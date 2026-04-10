@@ -426,7 +426,7 @@ function EmployeePortal({ employees, roles, tips, schedules, restaurants, onBack
 // ══════════════════════════════════════════════════════════════════════════════
 // RESTAURANT PANEL (shared by manager and super manager, with permission guard)
 // ══════════════════════════════════════════════════════════════════════════════
-function RestaurantPanel({ restaurant, employees, roles, tips, splits, schedules, onUpdate, perms, isSuperManager }) {
+function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, splits, schedules, onUpdate, perms, isSuperManager }) {
   const [tab, setTab] = useState(perms.tips ? "dashboard" : "schedule");
   const now = new Date();
   const [year, setYear] = useState(now.getFullYear());
@@ -881,7 +881,7 @@ function SuperManagerPortal({ data, onUpdate, onBack, currentUser }) {
           </div>
           <button onClick={onBack} style={{ ...S.btnSecondary, fontSize:12 }}>Sair</button>
         </div>
-        <RestaurantPanel restaurant={rest} employees={employees} roles={roles} tips={tips} splits={splits} schedules={schedules} onUpdate={onUpdate} perms={{ tips:true, schedule:true }} isSuperManager />
+        <RestaurantPanel restaurant={rest} restaurants={restaurants} employees={employees} roles={roles} tips={tips} splits={splits} schedules={schedules} onUpdate={onUpdate} perms={{ tips:true, schedule:true }} isSuperManager />
       </div>
     );
   }
@@ -1098,7 +1098,7 @@ function ManagerPortal({ manager, data, onUpdate, onBack }) {
               <button onClick={()=>setSelId(null)} style={{...S.btnSecondary,fontSize:12,padding:"4px 12px"}}>← Trocar restaurante</button>
             </div>
           )}
-          <RestaurantPanel restaurant={selRest} employees={employees} roles={roles} tips={tips} splits={splits} schedules={schedules} onUpdate={onUpdate} perms={manager.perms ?? {tips:true,schedule:true}} isSuperManager={false}/>
+          <RestaurantPanel restaurant={selRest} restaurants={restaurants} employees={employees} roles={roles} tips={tips} splits={splits} schedules={schedules} onUpdate={onUpdate} perms={manager.perms ?? {tips:true,schedule:true}} isSuperManager={false}/>
         </div>
       )}
     </div>
