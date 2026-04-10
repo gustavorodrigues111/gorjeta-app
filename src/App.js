@@ -1516,12 +1516,12 @@ function ReceibosManagerTab({ restaurantId, employees, roles, restaurants, recei
                               <select value={form.newRoleArea} onChange={e=>setNewEmpForm(p=>({...p,[r.id]:{...form,newRoleArea:e.target.value}}))} style={{...S.input,fontSize:12}}>
                                 {AREAS.map(a=><option key={a} value={a}>{a}</option>)}
                               </select>
-                              <input type="number" min="0.5" step="0.5" value={form.newRolePoints} onChange={e=>setNewEmpForm(p=>({...p,[r.id]:{...form,newRolePoints:e.target.value}}))} placeholder="Pontos" style={{...S.input,fontSize:12}}/>
+                              <input type="number" min="0" step="0.5" value={form.newRolePoints} onChange={e=>setNewEmpForm(p=>({...p,[r.id]:{...form,newRolePoints:e.target.value}}))} placeholder="Pontos" style={{...S.input,fontSize:12}}/>
                             </div>
                             <div style={{display:"flex",gap:6}}>
                               <button onClick={()=>{
                                 if(!form.newRoleName.trim()){alert("Nome do cargo obrigatório");return;}
-                                const newRole = { id:`role-${Date.now()}-${Math.random().toString(36).slice(2,5)}`, restaurantId, name:form.newRoleName.trim(), area:form.newRoleArea, points:parseFloat(form.newRolePoints)||1, inactive:false };
+                                const newRole = { id:`role-${Date.now()}-${Math.random().toString(36).slice(2,5)}`, restaurantId, name:form.newRoleName.trim(), area:form.newRoleArea, points:parseFloat(form.newRolePoints)??0, inactive:false };
                                 onUpdate("roles", [...roles, newRole]);
                                 setNewEmpForm(p=>({...p,[r.id]:{...form,roleId:newRole.id,creatingRole:false}}));
                               }} style={{flex:1,padding:"6px",borderRadius:8,border:"none",background:"#10b981",color:"#fff",cursor:"pointer",fontFamily:"DM Mono,monospace",fontSize:12,fontWeight:700}}>✅ Criar cargo</button>
@@ -2001,7 +2001,7 @@ function RoleSpreadsheet({ restRoles, rid, roles, onUpdate }) {
   function saveRole(r) {
     const row = getRow(r);
     if (!row.name.trim()) return;
-    const updated = { ...r, name: row.name.trim(), area: row.area, points: parseFloat(row.points) || 1 };
+    const updated = { ...r, name: row.name.trim(), area: row.area, points: parseFloat(row.points) ?? 0 };
     onUpdate("roles", roles.map(x => x.id === r.id ? updated : x));
     setSaved(p => ({ ...p, [r.id]: true }));
     setTimeout(() => setSaved(p => ({ ...p, [r.id]: false })), 1500);
@@ -2009,7 +2009,7 @@ function RoleSpreadsheet({ restRoles, rid, roles, onUpdate }) {
 
   function saveNew() {
     if (!newRow.name.trim()) return;
-    const r = { ...newRow, id: Date.now().toString(), points: parseFloat(newRow.points) || 1 };
+    const r = { ...newRow, id: Date.now().toString(), points: parseFloat(newRow.points) ?? 0 };
     onUpdate("roles", [...roles, r]);
     setNewRow(blank());
   }
@@ -2036,7 +2036,7 @@ function RoleSpreadsheet({ restRoles, rid, roles, onUpdate }) {
         <select value={newRow.area} onChange={e => setNewRow(p => ({ ...p, area: e.target.value }))} style={sel}>
           {AREAS.map(a => <option key={a} value={a}>{a}</option>)}
         </select>
-        <input type="number" min="0.5" step="0.5" value={newRow.points} onChange={e => setNewRow(p => ({ ...p, points: e.target.value }))} style={inStyle} />
+        <input type="number" min="0" step="0.5" value={newRow.points} onChange={e => setNewRow(p => ({ ...p, points: e.target.value }))} style={inStyle} />
         <button onClick={saveNew} style={{ background: "#10b981", border: "none", borderRadius: 8, color: "var(--text)", fontWeight: 700, fontSize: 12, cursor: "pointer", padding: "8px 4px", fontFamily: "DM Mono,monospace" }}>+ Add</button>
       </div>
 
@@ -2051,7 +2051,7 @@ function RoleSpreadsheet({ restRoles, rid, roles, onUpdate }) {
             <select value={row.area} onChange={e => setRow(r.id, "area", e.target.value)} style={sel}>
               {AREAS.map(a => <option key={a} value={a}>{a}</option>)}
             </select>
-            <input type="number" min="0.5" step="0.5" value={row.points} onChange={e => setRow(r.id, "points", e.target.value)} style={inStyle} />
+            <input type="number" min="0" step="0.5" value={row.points} onChange={e => setRow(r.id, "points", e.target.value)} style={inStyle} />
             <div style={{ display: "flex", gap: 4 }}>
               <button onClick={() => saveRole(r)} style={{ flex: 1, background: isSaved ? "#10b981" : ac, border: "none", borderRadius: 8, color: "#111", fontWeight: 700, fontSize: 11, cursor: "pointer", padding: "4px 2px", fontFamily: "DM Mono,monospace" }}>{isSaved ? "✓" : "Salvar"}</button>
               {r.inactive
