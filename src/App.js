@@ -27,8 +27,23 @@ const AREAS = ["Bar", "Cozinha", "Salão", "Limpeza"];
 const AREA_COLORS = { Bar: "#3b82f6", Cozinha: "#f59e0b", Salão: "#10b981", Limpeza: "#8b5cf6" };
 const DEFAULT_SPLIT = { Bar: 12, Cozinha: 40, Salão: 40, Limpeza: 8 };
 const TAX = 0.33;
-const DAY_OFF = "off";
-const DAY_COMP = "comp";
+const DAY_OFF       = "off";    // folga programada
+const DAY_COMP      = "comp";   // compensação banco de horas
+const DAY_VACATION  = "vac";    // férias
+const DAY_FAULT_J   = "faultj"; // falta justificada
+const DAY_FAULT_U   = "faultu"; // falta injustificada
+
+const DAY_LABELS = {
+  [DAY_OFF]:      { label: "Folga",          color: "#e74c3c" },
+  [DAY_COMP]:     { label: "Compensação",    color: "#3b82f6" },
+  [DAY_VACATION]: { label: "Férias",         color: "#8b5cf6" },
+  [DAY_FAULT_J]:  { label: "Falta Just.",    color: "#f59e0b" },
+  [DAY_FAULT_U]:  { label: "Falta Injust.",  color: "#ef4444" },
+};
+// Days that count for gorjeta
+const DAYS_EARN_TIP = new Set([DAY_COMP]); // comp earns tip; work (undefined) also earns
+// Days that block tip entirely
+const DAYS_NO_TIP   = new Set([DAY_OFF, DAY_VACATION, DAY_FAULT_J, DAY_FAULT_U]);
 
 // Division mode constants
 const MODE_AREA_POINTS = "area_points"; // default: split by area % then by points within area
@@ -50,14 +65,18 @@ function makeEmpCode(restaurantCode, seq) {
 
 // ─── Storage keys (all data scoped by restaurantId where relevant) ─────────────
 const K = {
-  superManagers: "v4:superManagers",   // [{id, name, cpf, pin}]
-  managers:      "v4:managers",        // [{id, name, cpf, pin, restaurantIds:[], perms:{tips,schedule}}]
-  restaurants:   "v4:restaurants",     // [{id, name, cnpj, address, divisionMode}]
-  employees:     "v4:employees",       // [{id, restaurantId, name, cpf, pin, roleId, admission}]
-  roles:         "v4:roles",           // [{id, restaurantId, name, area, points}]
-  tips:          "v4:tips",            // [{id, restaurantId, employeeId, date, monthKey, ...}]
-  splits:        "v4:splits",          // {restaurantId: {"2026-04": {Bar:12,...}}}
-  schedules:     "v4:schedules",       // {restaurantId: {"2026-04": {empId: {"2026-04-01": "off"}}}}
+  superManagers: "v4:superManagers",
+  managers:      "v4:managers",
+  restaurants:   "v4:restaurants",  // added taxRate, enabledTabs
+  employees:     "v4:employees",    // added inactiveFrom, inactive
+  roles:         "v4:roles",
+  tips:          "v4:tips",
+  splits:        "v4:splits",
+  schedules:     "v4:schedules",
+  communications:"v4:communications", // [{id,restaurantId,title,body,createdAt,createdBy}]
+  commAcks:      "v4:commAcks",       // {commId: {empId: isoDate}}
+  faq:           "v4:faq",            // {restaurantId: [{id,q,a}]}
+  dpMessages:    "v4:dpMessages",     // [{id,restaurantId,empId|null,name|null,category,body,date,read}]
 };
 
 // ─── Shared styles ────────────────────────────────────────────────────────────
@@ -132,10 +151,22 @@ function CalendarGrid({ year, month, dayMap, onDayClick, readOnly }) {
   const colorOf = (dateStr) => {
     if (!dateStr) return null;
     const s = dayMap?.[dateStr];
-    if (s === DAY_OFF)  return { bg: "#e74c3c22", border: "#e74c3c", text: "#e74c3c" };
-    if (s === DAY_COMP) return { bg: "#3b82f622", border: "#3b82f6", text: "#3b82f6" };
+    if (s === DAY_OFF)      return { bg: "#e74c3c22", border: "#e74c3c",  text: "#e74c3c"  };
+    if (s === DAY_COMP)     return { bg: "#3b82f622", border: "#3b82f6",  text: "#3b82f6"  };
+    if (s === DAY_VACATION) return { bg: "#8b5cf622", border: "#8b5cf6",  text: "#8b5cf6"  };
+    if (s === DAY_FAULT_J)  return { bg: "#f59e0b22", border: "#f59e0b",  text: "#f59e0b"  };
+    if (s === DAY_FAULT_U)  return { bg: "#ef444422", border: "#ef4444",  text: "#ef4444"  };
     return { bg: "#10b98122", border: "#10b981", text: "#10b981" };
   };
+
+  const LEGEND = [
+    ["#10b981", "Trabalho"],
+    ["#e74c3c", "Folga"],
+    ["#3b82f6", "Compensação"],
+    ["#8b5cf6", "Férias"],
+    ["#f59e0b", "Falta Just."],
+    ["#ef4444", "Falta Injust."],
+  ];
 
   return (
     <div>
@@ -155,11 +186,11 @@ function CalendarGrid({ year, month, dayMap, onDayClick, readOnly }) {
           );
         })}
       </div>
-      <div style={{ display: "flex", gap: 14, marginTop: 14, flexWrap: "wrap" }}>
-        {[["#10b981", "Trabalho"], ["#e74c3c", "Folga"], ["#3b82f6", "Comp. banco"]].map(([c, lbl]) => (
-          <div key={lbl} style={{ display: "flex", alignItems: "center", gap: 5 }}>
-            <div style={{ width: 12, height: 12, borderRadius: 3, background: c + "33", border: `1px solid ${c}` }} />
-            <span style={{ color: "#555", fontSize: 11, fontFamily: "DM Mono,monospace" }}>{lbl}</span>
+      <div style={{ display: "flex", gap: 10, marginTop: 14, flexWrap: "wrap" }}>
+        {LEGEND.map(([c, lbl]) => (
+          <div key={lbl} style={{ display: "flex", alignItems: "center", gap: 4 }}>
+            <div style={{ width: 11, height: 11, borderRadius: 3, background: c + "33", border: `1px solid ${c}`, flexShrink: 0 }} />
+            <span style={{ color: "#555", fontSize: 10, fontFamily: "DM Mono,monospace" }}>{lbl}</span>
           </div>
         ))}
       </div>
@@ -167,12 +198,16 @@ function CalendarGrid({ year, month, dayMap, onDayClick, readOnly }) {
   );
 }
 
+// Cycle order: work → off → comp → vacation → faultJ → faultU → work
+const DAY_CYCLE = [DAY_OFF, DAY_COMP, DAY_VACATION, DAY_FAULT_J, DAY_FAULT_U];
+
 function ScheduleCalendar({ empId, restaurantId, year, month, schedules, onUpdate }) {
   const mk = monthKey(year, month);
   const dayMap = schedules?.[restaurantId]?.[mk]?.[empId] ?? {};
   function cycleDay(dateStr) {
     const cur = dayMap[dateStr];
-    let next = !cur ? DAY_OFF : cur === DAY_OFF ? DAY_COMP : null;
+    const idx = DAY_CYCLE.indexOf(cur);
+    const next = idx === DAY_CYCLE.length - 1 ? null : DAY_CYCLE[idx + 1];
     const newMap = { ...dayMap };
     if (next === null) delete newMap[dateStr]; else newMap[dateStr] = next;
     onUpdate("schedules", {
@@ -353,8 +388,14 @@ function EmployeePortal({ employees, roles, tips, schedules, restaurants, onBack
       (e.empCode && e.empCode.toUpperCase() === cleanInput && String(e.pin) === cleanPin) ||
       (e.cpf && e.cpf.replace(/\D/g,"") === cleanInput.replace(/\D/g,"") && String(e.pin) === cleanPin)
     );
-    if (found) { setErr(""); setEmpId(found.id); }
-    else setErr("ID/CPF ou PIN incorretos.");
+    if (!found) { setErr("ID/CPF ou PIN incorretos."); return; }
+    // Block inactive employees
+    if (found.inactive && found.inactiveFrom && found.inactiveFrom <= today()) {
+      setErr("Acesso desativado. Entre em contato com o departamento pessoal.");
+      return;
+    }
+    setErr("");
+    setEmpId(found.id);
   }
 
   function completeFirstAccess() {
@@ -411,58 +452,73 @@ function EmployeePortal({ employees, roles, tips, schedules, restaurants, onBack
         <button onClick={() => { setEmpId(null); setCpf(""); setPin(""); }} style={{ ...S.btnSecondary, fontSize: 12 }}>Sair</button>
       </div>
       <div style={{ display: "flex", borderBottom: "1px solid #1e1e1e", background: "#111" }}>
-        {[["extrato", "💸 Extrato"], ["escala", "📅 Minha Escala"]].map(([id, lbl]) => (
+        {[["extrato", "💸 Gorjeta"], ["escala", "📅 Minha Escala"]].map(([id, lbl]) => (
           <button key={id} onClick={() => setTab(id)} style={{ flex: 1, padding: "12px 0", background: "none", border: "none", borderBottom: `2px solid ${tab === id ? ac : "transparent"}`, color: tab === id ? ac : "#555", cursor: "pointer", fontSize: 13, fontFamily: "DM Mono,monospace", fontWeight: tab === id ? 700 : 400 }}>{lbl}</button>
         ))}
       </div>
       <div style={{ padding: "24px 20px", maxWidth: 540, margin: "0 auto" }}>
         <div style={{ marginBottom: 20 }}><MonthNav year={year} month={month} onChange={(y, m) => { setYear(y); setMonth(m); }} /></div>
+
         {tab === "extrato" && (
           <div>
+            {/* Legal disclaimer */}
+            <div style={{ background: "#111", border: "1px solid #2a2a2a", borderRadius: 10, padding: "10px 14px", marginBottom: 16, fontSize: 11, color: "#555", lineHeight: 1.5 }}>
+              ⚠️ <strong style={{ color: "#666" }}>Aviso:</strong> Os valores exibidos são aproximados, apurados até o momento atual e sujeitos a alterações. Esta tela tem caráter informativo e de transparência, podendo conter imprecisões. Os valores definitivos serão apurados pela empresa e comunicados pelos canais oficiais.
+            </div>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10, marginBottom: 20 }}>
-              {[["Bruto", grossTotal, "#fff"], ["Imposto 33%", taxTotal, "#e74c3c"], ["Líquido", netTotal, ac]].map(([lbl, val, col]) => (
+              {[["Bruto", grossTotal, "#fff"], ["Imposto", taxTotal, "#e74c3c"], ["Líquido", netTotal, ac]].map(([lbl, val, col]) => (
                 <div key={lbl} style={{ ...S.card, textAlign: "center" }}>
                   <div style={{ color: "#555", fontSize: 10, marginBottom: 4 }}>{lbl}</div>
                   <div style={{ color: col, fontWeight: 700, fontSize: 14 }}>{fmt(val)}</div>
                 </div>
               ))}
             </div>
-            {myTips.length === 0 && <p style={{ color: "#555", textAlign: "center" }}>Nenhuma gorjeta neste mês.</p>}
-            {[...myTips].reverse().map(t => (
+            {myTips.length === 0 && <p style={{ color: "#555", textAlign: "center" }}>Nenhuma gorjeta registrada neste mês.</p>}
+            {[...myTips].sort((a,b) => a.date.localeCompare(b.date)).map(t => (
               <div key={t.id} style={{ ...S.card, marginBottom: 10 }}>
-                <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 10 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}>
                   <span style={{ color: "#aaa", fontSize: 13 }}>{fmtDate(t.date)}</span>
-                  <span style={{ color: "#555", fontSize: 12 }}>Pool: {fmt(t.poolTotal)}</span>
+                  {t.note && <span style={{ color: "#555", fontSize: 11 }}>📝 {t.note}</span>}
                 </div>
                 <div style={{ background: "#111", borderRadius: 10, padding: 12, fontSize: 12 }}>
-                  <div style={{ display: "flex", justifyContent: "space-between", color: "#aaa", marginBottom: 3 }}><span>Pool da área ({t.area})</span><span style={{ color: "#fff" }}>{fmt(t.areaPool)}</span></div>
-                  <div style={{ display: "flex", justifyContent: "space-between", color: "#aaa", marginBottom: 3 }}><span>Sua parte (bruto)</span><span style={{ color: "#fff" }}>{fmt(t.myShare)}</span></div>
-                  <div style={{ display: "flex", justifyContent: "space-between", color: "#aaa", marginBottom: 3 }}><span>Retenção fiscal (33%)</span><span style={{ color: "#e74c3c" }}>-{fmt(t.myTax)}</span></div>
-                  <div style={{ display: "flex", justifyContent: "space-between", color: "#aaa", borderTop: "1px solid #2a2a2a", paddingTop: 6, marginTop: 4 }}><span style={{ fontWeight: 700 }}>Valor líquido</span><span style={{ color: ac, fontWeight: 700 }}>{fmt(t.myNet)}</span></div>
+                  <div style={{ display: "flex", justifyContent: "space-between", color: "#aaa", marginBottom: 3 }}><span>Bruto</span><span style={{ color: "#fff" }}>{fmt(t.myShare)}</span></div>
+                  <div style={{ display: "flex", justifyContent: "space-between", color: "#aaa", marginBottom: 3 }}><span>Retenção ({Math.round((t.taxRate ?? TAX) * 100)}%)</span><span style={{ color: "#e74c3c" }}>-{fmt(t.myTax)}</span></div>
+                  <div style={{ display: "flex", justifyContent: "space-between", color: "#aaa", borderTop: "1px solid #2a2a2a", paddingTop: 6, marginTop: 4 }}><span style={{ fontWeight: 700 }}>Líquido</span><span style={{ color: ac, fontWeight: 700 }}>{fmt(t.myNet)}</span></div>
                 </div>
-                {t.note && <div style={{ color: "#555", fontSize: 12, marginTop: 6 }}>📝 {t.note}</div>}
               </div>
             ))}
           </div>
         )}
+
         {tab === "escala" && (
           <div>
             <p style={{ color: "#555", fontSize: 13, marginBottom: 16, textTransform: "capitalize" }}>Sua escala em {monthLabel(year, month)}</p>
             <CalendarGrid year={year} month={month} dayMap={dayMap} readOnly />
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10, marginTop: 20 }}>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 8, marginTop: 20 }}>
               {(() => {
                 const dim = new Date(year, month + 1, 0).getDate();
-                let work = 0, off = 0, comp = 0;
+                const counts = { work: 0, off: 0, comp: 0, vac: 0, fj: 0, fu: 0 };
                 for (let d = 1; d <= dim; d++) {
                   const k = `${year}-${String(month+1).padStart(2,"0")}-${String(d).padStart(2,"0")}`;
                   const s = dayMap[k];
-                  if (s === DAY_OFF) off++; else if (s === DAY_COMP) comp++; else work++;
+                  if (s === DAY_OFF) counts.off++;
+                  else if (s === DAY_COMP) counts.comp++;
+                  else if (s === DAY_VACATION) counts.vac++;
+                  else if (s === DAY_FAULT_J) counts.fj++;
+                  else if (s === DAY_FAULT_U) counts.fu++;
+                  else counts.work++;
                 }
-                return [["Trabalho", work, "#10b981"], ["Folga", off, "#e74c3c"], ["Compensação", comp, "#3b82f6"]].map(([lbl, val, col]) => (
-                  <div key={lbl} style={{ ...S.card, textAlign: "center" }}>
-                    <div style={{ color: "#555", fontSize: 10, marginBottom: 4 }}>{lbl}</div>
-                    <div style={{ color: col, fontWeight: 700, fontSize: 22 }}>{val}</div>
-                    <div style={{ color: "#555", fontSize: 10 }}>dias</div>
+                return [
+                  ["Trabalho", counts.work, "#10b981"],
+                  ["Folga", counts.off, "#e74c3c"],
+                  ["Compensação", counts.comp, "#3b82f6"],
+                  ["Férias", counts.vac, "#8b5cf6"],
+                  ["Falta Just.", counts.fj, "#f59e0b"],
+                  ["Falta Injust.", counts.fu, "#ef4444"],
+                ].map(([lbl, val, col]) => (
+                  <div key={lbl} style={{ ...S.card, textAlign: "center", padding: "12px 8px" }}>
+                    <div style={{ color: "#555", fontSize: 9, marginBottom: 4 }}>{lbl}</div>
+                    <div style={{ color: col, fontWeight: 700, fontSize: 20 }}>{val}</div>
                   </div>
                 ));
               })()}
@@ -557,10 +613,12 @@ function RoleSpreadsheet({ restRoles, rid, roles, onUpdate }) {
 // EmpRowCard defined OUTSIDE to prevent focus loss on re-render
 const empInS = { background: "#111", border: "1px solid #2a2a2a", borderRadius: 8, color: "#fff", fontFamily: "DM Mono,monospace", fontSize: 12, padding: "8px 10px", outline: "none", width: "100%", boxSizing: "border-box" };
 
-function EmpRowCard({ row, onChange, onSave, onDelete, isSaved, isNew, restRoles }) {
+function EmpRowCard({ row, onChange, onSave, onDelete, onToggleInactive, isSaved, isNew, restRoles }) {
   const ac = "#f5c842";
+  const isInactive = row.inactive && row.inactiveFrom && row.inactiveFrom <= today();
   return (
-    <div style={{ background: isNew ? "#1a2a1a" : "#1a1a1a", borderRadius: 12, padding: 12, marginBottom: 8, border: `1px solid ${isSaved ? "#10b98166" : isNew ? "#10b98144" : "#2a2a2a"}`, transition: "border-color 0.3s" }}>
+    <div style={{ background: isNew ? "#1a2a1a" : isInactive ? "#1a1a2a" : "#1a1a1a", borderRadius: 12, padding: 12, marginBottom: 8, border: `1px solid ${isSaved ? "#10b98166" : isNew ? "#10b98144" : isInactive ? "#8b5cf644" : "#2a2a2a"}`, transition: "border-color 0.3s", opacity: isInactive ? 0.7 : 1 }}>
+      {isInactive && <div style={{ color: "#8b5cf6", fontSize: 11, marginBottom: 8, fontFamily: "DM Mono,monospace" }}>⚫ Inativo desde {fmtDate(row.inactiveFrom)}</div>}
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6, marginBottom: 6 }}>
         <div><div style={{ color: "#555", fontSize: 10, marginBottom: 3 }}>Nome</div><input value={row.name} onChange={e => onChange("name", e.target.value)} placeholder="Nome completo" style={empInS} /></div>
         <div><div style={{ color: "#555", fontSize: 10, marginBottom: 3 }}>CPF</div><input value={row.cpf} onChange={e => onChange("cpf", e.target.value)} placeholder="000.000.000-00" style={empInS} inputMode="numeric" /></div>
@@ -569,7 +627,7 @@ function EmpRowCard({ row, onChange, onSave, onDelete, isSaved, isNew, restRoles
         <div><div style={{ color: "#555", fontSize: 10, marginBottom: 3 }}>Admissão</div><input type="date" value={row.admission} onChange={e => onChange("admission", e.target.value)} style={empInS} /></div>
         <div><div style={{ color: "#555", fontSize: 10, marginBottom: 3 }}>PIN</div><input type="password" value={row.pin} onChange={e => onChange("pin", e.target.value)} maxLength={4} placeholder="••••" style={empInS} /></div>
       </div>
-      <div style={{ marginBottom: 8 }}>
+      <div style={{ marginBottom: 6 }}>
         <div style={{ color: "#555", fontSize: 10, marginBottom: 3 }}>Cargo</div>
         <select value={row.roleId} onChange={e => onChange("roleId", e.target.value)} style={{ ...empInS, cursor: "pointer" }}>
           <option value="">Selecionar cargo…</option>
@@ -580,6 +638,17 @@ function EmpRowCard({ row, onChange, onSave, onDelete, isSaved, isNew, restRoles
           ))}
         </select>
       </div>
+      {!isNew && (
+        <div style={{ marginBottom: 8 }}>
+          <div style={{ color: "#555", fontSize: 10, marginBottom: 3 }}>Inativar a partir de</div>
+          <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+            <input type="date" value={row.inactiveFrom ?? ""} onChange={e => onChange("inactiveFrom", e.target.value)} style={{ ...empInS, flex: 1 }} />
+            <button onClick={onToggleInactive} style={{ padding: "8px 12px", borderRadius: 8, border: `1px solid ${row.inactive ? "#10b981" : "#e74c3c44"}`, background: "transparent", color: row.inactive ? "#10b981" : "#e74c3c", cursor: "pointer", fontFamily: "DM Mono,monospace", fontSize: 11, whiteSpace: "nowrap" }}>
+              {row.inactive ? "Reativar" : "Inativar"}
+            </button>
+          </div>
+        </div>
+      )}
       <div style={{ display: "flex", gap: 8 }}>
         <button onClick={onSave} style={{ flex: 1, background: isSaved ? "#10b981" : isNew ? "#10b981" : ac, border: "none", borderRadius: 8, color: "#111", fontWeight: 700, fontSize: 13, cursor: "pointer", padding: "10px", fontFamily: "DM Mono,monospace" }}>
           {isSaved ? "✓ Salvo!" : isNew ? "+ Adicionar" : "Salvar"}
@@ -626,28 +695,54 @@ function EmployeeSpreadsheet({ restEmps, restRoles, rid, employees, onUpdate, re
 
   function deleteEmp(id) { onUpdate("employees", employees.filter(x => x.id !== id)); }
 
+  function toggleInactive(e) {
+    const row = getRow(e);
+    const updated = { ...e, inactive: !e.inactive, inactiveFrom: row.inactiveFrom || today() };
+    onUpdate("employees", employees.map(x => x.id === e.id ? updated : x));
+  }
+
+  const activeEmps   = sorted.filter(e => !e.inactive || (e.inactiveFrom && e.inactiveFrom > today()));
+  const inactiveEmps = sorted.filter(e => e.inactive && e.inactiveFrom && e.inactiveFrom <= today());
+  const [showInactive, setShowInactive] = useState(false);
+
+  const renderEmpList = (list) => list.map(e => {
+    const row = getRow(e);
+    const role = restRoles.find(r => r.id === (editRows[e.id]?.roleId ?? e.roleId));
+    return (
+      <div key={e.id}>
+        {role && <div style={{ color: AREA_COLORS[role.area] ?? "#555", fontSize: 11, fontWeight: 700, marginBottom: 4, marginTop: 12, paddingLeft: 4 }}>{role.area}</div>}
+        {e.empCode && <div style={{ color: "#555", fontSize: 11, marginBottom: 2, paddingLeft: 4 }}>ID: <span style={{color:"#f5c842"}}>{e.empCode}</span></div>}
+        <EmpRowCard row={row} isSaved={saved[e.id]} isNew={false} restRoles={restRoles}
+          onChange={(f, v) => setRow(e.id, f, v)}
+          onSave={() => saveEmp(e)}
+          onDelete={() => deleteEmp(e.id)}
+          onToggleInactive={() => toggleInactive(e)}
+        />
+      </div>
+    );
+  });
+
   return (
     <div style={{ fontFamily: "DM Mono,monospace" }}>
       <p style={{ color: "#555", fontSize: 12, marginBottom: 16 }}>Card verde para novo empregado. Edite e clique Salvar em cada card.</p>
       <EmpRowCard row={newRow} isNew restRoles={restRoles}
         onChange={(f, v) => setNewRow(p => ({ ...p, [f]: v }))}
         onSave={saveNew} isSaved={false} />
-      {sorted.length === 0 && <p style={{ color: "#555", textAlign: "center", marginTop: 10 }}>Nenhum empregado cadastrado.</p>}
-      {sorted.map(e => {
-        const row = getRow(e);
-        const role = restRoles.find(r => r.id === (editRows[e.id]?.roleId ?? e.roleId));
-        return (
-          <div key={e.id}>
-            {role && <div style={{ color: AREA_COLORS[role.area] ?? "#555", fontSize: 11, fontWeight: 700, marginBottom: 4, marginTop: 12, paddingLeft: 4 }}>{role.area}</div>}
-            {e.empCode && <div style={{ color: "#555", fontSize: 11, marginBottom: 2, paddingLeft: 4 }}>ID: <span style={{color:"#f5c842"}}>{e.empCode}</span></div>}
-            <EmpRowCard row={row} isSaved={saved[e.id]} isNew={false} restRoles={restRoles}
-              onChange={(f, v) => setRow(e.id, f, v)}
-              onSave={() => saveEmp(e)}
-              onDelete={() => deleteEmp(e.id)}
-            />
-          </div>
-        );
-      })}
+
+      {/* Active / Inactive toggle */}
+      <div style={{ display: "flex", gap: 8, marginBottom: 16, marginTop: 8 }}>
+        <button onClick={() => setShowInactive(false)} style={{ flex: 1, padding: "8px", borderRadius: 10, border: `1px solid ${!showInactive ? "#10b981" : "#2a2a2a"}`, background: !showInactive ? "#10b98122" : "transparent", color: !showInactive ? "#10b981" : "#555", cursor: "pointer", fontFamily: "DM Mono,monospace", fontSize: 13 }}>
+          Ativos ({activeEmps.length})
+        </button>
+        <button onClick={() => setShowInactive(true)} style={{ flex: 1, padding: "8px", borderRadius: 10, border: `1px solid ${showInactive ? "#8b5cf6" : "#2a2a2a"}`, background: showInactive ? "#8b5cf622" : "transparent", color: showInactive ? "#8b5cf6" : "#555", cursor: "pointer", fontFamily: "DM Mono,monospace", fontSize: 13 }}>
+          Inativos ({inactiveEmps.length})
+        </button>
+      </div>
+
+      {!showInactive && activeEmps.length === 0 && <p style={{ color: "#555", textAlign: "center" }}>Nenhum empregado ativo.</p>}
+      {showInactive && inactiveEmps.length === 0 && <p style={{ color: "#555", textAlign: "center" }}>Nenhum empregado inativo.</p>}
+      {!showInactive && renderEmpList(activeEmps)}
+      {showInactive && renderEmpList(inactiveEmps)}
     </div>
   );
 }
@@ -668,7 +763,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
   const totalNet   = monthTips.reduce((a, t) => a + t.myNet, 0);
   const totalTax   = monthTips.reduce((a, t) => a + t.myTax, 0);
 
-  const restEmps  = employees.filter(e => e.restaurantId === rid);
+  const restEmps  = employees.filter(e => e.restaurantId === rid && !(e.inactive && e.inactiveFrom && e.inactiveFrom <= today()));
   const restRoles = roles.filter(r => r.restaurantId === rid);
 
   // forms
@@ -690,18 +785,45 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
     if (!total || isNaN(total) || total <= 0) return 0;
     const td = new Date(tipDate + "T12:00:00");
     const tKey = monthKey(td.getFullYear(), td.getMonth());
-    const totalTaxAmt = total * TAX;
+    const taxRate = restaurant.taxRate ?? TAX;
+    const totalTaxAmt = total * taxRate;
     const toDistribute = total - totalTaxAmt;
     const newTips = [];
     const mode = restaurant.divisionMode ?? MODE_AREA_POINTS;
 
+    // Get schedule dayMap for the tip date
+    const empDayStatus = (empId) => {
+      const empDayMap = schedules?.[rid]?.[tKey]?.[empId] ?? {};
+      return empDayMap[tipDate]; // undefined = work
+    };
+
+    const isProdArea = (area) => area === "Cozinha"; // Produção = Cozinha rule
+
     const activeEmps = restEmps.filter(emp => {
+      // Must have a role and be admitted
       const r = restRoles.find(r => r.id === emp.roleId);
-      return r && (!emp.admission || emp.admission <= tipDate);
-    }).map(emp => ({ ...emp, points: parseFloat(restRoles.find(r => r.id === emp.roleId)?.points) || 1, area: restRoles.find(r => r.id === emp.roleId)?.area }));
+      if (!r) return false;
+      if (emp.admission && emp.admission > tipDate) return false;
+      // Must not be inactive
+      if (emp.inactive && emp.inactiveFrom && emp.inactiveFrom <= tipDate) return false;
+      // Check schedule
+      const status = empDayStatus(emp.id);
+      if (!status) return true; // working day
+      if (DAYS_EARN_TIP.has(status)) return true; // comp = earns tip
+      // Produção (Cozinha) always earns EXCEPT falta justificada or injustificada
+      if (isProdArea(r.area)) {
+        if (status === DAY_FAULT_J || status === DAY_FAULT_U) return false;
+        return true; // folga/férias still earns for Produção
+      }
+      return false; // all others on off/vacation/fault don't earn
+    }).map(emp => ({
+      ...emp,
+      points: parseFloat(restRoles.find(r => r.id === emp.roleId)?.points) || 1,
+      area: restRoles.find(r => r.id === emp.roleId)?.area,
+      dayStatus: empDayStatus(emp.id),
+    }));
 
     if (mode === MODE_GLOBAL_POINTS) {
-      // Mode 2: divide by total points of all employees, no area split
       const totalPoints = activeEmps.reduce((a, e) => a + e.points, 0);
       if (!totalPoints) return 0;
       activeEmps.forEach(emp => {
@@ -711,11 +833,11 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
           id: `${Date.now()}-${emp.id}-${Math.random().toString(36).slice(2,6)}`,
           restaurantId: rid, employeeId: emp.id, date: tipDate, monthKey: tKey,
           poolTotal: total, areaPool: toDistribute, area: emp.area ?? "—",
-          myShare: myGross, myTax: myTaxShare, myNet: myGross - myTaxShare, note: tipNote,
+          myShare: myGross, myTax: myTaxShare, myNet: myGross - myTaxShare,
+          note: tipNote, taxRate,
         });
       });
     } else {
-      // Mode 1 (default): split by area % then by points within area
       const tSplit = splits?.[rid]?.[tKey] ?? DEFAULT_SPLIT;
       const empsByArea = {};
       AREAS.forEach(a => { empsByArea[a] = []; });
@@ -731,7 +853,9 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
           newTips.push({
             id: `${Date.now()}-${emp.id}-${Math.random().toString(36).slice(2,6)}`,
             restaurantId: rid, employeeId: emp.id, date: tipDate, monthKey: tKey,
-            poolTotal: total, areaPool, area, myShare: myGross, myTax: myTaxShare, myNet: myGross - myTaxShare, note: tipNote,
+            poolTotal: total, areaPool, area,
+            myShare: myGross, myTax: myTaxShare, myNet: myGross - myTaxShare,
+            note: tipNote, taxRate,
           });
         });
       });
@@ -842,12 +966,13 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                 <div><label style={S.label}>Valor Total (R$)</label><input type="number" min="0" step="0.01" value={tipTotal} onChange={e => setTipTotal(e.target.value)} placeholder="Ex: 1500.00" style={S.input} /></div>
                 {tipTotal && !isNaN(parseFloat(tipTotal)) && (() => {
                   const total = parseFloat(tipTotal);
-                  const tax = total * TAX;
+                  const taxRate = restaurant.taxRate ?? TAX;
+                  const tax = total * taxRate;
                   const tSplit = splits?.[rid]?.[monthKey(new Date(tipDate+"T12:00:00").getFullYear(), new Date(tipDate+"T12:00:00").getMonth())] ?? DEFAULT_SPLIT;
                   return (
                     <div style={{ background: "#111", borderRadius: 10, padding: 12, fontSize: 12 }}>
                       <div style={{ display:"flex",justifyContent:"space-between",color:"#aaa",marginBottom:4 }}><span>Total bruto</span><span style={{color:"#fff"}}>{fmt(total)}</span></div>
-                      <div style={{ display:"flex",justifyContent:"space-between",color:"#aaa",marginBottom:4 }}><span>Retenção (33%)</span><span style={{color:"#e74c3c"}}>-{fmt(tax)}</span></div>
+                      <div style={{ display:"flex",justifyContent:"space-between",color:"#aaa",marginBottom:4 }}><span>Retenção ({Math.round(taxRate*100)}%)</span><span style={{color:"#e74c3c"}}>-{fmt(tax)}</span></div>
                       <div style={{ display:"flex",justifyContent:"space-between",color:"#aaa",borderTop:"1px solid #2a2a2a",paddingTop:6,marginTop:4,marginBottom:10 }}><span>A distribuir</span><span style={{color:ac,fontWeight:700}}>{fmt(total-tax)}</span></div>
                       {(() => {
                         const mode = restaurant.divisionMode ?? MODE_AREA_POINTS;
@@ -908,7 +1033,8 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
         {/* EQUIPE */}
         {tab === "employees" && (
           <EmployeeSpreadsheet
-            restEmps={restEmps} restRoles={restRoles} rid={rid}
+            restEmps={employees.filter(e => e.restaurantId === rid)}
+            restRoles={restRoles} rid={rid}
             employees={employees} onUpdate={onUpdate} restCode={restaurant.shortCode}
           />
         )}
@@ -925,17 +1051,31 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
         {tab === "schedule" && (
           <div>
             <div style={{marginBottom:16}}><PillBar options={AREAS} value={schedArea} onChange={setSchedArea}/></div>
-            <p style={{color:"#555",fontSize:12,marginBottom:16}}>Clique: <span style={{color:"#10b981"}}>Trabalho</span> → <span style={{color:"#e74c3c"}}>Folga</span> → <span style={{color:"#3b82f6"}}>Comp.</span> → Trabalho</p>
+            <p style={{color:"#555",fontSize:12,marginBottom:16}}>Clique para ciclar: <span style={{color:"#10b981"}}>Trabalho</span> → <span style={{color:"#e74c3c"}}>Folga</span> → <span style={{color:"#3b82f6"}}>Comp.</span> → <span style={{color:"#8b5cf6"}}>Férias</span> → <span style={{color:"#f59e0b"}}>F.Just.</span> → <span style={{color:"#ef4444"}}>F.Injust.</span> → Trabalho</p>
             {areaEmps.length === 0 && <p style={{color:"#555",textAlign:"center"}}>Nenhum empregado nesta área.</p>}
             {areaEmps.map(emp => {
               const dayMap = schedules?.[rid]?.[mk]?.[emp.id] ?? {};
-              const offC  = Object.values(dayMap).filter(v=>v===DAY_OFF).length;
-              const compC = Object.values(dayMap).filter(v=>v===DAY_COMP).length;
+              const counts = { off:0, comp:0, vac:0, fj:0, fu:0 };
+              Object.values(dayMap).forEach(v => {
+                if (v===DAY_OFF) counts.off++;
+                else if (v===DAY_COMP) counts.comp++;
+                else if (v===DAY_VACATION) counts.vac++;
+                else if (v===DAY_FAULT_J) counts.fj++;
+                else if (v===DAY_FAULT_U) counts.fu++;
+              });
+              const workC = dim - counts.off - counts.comp - counts.vac - counts.fj - counts.fu;
               return (
                 <div key={emp.id} style={{...S.card,marginBottom:20}}>
-                  <div style={{display:"flex",justifyContent:"space-between",marginBottom:8}}>
+                  <div style={{display:"flex",justifyContent:"space-between",marginBottom:8,flexWrap:"wrap",gap:4}}>
                     <div><div style={{color:"#fff",fontWeight:600}}>{emp.name}</div><div style={{color:"#555",fontSize:12}}>{restRoles.find(r=>r.id===emp.roleId)?.name}</div></div>
-                    <div style={{fontSize:12}}><span style={{color:"#10b981"}}>{dim-offC-compC}T</span><span style={{color:"#555",margin:"0 4px"}}>·</span><span style={{color:"#e74c3c"}}>{offC}F</span><span style={{color:"#555",margin:"0 4px"}}>·</span><span style={{color:"#3b82f6"}}>{compC}C</span></div>
+                    <div style={{fontSize:11,display:"flex",gap:6,flexWrap:"wrap",alignItems:"center"}}>
+                      <span style={{color:"#10b981"}}>{workC}T</span>
+                      <span style={{color:"#e74c3c"}}>{counts.off}F</span>
+                      <span style={{color:"#3b82f6"}}>{counts.comp}C</span>
+                      <span style={{color:"#8b5cf6"}}>{counts.vac}Fér</span>
+                      <span style={{color:"#f59e0b"}}>{counts.fj}FJ</span>
+                      <span style={{color:"#ef4444"}}>{counts.fu}FI</span>
+                    </div>
                   </div>
                   <ScheduleCalendar empId={emp.id} restaurantId={rid} year={year} month={month} schedules={schedules} onUpdate={onUpdate}/>
                 </div>
@@ -947,6 +1087,24 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
         {/* CONFIG */}
         {tab === "config" && (
           <div>
+            {/* Tax Rate */}
+            <div style={{...S.card,marginBottom:20}}>
+              <p style={{color:ac,fontSize:14,fontWeight:700,margin:"0 0 8px"}}>Retenção Fiscal</p>
+              <p style={{color:"#555",fontSize:12,marginBottom:14}}>Percentual retido do pool total antes da distribuição.</p>
+              <div style={{display:"flex",gap:10}}>
+                {[[0.33,"33%"],[0.20,"20%"]].map(([rate,lbl])=>{
+                  const sel = (restaurant.taxRate ?? TAX) === rate;
+                  return (
+                    <button key={rate} onClick={()=>{
+                      onUpdate("restaurants", restaurants.map(r=>r.id===rid?{...r,taxRate:rate}:r));
+                      onUpdate("_toast","Retenção salva!");
+                    }} style={{flex:1,padding:"12px",borderRadius:12,border:`2px solid ${sel?ac:"#2a2a2a"}`,background:sel?ac+"11":"transparent",cursor:"pointer",fontFamily:"DM Mono,monospace",fontSize:16,fontWeight:700,color:sel?ac:"#555"}}>
+                      {lbl}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
             <div style={{...S.card,marginBottom:20}}>
               <p style={{color:ac,fontSize:14,fontWeight:700,margin:"0 0 8px"}}>Modalidade de Divisão</p>
               <p style={{color:"#555",fontSize:12,marginBottom:14}}>Define como a gorjeta é dividida entre os empregados.</p>
