@@ -1191,7 +1191,7 @@ function ReceibosManagerTab({ restaurantId, employees, roles, restaurants, recei
       setProgress(`Lendo ${numPages} páginas...`);
 
       const newReceipts = [];
-      const pageTexts = []; // store text of each page to detect duplicates
+      const pageTexts = []; // store fingerprints to detect duplicates
 
       for (let p = 1; p <= numPages; p++) {
         setProgress(`Processando página ${p} de ${numPages}...`);
@@ -1199,25 +1199,20 @@ function ReceibosManagerTab({ restaurantId, employees, roles, restaurants, recei
         const textContent = await page.getTextContent();
         const text = textContent.items.map(i => i.str).join(" ");
 
-        // Duplicate detection: compare normalized text with previous pages
-        // Use first 300 chars as fingerprint (enough to detect same content)
-        const fingerprint = text.replace(/\s+/g," ").trim().slice(0, 300);
-        const isDuplicate = pageTexts.some(prev => {
-          // Calculate similarity: count matching characters in fingerprint
-          if (Math.abs(prev.length - fingerprint.length) > 50) return false;
-          let matches = 0;
-          const shorter = fingerprint.length < prev.length ? fingerprint : prev;
-          for (let i = 0; i < shorter.length; i++) {
-            if (fingerprint[i] === prev[i]) matches++;
-          }
-          return (matches / shorter.length) > 0.85; // 85% similarity = duplicate
-        });
+        // Duplicate detection using CPF + page type as fingerprint
+        // Avoids false positives since all pages share same company header
+        const cpfForFp = (text.match(/CPF:\s*([\d.-]+)/) || [])[1]?.replace(/\D/g,"") ?? "";
+        const isContinuation = text.includes("Continua na próxima") ? "1" : "2";
+        const fingerprint = cpfForFp.length >= 11 ? `${cpfForFp}|${isContinuation}` : null;
+
+        // Only skip if we have a valid fingerprint AND already seen it
+        const isDuplicate = fingerprint && pageTexts.includes(fingerprint);
 
         if (isDuplicate) {
           setProgress(`Página ${p} de ${numPages} — cópia ignorada ✓`);
-          continue; // skip duplicate
+          continue;
         }
-        pageTexts.push(fingerprint);
+        if (fingerprint) pageTexts.push(fingerprint);
 
         // Auto-detect month from text (e.g. "Março/2026", "03/2026", "Referente ao mês: Março 2026")
         let detectedMonth = selMonth; // fallback to selected
