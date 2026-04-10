@@ -554,66 +554,24 @@ function RoleSpreadsheet({ restRoles, rid, roles, onUpdate }) {
 }
 
 // ── Employee Spreadsheet ──────────────────────────────────────────────────────
-function EmployeeSpreadsheet({ restEmps, restRoles, rid, employees, onUpdate, restCode: restCode_ }) {
-  const blank = () => ({ id: null, name: "", cpf: "", admission: "", pin: "", roleId: "", restaurantId: rid });
-  const [newRow, setNewRow] = useState(blank());
-  const [editRows, setEditRows] = useState({});
-  const [saved, setSaved] = useState({});
+// EmpRowCard defined OUTSIDE to prevent focus loss on re-render
+const empInS = { background: "#111", border: "1px solid #2a2a2a", borderRadius: 8, color: "#fff", fontFamily: "DM Mono,monospace", fontSize: 12, padding: "8px 10px", outline: "none", width: "100%", boxSizing: "border-box" };
 
-  // Sort by role area then employee name
-  const sorted = [...restEmps].sort((a, b) => {
-    const rA = restRoles.find(r => r.id === a.roleId);
-    const rB = restRoles.find(r => r.id === b.roleId);
-    const areaA = rA?.area ?? "z";
-    const areaB = rB?.area ?? "z";
-    return areaA.localeCompare(areaB) || a.name.localeCompare(b.name);
-  });
-
-  function getRow(e) { return editRows[e.id] ?? { name: e.name, cpf: e.cpf ?? "", admission: e.admission ?? today(), pin: e.pin ?? "", roleId: e.roleId ?? "" }; }
-  function setRow(id, field, val) { setEditRows(prev => ({ ...prev, [id]: { ...getRow({ id }), [field]: val } })); }
-
-  function saveEmp(e) {
-    const row = getRow(e);
-    if (!row.name.trim()) return;
-    const updated = { ...e, name: row.name.trim(), cpf: row.cpf, admission: row.admission, pin: row.pin, roleId: row.roleId };
-    onUpdate("employees", employees.map(x => x.id === e.id ? updated : x));
-    setSaved(p => ({ ...p, [e.id]: true }));
-    setTimeout(() => setSaved(p => ({ ...p, [e.id]: false })), 1500);
-  }
-
-  function saveNew() {
-    if (!newRow.name.trim()) return;
-    // Find restaurant shortCode
-    const allEmps = employees; // closure
-    // Get restaurant from employees with same restaurantId or from restCode prop
-    const restCode = restCode_ || "XXX";
-    const seq = nextEmpSeq(allEmps, restCode);
-    const empCode = makeEmpCode(restCode, seq);
-    const pin = String(seq).padStart(4, "0"); // initial PIN = last 4 digits of empCode
-    onUpdate("employees", [...employees, { ...newRow, id: Date.now().toString(), empCode, pin, restaurantId: rid }]);
-    setNewRow(blank());
-  }
-
-  function deleteEmp(id) { onUpdate("employees", employees.filter(x => x.id !== id)); }
-
-  const inStyle = { background: "#111", border: "1px solid #2a2a2a", borderRadius: 8, color: "#fff", fontFamily: "DM Mono,monospace", fontSize: 12, padding: "8px 10px", outline: "none", width: "100%", boxSizing: "border-box" };
-  const sel = { ...inStyle, cursor: "pointer" };
+function EmpRowCard({ row, onChange, onSave, onDelete, isSaved, isNew, restRoles }) {
   const ac = "#f5c842";
-
-  // Mobile-friendly: stack in cards
-  const RowCard = ({ row, onChange, onSave, onDelete, isSaved, isNew }) => (
+  return (
     <div style={{ background: isNew ? "#1a2a1a" : "#1a1a1a", borderRadius: 12, padding: 12, marginBottom: 8, border: `1px solid ${isSaved ? "#10b98166" : isNew ? "#10b98144" : "#2a2a2a"}`, transition: "border-color 0.3s" }}>
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6, marginBottom: 6 }}>
-        <div><div style={{ color: "#555", fontSize: 10, marginBottom: 3 }}>Nome</div><input value={row.name} onChange={e => onChange("name", e.target.value)} placeholder="Nome completo" style={inStyle} /></div>
-        <div><div style={{ color: "#555", fontSize: 10, marginBottom: 3 }}>CPF</div><input value={row.cpf} onChange={e => onChange("cpf", e.target.value)} placeholder="000.000.000-00" style={inStyle} inputMode="numeric" /></div>
+        <div><div style={{ color: "#555", fontSize: 10, marginBottom: 3 }}>Nome</div><input value={row.name} onChange={e => onChange("name", e.target.value)} placeholder="Nome completo" style={empInS} /></div>
+        <div><div style={{ color: "#555", fontSize: 10, marginBottom: 3 }}>CPF</div><input value={row.cpf} onChange={e => onChange("cpf", e.target.value)} placeholder="000.000.000-00" style={empInS} inputMode="numeric" /></div>
       </div>
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6, marginBottom: 6 }}>
-        <div><div style={{ color: "#555", fontSize: 10, marginBottom: 3 }}>Admissão</div><input type="date" value={row.admission} onChange={e => onChange("admission", e.target.value)} style={inStyle} /></div>
-        <div><div style={{ color: "#555", fontSize: 10, marginBottom: 3 }}>PIN</div><input type="password" value={row.pin} onChange={e => onChange("pin", e.target.value)} maxLength={6} placeholder="••••" style={inStyle} /></div>
+        <div><div style={{ color: "#555", fontSize: 10, marginBottom: 3 }}>Admissão</div><input type="date" value={row.admission} onChange={e => onChange("admission", e.target.value)} style={empInS} /></div>
+        <div><div style={{ color: "#555", fontSize: 10, marginBottom: 3 }}>PIN</div><input type="password" value={row.pin} onChange={e => onChange("pin", e.target.value)} maxLength={4} placeholder="••••" style={empInS} /></div>
       </div>
       <div style={{ marginBottom: 8 }}>
         <div style={{ color: "#555", fontSize: 10, marginBottom: 3 }}>Cargo</div>
-        <select value={row.roleId} onChange={e => onChange("roleId", e.target.value)} style={sel}>
+        <select value={row.roleId} onChange={e => onChange("roleId", e.target.value)} style={{ ...empInS, cursor: "pointer" }}>
           <option value="">Selecionar cargo…</option>
           {AREAS.map(a => (
             <optgroup key={a} label={a}>
@@ -630,13 +588,50 @@ function EmployeeSpreadsheet({ restEmps, restRoles, rid, employees, onUpdate, re
       </div>
     </div>
   );
+}
 
-  const newRowState = { name: newRow.name, cpf: newRow.cpf, admission: newRow.admission, pin: newRow.pin, roleId: newRow.roleId };
+function EmployeeSpreadsheet({ restEmps, restRoles, rid, employees, onUpdate, restCode: restCode_ }) {
+  const blank = () => ({ id: null, name: "", cpf: "", admission: "", pin: "", roleId: "", restaurantId: rid });
+  const [newRow, setNewRow] = useState(blank());
+  const [editRows, setEditRows] = useState({});
+  const [saved, setSaved] = useState({});
+
+  const sorted = [...restEmps].sort((a, b) => {
+    const rA = restRoles.find(r => r.id === a.roleId);
+    const rB = restRoles.find(r => r.id === b.roleId);
+    return (rA?.area ?? "z").localeCompare(rB?.area ?? "z") || a.name.localeCompare(b.name);
+  });
+
+  function getRow(e) { return editRows[e.id] ?? { name: e.name, cpf: e.cpf ?? "", admission: e.admission ?? "", pin: e.pin ?? "", roleId: e.roleId ?? "" }; }
+  function setRow(id, field, val) { setEditRows(prev => ({ ...prev, [id]: { ...(prev[id] ?? getRow({ id, name:"", cpf:"", admission:"", pin:"", roleId:"" })), [field]: val } })); }
+
+  function saveEmp(e) {
+    const row = getRow(e);
+    if (!row.name.trim()) return;
+    const updated = { ...e, name: row.name.trim(), cpf: row.cpf, admission: row.admission, pin: row.pin, roleId: row.roleId };
+    onUpdate("employees", employees.map(x => x.id === e.id ? updated : x));
+    setSaved(p => ({ ...p, [e.id]: true }));
+    setTimeout(() => setSaved(p => ({ ...p, [e.id]: false })), 1500);
+  }
+
+  function saveNew() {
+    if (!newRow.name.trim()) return;
+    const restCode = restCode_ || "XXX";
+    const seq = nextEmpSeq(employees, restCode);
+    const empCode = makeEmpCode(restCode, seq);
+    const pin = String(seq).padStart(4, "0");
+    onUpdate("employees", [...employees, { ...newRow, id: Date.now().toString(), empCode, pin, restaurantId: rid }]);
+    setNewRow(blank());
+  }
+
+  function deleteEmp(id) { onUpdate("employees", employees.filter(x => x.id !== id)); }
 
   return (
     <div style={{ fontFamily: "DM Mono,monospace" }}>
-      <p style={{ color: "#555", fontSize: 12, marginBottom: 16 }}>Edite e clique em Salvar. Use o card verde para adicionar novos empregados.</p>
-      <RowCard row={newRowState} isNew onChange={(f, v) => setNewRow(p => ({ ...p, [f]: v }))} onSave={saveNew} isSaved={false} />
+      <p style={{ color: "#555", fontSize: 12, marginBottom: 16 }}>Card verde para novo empregado. Edite e clique Salvar em cada card.</p>
+      <EmpRowCard row={newRow} isNew restRoles={restRoles}
+        onChange={(f, v) => setNewRow(p => ({ ...p, [f]: v }))}
+        onSave={saveNew} isSaved={false} />
       {sorted.length === 0 && <p style={{ color: "#555", textAlign: "center", marginTop: 10 }}>Nenhum empregado cadastrado.</p>}
       {sorted.map(e => {
         const row = getRow(e);
@@ -644,7 +639,8 @@ function EmployeeSpreadsheet({ restEmps, restRoles, rid, employees, onUpdate, re
         return (
           <div key={e.id}>
             {role && <div style={{ color: AREA_COLORS[role.area] ?? "#555", fontSize: 11, fontWeight: 700, marginBottom: 4, marginTop: 12, paddingLeft: 4 }}>{role.area}</div>}
-            <RowCard row={row} isSaved={saved[e.id]} isNew={false}
+            {e.empCode && <div style={{ color: "#555", fontSize: 11, marginBottom: 2, paddingLeft: 4 }}>ID: <span style={{color:"#f5c842"}}>{e.empCode}</span></div>}
+            <EmpRowCard row={row} isSaved={saved[e.id]} isNew={false} restRoles={restRoles}
               onChange={(f, v) => setRow(e.id, f, v)}
               onSave={() => saveEmp(e)}
               onDelete={() => deleteEmp(e.id)}
@@ -655,6 +651,7 @@ function EmployeeSpreadsheet({ restEmps, restRoles, rid, employees, onUpdate, re
     </div>
   );
 }
+
 
 function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, splits, schedules, onUpdate, perms, isSuperManager }) {
   const [tab, setTab] = useState(perms.tips ? "dashboard" : "schedule");
