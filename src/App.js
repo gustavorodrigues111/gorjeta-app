@@ -555,7 +555,6 @@ function RoleSpreadsheet({ restRoles, rid, roles, onUpdate }) {
 
 // ── Employee Spreadsheet ──────────────────────────────────────────────────────
 function EmployeeSpreadsheet({ restEmps, restRoles, rid, employees, onUpdate, restCode: restCode_ }) {
-  const restaurant = (typeof restRoles !== "undefined" ? null : null); // placeholder
   const blank = () => ({ id: null, name: "", cpf: "", admission: "", pin: "", roleId: "", restaurantId: rid });
   const [newRow, setNewRow] = useState(blank());
   const [editRows, setEditRows] = useState({});
