@@ -98,6 +98,8 @@ const K = {
   faq:           "v4:faq",            // {restaurantId: [{id,q,a}]}
   dpMessages:    "v4:dpMessages",     // [{id,restaurantId,empId|null,name|null,category,body,date,read}]
   receipts:      "v4:receipts",       // [{id,restaurantId,empId,empName,month,type,dataUrl,uploadedAt}]
+  workSchedules: "v4:workSchedules",  // {restaurantId: {empId: [{id,days:{0-6:{in,out,break}},validFrom,createdBy,createdAt}]}}
+  notifications: "v4:notifications",  // [{id,restaurantId,type,body,date,read,targetRole:'dp'}]
 };
 
 //
@@ -659,6 +661,452 @@ function FaqManagerTab({ restaurantId, faq, onUpdate }) {
 //
 // DP MESSAGES MANAGER TAB
 //
+// ── Notificações Tab (DP only) ────────────────────────────────────────────────
+function NotificacoesTab({ restaurantId, dpMessages, notifications, onUpdate }) {
+  const ac = "#3b82f6";
+
+  // All DP messages for this restaurant
+  const dpMsgs = (dpMessages ?? [])
+    .filter(m => m.restaurantId === restaurantId)
+    .map(m => ({ ...m, _kind: "dp" }));
+
+  // System notifications (horário changes, etc)
+  const sysNots = (notifications ?? [])
+    .filter(n => n.restaurantId === restaurantId)
+    .map(n => ({ ...n, _kind: "sys" }));
+
+  const all = [...dpMsgs, ...sysNots]
+    .sort((a, b) => (b.date || b.createdAt || "").localeCompare(a.date || a.createdAt || ""));
+
+  const unread = all.filter(m => !m.read).length;
+
+  function markRead(item) {
+    if (item._kind === "dp") {
+      onUpdate("dpMessages", dpMessages.map(m => m.id === item.id ? { ...m, read: true } : m));
+    } else {
+      onUpdate("notifications", notifications.map(n => n.id === item.id ? { ...n, read: true } : n));
+    }
+  }
+
+  function markAllRead() {
+    onUpdate("dpMessages", dpMessages.map(m => m.restaurantId === restaurantId ? { ...m, read: true } : m));
+    onUpdate("notifications", notifications.map(n => n.restaurantId === restaurantId ? { ...n, read: true } : n));
+  }
+
+  const CATS = { sugestao:"💡 Sugestão", elogio:"👏 Elogio", reclamacao:"⚠️ Reclamação", denuncia:"🚨 Denúncia" };
+
+  return (
+    <div style={{fontFamily:"DM Mono,monospace"}}>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}}>
+        <div>
+          <p style={{color:ac,fontSize:15,fontWeight:700,margin:0}}>📬 Notificações</p>
+          {unread > 0 && <p style={{color:"#555",fontSize:12,margin:"2px 0 0"}}>{unread} não lida{unread>1?"s":""}</p>}
+        </div>
+        {unread > 0 && <button onClick={markAllRead} style={{...S.btnSecondary,fontSize:12}}>Marcar todas lidas</button>}
+      </div>
+      {all.length === 0 && <p style={{color:"#555",textAlign:"center",marginTop:40}}>Nenhuma notificação.</p>}
+      {all.map(item => {
+        const date = item.date || item.createdAt || "";
+        const isDP = item._kind === "dp";
+        const isSys = item._kind === "sys";
+        return (
+          <div key={item.id} style={{...S.card,marginBottom:10,opacity:item.read?0.65:1,borderColor:item.read?"#2a2a2a":isDP?"#f5c84244":"#3b82f644"}}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:8}}>
+              <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
+                {isDP && <span style={{background:"#f5c84222",color:"#f5c842",borderRadius:6,padding:"2px 8px",fontSize:10,fontWeight:700}}>💬 Fale com DP</span>}
+                {isSys && <span style={{background:"#3b82f622",color:"#3b82f6",borderRadius:6,padding:"2px 8px",fontSize:10,fontWeight:700}}>⚙️ Sistema</span>}
+                {isDP && item.category && <span style={{color:"#555",fontSize:11}}>{CATS[item.category]??item.category}</span>}
+                {!item.read && <span style={{background:isDP?"#f5c842":"#3b82f6",color:"#111",borderRadius:4,padding:"1px 6px",fontSize:10,fontWeight:700}}>Novo</span>}
+              </div>
+              <span style={{color:"#555",fontSize:11,whiteSpace:"nowrap"}}>{date ? new Date(date).toLocaleString("pt-BR") : ""}</span>
+            </div>
+            {isDP && <div style={{color:"#aaa",fontSize:12,marginBottom:6}}>De: <span style={{color:item.empName==="Anônimo"?"#8b5cf6":"#fff"}}>{item.empName}</span></div>}
+            <div style={{color:"#fff",fontSize:13,lineHeight:1.6,whiteSpace:"pre-wrap",marginBottom:item.read?0:8}}>{item.body}</div>
+            {!item.read && <button onClick={()=>markRead(item)} style={{...S.btnSecondary,fontSize:11,padding:"4px 12px"}}>Marcar como lida</button>}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+// ── Work Schedule helpers ──────────────────────────────────────────────────────
+const WEEK_DAYS_LABEL = ["Dom","Seg","Ter","Qua","Qui","Sex","Sáb"];
+
+function timeToMin(t) {
+  if (!t) return null;
+  const [h, m] = t.split(":").map(Number);
+  return h * 60 + (m || 0);
+}
+function minToTime(m) {
+  if (m === null || m === undefined) return "";
+  const h = Math.floor(m / 60) % 24;
+  const mm = m % 60;
+  return `${String(h).padStart(2,"0")}:${String(mm).padStart(2,"0")}`;
+}
+function fmtHHMM(totalMin) {
+  if (!totalMin && totalMin !== 0) return "—";
+  const sign = totalMin < 0 ? "-" : "";
+  const abs = Math.abs(totalMin);
+  return `${sign}${String(Math.floor(abs/60)).padStart(2,"0")}:${String(abs%60).padStart(2,"0")}`;
+}
+
+// Calcula horas do dia respeitando hora ficta noturna
+// Retorna {worked, diurnal, nocturnal, nocturnalFicta, error}
+function calcDayHours(inTime, outTime, breakMin) {
+  if (!inTime || !outTime) return { worked: 0, diurnal: 0, nocturnal: 0, nocturnalFicta: 0 };
+  let inM = timeToMin(inTime);
+  let outM = timeToMin(outTime);
+  // Handle overnight (e.g. 22:00 -> 02:00)
+  if (outM <= inM) outM += 24 * 60;
+  const totalMin = outM - inM - (breakMin || 0);
+  if (totalMin <= 0) return { worked: 0, diurnal: 0, nocturnal: 0, nocturnalFicta: 0, error: "Horário inválido" };
+
+  // Nocturnal: 22:00 to 05:00 next day = 840min to 1740min (in 24h cycle)
+  // Count minutes in nocturnal window
+  let noctMin = 0;
+  const NOC_START = 22 * 60; // 1320
+  const NOC_END = 5 * 60 + 24 * 60; // 300 + 1440 = 1740 (next day 5am)
+  for (let t = inM; t < outM; t++) {
+    const tMod = t % (24 * 60);
+    if (tMod >= NOC_START || tMod < 5 * 60) noctMin++;
+  }
+  // Subtract break proportionally from nocturnal (simplified: subtract from total)
+  const noctProportion = noctMin / (outM - inM);
+  const noctAfterBreak = Math.round(noctMin - (breakMin || 0) * noctProportion);
+  const diurnAfterBreak = totalMin - noctAfterBreak;
+
+  // Hora ficta: each 52.5 real nocturnal minutes = 60 contract minutes
+  const nocturnalFicta = Math.round(noctAfterBreak * (60 / 52.5));
+
+  return {
+    worked: totalMin,
+    diurnal: diurnAfterBreak,
+    nocturnal: noctAfterBreak,
+    nocturnalFicta,
+    totalContract: diurnAfterBreak + nocturnalFicta,
+  };
+}
+
+// Validate a full week schedule
+function validateWeekSchedule(days) {
+  const errors = [];
+  const activeDays = Object.entries(days).filter(([,d]) => d && d.in && d.out);
+
+  // Per day validations
+  activeDays.forEach(([dayIdx, d]) => {
+    const label = WEEK_DAYS_LABEL[parseInt(dayIdx)];
+    const calc = calcDayHours(d.in, d.out, d.break || 0);
+    if (calc.error) { errors.push(`${label}: ${calc.error}`); return; }
+    if (calc.worked > 10 * 60) errors.push(`${label}: jornada de ${fmtHHMM(calc.worked)} ultrapassa o máximo de 10h.`);
+    if ((d.break || 0) < 30) errors.push(`${label}: intervalo mínimo é 30 minutos (atual: ${d.break || 0}min).`);
+  });
+
+  // Interjornada (≥ 11h between end of one day and start of next)
+  const sorted = activeDays.sort((a, b) => parseInt(a[0]) - parseInt(b[0]));
+  for (let i = 0; i < sorted.length - 1; i++) {
+    const [, cur] = sorted[i];
+    const [, nxt] = sorted[i + 1];
+    const curOut = timeToMin(cur.out);
+    const nxtIn = timeToMin(nxt.in);
+    // If next day starts before current ends, it's next calendar day
+    const gap = nxtIn >= curOut ? nxtIn - curOut : nxtIn + 24*60 - curOut;
+    if (gap < 11 * 60) {
+      errors.push(`Interjornada entre ${WEEK_DAYS_LABEL[parseInt(sorted[i][0])]} e ${WEEK_DAYS_LABEL[parseInt(sorted[i+1][0])]} é de ${fmtHHMM(gap)}, mínimo exigido é 11h.`);
+    }
+  }
+
+  // Weekly total: must be between 43h55 and 44h00
+  const totalContract = activeDays.reduce((sum, [,d]) => {
+    const c = calcDayHours(d.in, d.out, d.break || 0);
+    return sum + (c.totalContract || 0);
+  }, 0);
+  const MIN_WEEK = 43 * 60 + 55;
+  const MAX_WEEK = 44 * 60;
+  if (activeDays.length > 0 && (totalContract < MIN_WEEK || totalContract > MAX_WEEK)) {
+    errors.push(`Carga semanal de ${fmtHHMM(totalContract)} fora do intervalo permitido (43:55 a 44:00).`);
+  }
+
+  return { errors, totalContract };
+}
+
+// ── Work Schedule Manager Tab ─────────────────────────────────────────────────
+function WorkScheduleManagerTab({ restaurantId, employees, workSchedules, notifications, managers, currentManagerName, onUpdate }) {
+  const ac = "#f5c842";
+  const restEmps = employees.filter(e => e.restaurantId === restaurantId && !e.inactive);
+  const [selEmpId, setSelEmpId] = useState(null);
+  const [editDays, setEditDays] = useState({});
+  const [errors, setErrors] = useState([]);
+  const [showValidFrom, setShowValidFrom] = useState(false);
+  const [validFrom, setValidFrom] = useState(today());
+
+  const selEmp = restEmps.find(e => e.id === selEmpId);
+  const empSchedules = workSchedules?.[restaurantId]?.[selEmpId] ?? [];
+  const currentSched = empSchedules[empSchedules.length - 1];
+
+  function loadEmp(empId) {
+    setSelEmpId(empId);
+    setErrors([]);
+    setShowValidFrom(false);
+    const sched = (workSchedules?.[restaurantId]?.[empId] ?? []);
+    const cur = sched[sched.length - 1];
+    setEditDays(cur ? { ...cur.days } : {});
+  }
+
+  function handleDayChange(dayIdx, field, val) {
+    setEditDays(prev => ({
+      ...prev,
+      [dayIdx]: { ...(prev[dayIdx] ?? {}), [field]: val }
+    }));
+    setErrors([]);
+  }
+
+  function clearDay(dayIdx) {
+    setEditDays(prev => { const n = { ...prev }; delete n[dayIdx]; return n; });
+  }
+
+  function tryValidate() {
+    const { errors: errs } = validateWeekSchedule(editDays);
+    setErrors(errs);
+    if (errs.length === 0) setShowValidFrom(true);
+  }
+
+  function saveSchedule() {
+    const { errors: errs, totalContract } = validateWeekSchedule(editDays);
+    if (errs.length > 0) { setErrors(errs); return; }
+
+    const newEntry = {
+      id: `${Date.now()}-${Math.random().toString(36).slice(2,5)}`,
+      days: editDays,
+      validFrom,
+      createdBy: currentManagerName,
+      createdAt: new Date().toISOString(),
+      totalContract,
+    };
+
+    const empScheds = [...(workSchedules?.[restaurantId]?.[selEmpId] ?? []), newEntry];
+    onUpdate("workSchedules", {
+      ...workSchedules,
+      [restaurantId]: { ...(workSchedules?.[restaurantId] ?? {}), [selEmpId]: empScheds }
+    });
+
+    // Notify all DP managers
+    const dpMgrs = managers.filter(m => m.isDP && (m.restaurantIds ?? []).includes(restaurantId));
+    if (dpMgrs.length > 0) {
+      const body = `📋 Horário alterado\n\nEmpregado: ${selEmp?.name}\nAlterado por: ${currentManagerName}\nVigência a partir de: ${fmtDate(validFrom)}\n\nNovo horário:\n${Object.entries(editDays).filter(([,d])=>d?.in&&d?.out).sort((a,b)=>parseInt(a[0])-parseInt(b[0])).map(([i,d])=>`${WEEK_DAYS_LABEL[i]}: ${d.in} – ${d.out} (intervalo ${d.break??0}min)`).join("\n")}`;
+      const notif = {
+        id: `${Date.now()}-notif-${Math.random().toString(36).slice(2,5)}`,
+        restaurantId,
+        type: "horario",
+        body,
+        date: new Date().toISOString(),
+        read: false,
+        targetRole: "dp",
+      };
+      onUpdate("notifications", [...(notifications ?? []), notif]);
+    }
+
+    setShowValidFrom(false);
+    setErrors([]);
+    onUpdate("_toast", `✅ Horário de ${selEmp?.name} salvo com vigência a partir de ${fmtDate(validFrom)}`);
+  }
+
+  if (!selEmpId) return (
+    <div>
+      <p style={{color:"#555",fontSize:13,marginBottom:16}}>Selecione um empregado para editar o horário:</p>
+      {restEmps.map(emp => {
+        const sched = workSchedules?.[restaurantId]?.[emp.id] ?? [];
+        const cur = sched[sched.length - 1];
+        return (
+          <div key={emp.id} onClick={()=>loadEmp(emp.id)} style={{...S.card,marginBottom:8,cursor:"pointer",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+            <div>
+              <div style={{color:"#fff",fontWeight:600,fontSize:14}}>{emp.name}</div>
+              <div style={{color:"#555",fontSize:12}}>{cur ? `Vigente desde ${fmtDate(cur.validFrom)} · ${fmtHHMM(cur.totalContract)}/sem` : "Sem horário cadastrado"}</div>
+            </div>
+            <span style={{color:ac,fontSize:13}}>›</span>
+          </div>
+        );
+      })}
+    </div>
+  );
+
+  const { totalContract } = validateWeekSchedule(editDays);
+  const MIN_WEEK = 43*60+55, MAX_WEEK = 44*60;
+  const weekOk = totalContract >= MIN_WEEK && totalContract <= MAX_WEEK;
+
+  return (
+    <div>
+      <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:16}}>
+        <button onClick={()=>{setSelEmpId(null);setErrors([]);setShowValidFrom(false);}} style={{...S.btnSecondary,fontSize:12}}>← Voltar</button>
+        <div>
+          <span style={{color:"#fff",fontWeight:700,fontSize:15}}>{selEmp?.name}</span>
+          <span style={{color:"#555",fontSize:12,marginLeft:8}}>Horário semanal</span>
+        </div>
+      </div>
+
+      {/* History */}
+      {empSchedules.length > 1 && (
+        <details style={{marginBottom:16}}>
+          <summary style={{color:"#555",fontSize:12,cursor:"pointer",padding:"8px 12px",background:"#111",borderRadius:8}}>
+            📂 Histórico ({empSchedules.length} versões)
+          </summary>
+          <div style={{paddingTop:8}}>
+            {[...empSchedules].reverse().slice(1).map(s => (
+              <div key={s.id} style={{padding:"6px 12px",borderBottom:"1px solid #1a1a1a",fontSize:12}}>
+                <span style={{color:"#aaa"}}>Vigente de {fmtDate(s.validFrom)}</span>
+                <span style={{color:"#555",marginLeft:12}}>por {s.createdBy}</span>
+                <span style={{color:"#555",marginLeft:12}}>{fmtHHMM(s.totalContract)}/sem</span>
+              </div>
+            ))}
+          </div>
+        </details>
+      )}
+
+      {/* Weekly schedule table */}
+      <div style={{...S.card,marginBottom:16,overflowX:"auto"}}>
+        <table style={{width:"100%",borderCollapse:"collapse",fontFamily:"DM Mono,monospace",fontSize:13}}>
+          <thead>
+            <tr>
+              {["Dia","Entrada","Saída","Intervalo (min)","Hrs trabalhadas","Hrs diurnas","Hrs noturnas","Ficta",""].map(h=>(
+                <th key={h} style={{padding:"8px 10px",textAlign:"left",color:"#555",fontSize:11,borderBottom:"1px solid #2a2a2a",whiteSpace:"nowrap"}}>{h}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {[0,1,2,3,4,5,6].map(dayIdx => {
+              const d = editDays[dayIdx] ?? {};
+              const hasDay = d.in && d.out;
+              const calc = hasDay ? calcDayHours(d.in, d.out, parseInt(d.break)||0) : null;
+              const dayErr = calc && calc.worked > 10*60;
+              return (
+                <tr key={dayIdx} style={{background:dayIdx%2===0?"#111":"#141414",opacity:hasDay?1:0.5}}>
+                  <td style={{padding:"6px 10px",color:([0,6].includes(dayIdx))?"#f59e0b":"#aaa",fontWeight:600,whiteSpace:"nowrap"}}>{WEEK_DAYS_LABEL[dayIdx]}</td>
+                  <td style={{padding:"4px 6px"}}>
+                    <input type="time" value={d.in||""} onChange={e=>handleDayChange(dayIdx,"in",e.target.value)}
+                      style={{...S.input,width:90,padding:"4px 6px",fontSize:12}}/>
+                  </td>
+                  <td style={{padding:"4px 6px"}}>
+                    <input type="time" value={d.out||""} onChange={e=>handleDayChange(dayIdx,"out",e.target.value)}
+                      style={{...S.input,width:90,padding:"4px 6px",fontSize:12}}/>
+                  </td>
+                  <td style={{padding:"4px 6px"}}>
+                    <input type="number" min="0" max="120" value={d.break||""} onChange={e=>handleDayChange(dayIdx,"break",parseInt(e.target.value)||0)}
+                      placeholder="30" style={{...S.input,width:70,padding:"4px 6px",fontSize:12}} disabled={!hasDay}/>
+                  </td>
+                  <td style={{padding:"6px 10px",color:dayErr?"#ef4444":"#10b981",fontWeight:calc?600:400}}>{calc?fmtHHMM(calc.worked):"—"}</td>
+                  <td style={{padding:"6px 10px",color:"#aaa"}}>{calc?fmtHHMM(calc.diurnal):"—"}</td>
+                  <td style={{padding:"6px 10px",color:"#8b5cf6"}}>{calc?fmtHHMM(calc.nocturnal):"—"}</td>
+                  <td style={{padding:"6px 10px",color:"#ec4899"}}>{calc?fmtHHMM(calc.nocturnalFicta):"—"}</td>
+                  <td style={{padding:"4px 6px"}}>
+                    {hasDay && <button onClick={()=>clearDay(dayIdx)} style={{background:"none",border:"1px solid #e74c3c33",borderRadius:6,color:"#e74c3c",cursor:"pointer",padding:"3px 8px",fontSize:11,fontFamily:"DM Mono,monospace"}}>Folga</button>}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+          <tfoot>
+            <tr style={{borderTop:"2px solid #2a2a2a"}}>
+              <td colSpan={4} style={{padding:"8px 10px",color:"#555",fontSize:12}}>Total semanal</td>
+              <td style={{padding:"8px 10px",color:weekOk?"#10b981":"#ef4444",fontWeight:700,fontSize:14}}>{fmtHHMM(totalContract)}</td>
+              <td colSpan={4} style={{padding:"8px 10px",color:"#555",fontSize:11}}>{weekOk?"✅ Dentro do limite":"⚠️ Fora do limite (43:55 – 44:00)"}</td>
+            </tr>
+          </tfoot>
+        </table>
+      </div>
+
+      {/* Validation errors */}
+      {errors.length > 0 && (
+        <div style={{background:"#e74c3c11",border:"1px solid #e74c3c44",borderRadius:10,padding:"12px 16px",marginBottom:16}}>
+          <p style={{color:"#e74c3c",fontWeight:700,fontSize:13,margin:"0 0 8px"}}>⚠️ Corrija os seguintes erros antes de salvar:</p>
+          {errors.map((e,i)=><div key={i} style={{color:"#e74c3c",fontSize:12,marginBottom:4}}>• {e}</div>)}
+        </div>
+      )}
+
+      {/* Valid from modal */}
+      {showValidFrom && (
+        <div style={{...S.card,border:"1px solid #f5c84244",marginBottom:16}}>
+          <p style={{color:ac,fontWeight:700,fontSize:14,margin:"0 0 10px"}}>📅 A partir de quando este horário entra em vigor?</p>
+          <input type="date" value={validFrom} onChange={e=>setValidFrom(e.target.value)} style={{...S.input,marginBottom:12}}/>
+          <p style={{color:"#555",fontSize:12,marginBottom:12}}>Todos os gestores marcados como DP receberão uma notificação com esta alteração.</p>
+          <div style={{display:"flex",gap:10}}>
+            <button onClick={saveSchedule} style={S.btnPrimary}>✅ Confirmar e Salvar</button>
+            <button onClick={()=>setShowValidFrom(false)} style={S.btnSecondary}>Cancelar</button>
+          </div>
+        </div>
+      )}
+
+      {!showValidFrom && (
+        <button onClick={tryValidate} style={S.btnPrimary}>Validar e Salvar Horário</button>
+      )}
+    </div>
+  );
+}
+
+// ── Work Schedule Employee Tab ────────────────────────────────────────────────
+function WorkScheduleEmployeeTab({ empId, restaurantId, workSchedules }) {
+  const ac = "#f5c842";
+  const empScheds = workSchedules?.[restaurantId]?.[empId] ?? [];
+  const current = empScheds[empScheds.length - 1];
+
+  if (!current) return (
+    <div style={{textAlign:"center",marginTop:40}}>
+      <div style={{fontSize:32,marginBottom:12}}>🕐</div>
+      <p style={{color:"#555",fontSize:14}}>Nenhum horário cadastrado ainda.</p>
+    </div>
+  );
+
+  return (
+    <div style={{fontFamily:"DM Mono,monospace"}}>
+      <p style={{color:ac,fontSize:14,fontWeight:700,margin:"0 0 4px"}}>Seu Horário</p>
+      <p style={{color:"#555",fontSize:12,marginBottom:16}}>Vigente desde {fmtDate(current.validFrom)}</p>
+
+      {[0,1,2,3,4,5,6].map(dayIdx => {
+        const d = current.days[dayIdx];
+        if (!d?.in || !d?.out) return (
+          <div key={dayIdx} style={{display:"flex",justifyContent:"space-between",padding:"10px 14px",background:"#111",borderRadius:8,marginBottom:6,opacity:0.4}}>
+            <span style={{color:([0,6].includes(dayIdx))?"#f59e0b":"#555",fontWeight:600}}>{WEEK_DAYS_LABEL[dayIdx]}</span>
+            <span style={{color:"#555",fontSize:12}}>Folga</span>
+          </div>
+        );
+        const calc = calcDayHours(d.in, d.out, parseInt(d.break)||0);
+        return (
+          <div key={dayIdx} style={{background:"#1a1a1a",borderRadius:10,padding:"12px 14px",marginBottom:8,border:"1px solid #2a2a2a"}}>
+            <div style={{display:"flex",justifyContent:"space-between",marginBottom:8}}>
+              <span style={{color:([0,6].includes(dayIdx))?"#f59e0b":"#fff",fontWeight:700,fontSize:14}}>{WEEK_DAYS_LABEL[dayIdx]}</span>
+              <span style={{color:ac,fontWeight:700,fontSize:14}}>{fmtHHMM(calc.totalContract)}h</span>
+            </div>
+            <div style={{display:"flex",gap:16,fontSize:12,flexWrap:"wrap"}}>
+              <span style={{color:"#10b981"}}>🟢 Entrada: {d.in}</span>
+              <span style={{color:"#e74c3c"}}>🔴 Saída: {d.out}</span>
+              <span style={{color:"#555"}}>☕ Intervalo: {d.break||0}min</span>
+              {calc.nocturnal > 0 && <span style={{color:"#8b5cf6"}}>🌙 Noturno: {fmtHHMM(calc.nocturnal)}</span>}
+            </div>
+          </div>
+        );
+      })}
+
+      {empScheds.length > 1 && (
+        <details style={{marginTop:20}}>
+          <summary style={{color:"#555",fontSize:12,cursor:"pointer",padding:"8px 12px",background:"#111",borderRadius:8}}>
+            📂 Horários anteriores ({empScheds.length - 1})
+          </summary>
+          <div style={{paddingTop:8}}>
+            {[...empScheds].reverse().slice(1).map(s => (
+              <div key={s.id} style={{...S.card,marginBottom:8,opacity:0.7}}>
+                <p style={{color:"#555",fontSize:12,margin:"0 0 8px"}}>Vigente desde {fmtDate(s.validFrom)}</p>
+                {[0,1,2,3,4,5,6].filter(i=>s.days[i]?.in&&s.days[i]?.out).map(i=>{
+                  const d=s.days[i];
+                  return <div key={i} style={{color:"#555",fontSize:12,marginBottom:2}}>{WEEK_DAYS_LABEL[i]}: {d.in} – {d.out}</div>;
+                })}
+              </div>
+            ))}
+          </div>
+        </details>
+      )}
+    </div>
+  );
+}
+
 function DpManagerTab({ restaurantId, dpMessages, onUpdate }) {
   const msgs = dpMessages.filter(m => m.restaurantId === restaurantId)
     .sort((a, b) => b.date.localeCompare(a.date));
@@ -1059,7 +1507,7 @@ function ReceibosEmployeeTab({ empId, restaurantId, receipts }) {
   );
 }
 
-function EmployeePortal({ employees, roles, tips, schedules, restaurants, communications, commAcks, faq, dpMessages, receipts, onBack, onUpdateEmployee, onUpdate }) {
+function EmployeePortal({ employees, roles, tips, schedules, restaurants, communications, commAcks, faq, dpMessages, receipts, workSchedules, onBack, onUpdateEmployee, onUpdate }) {
   const [cpf, setCpf] = useState("");
   const [pin, setPin] = useState("");
   const [err, setErr] = useState("");
@@ -1094,7 +1542,7 @@ function EmployeePortal({ employees, roles, tips, schedules, restaurants, commun
   const hasPending = pendingComms.length > 0;
 
   // Force comunicados tab if there are pending
-  const TABS = [["comunicados","📢 Comunicados"],["escala","📅 Escala"],["extrato","💸 Gorjeta"],["recibos","📄 Recibos"],["faq","❓ FAQ"],["dp","💬 Fale com DP"]];
+  const TABS = [["comunicados","📢 Comunicados"],["escala","📅 Escala"],["extrato","💸 Gorjeta"],["horarios","🕐 Horários"],["recibos","📄 Recibos"],["faq","❓ FAQ"],["dp","💬 Fale com DP"]];
 
   function handleTabChange(id) {
     if (hasPending && id !== "comunicados") {
@@ -1335,6 +1783,10 @@ function EmployeePortal({ employees, roles, tips, schedules, restaurants, commun
 
         {tab === "dp" && (
           <FaleDpTab empId={empId} emp={emp} restaurantId={emp?.restaurantId} dpMessages={dpMessages} onUpdate={onUpdate} />
+        )}
+
+        {tab === "horarios" && (
+          <WorkScheduleEmployeeTab empId={empId} restaurantId={emp?.restaurantId} workSchedules={workSchedules ?? {}} />
         )}
 
         {tab === "recibos" && (
@@ -1849,6 +2301,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
   const ac = "#f5c842";
   const canTips  = perms.tips     || isSuperManager;
   const canSched = perms.schedule || isSuperManager;
+  const isDP     = perms.isDP === true;
   const canComms = perms.comunicados !== false || isSuperManager;
   const canFaq   = perms.faq   !== false || isSuperManager;
   const canDp    = perms.dp    !== false || isSuperManager;
@@ -1862,6 +2315,8 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
     canComms  && ["comunicados",  "📢 Comunicados"],
     canFaq    && ["faq",          "❓ FAQ"],
     canDp     && ["dp",           "💬 Fale com DP"],
+    (perms.horarios !== false || isSuperManager) && ["horarios", "🕐 Horários"],
+    isDP      && ["notificacoes", `📬 Notificações${((data?.notifications??[]).filter(n=>n.restaurantId===rid&&!n.read).length+(data?.dpMessages??[]).filter(m=>m.restaurantId===rid&&!m.read).length)>0?" ●":"" }`],
     (canTips || isSuperManager) && ["recibos", "📄 Recibos"],
     (canTips || isSuperManager) && ["config", "⚙️ Config"],
   ].filter(Boolean);
@@ -2349,6 +2804,16 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
           <DpManagerTab restaurantId={rid} dpMessages={data?.dpMessages ?? []} onUpdate={onUpdate} />
         )}
 
+        {/* HORARIOS */}
+        {tab === "horarios" && (
+          <WorkScheduleManagerTab restaurantId={rid} employees={employees} workSchedules={data?.workSchedules??{}} notifications={data?.notifications??[]} managers={data?.managers??[]} currentManagerName={isSuperManager?"Super Gestor":"Gestor"} onUpdate={onUpdate} />
+        )}
+
+        {/* NOTIFICAÇÕES */}
+        {tab === "notificacoes" && (
+          <NotificacoesTab restaurantId={rid} dpMessages={data?.dpMessages??[]} notifications={data?.notifications??[]} onUpdate={onUpdate} />
+        )}
+
         {/* RECIBOS */}
         {tab === "recibos" && (
           <ReceibosManagerTab restaurantId={rid} employees={employees} receipts={data?.receipts ?? []} onUpdate={onUpdate} />
@@ -2465,7 +2930,7 @@ function SuperManagerPortal({ data, onUpdate, onBack, currentUser }) {
   const [restForm, setRestForm]             = useState({ name:"",shortCode:"",cnpj:"",address:"" });
   const [showMgrModal, setShowMgrModal]     = useState(false);
   const [editMgrId, setEditMgrId]           = useState(null);
-  const [mgrForm, setMgrForm]               = useState({ name:"",cpf:"",pin:"",restaurantIds:[],perms:{tips:true,schedule:true} });
+  const [mgrForm, setMgrForm]               = useState({ name:"",cpf:"",pin:"",restaurantIds:[],perms:{tips:true,schedule:true},isDP:false });
   const [showSuperModal, setShowSuperModal] = useState(false);
   const [editSuperId, setEditSuperId]       = useState(null);
   const [superForm, setSuperForm]           = useState({ name:"",cpf:"",pin:"" });
@@ -2585,7 +3050,7 @@ function SuperManagerPortal({ data, onUpdate, onBack, currentUser }) {
         {/* GESTORES */}
         {tab === "managers" && (
           <div>
-            <button onClick={()=>{setEditMgrId(null);setMgrForm({name:"",cpf:"",pin:"",restaurantIds:[],perms:{tips:true,schedule:true}});setShowMgrModal(true);}} style={{...S.btnPrimary,marginBottom:20}}>+ Novo Gestor</button>
+            <button onClick={()=>{setEditMgrId(null);setMgrForm({name:"",cpf:"",pin:"",restaurantIds:[],perms:{tips:true,schedule:true},isDP:false});setShowMgrModal(true);}} style={{...S.btnPrimary,marginBottom:20}}>+ Novo Gestor</button>
             {managers.length === 0 && <p style={{color:"#555",textAlign:"center"}}>Nenhum gestor cadastrado.</p>}
             {managers.map(m=>(
               <div key={m.id} style={{...S.card,marginBottom:10}}>
@@ -2594,7 +3059,7 @@ function SuperManagerPortal({ data, onUpdate, onBack, currentUser }) {
                     <div style={{color:"#fff",fontWeight:600,fontSize:15}}>{m.name}</div>
                     <div style={{color:"#555",fontSize:12}}>CPF: {m.cpf||"—"}</div>
                     <div style={{marginTop:6,display:"flex",gap:6,flexWrap:"wrap"}}>
-                      {[["tips","Gorjetas"],["schedule","Escala"],["comunicados","Comuns."],["faq","FAQ"],["dp","DP"]].map(([k,lbl])=><PermBadge key={k} label={lbl} on={m.perms?.[k]!==false}/>)}
+      {[["tips","Gorjetas"],["schedule","Escala"],["comunicados","Comuns."],["faq","FAQ"],["dp","DP"],["horarios","Horários"]].map(([k,lbl])=><PermBadge key={k} label={lbl} on={m.perms?.[k]!==false}/>)}{m.isDP&&<span style={{background:"#3b82f622",color:"#3b82f6",borderRadius:6,padding:"2px 10px",fontSize:11,fontWeight:700}}>📬 DP</span>}
                     </div>
                     <div style={{marginTop:6,display:"flex",gap:4,flexWrap:"wrap"}}>
                       {(m.restaurantIds??[]).map(rid=>{const r=restaurants.find(x=>x.id===rid);return r?<span key={rid} style={{background:"#2a2a2a",color:"#aaa",borderRadius:6,padding:"2px 8px",fontSize:11}}>{r.name}</span>:null;})}
@@ -2602,7 +3067,7 @@ function SuperManagerPortal({ data, onUpdate, onBack, currentUser }) {
                     </div>
                   </div>
                   <div style={{display:"flex",gap:8}}>
-                    <button onClick={()=>{setEditMgrId(m.id);setMgrForm({name:m.name,cpf:m.cpf??"",pin:m.pin??"",restaurantIds:m.restaurantIds??[],perms:m.perms??{tips:true,schedule:true}});setShowMgrModal(true);}} style={{...S.btnSecondary,fontSize:12}}>Editar</button>
+                    <button onClick={()=>{setEditMgrId(m.id);setMgrForm({name:m.name,cpf:m.cpf??"",pin:m.pin??"",restaurantIds:m.restaurantIds??[],perms:m.perms??{tips:true,schedule:true},isDP:m.isDP??false});setShowMgrModal(true);}} style={{...S.btnSecondary,fontSize:12}}>Editar</button>
                     <button onClick={()=>onUpdate("managers",managers.filter(x=>x.id!==m.id))} style={{background:"none",border:"1px solid #e74c3c33",borderRadius:8,color:"#e74c3c",cursor:"pointer",fontSize:12,padding:"6px 12px",fontFamily:"DM Mono,monospace"}}>✕</button>
                   </div>
                 </div>
@@ -2663,7 +3128,7 @@ function SuperManagerPortal({ data, onUpdate, onBack, currentUser }) {
             <div>
               <label style={S.label}>Permissões de acesso às abas</label>
               <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
-                {[["tips","💸 Gorjetas"],["schedule","📅 Escala"],["comunicados","📢 Comunicados"],["faq","❓ FAQ"],["dp","💬 Fale c/ DP"]].map(([k,lbl])=>{
+                {[["tips","💸 Gorjetas"],["schedule","📅 Escala"],["comunicados","📢 Comunicados"],["faq","❓ FAQ"],["dp","💬 Fale c/ DP"],["horarios","🕐 Horários"]].map(([k,lbl])=>{
                   const on = mgrForm.perms?.[k] !== false;
                   return (
                     <button key={k} onClick={()=>setMgrForm({...mgrForm,perms:{...mgrForm.perms,[k]:!on}})}
@@ -2755,7 +3220,7 @@ function ManagerPortal({ manager, data, onUpdate, onBack }) {
               <button onClick={()=>setSelId(null)} style={{...S.btnSecondary,fontSize:12,padding:"4px 12px"}}>← Trocar restaurante</button>
             </div>
           )}
-          <RestaurantPanel restaurant={selRest} restaurants={restaurants} employees={employees} roles={roles} tips={tips} splits={splits} schedules={schedules} onUpdate={onUpdate} perms={manager.perms ?? {tips:true,schedule:true}} isSuperManager={false} data={data}/>
+          <RestaurantPanel restaurant={selRest} restaurants={restaurants} employees={employees} roles={roles} tips={tips} splits={splits} schedules={schedules} onUpdate={onUpdate} perms={{...(manager.perms ?? {tips:true,schedule:true}), isDP: manager.isDP ?? false}} isSuperManager={false} data={data}/>
         </div>
       )}
     </div>
@@ -2885,12 +3350,14 @@ export default function App() {
   const [faq,           setFaq]           = useState({});
   const [dpMessages,    setDpMessages]    = useState([]);
   const [receipts,      setReceipts]      = useState([]);
+  const [workSchedules, setWorkSchedules] = useState({});
+  const [notifications, setNotifications] = useState([]);
 
   useEffect(() => {
     (async () => {
       const vals = await Promise.all(Object.values(K).map(load));
       const keys = Object.keys(K);
-      const map = { superManagers:setSuperManagers, managers:setManagers, restaurants:setRestaurants, employees:setEmployees, roles:setRoles, tips:setTips, splits:setSplits, schedules:setSchedules, communications:setCommunications, commAcks:setCommAcks, faq:setFaq, dpMessages:setDpMessages };
+      const map = { superManagers:setSuperManagers, managers:setManagers, restaurants:setRestaurants, employees:setEmployees, roles:setRoles, tips:setTips, splits:setSplits, schedules:setSchedules, communications:setCommunications, commAcks:setCommAcks, faq:setFaq, dpMessages:setDpMessages, workSchedules:setWorkSchedules, notifications:setNotifications };
       keys.filter(k => k !== "receipts").forEach((k, i) => { if (vals[i]) map[k]?.(vals[i]); });
       // Load receipts from separate collection
       const recs = await loadReceipts();
@@ -2899,7 +3366,7 @@ export default function App() {
     })();
   }, []);
 
-  const data = { superManagers, managers, restaurants, employees, roles, tips, splits, schedules, communications, commAcks, faq, dpMessages, receipts };
+  const data = { superManagers, managers, restaurants, employees, roles, tips, splits, schedules, communications, commAcks, faq, dpMessages, receipts, workSchedules, notifications };
 
   async function handleUpdate(field, value) {
     if (field === "_toast") { setToast(value); return; }
@@ -2926,11 +3393,11 @@ export default function App() {
       setToast("Recibos atualizados");
       return;
     }
-    const setters = { superManagers:setSuperManagers, managers:setManagers, restaurants:setRestaurants, employees:setEmployees, roles:setRoles, tips:setTips, splits:setSplits, schedules:setSchedules, communications:setCommunications, commAcks:setCommAcks, faq:setFaq, dpMessages:setDpMessages };
-    const keys    = { superManagers:K.superManagers, managers:K.managers, restaurants:K.restaurants, employees:K.employees, roles:K.roles, tips:K.tips, splits:K.splits, schedules:K.schedules, communications:K.communications, commAcks:K.commAcks, faq:K.faq, dpMessages:K.dpMessages };
+    const setters = { superManagers:setSuperManagers, managers:setManagers, restaurants:setRestaurants, employees:setEmployees, roles:setRoles, tips:setTips, splits:setSplits, schedules:setSchedules, communications:setCommunications, commAcks:setCommAcks, faq:setFaq, dpMessages:setDpMessages, workSchedules:setWorkSchedules, notifications:setNotifications };
+    const keys    = { superManagers:K.superManagers, managers:K.managers, restaurants:K.restaurants, employees:K.employees, roles:K.roles, tips:K.tips, splits:K.splits, schedules:K.schedules, communications:K.communications, commAcks:K.commAcks, faq:K.faq, dpMessages:K.dpMessages, workSchedules:K.workSchedules, notifications:K.notifications };
     setters[field]?.(value);
     await save(keys[field], value);
-    const labels = { superManagers:"Super Gestores atualizados", managers:"Gestores atualizados", restaurants:"Restaurantes atualizados", employees:"Empregados atualizados", roles:"Cargos atualizados", tips:"Gorjetas atualizadas", splits:"Percentuais salvos", schedules:"Escala atualizada", communications:"Comunicados atualizados", commAcks:"Ciências atualizadas", faq:"FAQ atualizado", dpMessages:"Mensagem enviada" };
+    const labels = { superManagers:"Super Gestores atualizados", managers:"Gestores atualizados", restaurants:"Restaurantes atualizados", employees:"Empregados atualizados", roles:"Cargos atualizados", tips:"Gorjetas atualizadas", splits:"Percentuais salvos", schedules:"Escala atualizada", communications:"Comunicados atualizados", commAcks:"Ciências atualizadas", faq:"FAQ atualizado", dpMessages:"Mensagem enviada", workSchedules:"Horários salvos", notifications:"Notificações atualizadas" };
     setToast(labels[field] ?? "Salvo!");
   }
 
@@ -2953,7 +3420,7 @@ export default function App() {
       )}
       {view === "super"    && <SuperManagerPortal data={data} onUpdate={handleUpdate} onBack={doLogout} currentUser={currentUser} />}
       {view === "manager"  && <ManagerPortal manager={currentUser} data={data} onUpdate={handleUpdate} onBack={doLogout} />}
-      {view === "employee" && <EmployeePortal employees={employees} roles={roles} tips={tips} schedules={schedules} restaurants={restaurants} communications={communications} commAcks={commAcks} faq={faq} dpMessages={dpMessages} receipts={receipts} onBack={()=>setView("home")} onUpdateEmployee={emp=>{const next=employees.map(e=>e.id===emp.id?emp:e);handleUpdate("employees",next);}} onUpdate={handleUpdate} />}
+      {view === "employee" && <EmployeePortal employees={employees} roles={roles} tips={tips} schedules={schedules} restaurants={restaurants} communications={communications} commAcks={commAcks} faq={faq} dpMessages={dpMessages} receipts={receipts} workSchedules={workSchedules} onBack={()=>setView("home")} onUpdateEmployee={emp=>{const next=employees.map(e=>e.id===emp.id?emp:e);handleUpdate("employees",next);}} onUpdate={handleUpdate} />}
       <Toast msg={toast} onClose={()=>setToast("")} />
     </>
   );
