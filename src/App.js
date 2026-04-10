@@ -1587,6 +1587,8 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
   const [tipDate, setTipDate]   = useState(today());
   const [tipTotal, setTipTotal] = useState("");
   const [tipNote, setTipNote]   = useState("");
+  const [showTipTable, setShowTipTable] = useState(false);
+  const [tipRows, setTipRows]   = useState([{date:today(),total:"",note:""}]);
   const [showRecalc, setShowRecalc] = useState(false);
   const [splitForm, setSplitForm]         = useState(null);
   const [schedArea, setSchedArea]         = useState("Salão");
@@ -1597,6 +1599,44 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
     const r = restRoles.find(r => r.id === e.roleId);
     return { ...e, roleName: r?.name, area: r?.area, gross: eT.reduce((a, t) => a + t.myShare, 0), net: eT.reduce((a, t) => a + t.myNet, 0) };
   }).sort((a, b) => b.net - a.net);
+
+  function calcTipForDate(date, totalVal, noteVal) {
+    const total = parseFloat(totalVal);
+    if (!total || isNaN(total) || total <= 0) return 0;
+    const td = new Date(date + "T12:00:00");
+    const tKey = monthKey(td.getFullYear(), td.getMonth());
+    const taxRate = restaurant.taxRate ?? TAX;
+    const totalTaxAmt = total * taxRate;
+    const toDistribute = total - totalTaxAmt;
+    const mode = restaurant.divisionMode ?? MODE_AREA_POINTS;
+    const empDayStatus = (empId) => { const m = schedules?.[rid]?.[tKey]?.[empId] ?? {}; return m[date]; };
+    const isProd = (area) => area === "Produção";
+    const activeEmps = restEmps.filter(emp => {
+      const r = restRoles.find(r => r.id === emp.roleId);
+      if (!r) return false;
+      if (emp.admission && emp.admission > date) return false;
+      if (emp.inactive && emp.inactiveFrom && emp.inactiveFrom <= date) return false;
+      const status = empDayStatus(emp.id);
+      if (!status) return true;
+      if (status === DAY_COMP) return true;
+      if (status === DAY_FAULT_J || status === DAY_FAULT_U) return false;
+      if (status === DAY_VACATION) return false;
+      if (isProd(r.area)) return true;
+      return false;
+    }).map(emp => ({ ...emp, points: parseFloat(restRoles.find(r=>r.id===emp.roleId)?.points)||1, area: restRoles.find(r=>r.id===emp.roleId)?.area }));
+    const newTips = [];
+    if (mode === MODE_GLOBAL_POINTS) {
+      const totalPoints = activeEmps.reduce((a,e)=>a+e.points,0);
+      if (!totalPoints) return 0;
+      activeEmps.forEach(emp => { const g=total*(emp.points/totalPoints),tx=totalTaxAmt*(emp.points/totalPoints); newTips.push({id:`${Date.now()}-${emp.id}-${Math.random().toString(36).slice(2,6)}`,restaurantId:rid,employeeId:emp.id,date,monthKey:tKey,poolTotal:total,areaPool:toDistribute,area:emp.area??"—",myShare:g,myTax:tx,myNet:g-tx,note:noteVal,taxRate}); });
+    } else {
+      const tSplit = splits?.[rid]?.[tKey] ?? DEFAULT_SPLIT;
+      const byArea = {}; AREAS.forEach(a=>{byArea[a]=[];}); activeEmps.forEach(emp=>{if(emp.area)byArea[emp.area].push(emp);});
+      AREAS.forEach(area => { const emps=byArea[area],tp=emps.reduce((a,e)=>a+e.points,0); if(!tp)return; const ap=toDistribute*(tSplit[area]/100); emps.forEach(emp=>{const g=total*(tSplit[area]/100)*(emp.points/tp),tx=totalTaxAmt*(tSplit[area]/100)*(emp.points/tp);newTips.push({id:`${Date.now()}-${emp.id}-${Math.random().toString(36).slice(2,6)}`,restaurantId:rid,employeeId:emp.id,date,monthKey:tKey,poolTotal:total,areaPool:ap,area,myShare:g,myTax:tx,myNet:g-tx,note:noteVal,taxRate});}); });
+    }
+    onUpdate("tips", [...tips, ...newTips]);
+    return newTips.length;
+  }
 
   function calcTip() {
     const total = parseFloat(tipTotal);
@@ -1679,10 +1719,48 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
     }
     onUpdate("tips", [...tips, ...newTips]);
     setTipTotal(""); setTipNote("");
+    // Apply 4% penalty for Producao employees with falta injustificada this month
+    applyFaultPenalty(tKey, [...tips, ...newTips]);
     return newTips.length;
   }
 
-  function recalcTipDay(date) {
+  function applyFaultPenalty(tKey, allTips) {
+    // Find Producao employees with falta injustificada this month
+    const monthSchedule = schedules?.[rid]?.[tKey] ?? {};
+    const penaltyEmps = restEmps.filter(emp => {
+      const r = restRoles.find(r => r.id === emp.roleId);
+      if (!r || r.area !== "Produção") return false;
+      const empDayMap = monthSchedule[emp.id] ?? {};
+      return Object.values(empDayMap).some(s => s === DAY_FAULT_U);
+    });
+    if (!penaltyEmps.length) return;
+
+    // Total pool for the month
+    const monthTipsLocal = allTips.filter(t => t.restaurantId === rid && t.monthKey === tKey);
+    const monthPool = [...new Set(monthTipsLocal.map(t => t.date))]
+      .reduce((sum, date) => {
+        const dayTips = monthTipsLocal.filter(t => t.date === date);
+        return sum + (dayTips[0]?.poolTotal ?? 0);
+      }, 0);
+    if (!monthPool) return;
+
+    const penaltyAmount = monthPool * 0.04; // 4% of total monthly pool per fault
+
+    // Apply penalty: reduce net for each falta injustificada day
+    const updated = allTips.map(t => {
+      if (t.restaurantId !== rid || t.monthKey !== tKey) return t;
+      const emp = penaltyEmps.find(e => e.id === t.employeeId);
+      if (!emp) return t;
+      const empDayMap = monthSchedule[emp.id] ?? {};
+      const faultDays = Object.values(empDayMap).filter(s => s === DAY_FAULT_U).length;
+      const totalPenalty = penaltyAmount * faultDays;
+      // Spread penalty across all tip entries for this employee this month
+      const empTipsCount = allTips.filter(x => x.restaurantId === rid && x.monthKey === tKey && x.employeeId === emp.id).length;
+      const penaltyPerEntry = empTipsCount > 0 ? totalPenalty / empTipsCount : 0;
+      return { ...t, myNet: Math.max(0, t.myNet - penaltyPerEntry), penalty: penaltyPerEntry };
+    });
+    onUpdate("tips", updated);
+  }
     // Find existing tips for this date
     const existing = tips.filter(t => t.restaurantId === rid && t.date === date);
     if (!existing.length) return 0;
@@ -1857,7 +1935,14 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
         {tab === "tips" && (
           <div>
             <div style={{ ...S.card, marginBottom: 24 }}>
-              <p style={{ color: ac, fontSize: 14, margin: "0 0 14px", fontWeight: 700 }}>+ Lançar Gorjeta do Dia</p>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
+                <p style={{ color: ac, fontSize: 14, margin: 0, fontWeight: 700 }}>+ Lançar Gorjeta</p>
+                <button onClick={()=>setShowTipTable(!showTipTable)} style={{...S.btnSecondary,fontSize:11,padding:"4px 10px"}}>
+                  {showTipTable ? "Modo simples" : "Modo tabela"}
+                </button>
+              </div>
+
+              {!showTipTable ? (
               <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
                 <div><label style={S.label}>Data</label><input type="date" value={tipDate} onChange={e => setTipDate(e.target.value)} style={S.input} /></div>
                 <div><label style={S.label}>Valor Total (R$)</label><input type="number" min="0" step="0.01" value={tipTotal} onChange={e => setTipTotal(e.target.value)} placeholder="Ex: 1500.00" style={S.input} /></div>
@@ -1924,6 +2009,36 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                 <div><label style={S.label}>Observação</label><input value={tipNote} onChange={e => setTipNote(e.target.value)} placeholder="Ex: Sábado à noite" style={S.input} /></div>
                 <button onClick={() => { const n = calcTip(); if (n > 0) onUpdate("_toast", `✅ Distribuído para ${n} empregados!`); }} style={S.btnPrimary}>Calcular e Distribuir</button>
               </div>
+              ) : (
+              /* MODO TABELA */
+              <div>
+                <p style={{color:"#555",fontSize:12,marginBottom:10}}>Adicione múltiplos lançamentos de uma vez. Clique em + para nova linha.</p>
+                {/* Table header */}
+                <div style={{display:"grid",gridTemplateColumns:"1fr 1.2fr 2fr auto",gap:6,marginBottom:6,padding:"0 4px"}}>
+                  {["Data","Valor Bruto (R$)","Observação",""].map(h=><div key={h} style={{color:"#555",fontSize:10,fontWeight:700}}>{h}</div>)}
+                </div>
+                {tipRows.map((row,i)=>(
+                  <div key={i} style={{display:"grid",gridTemplateColumns:"1fr 1.2fr 2fr auto",gap:6,marginBottom:6}}>
+                    <input type="date" value={row.date} onChange={e=>{const r=[...tipRows];r[i]={...r[i],date:e.target.value};setTipRows(r);}} style={{...S.input,fontSize:12,padding:"8px 8px"}}/>
+                    <input type="number" min="0" step="0.01" value={row.total} onChange={e=>{const r=[...tipRows];r[i]={...r[i],total:e.target.value};setTipRows(r);}} placeholder="0.00" style={{...S.input,fontSize:12,padding:"8px 8px"}}/>
+                    <input value={row.note} onChange={e=>{const r=[...tipRows];r[i]={...r[i],note:e.target.value};setTipRows(r);}} placeholder="Obs." style={{...S.input,fontSize:12,padding:"8px 8px"}}/>
+                    <button onClick={()=>setTipRows(tipRows.filter((_,j)=>j!==i))} style={{background:"none",border:"1px solid #e74c3c33",borderRadius:8,color:"#e74c3c",cursor:"pointer",padding:"0 10px",fontFamily:"DM Mono,monospace",fontSize:14}}>✕</button>
+                  </div>
+                ))}
+                <button onClick={()=>setTipRows([...tipRows,{date:today(),total:"",note:""}])} style={{...S.btnSecondary,width:"100%",marginBottom:10,fontSize:13}}>+ Adicionar linha</button>
+                <button onClick={()=>{
+                  let total = 0;
+                  tipRows.forEach(row => {
+                    const v = parseFloat(row.total);
+                    if (!v || isNaN(v) || v <= 0) return;
+                    setTipDate(row.date); setTipTotal(String(v)); setTipNote(row.note);
+                    const n = calcTipForDate(row.date, v, row.note);
+                    total += n;
+                  });
+                  if (total > 0) { onUpdate("_toast", `✅ ${tipRows.filter(r=>parseFloat(r.total)>0).length} dias distribuídos!`); setTipRows([{date:today(),total:"",note:""}]); }
+                }} style={S.btnPrimary}>Distribuir Todos</button>
+              </div>
+              )}
             </div>
 
             {/* Recalcular periodo */}
