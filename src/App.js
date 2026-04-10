@@ -1151,8 +1151,10 @@ function DpManagerTab({ restaurantId, dpMessages, onUpdate }) {
 }
 
 // ── Recibos Manager Tab ──────────────────────────────────────────────────────
-function ReceibosManagerTab({ restaurantId, employees, receipts, onUpdate }) {
+function ReceibosManagerTab({ restaurantId, employees, roles, restaurants, receipts, onUpdate, onUpdateEmployees }) {
   const restEmps = employees.filter(e => e.restaurantId === restaurantId);
+  const restRoles = roles.filter(r => r.restaurantId === restaurantId && !r.inactive);
+  const restaurant = restaurants.find(r => r.id === restaurantId);
   const [uploading, setUploading] = useState(false);
   const [progress, setProgress] = useState("");
   const [selMonth, setSelMonth] = useState(() => {
@@ -1161,6 +1163,8 @@ function ReceibosManagerTab({ restaurantId, employees, receipts, onUpdate }) {
   });
   const [type, setType] = useState("pagamento");
   const [assignTarget, setAssignTarget] = useState({}); // {receiptId: empId}
+  const [unmatchedAction, setUnmatchedAction] = useState({}); // {receiptId: "create"|"assign"}
+  const [newEmpForm, setNewEmpForm] = useState({}); // {receiptId: {name,cpf,admission,roleId}}
   const ac = "#f5c842";
 
   async function handleUpload(e) {
@@ -1250,6 +1254,9 @@ function ReceibosManagerTab({ restaurantId, employees, receipts, onUpdate }) {
         }
         let matchedEmp = null;
         let extractedName = "";
+        let extractedCpf = "";
+        let extractedAdmission = "";
+
         for (const emp of restEmps) {
           if (emp.cpf) {
             const cleanCpf = emp.cpf.replace(/\D/g, "");
@@ -1266,9 +1273,29 @@ function ReceibosManagerTab({ restaurantId, employees, receipts, onUpdate }) {
             }
           }
         }
-        // Try to extract a name from the PDF text for display
-        const nameMatch = text.match(/[A-ZÁÉÍÓÚÃÕÂÊÎÔÛÇÀÜ]{2,}(?:\s+[A-ZÁÉÍÓÚÃÕÂÊÎÔÛÇÀÜ]{2,})+/);
-        if (nameMatch) extractedName = nameMatch[0];
+
+        // Extract name: look for "Nome do Colaborador" or "Nome:" patterns first, then fallback
+        const namedMatch = text.match(/(?:nome\s+do\s+colaborador|colaborador|funcionário)[:\s]+([A-ZÁÉÍÓÚÃÕÂÊÎÔÛÇÀÜ]{2,}(?:\s+[A-ZÁÉÍÓÚÃÕÂÊÎÔÛÇÀÜ]{2,})+)/i);
+        if (namedMatch) {
+          extractedName = namedMatch[1].trim();
+        } else {
+          const nameMatch = text.match(/[A-ZÁÉÍÓÚÃÕÂÊÎÔÛÇÀÜ]{3,}(?:\s+[A-ZÁÉÍÓÚÃÕÂÊÎÔÛÇÀÜ]{2,}){1,4}/);
+          if (nameMatch) extractedName = nameMatch[0].trim();
+        }
+
+        // Extract CPF: pattern 000.000.000-00 or 00000000000
+        const cpfMatch = text.match(/\d{3}[\.\-]?\d{3}[\.\-]?\d{3}[\.\-]?\d{2}/);
+        if (cpfMatch) {
+          const digits = cpfMatch[0].replace(/\D/g,"");
+          if (digits.length === 11) extractedCpf = `${digits.slice(0,3)}.${digits.slice(3,6)}.${digits.slice(6,9)}-${digits.slice(9)}`;
+        }
+
+        // Extract admission date: patterns like "Admissão: 01/02/2026" or "Admitido em"
+        const admMatch = text.match(/(?:admiss[aã]o|admitido\s+em|data\s+de\s+admiss[aã]o)[:\s]+(\d{2}\/\d{2}\/\d{4})/i);
+        if (admMatch) {
+          const [d,m,y] = admMatch[1].split("/");
+          extractedAdmission = `${y}-${m}-${d}`;
+        }
 
         const viewport = page.getViewport({ scale: 1.5 });
         const canvas = document.createElement("canvas");
@@ -1282,6 +1309,9 @@ function ReceibosManagerTab({ restaurantId, employees, receipts, onUpdate }) {
           empId: matchedEmp ? matchedEmp.id : null,
           empName: matchedEmp ? matchedEmp.name : (extractedName || `Página ${p} — não identificado`),
           unmatched: !matchedEmp,
+          extractedName: extractedName || "",
+          extractedCpf: extractedCpf || "",
+          extractedAdmission: extractedAdmission || "",
           month: detectedMonth, type: detectedType, dataUrl,
           uploadedAt: new Date().toISOString(), page: p
         });
@@ -1353,32 +1383,118 @@ function ReceibosManagerTab({ restaurantId, employees, receipts, onUpdate }) {
         </div>
       </div>
 
-      {/* Unmatched receipts - manual assignment */}
+      {/* Unmatched receipts */}
       {unmatched.length > 0 && (
         <div style={{...S.card,marginBottom:20,border:"1px solid #f59e0b44"}}>
-          <p style={{color:"#f59e0b",fontWeight:700,fontSize:13,margin:"0 0 12px"}}>⚠️ {unmatched.length} recibo(s) não identificado(s) — associe manualmente:</p>
-          {unmatched.map(r => (
-            <div key={r.id} style={{marginBottom:14,padding:10,background:"var(--bg1)",borderRadius:10}}>
-              <div style={{color:"var(--text2)",fontSize:12,marginBottom:6}}>Página {r.page} — {r.empName}</div>
-              <img src={r.dataUrl} alt="" style={{width:"100%",borderRadius:6,marginBottom:8,maxHeight:200,objectFit:"cover"}}/>
-              <div style={{display:"flex",gap:8}}>
-                <select value={assignTarget[r.id]??""} onChange={e=>setAssignTarget(p=>({...p,[r.id]:e.target.value}))}
-                  style={{...S.input,flex:1}}>
-                  <option value="">Selecionar empregado…</option>
-                  {restEmps.map(e=><option key={e.id} value={e.id}>{e.name}</option>)}
-                </select>
-                <button onClick={()=>assignReceipt(r.id,assignTarget[r.id])}
-                  disabled={!assignTarget[r.id]}
-                  style={{padding:"8px 14px",borderRadius:8,border:"none",background:assignTarget[r.id]?ac:"#2a2a2a",color:"#111",fontWeight:700,cursor:assignTarget[r.id]?"pointer":"default",fontFamily:"DM Mono,monospace",fontSize:12}}>
-                  Associar
-                </button>
-                <button onClick={()=>onUpdate("receipts",receipts.filter(x=>x.id!==r.id))}
-                  style={{padding:"8px 10px",borderRadius:8,border:"1px solid #e74c3c33",background:"transparent",color:"#e74c3c",cursor:"pointer",fontFamily:"DM Mono,monospace",fontSize:12}}>
-                  ✕
-                </button>
+          <p style={{color:"#f59e0b",fontWeight:700,fontSize:13,margin:"0 0 12px"}}>⚠️ {unmatched.length} recibo(s) não identificado(s)</p>
+          {unmatched.map(r => {
+            const action = unmatchedAction[r.id]; // "create" | "assign" | undefined
+            const form = newEmpForm[r.id] ?? { name: r.extractedName||"", cpf: r.extractedCpf||"", admission: r.extractedAdmission||"", roleId:"" };
+
+            return (
+              <div key={r.id} style={{marginBottom:16,padding:12,background:"var(--bg2)",borderRadius:10,border:"1px solid #f59e0b33"}}>
+                {/* Preview info extracted */}
+                <div style={{marginBottom:8,display:"flex",gap:12,flexWrap:"wrap"}}>
+                  {r.extractedName && <span style={{color:"var(--text)",fontSize:13,fontWeight:600}}>👤 {r.extractedName}</span>}
+                  {r.extractedCpf && <span style={{color:"var(--text2)",fontSize:12}}>CPF: {r.extractedCpf}</span>}
+                  {r.extractedAdmission && <span style={{color:"var(--text2)",fontSize:12}}>Admissão: {fmtDate(r.extractedAdmission)}</span>}
+                  {!r.extractedName && <span style={{color:"var(--text3)",fontSize:12}}>Página {r.page} — dados não identificados</span>}
+                </div>
+                <img src={r.dataUrl} alt="" style={{width:"100%",borderRadius:6,marginBottom:10,maxHeight:160,objectFit:"cover"}}/>
+
+                {/* Action choice */}
+                {!action && (
+                  <div>
+                    <p style={{color:"var(--text2)",fontSize:12,marginBottom:8}}>O que deseja fazer com este recibo?</p>
+                    <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+                      <button onClick={()=>{
+                        setUnmatchedAction(p=>({...p,[r.id]:"create"}));
+                        setNewEmpForm(p=>({...p,[r.id]:{name:r.extractedName||"",cpf:r.extractedCpf||"",admission:r.extractedAdmission||"",roleId:""}}));
+                      }} style={{padding:"8px 16px",borderRadius:8,border:"none",background:"#10b981",color:"#fff",cursor:"pointer",fontFamily:"DM Mono,monospace",fontSize:12,fontWeight:700}}>
+                        ➕ Criar novo empregado
+                      </button>
+                      <button onClick={()=>setUnmatchedAction(p=>({...p,[r.id]:"assign"}))} style={{padding:"8px 16px",borderRadius:8,border:"1px solid var(--border)",background:"transparent",color:"var(--text2)",cursor:"pointer",fontFamily:"DM Mono,monospace",fontSize:12}}>
+                        🔗 Associar a existente
+                      </button>
+                      <button onClick={()=>onUpdate("receipts",receipts.filter(x=>x.id!==r.id))} style={{padding:"8px 12px",borderRadius:8,border:"1px solid #e74c3c33",background:"transparent",color:"#e74c3c",cursor:"pointer",fontFamily:"DM Mono,monospace",fontSize:12}}>
+                        ✕ Descartar
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {/* Create new employee */}
+                {action === "create" && (
+                  <div style={{display:"flex",flexDirection:"column",gap:8,marginTop:4}}>
+                    <p style={{color:"#10b981",fontSize:12,fontWeight:700,margin:0}}>➕ Criar novo empregado</p>
+                    <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+                      <div>
+                        <label style={S.label}>Nome completo</label>
+                        <input value={form.name} onChange={e=>setNewEmpForm(p=>({...p,[r.id]:{...form,name:e.target.value}}))} style={S.input}/>
+                      </div>
+                      <div>
+                        <label style={S.label}>CPF</label>
+                        <input value={form.cpf} onChange={e=>setNewEmpForm(p=>({...p,[r.id]:{...form,cpf:e.target.value}}))} placeholder="000.000.000-00" style={S.input}/>
+                      </div>
+                      <div>
+                        <label style={S.label}>Data de admissão</label>
+                        <input type="date" value={form.admission} onChange={e=>setNewEmpForm(p=>({...p,[r.id]:{...form,admission:e.target.value}}))} style={S.input}/>
+                      </div>
+                      <div>
+                        <label style={S.label}>Cargo</label>
+                        <select value={form.roleId} onChange={e=>setNewEmpForm(p=>({...p,[r.id]:{...form,roleId:e.target.value}}))} style={S.input}>
+                          <option value="">Selecionar cargo…</option>
+                          {restRoles.map(role=><option key={role.id} value={role.id}>{role.name} ({role.area})</option>)}
+                        </select>
+                      </div>
+                    </div>
+                    <div style={{display:"flex",gap:8,marginTop:4}}>
+                      <button onClick={()=>{
+                        if (!form.name.trim()) { alert("Nome obrigatório"); return; }
+                        // Create employee
+                        const code = restaurant?.shortCode ?? "EMP";
+                        const seq = employees.filter(e=>e.restaurantId===restaurantId).length + 1;
+                        const empCode = code.toUpperCase() + String(seq).padStart(4,"0");
+                        const pin = empCode.slice(-4);
+                        const newEmp = { id:`${Date.now()}-${Math.random().toString(36).slice(2,5)}`, restaurantId, name:form.name.trim(), cpf:form.cpf.trim(), admission:form.admission||today(), roleId:form.roleId||null, empCode, pin, inactive:false };
+                        onUpdateEmployees([...employees, newEmp]);
+                        // Associate receipt
+                        onUpdate("receipts", receipts.map(x=>x.id===r.id?{...x,empId:newEmp.id,empName:newEmp.name,unmatched:false}:x));
+                        setUnmatchedAction(p=>{const n={...p};delete n[r.id];return n;});
+                        alert(`✅ Empregado "${newEmp.name}" criado!\nCódigo: ${empCode} | PIN: ${pin}`);
+                      }} style={{padding:"8px 16px",borderRadius:8,border:"none",background:"#10b981",color:"#fff",cursor:"pointer",fontFamily:"DM Mono,monospace",fontSize:12,fontWeight:700}}>
+                        ✅ Criar e associar
+                      </button>
+                      <button onClick={()=>setUnmatchedAction(p=>{const n={...p};delete n[r.id];return n;})} style={{...S.btnSecondary,fontSize:12}}>Voltar</button>
+                    </div>
+                  </div>
+                )}
+
+                {/* Assign to existing */}
+                {action === "assign" && (
+                  <div style={{display:"flex",flexDirection:"column",gap:8,marginTop:4}}>
+                    <p style={{color:"var(--text2)",fontSize:12,fontWeight:700,margin:0}}>🔗 Associar a empregado existente</p>
+                    <div style={{display:"flex",gap:8}}>
+                      <select value={assignTarget[r.id]??""} onChange={e=>setAssignTarget(p=>({...p,[r.id]:e.target.value}))} style={{...S.input,flex:1}}>
+                        <option value="">Selecionar empregado…</option>
+                        {restEmps.map(e=><option key={e.id} value={e.id}>{e.name}</option>)}
+                      </select>
+                      <button onClick={()=>{
+                        if(!assignTarget[r.id]) return;
+                        const emp = restEmps.find(e=>e.id===assignTarget[r.id]);
+                        if(!emp) return;
+                        onUpdate("receipts", receipts.map(x=>x.id===r.id?{...x,empId:emp.id,empName:emp.name,unmatched:false}:x));
+                        setUnmatchedAction(p=>{const n={...p};delete n[r.id];return n;});
+                      }} disabled={!assignTarget[r.id]} style={{padding:"8px 14px",borderRadius:8,border:"none",background:assignTarget[r.id]?ac:"var(--bg4)",color:"#111",fontWeight:700,cursor:assignTarget[r.id]?"pointer":"default",fontFamily:"DM Mono,monospace",fontSize:12}}>
+                        Associar
+                      </button>
+                      <button onClick={()=>setUnmatchedAction(p=>{const n={...p};delete n[r.id];return n;})} style={{...S.btnSecondary,fontSize:12}}>Voltar</button>
+                    </div>
+                  </div>
+                )}
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
 
@@ -2806,7 +2922,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
 
         {/* RECIBOS */}
         {tab === "recibos" && (
-          <ReceibosManagerTab restaurantId={rid} employees={employees} receipts={data?.receipts ?? []} onUpdate={onUpdate} />
+          <ReceibosManagerTab restaurantId={rid} employees={employees} roles={restRoles} restaurants={restaurants} receipts={data?.receipts ?? []} onUpdate={onUpdate} onUpdateEmployees={newEmps=>onUpdate("employees",newEmps)} />
         )}
 
         {/* CONFIG */}
