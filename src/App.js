@@ -871,27 +871,74 @@ function ReceibosManagerTab({ restaurantId, employees, receipts, onUpdate }) {
         </div>
       )}
 
-      <p style={{color:"#555",fontSize:12,marginBottom:12}}>Recibos importados: {myReceipts.filter(r=>!r.unmatched).length}</p>
+      {/* Recibos por mês */}
+      {months.length === 0 && <p style={{color:"#555",textAlign:"center"}}>Nenhum recibo importado.</p>}
       {months.map(m => {
         const mReceipts = myReceipts.filter(r => r.month === m && !r.unmatched);
+        const [expanded, setExpanded] = [true, ()=>{}]; // always expanded for now
+        const pag = mReceipts.filter(r=>r.type==="pagamento");
+        const adi = mReceipts.filter(r=>r.type==="adiantamento");
+        // Format month display
+        const [y,mo] = m.split("-");
+        const mLabel = new Date(parseInt(y), parseInt(mo)-1, 1).toLocaleDateString("pt-BR",{month:"long",year:"numeric"});
         return (
-          <div key={m} style={{...S.card,marginBottom:12}}>
-            <p style={{color:ac,fontWeight:700,margin:"0 0 10px",fontSize:13}}>{m}</p>
-            {["pagamento","adiantamento"].map(t => {
-              const tR = mReceipts.filter(r=>r.type===t);
-              if(!tR.length) return null;
-              return (
-                <div key={t} style={{marginBottom:8}}>
-                  <p style={{color:"#555",fontSize:11,margin:"0 0 6px"}}>{t==="pagamento"?"💰 Pagamento":"💵 Adiantamento"} ({tR.length})</p>
-                  {tR.map(r=>(
-                    <div key={r.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"6px 0",borderBottom:"1px solid #1a1a1a"}}>
-                      <span style={{color:"#aaa",fontSize:12}}>{r.empName}</span>
-                      <button onClick={()=>onUpdate("receipts",receipts.filter(x=>x.id!==r.id))} style={{background:"none",border:"1px solid #e74c3c33",borderRadius:6,color:"#e74c3c",cursor:"pointer",fontSize:11,padding:"3px 8px",fontFamily:"DM Mono,monospace"}}>✕</button>
-                    </div>
-                  ))}
+          <div key={m} style={{...S.card, marginBottom:16}}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
+              <span style={{color:ac,fontWeight:700,fontSize:14,textTransform:"capitalize"}}>{mLabel}</span>
+              <span style={{color:"#555",fontSize:12}}>{mReceipts.length} recibo(s)</span>
+            </div>
+
+            {/* Pagamento */}
+            {pag.length > 0 && (
+              <div style={{marginBottom:12}}>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
+                  <span style={{color:"#10b981",fontSize:12,fontWeight:700}}>💰 Pagamento ({pag.length})</span>
+                  <button onClick={()=>{
+                    if(window.confirm(`Excluir TODOS os ${pag.length} recibo(s) de pagamento de ${mLabel}?`))
+                      onUpdate("receipts", receipts.filter(r=>!(r.month===m&&r.type==="pagamento"&&r.restaurantId===restaurantId)));
+                  }} style={{background:"none",border:"1px solid #e74c3c33",borderRadius:6,color:"#e74c3c",cursor:"pointer",fontSize:11,padding:"3px 8px",fontFamily:"DM Mono,monospace"}}>
+                    Excluir todos
+                  </button>
                 </div>
-              );
-            })}
+                {pag.map(r=>(
+                  <div key={r.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"7px 10px",background:"#111",borderRadius:8,marginBottom:4}}>
+                    <span style={{color:"#fff",fontSize:13}}>{r.empName}</span>
+                    <button onClick={()=>{
+                      if(window.confirm(`Excluir recibo de ${r.empName}?`))
+                        onUpdate("receipts", receipts.filter(x=>x.id!==r.id));
+                    }} style={{background:"none",border:"1px solid #e74c3c33",borderRadius:6,color:"#e74c3c",cursor:"pointer",fontSize:11,padding:"3px 8px",fontFamily:"DM Mono,monospace"}}>✕</button>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* Adiantamento */}
+            {adi.length > 0 && (
+              <div>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
+                  <span style={{color:"#3b82f6",fontSize:12,fontWeight:700}}>💵 Adiantamento ({adi.length})</span>
+                  <button onClick={()=>{
+                    if(window.confirm(`Excluir TODOS os ${adi.length} recibo(s) de adiantamento de ${mLabel}?`))
+                      onUpdate("receipts", receipts.filter(r=>!(r.month===m&&r.type==="adiantamento"&&r.restaurantId===restaurantId)));
+                  }} style={{background:"none",border:"1px solid #e74c3c33",borderRadius:6,color:"#e74c3c",cursor:"pointer",fontSize:11,padding:"3px 8px",fontFamily:"DM Mono,monospace"}}>
+                    Excluir todos
+                  </button>
+                </div>
+                {adi.map(r=>(
+                  <div key={r.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"7px 10px",background:"#111",borderRadius:8,marginBottom:4}}>
+                    <span style={{color:"#fff",fontSize:13}}>{r.empName}</span>
+                    <button onClick={()=>{
+                      if(window.confirm(`Excluir recibo de ${r.empName}?`))
+                        onUpdate("receipts", receipts.filter(x=>x.id!==r.id));
+                    }} style={{background:"none",border:"1px solid #e74c3c33",borderRadius:6,color:"#e74c3c",cursor:"pointer",fontSize:11,padding:"3px 8px",fontFamily:"DM Mono,monospace"}}>✕</button>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {pag.length === 0 && adi.length === 0 && (
+              <p style={{color:"#555",fontSize:12,textAlign:"center"}}>Nenhum recibo identificado neste mês.</p>
+            )}
           </div>
         );
       })}
@@ -901,8 +948,8 @@ function ReceibosManagerTab({ restaurantId, employees, receipts, onUpdate }) {
 
 // ── Recibos Employee Tab ──────────────────────────────────────────────────────
 function ReceibosEmployeeTab({ empId, restaurantId, receipts }) {
-  const myReceipts = receipts
-    .filter(r => r.empId === empId && r.restaurantId === restaurantId)
+  const myReceipts = (receipts ?? [])
+    .filter(r => r.empId === empId && r.restaurantId === restaurantId && !r.unmatched)
     .sort((a,b) => b.month.localeCompare(a.month));
   const months = [...new Set(myReceipts.map(r => r.month))];
   const [selReceipt, setSelReceipt] = useState(null);
@@ -924,7 +971,12 @@ function ReceibosEmployeeTab({ empId, restaurantId, receipts }) {
   }
 
   if (myReceipts.length === 0) return (
-    <p style={{color:"#555",textAlign:"center",marginTop:20,fontSize:14}}>Nenhum recibo disponível ainda.</p>
+    <div style={{textAlign:"center",marginTop:30}}>
+      <div style={{fontSize:32,marginBottom:12}}>📄</div>
+      <p style={{color:"#555",fontSize:14}}>Nenhum recibo disponível ainda.</p>
+      <p style={{color:"#333",fontSize:12,marginTop:8}}>Quando o gestor importar os recibos do mês, eles aparecerão aqui.</p>
+      {(receipts??[]).length > 0 && <p style={{color:"#333",fontSize:11,marginTop:4}}>({(receipts??[]).length} recibos no sistema, nenhum para você)</p>}
+    </div>
   );
 
   return (
