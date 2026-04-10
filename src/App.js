@@ -1284,14 +1284,14 @@ function ReceibosManagerTab({ restaurantId, employees, roles, restaurants, recei
         }
 
         // Extract CPF: pattern 000.000.000-00 or 00000000000
-        const cpfMatch = text.match(/\d{3}[\.\-]?\d{3}[\.\-]?\d{3}[\.\-]?\d{2}/);
+        const cpfMatch = text.match(/\d{3}[.-]?\d{3}[.-]?\d{3}[.-]?\d{2}/);
         if (cpfMatch) {
           const digits = cpfMatch[0].replace(/\D/g,"");
           if (digits.length === 11) extractedCpf = `${digits.slice(0,3)}.${digits.slice(3,6)}.${digits.slice(6,9)}-${digits.slice(9)}`;
         }
 
         // Extract admission date: patterns like "Admissão: 01/02/2026" or "Admitido em"
-        const admMatch = text.match(/(?:admiss[aã]o|admitido\s+em|data\s+de\s+admiss[aã]o)[:\s]+(\d{2}\/\d{2}\/\d{4})/i);
+        const admMatch = text.match(/(?:admiss[aã]o|admitido\s+em|data\s+de\s+admiss[aã]o)[:\s]+(\d{2}[/]\d{2}[/]\d{4})/i);
         if (admMatch) {
           const [d,m,y] = admMatch[1].split("/");
           extractedAdmission = `${y}-${m}-${d}`;
