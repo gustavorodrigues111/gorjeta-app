@@ -10,7 +10,46 @@
     <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&display=swap" rel="stylesheet" />
     <style>
       * { margin: 0; padding: 0; box-sizing: border-box; }
-      body { background: #0f0f0f; font-family: 'DM Mono', monospace; }
+
+      :root {
+        --bg:        #0f0f0f;
+        --bg1:       #111111;
+        --bg2:       #141414;
+        --bg3:       #1a1a1a;
+        --bg4:       #2a2a2a;
+        --bg5:       #0a0a0a;
+        --border:    #2a2a2a;
+        --text:      #ffffff;
+        --text2:     #aaaaaa;
+        --text3:     #555555;
+        --card-bg:   #1a1a1a;
+        --input-bg:  #111111;
+        --header-bg: #141414;
+        --sticky-bg: #111111;
+        --sticky-bg2:#141414;
+        --ac:        #f5c842;
+      }
+
+      body.light-mode {
+        --bg:        #e8eaed;
+        --bg1:       #f0f2f5;
+        --bg2:       #e4e6ea;
+        --bg3:       #d8dce2;
+        --bg4:       #c4c8d0;
+        --bg5:       #f5f6f8;
+        --border:    #c8cdd6;
+        --text:      #1a1d23;
+        --text2:     #4a5060;
+        --text3:     #8890a0;
+        --card-bg:   #f0f2f5;
+        --input-bg:  #ffffff;
+        --header-bg: #dde0e6;
+        --sticky-bg: #f0f2f5;
+        --sticky-bg2:#e8eaed;
+        --ac:        #d4a800;
+      }
+
+      body { background: var(--bg); font-family: 'DM Mono', monospace; color: var(--text); transition: background 0.2s, color 0.2s; }
     </style>
   </head>
   <body>
