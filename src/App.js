@@ -933,7 +933,8 @@ function RoleSpreadsheet({ restRoles, rid, roles, onUpdate }) {
     setNewRow(blank());
   }
 
-  function deleteRole(id) { onUpdate("roles", roles.filter(x => x.id !== id)); }
+  function inactivateRole(id) { onUpdate("roles", roles.map(x => x.id === id ? {...x, inactive: true} : x)); }
+  function reactivateRole(id) { onUpdate("roles", roles.map(x => x.id === id ? {...x, inactive: false} : x)); }
 
   const inStyle = { background: "#111", border: "1px solid #2a2a2a", borderRadius: 8, color: "#fff", fontFamily: "DM Mono,monospace", fontSize: 12, padding: "8px 10px", outline: "none", width: "100%" };
   const sel = { ...inStyle, cursor: "pointer" };
@@ -972,7 +973,10 @@ function RoleSpreadsheet({ restRoles, rid, roles, onUpdate }) {
             <input type="number" min="0.5" step="0.5" value={row.points} onChange={e => setRow(r.id, "points", e.target.value)} style={inStyle} />
             <div style={{ display: "flex", gap: 4 }}>
               <button onClick={() => saveRole(r)} style={{ flex: 1, background: isSaved ? "#10b981" : ac, border: "none", borderRadius: 8, color: "#111", fontWeight: 700, fontSize: 11, cursor: "pointer", padding: "4px 2px", fontFamily: "DM Mono,monospace" }}>{isSaved ? "✓" : "Salvar"}</button>
-              <button onClick={() => deleteRole(r.id)} style={{ background: "none", border: "1px solid #e74c3c44", borderRadius: 8, color: "#e74c3c", cursor: "pointer", fontSize: 12, padding: "4px 8px" }}>✕</button>
+              {r.inactive
+                ? <button onClick={() => reactivateRole(r.id)} style={{ padding:"4px 8px", borderRadius:8, border:"1px solid #10b98144", background:"transparent", color:"#10b981", cursor:"pointer", fontSize:11, fontFamily:"DM Mono,monospace" }}>Reativar</button>
+                : <button onClick={() => inactivateRole(r.id)} style={{ padding:"4px 8px", borderRadius:8, border:"1px solid #f59e0b44", background:"transparent", color:"#f59e0b", cursor:"pointer", fontSize:11, fontFamily:"DM Mono,monospace" }}>Inativar</button>
+              }
             </div>
           </div>
         );
@@ -1025,7 +1029,7 @@ function EmpRowCard({ row, onChange, onSave, onDelete, onToggleInactive, isSaved
         <button onClick={onSave} style={{ flex: 1, background: isSaved ? "#10b981" : isNew ? "#10b981" : ac, border: "none", borderRadius: 8, color: "#111", fontWeight: 700, fontSize: 13, cursor: "pointer", padding: "10px", fontFamily: "DM Mono,monospace" }}>
           {isSaved ? "✓ Salvo!" : isNew ? "+ Adicionar" : "Salvar"}
         </button>
-        {!isNew && <button onClick={onDelete} style={{ background: "none", border: "1px solid #e74c3c44", borderRadius: 8, color: "#e74c3c", cursor: "pointer", fontSize: 13, padding: "10px 14px" }}>✕</button>}
+        {!isNew && onDelete && <button onClick={onDelete} style={{ background: "none", border: "1px solid #e74c3c44", borderRadius: 8, color: "#e74c3c", cursor: "pointer", fontSize: 13, padding: "10px 14px" }}>✕</button>}
       </div>
     </div>
   );
@@ -1065,7 +1069,7 @@ function EmployeeSpreadsheet({ restEmps, restRoles, rid, employees, onUpdate, re
     setNewRow(blank());
   }
 
-  function deleteEmp(id) { onUpdate("employees", employees.filter(x => x.id !== id)); }
+  // Employees are never deleted, only inactivated via EmpRowCard
 
   function toggleInactive(e) {
     const row = getRow(e);
@@ -1087,7 +1091,7 @@ function EmployeeSpreadsheet({ restEmps, restRoles, rid, employees, onUpdate, re
         <EmpRowCard row={row} isSaved={saved[e.id]} isNew={false} restRoles={restRoles}
           onChange={(f, v) => setRow(e.id, f, v)}
           onSave={() => saveEmp(e)}
-          onDelete={() => deleteEmp(e.id)}
+          onDelete={null}
           onToggleInactive={() => toggleInactive(e)}
         />
       </div>
@@ -1142,6 +1146,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
   const [tipDate, setTipDate]   = useState(today());
   const [tipTotal, setTipTotal] = useState("");
   const [tipNote, setTipNote]   = useState("");
+  const [showRecalc, setShowRecalc] = useState(false);
   const [splitForm, setSplitForm]         = useState(null);
   const [schedArea, setSchedArea]         = useState("Salão");
   const [showExport, setShowExport]       = useState(false);
@@ -1234,6 +1239,69 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
     }
     onUpdate("tips", [...tips, ...newTips]);
     setTipTotal(""); setTipNote("");
+    return newTips.length;
+  }
+
+  function recalcTipDay(date) {
+    // Find existing tips for this date
+    const existing = tips.filter(t => t.restaurantId === rid && t.date === date);
+    if (!existing.length) return 0;
+    const poolTotal = existing[0].poolTotal;
+    const noteVal   = existing[0].note ?? "";
+    const taxRate   = restaurant.taxRate ?? TAX;
+    const td        = new Date(date + "T12:00:00");
+    const tKey      = monthKey(td.getFullYear(), td.getMonth());
+    const totalTaxAmt = poolTotal * taxRate;
+    const toDistribute = poolTotal - totalTaxAmt;
+    const mode = restaurant.divisionMode ?? MODE_AREA_POINTS;
+
+    const empDayStatus = (empId) => schedules?.[rid]?.[tKey]?.[empId]?.[date];
+
+    const activeEmps = restEmps.filter(emp => {
+      const r = restRoles.find(r => r.id === emp.roleId);
+      if (!r) return false;
+      if (emp.admission && emp.admission > date) return false;
+      if (emp.inactive && emp.inactiveFrom && emp.inactiveFrom <= date) return false;
+      const status = empDayStatus(emp.id);
+      if (!status) return true;
+      if (status === DAY_COMP) return true;
+      if (r.area === "Cozinha" && status !== DAY_FAULT_J && status !== DAY_FAULT_U) return true;
+      return false;
+    }).map(emp => ({
+      ...emp,
+      points: parseFloat(restRoles.find(r => r.id === emp.roleId)?.points) || 1,
+      area: restRoles.find(r => r.id === emp.roleId)?.area,
+    }));
+
+    const newTips = [];
+    if (mode === MODE_GLOBAL_POINTS) {
+      const totalPoints = activeEmps.reduce((a, e) => a + e.points, 0);
+      if (!totalPoints) return 0;
+      activeEmps.forEach(emp => {
+        const myGross = poolTotal * (emp.points / totalPoints);
+        const myTaxShare = totalTaxAmt * (emp.points / totalPoints);
+        newTips.push({ id: `${Date.now()}-${emp.id}-${Math.random().toString(36).slice(2,6)}`, restaurantId: rid, employeeId: emp.id, date, monthKey: tKey, poolTotal, areaPool: toDistribute, area: emp.area ?? "—", myShare: myGross, myTax: myTaxShare, myNet: myGross - myTaxShare, note: noteVal, taxRate });
+      });
+    } else {
+      const tSplit = splits?.[rid]?.[tKey] ?? DEFAULT_SPLIT;
+      const empsByArea = {};
+      AREAS.forEach(a => { empsByArea[a] = []; });
+      activeEmps.forEach(emp => { if (emp.area) empsByArea[emp.area].push(emp); });
+      AREAS.forEach(area => {
+        const emps = empsByArea[area];
+        const totalPoints = emps.reduce((a, e) => a + e.points, 0);
+        if (!totalPoints) return;
+        const areaPool = toDistribute * (tSplit[area] / 100);
+        emps.forEach(emp => {
+          const myGross = poolTotal * (tSplit[area] / 100) * (emp.points / totalPoints);
+          const myTaxShare = totalTaxAmt * (tSplit[area] / 100) * (emp.points / totalPoints);
+          newTips.push({ id: `${Date.now()}-${emp.id}-${Math.random().toString(36).slice(2,6)}`, restaurantId: rid, employeeId: emp.id, date, monthKey: tKey, poolTotal, areaPool, area, myShare: myGross, myTax: myTaxShare, myNet: myGross - myTaxShare, note: noteVal, taxRate });
+        });
+      });
+    }
+    // Remove old tips for this date and add new ones
+    const remaining = tips.filter(t => !(t.restaurantId === rid && t.date === date));
+    onUpdate("tips", [...remaining, ...newTips]);
     return newTips.length;
   }
 
@@ -1354,23 +1422,46 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                       <div style={{ display:"flex",justifyContent:"space-between",color:"#aaa",borderTop:"1px solid #2a2a2a",paddingTop:6,marginTop:4,marginBottom:10 }}><span>A distribuir</span><span style={{color:ac,fontWeight:700}}>{fmt(total-tax)}</span></div>
                       {(() => {
                         const mode = restaurant.divisionMode ?? MODE_AREA_POINTS;
+                        const previewTKey = monthKey(new Date(tipDate+"T12:00:00").getFullYear(), new Date(tipDate+"T12:00:00").getMonth());
+                        const getStatus = (empId) => schedules?.[rid]?.[previewTKey]?.[empId]?.[tipDate];
                         const activeEmps = restEmps.filter(e => {
                           const r = restRoles.find(r=>r.id===e.roleId);
-                          return r && (!e.admission||e.admission<=tipDate);
+                          if (!r || (e.admission && e.admission > tipDate)) return false;
+                          const status = getStatus(e.id);
+                          if (!status) return true; // working
+                          if (status === DAY_COMP) return true;
+                          if (r.area === "Cozinha" && status !== DAY_FAULT_J && status !== DAY_FAULT_U) return true;
+                          return false;
                         });
-                        if (mode === MODE_GLOBAL_POINTS) {
-                          const totalPts = activeEmps.reduce((s,e)=>s+(parseFloat(restRoles.find(r=>r.id===e.roleId)?.points)||1),0);
-                          return <div style={{color:"#aaa",fontSize:12}}>
-                            <span style={{color:"#f5c842"}}>Pontos Global</span> · {activeEmps.length} emp · {totalPts}pt total
-                            <div style={{marginTop:4,color:"#555"}}>Cada ponto vale: {fmt((total-tax)/totalPts)}</div>
-                          </div>;
-                        }
-                        return AREAS.map(a => {
-                          const emps = activeEmps.filter(e => restRoles.find(r=>r.id===e.roleId)?.area===a);
-                          if (!emps.length) return null;
-                          const pts = emps.reduce((s,e)=>s+(parseFloat(restRoles.find(r=>r.id===e.roleId)?.points)||1),0);
-                          return <div key={a} style={{display:"flex",justifyContent:"space-between",color:"#aaa",marginBottom:2}}><span style={{color:AREA_COLORS[a]}}>{a} ({tSplit[a]}%)</span><span>{fmt((total-tax)*(tSplit[a]/100))} · {emps.length} emp · {pts}pt</span></div>;
+                        const excluded = restEmps.filter(e => {
+                          const r = restRoles.find(r=>r.id===e.roleId);
+                          if (!r || (e.admission && e.admission > tipDate)) return false;
+                          const status = getStatus(e.id);
+                          if (!status || status === DAY_COMP) return false;
+                          if (r.area === "Cozinha" && status !== DAY_FAULT_J && status !== DAY_FAULT_U) return false;
+                          return true;
                         });
+                        return (<div>
+                          {excluded.length > 0 && <div style={{marginBottom:8,padding:"6px 8px",background:"#e74c3c11",borderRadius:8,border:"1px solid #e74c3c22"}}>
+                            <div style={{color:"#e74c3c",fontSize:11,marginBottom:4}}>Fora do rateio hoje:</div>
+                            {excluded.map(e => {
+                              const st = getStatus(e.id);
+                              const stLabels = {off:"Folga",vac:"Férias",faultj:"Falta Just.",faultu:"Falta Injust."};
+                              return <div key={e.id} style={{color:"#555",fontSize:11}}>{e.name} — {stLabels[st]??st}</div>;
+                            })}
+                          </div>}
+                          {mode === MODE_GLOBAL_POINTS ? (
+                            <div style={{color:"#aaa",fontSize:12}}>
+                              <span style={{color:"#f5c842"}}>Pontos Global</span> · {activeEmps.length} emp
+                              {activeEmps.length > 0 && <div style={{marginTop:4,color:"#555"}}>Cada ponto vale: {fmt((total-tax)/(activeEmps.reduce((s,e)=>s+(parseFloat(restRoles.find(r=>r.id===e.roleId)?.points)||1),0)||1))}</div>}
+                            </div>
+                          ) : AREAS.map(a => {
+                            const emps = activeEmps.filter(e => restRoles.find(r=>r.id===e.roleId)?.area===a);
+                            if (!emps.length) return null;
+                            const pts = emps.reduce((s,e)=>s+(parseFloat(restRoles.find(r=>r.id===e.roleId)?.points)||1),0);
+                            return <div key={a} style={{display:"flex",justifyContent:"space-between",color:"#aaa",marginBottom:2}}><span style={{color:AREA_COLORS[a]}}>{a} ({tSplit[a]}%)</span><span>{fmt((total-tax)*(tSplit[a]/100))} · {emps.length} emp · {pts}pt</span></div>;
+                          })}
+                        </div>);
                       })()}
                     </div>
                   );
@@ -1379,6 +1470,32 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                 <button onClick={() => { const n = calcTip(); if (n > 0) onUpdate("_toast", `✅ Distribuído para ${n} empregados!`); }} style={S.btnPrimary}>Calcular e Distribuir</button>
               </div>
             </div>
+
+            {/* Recalcular periodo */}
+            <div style={{...S.card, marginBottom:16, background:"#141414"}}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                <div>
+                  <p style={{color:"#f59e0b",fontSize:13,fontWeight:700,margin:0}}>🔄 Recalcular por Escala</p>
+                  <p style={{color:"#555",fontSize:11,margin:"2px 0 0"}}>Recalcula lançamentos existentes respeitando a escala atual</p>
+                </div>
+                <button onClick={()=>setShowRecalc(!showRecalc)} style={{...S.btnSecondary,fontSize:12}}>{showRecalc?"Fechar":"Ver"}</button>
+              </div>
+              {showRecalc && (
+                <div style={{marginTop:14}}>
+                  {tipDates.length === 0 && <p style={{color:"#555",fontSize:13}}>Nenhum lançamento para recalcular neste mês.</p>}
+                  {tipDates.map(d => (
+                    <div key={d} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"8px 0",borderBottom:"1px solid #2a2a2a"}}>
+                      <span style={{color:"#aaa",fontSize:13}}>{fmtDate(d)}</span>
+                      <button onClick={()=>{const n=recalcTipDay(d);onUpdate("_toast",`🔄 Dia ${fmtDate(d)} recalculado para ${n} empregados`);}} style={{padding:"6px 14px",borderRadius:8,border:"1px solid #f59e0b44",background:"transparent",color:"#f59e0b",cursor:"pointer",fontFamily:"DM Mono,monospace",fontSize:12}}>Recalcular</button>
+                    </div>
+                  ))}
+                  {tipDates.length > 1 && (
+                    <button onClick={()=>{let total=0;tipDates.forEach(d=>{total+=recalcTipDay(d);});onUpdate("_toast",`🔄 ${tipDates.length} dias recalculados!`);}} style={{...S.btnPrimary,marginTop:12,background:"#f59e0b"}}>Recalcular Todos os Dias do Mês</button>
+                  )}
+                </div>
+              )}
+            </div>
+
             {tipDates.length === 0 && <p style={{ color: "#555", textAlign: "center" }}>Nenhum lançamento neste mês.</p>}
             {tipDates.map(d => {
               const dT = monthTips.filter(t => t.date === d);
@@ -1652,7 +1769,26 @@ function SuperManagerPortal({ data, onUpdate, onBack, currentUser }) {
                     <div style={{display:"flex",gap:8,flexWrap:"wrap",justifyContent:"flex-end"}}>
                       <button onClick={()=>setSelRestaurant(r.id)} style={{...S.btnSecondary,fontSize:12,color:ac,borderColor:ac}}>Abrir →</button>
                       <button onClick={()=>{setEditRestId(r.id);setRestForm({name:r.name,shortCode:r.shortCode??"",cnpj:r.cnpj??"",address:r.address??""});setShowRestModal(true);}} style={{...S.btnSecondary,fontSize:12}}>Editar</button>
-                      <button onClick={()=>onUpdate("restaurants",restaurants.filter(x=>x.id!==r.id))} style={{background:"none",border:"1px solid #e74c3c33",borderRadius:8,color:"#e74c3c",cursor:"pointer",fontSize:12,padding:"6px 12px",fontFamily:"DM Mono,monospace"}}>✕</button>
+                      <button onClick={()=>{
+                        if(!window.confirm(`Tem certeza que deseja EXCLUIR o restaurante "${r.name}"? Esta ação não pode ser desfeita.`)) return;
+                        const saveData = window.confirm("Deseja baixar os dados do restaurante (gorjetas e empregados) antes de excluir?");
+                        if(saveData) {
+                          // Export basic data as JSON text for safety
+                          const data = {
+                            restaurante: r,
+                            empregados: employees.filter(e=>e.restaurantId===r.id),
+                            gorjetas: tips.filter(t=>t.restaurantId===r.id),
+                            cargos: roles.filter(ro=>ro.restaurantId===r.id),
+                          };
+                          const blob = new Blob([JSON.stringify(data, null, 2)], {type:"application/json"});
+                          const url = URL.createObjectURL(blob);
+                          const a = document.createElement("a");
+                          a.href=url; a.download=`backup_${r.shortCode||r.id}_${today()}.json`; a.click();
+                          URL.revokeObjectURL(url);
+                        }
+                        onUpdate("restaurants",restaurants.filter(x=>x.id!==r.id));
+                        onUpdate("_toast","Restaurante excluído.");
+                      }} style={{background:"none",border:"1px solid #e74c3c33",borderRadius:8,color:"#e74c3c",cursor:"pointer",fontSize:12,padding:"6px 12px",fontFamily:"DM Mono,monospace"}}>✕</button>
                     </div>
                   </div>
                 </div>
