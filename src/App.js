@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { db } from "./firebase";
-import { doc, getDoc, setDoc } from "firebase/firestore";
+import { doc, getDoc, setDoc, deleteDoc, collection, getDocs, query, where } from "firebase/firestore";
 
 /* eslint-disable no-unused-vars */
 //
@@ -14,6 +14,24 @@ async function save(key, value) {
   try {
     await setDoc(doc(db, "appdata", key), { value });
   } catch (e) { console.error("save error", e); }
+}
+
+// Receipts stored per-document to avoid Firestore 1MB limit
+async function saveReceipt(receipt) {
+  try {
+    await setDoc(doc(db, "receipts", receipt.id), receipt);
+  } catch (e) { console.error("saveReceipt error", e); }
+}
+async function deleteReceipt(id) {
+  try {
+    await deleteDoc(doc(db, "receipts", id));
+  } catch (e) { console.error("deleteReceipt error", e); }
+}
+async function loadReceipts() {
+  try {
+    const snap = await getDocs(collection(db, "receipts"));
+    return snap.docs.map(d => d.data());
+  } catch (e) { console.error("loadReceipts error", e); return []; }
 }
 
 //
@@ -2473,8 +2491,11 @@ export default function App() {
     (async () => {
       const vals = await Promise.all(Object.values(K).map(load));
       const keys = Object.keys(K);
-      const map = { superManagers:setSuperManagers, managers:setManagers, restaurants:setRestaurants, employees:setEmployees, roles:setRoles, tips:setTips, splits:setSplits, schedules:setSchedules, communications:setCommunications, commAcks:setCommAcks, faq:setFaq, dpMessages:setDpMessages, receipts:setReceipts };
-      keys.forEach((k, i) => { if (vals[i]) map[k]?.(vals[i]); });
+      const map = { superManagers:setSuperManagers, managers:setManagers, restaurants:setRestaurants, employees:setEmployees, roles:setRoles, tips:setTips, splits:setSplits, schedules:setSchedules, communications:setCommunications, commAcks:setCommAcks, faq:setFaq, dpMessages:setDpMessages };
+      keys.filter(k => k !== "receipts").forEach((k, i) => { if (vals[i]) map[k]?.(vals[i]); });
+      // Load receipts from separate collection
+      const recs = await loadReceipts();
+      if (recs.length) setReceipts(recs);
       setLoaded(true);
     })();
   }, []);
@@ -2483,11 +2504,34 @@ export default function App() {
 
   async function handleUpdate(field, value) {
     if (field === "_toast") { setToast(value); return; }
-    const setters = { superManagers:setSuperManagers, managers:setManagers, restaurants:setRestaurants, employees:setEmployees, roles:setRoles, tips:setTips, splits:setSplits, schedules:setSchedules, communications:setCommunications, commAcks:setCommAcks, faq:setFaq, dpMessages:setDpMessages, receipts:setReceipts };
-    const keys    = { superManagers:K.superManagers, managers:K.managers, restaurants:K.restaurants, employees:K.employees, roles:K.roles, tips:K.tips, splits:K.splits, schedules:K.schedules, communications:K.communications, commAcks:K.commAcks, faq:K.faq, dpMessages:K.dpMessages, receipts:K.receipts };
+    if (field === "receipts") {
+      // Save each receipt as separate Firestore document
+      const prev = receipts;
+      setReceipts(value);
+      // Find new/updated receipts
+      const prevIds = new Set(prev.map(r => r.id));
+      const newOnes = value.filter(r => !prevIds.has(r.id));
+      // Find deleted receipts
+      const newIds = new Set(value.map(r => r.id));
+      const deleted = prev.filter(r => !newIds.has(r.id));
+      // Find updated (empId changed - manual assignment)
+      const updated = value.filter(r => {
+        const old = prev.find(p => p.id === r.id);
+        return old && old.empId !== r.empId;
+      });
+      await Promise.all([
+        ...newOnes.map(r => saveReceipt(r)),
+        ...updated.map(r => saveReceipt(r)),
+        ...deleted.map(r => deleteReceipt(r.id)),
+      ]);
+      setToast("Recibos atualizados");
+      return;
+    }
+    const setters = { superManagers:setSuperManagers, managers:setManagers, restaurants:setRestaurants, employees:setEmployees, roles:setRoles, tips:setTips, splits:setSplits, schedules:setSchedules, communications:setCommunications, commAcks:setCommAcks, faq:setFaq, dpMessages:setDpMessages };
+    const keys    = { superManagers:K.superManagers, managers:K.managers, restaurants:K.restaurants, employees:K.employees, roles:K.roles, tips:K.tips, splits:K.splits, schedules:K.schedules, communications:K.communications, commAcks:K.commAcks, faq:K.faq, dpMessages:K.dpMessages };
     setters[field]?.(value);
     await save(keys[field], value);
-    const labels = { superManagers:"Super Gestores atualizados", managers:"Gestores atualizados", restaurants:"Restaurantes atualizados", employees:"Empregados atualizados", roles:"Cargos atualizados", tips:"Gorjetas atualizadas", splits:"Percentuais salvos", schedules:"Escala atualizada", communications:"Comunicados atualizados", commAcks:"Ciências atualizadas", faq:"FAQ atualizado", dpMessages:"Mensagem enviada", receipts:"Recibos atualizados" };
+    const labels = { superManagers:"Super Gestores atualizados", managers:"Gestores atualizados", restaurants:"Restaurantes atualizados", employees:"Empregados atualizados", roles:"Cargos atualizados", tips:"Gorjetas atualizadas", splits:"Percentuais salvos", schedules:"Escala atualizada", communications:"Comunicados atualizados", commAcks:"Ciências atualizadas", faq:"FAQ atualizado", dpMessages:"Mensagem enviada" };
     setToast(labels[field] ?? "Salvo!");
   }
 
