@@ -1274,28 +1274,43 @@ function ReceibosManagerTab({ restaurantId, employees, roles, restaurants, recei
           }
         }
 
-        // Extract name: look for "Nome do Colaborador" or "Nome:" patterns first, then fallback
+        // Extract name: try multiple patterns for Brazilian payroll PDFs
+        // Pattern 1: "Código Nome do Colaborador\n000058 NOME COMPLETO"
+        const codeNameMatch = text.match(/\d{5,6}\s+([A-ZÁÉÍÓÚÃÕÂÊÎÔÛÇÀÜ]{2,}(?:\s+[A-ZÁÉÍÓÚÃÕÂÊÎÔÛÇÀÜa-záéíóúãõâêîôûçàü]{2,})+)/);
+        // Pattern 2: after "Nome do Colaborador" or "Colaborador:"
         const namedMatch = text.match(/(?:nome\s+do\s+colaborador|colaborador|funcionário)[:\s]+([A-ZÁÉÍÓÚÃÕÂÊÎÔÛÇÀÜ]{2,}(?:\s+[A-ZÁÉÍÓÚÃÕÂÊÎÔÛÇÀÜ]{2,})+)/i);
         if (namedMatch) {
           extractedName = namedMatch[1].trim();
+        } else if (codeNameMatch) {
+          extractedName = codeNameMatch[1].trim();
         } else {
-          const nameMatch = text.match(/[A-ZÁÉÍÓÚÃÕÂÊÎÔÛÇÀÜ]{3,}(?:\s+[A-ZÁÉÍÓÚÃÕÂÊÎÔÛÇÀÜ]{2,}){1,4}/);
-          if (nameMatch) extractedName = nameMatch[0].trim();
+          // Fallback: longest sequence of capitalized words (at least 2 words)
+          const allNames = [...text.matchAll(/[A-ZÁÉÍÓÚÃÕÂÊÎÔÛÇÀÜ]{3,}(?:\s+[A-ZÁÉÍÓÚÃÕÂÊÎÔÛÇÀÜ]{2,}){1,5}/g)];
+          // Filter out known non-name patterns and pick longest
+          const filtered = allNames.map(m=>m[0]).filter(n => !n.match(/^(RECIBO|SALÁRIO|PAGAMENTO|CNPJ|LTDA|FUNC|SENADOR|CEP|SAO|SÃO|RUA|AV|PAULO)/i));
+          if (filtered.length) extractedName = filtered.reduce((a,b) => b.split(" ").length > a.split(" ").length ? b : a, "");
         }
 
-        // Extract CPF: pattern 000.000.000-00 or 00000000000
-        const cpfMatch = text.match(/\d{3}[.-]?\d{3}[.-]?\d{3}[.-]?\d{2}/);
-        if (cpfMatch) {
-          const digits = cpfMatch[0].replace(/\D/g,"");
+        // Extract CPF: pattern 000.000.000-00 — look for labeled one first
+        const cpfLabelMatch = text.match(/CPF[:\s]+(\d{3}[.-]\d{3}[.-]\d{3}[.-]\d{2})/i);
+        const cpfRawMatch = text.match(/\d{3}[.-]\d{3}[.-]\d{3}[.-]\d{2}/);
+        const cpfFound = cpfLabelMatch ? cpfLabelMatch[1] : (cpfRawMatch ? cpfRawMatch[0] : null);
+        if (cpfFound) {
+          const digits = cpfFound.replace(/\D/g,"");
           if (digits.length === 11) extractedCpf = `${digits.slice(0,3)}.${digits.slice(3,6)}.${digits.slice(6,9)}-${digits.slice(9)}`;
         }
 
-        // Extract admission date: patterns like "Admissão: 01/02/2026" or "Admitido em"
+        // Extract admission date
         const admMatch = text.match(/(?:admiss[aã]o|admitido\s+em|data\s+de\s+admiss[aã]o)[:\s]+(\d{2}[/]\d{2}[/]\d{4})/i);
         if (admMatch) {
           const [d,m,y] = admMatch[1].split("/");
           extractedAdmission = `${y}-${m}-${d}`;
         }
+
+        // Extract role/function: "Função: GARCOM III" or "Cargo: ..." or "CBO: 5134-05 Função: GARCOM III"
+        let extractedRole = "";
+        const funcMatch = text.match(/(?:fun[çc][aã]o|cargo)[:\s]+([A-ZÁÉÍÓÚÃÕÂÊÎÔÛÇÀÜa-záéíóúãõâêîôûçàü][A-ZÁÉÍÓÚÃÕÂÊÎÔÛÇÀÜa-záéíóúãõâêîôûçàü\s]{1,30}?)(?=\s{2,}|CPF|CBO|PIS|$)/i);
+        if (funcMatch) extractedRole = funcMatch[1].trim();
 
         const viewport = page.getViewport({ scale: 1.5 });
         const canvas = document.createElement("canvas");
@@ -1312,6 +1327,7 @@ function ReceibosManagerTab({ restaurantId, employees, roles, restaurants, recei
           extractedName: extractedName || "",
           extractedCpf: extractedCpf || "",
           extractedAdmission: extractedAdmission || "",
+          extractedRole: extractedRole || "",
           month: detectedMonth, type: detectedType, dataUrl,
           uploadedAt: new Date().toISOString(), page: p
         });
@@ -1409,7 +1425,7 @@ function ReceibosManagerTab({ restaurantId, employees, roles, restaurants, recei
                     <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
                       <button onClick={()=>{
                         setUnmatchedAction(p=>({...p,[r.id]:"create"}));
-                        setNewEmpForm(p=>({...p,[r.id]:{name:r.extractedName||"",cpf:r.extractedCpf||"",admission:r.extractedAdmission||"",roleId:""}}));
+                        setNewEmpForm(p=>({...p,[r.id]:{name:r.extractedName||"",cpf:r.extractedCpf||"",admission:r.extractedAdmission||"",roleId:"",newRoleName:r.extractedRole||"",newRoleArea:"Salão",newRolePoints:"1",creatingRole:false}}));
                       }} style={{padding:"8px 16px",borderRadius:8,border:"none",background:"#10b981",color:"#fff",cursor:"pointer",fontFamily:"DM Mono,monospace",fontSize:12,fontWeight:700}}>
                         ➕ Criar novo empregado
                       </button>
@@ -1430,7 +1446,7 @@ function ReceibosManagerTab({ restaurantId, employees, roles, restaurants, recei
                     <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
                       <div>
                         <label style={S.label}>Nome completo</label>
-                        <input value={form.name} onChange={e=>setNewEmpForm(p=>({...p,[r.id]:{...form,name:e.target.value}}))} style={S.input}/>
+                        <input value={form.name} onChange={e=>setNewEmpForm(p=>({...p,[r.id]:{...form,name:e.target.value}}))} style={S.input} placeholder="Nome extraído do recibo"/>
                       </div>
                       <div>
                         <label style={S.label}>CPF</label>
@@ -1442,23 +1458,48 @@ function ReceibosManagerTab({ restaurantId, employees, roles, restaurants, recei
                       </div>
                       <div>
                         <label style={S.label}>Cargo</label>
-                        <select value={form.roleId} onChange={e=>setNewEmpForm(p=>({...p,[r.id]:{...form,roleId:e.target.value}}))} style={S.input}>
-                          <option value="">Selecionar cargo…</option>
-                          {restRoles.map(role=><option key={role.id} value={role.id}>{role.name} ({role.area})</option>)}
-                        </select>
+                        {!form.creatingRole ? (
+                          <div style={{display:"flex",gap:6}}>
+                            <select value={form.roleId} onChange={e=>setNewEmpForm(p=>({...p,[r.id]:{...form,roleId:e.target.value}}))} style={{...S.input,flex:1}}>
+                              <option value="">Selecionar cargo…</option>
+                              {restRoles.map(role=><option key={role.id} value={role.id}>{role.name} ({role.area})</option>)}
+                            </select>
+                            <button onClick={()=>setNewEmpForm(p=>({...p,[r.id]:{...form,creatingRole:true,roleId:""}}))}
+                              title="Criar novo cargo" style={{padding:"8px 10px",borderRadius:8,border:"1px solid #10b98144",background:"#10b98111",color:"#10b981",cursor:"pointer",fontFamily:"DM Mono,monospace",fontSize:13,whiteSpace:"nowrap"}}>+ Novo</button>
+                          </div>
+                        ) : (
+                          <div style={{display:"flex",flexDirection:"column",gap:6,padding:"10px 12px",background:"var(--bg3)",borderRadius:8,border:"1px solid #10b98133"}}>
+                            <p style={{color:"#10b981",fontSize:11,fontWeight:700,margin:"0 0 4px"}}>Novo cargo</p>
+                            <input value={form.newRoleName} onChange={e=>setNewEmpForm(p=>({...p,[r.id]:{...form,newRoleName:e.target.value}}))} placeholder={r.extractedRole||"Nome do cargo"} style={{...S.input,fontSize:12}}/>
+                            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:6}}>
+                              <select value={form.newRoleArea} onChange={e=>setNewEmpForm(p=>({...p,[r.id]:{...form,newRoleArea:e.target.value}}))} style={{...S.input,fontSize:12}}>
+                                {AREAS.map(a=><option key={a} value={a}>{a}</option>)}
+                              </select>
+                              <input type="number" min="0.5" step="0.5" value={form.newRolePoints} onChange={e=>setNewEmpForm(p=>({...p,[r.id]:{...form,newRolePoints:e.target.value}}))} placeholder="Pontos" style={{...S.input,fontSize:12}}/>
+                            </div>
+                            <div style={{display:"flex",gap:6}}>
+                              <button onClick={()=>{
+                                if(!form.newRoleName.trim()){alert("Nome do cargo obrigatório");return;}
+                                const newRole = { id:`role-${Date.now()}-${Math.random().toString(36).slice(2,5)}`, restaurantId, name:form.newRoleName.trim(), area:form.newRoleArea, points:parseFloat(form.newRolePoints)||1, inactive:false };
+                                onUpdate("roles", [...roles, newRole]);
+                                setNewEmpForm(p=>({...p,[r.id]:{...form,roleId:newRole.id,creatingRole:false}}));
+                              }} style={{flex:1,padding:"6px",borderRadius:8,border:"none",background:"#10b981",color:"#fff",cursor:"pointer",fontFamily:"DM Mono,monospace",fontSize:12,fontWeight:700}}>✅ Criar cargo</button>
+                              <button onClick={()=>setNewEmpForm(p=>({...p,[r.id]:{...form,creatingRole:false}}))} style={{...S.btnSecondary,fontSize:11,padding:"6px 10px"}}>Cancelar</button>
+                            </div>
+                          </div>
+                        )}
                       </div>
                     </div>
+                    {r.extractedRole && !form.creatingRole && <p style={{color:"var(--text3)",fontSize:11}}>Cargo no recibo: <strong style={{color:"var(--text2)"}}>{r.extractedRole}</strong></p>}
                     <div style={{display:"flex",gap:8,marginTop:4}}>
                       <button onClick={()=>{
                         if (!form.name.trim()) { alert("Nome obrigatório"); return; }
-                        // Create employee
                         const code = restaurant?.shortCode ?? "EMP";
                         const seq = employees.filter(e=>e.restaurantId===restaurantId).length + 1;
                         const empCode = code.toUpperCase() + String(seq).padStart(4,"0");
                         const pin = empCode.slice(-4);
                         const newEmp = { id:`${Date.now()}-${Math.random().toString(36).slice(2,5)}`, restaurantId, name:form.name.trim(), cpf:form.cpf.trim(), admission:form.admission||today(), roleId:form.roleId||null, empCode, pin, inactive:false };
                         onUpdateEmployees([...employees, newEmp]);
-                        // Associate receipt
                         onUpdate("receipts", receipts.map(x=>x.id===r.id?{...x,empId:newEmp.id,empName:newEmp.name,unmatched:false}:x));
                         setUnmatchedAction(p=>{const n={...p};delete n[r.id];return n;});
                         alert(`✅ Empregado "${newEmp.name}" criado!\nCódigo: ${empCode} | PIN: ${pin}`);
