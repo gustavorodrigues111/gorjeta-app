@@ -2060,17 +2060,18 @@ function RoleSpreadsheet({ restRoles, rid, roles, onUpdate }) {
       <p style={{ color: "var(--text3)", fontSize: 12, marginBottom: 16 }}>Edite inline e clique em Salvar na linha. Nova linha no topo para adicionar.</p>
 
       {/* Header */}
-      <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr 80px 80px", gap: 6, marginBottom: 8, padding: "0 6px" }}>
-        {["Nome do Cargo", "Área", "Pontos", ""].map(h => <div key={h} style={{ color: "var(--text3)", fontSize: 11 }}>{h}</div>)}
+      <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr 80px 90px 80px", gap: 6, marginBottom: 8, padding: "0 6px" }}>
+        {["Nome do Cargo", "Área", "Pontos", "Sem gorjeta", ""].map(h => <div key={h} style={{ color: "var(--text3)", fontSize: 11 }}>{h}</div>)}
       </div>
 
       {/* New row */}
-      <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr 80px 80px", gap: 6, marginBottom: 6, background: "#1a2a1a", borderRadius: 10, padding: 8, border: "1px solid #10b98144" }}>
+      <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr 80px 90px 80px", gap: 6, marginBottom: 6, background: "#1a2a1a", borderRadius: 10, padding: 8, border: "1px solid #10b98144" }}>
         <input value={newRow.name} onChange={e => setNewRow(p => ({ ...p, name: e.target.value }))} placeholder="Nome do cargo…" style={inStyle} />
         <select value={newRow.area} onChange={e => setNewRow(p => ({ ...p, area: e.target.value }))} style={sel}>
           {AREAS.map(a => <option key={a} value={a}>{a}</option>)}
         </select>
-        <input type="number" min="0" step="0.5" value={newRow.points} onChange={e => setNewRow(p => ({ ...p, points: e.target.value }))} style={inStyle} />
+        <input type="number" min="0.5" step="0.5" value={newRow.noTip ? 0 : newRow.points} disabled={newRow.noTip} onChange={e => setNewRow(p => ({ ...p, points: e.target.value }))} style={{...inStyle, opacity: newRow.noTip ? 0.4 : 1}} />
+        <label style={{display:"flex",alignItems:"center",gap:6,cursor:"pointer",color:"var(--text2)",fontSize:12,fontFamily:"DM Mono,monospace"}}><input type="checkbox" checked={!!newRow.noTip} onChange={e=>setNewRow(p=>({...p,noTip:e.target.checked,points:e.target.checked?"0":p.points}))} style={{width:16,height:16,cursor:"pointer"}}/>Não entra</label>
         <button onClick={saveNew} style={{ background: "#10b981", border: "none", borderRadius: 8, color: "var(--text)", fontWeight: 700, fontSize: 12, cursor: "pointer", padding: "8px 4px", fontFamily: "DM Mono,monospace" }}>+ Add</button>
       </div>
 
@@ -2080,12 +2081,13 @@ function RoleSpreadsheet({ restRoles, rid, roles, onUpdate }) {
         const row = getRow(r);
         const isSaved = saved[r.id];
         return (
-          <div key={r.id} style={{ display: "grid", gridTemplateColumns: "2fr 1fr 80px 80px", gap: 6, marginBottom: 6, background: "var(--card-bg)", borderRadius: 10, padding: 8, border: `1px solid ${isSaved ? "#10b98166" : "#2a2a2a"}`, transition: "border-color 0.3s" }}>
+          <div key={r.id} style={{ display: "grid", gridTemplateColumns: "2fr 1fr 80px 90px 80px", gap: 6, marginBottom: 6, background: "var(--card-bg)", borderRadius: 10, padding: 8, border: `1px solid ${isSaved ? "#10b98166" : "#2a2a2a"}`, transition: "border-color 0.3s" }}>
             <input value={row.name} onChange={e => setRow(r.id, "name", e.target.value)} style={inStyle} />
             <select value={row.area} onChange={e => setRow(r.id, "area", e.target.value)} style={sel}>
               {AREAS.map(a => <option key={a} value={a}>{a}</option>)}
             </select>
-            <input type="number" min="0" step="0.5" value={row.points} onChange={e => setRow(r.id, "points", e.target.value)} style={inStyle} />
+            <input type="number" min="0.5" step="0.5" value={r.noTip ? 0 : row.points} disabled={r.noTip} onChange={e => setRow(r.id, "points", e.target.value)} style={{...inStyle, opacity: r.noTip ? 0.4 : 1}} />
+            <label style={{display:"flex",alignItems:"center",gap:6,cursor:"pointer",color:"var(--text2)",fontSize:12,fontFamily:"DM Mono,monospace"}}><input type="checkbox" checked={!!r.noTip} onChange={e=>{onUpdate("roles",roles.map(x=>x.id===r.id?{...x,noTip:e.target.checked,points:e.target.checked?0:parseFloat(row.points)||1}:x));}} style={{width:16,height:16,cursor:"pointer"}}/>Não entra</label>
             <div style={{ display: "flex", gap: 4 }}>
               <button onClick={() => saveRole(r)} style={{ flex: 1, background: isSaved ? "#10b981" : ac, border: "none", borderRadius: 8, color: "#111", fontWeight: 700, fontSize: 11, cursor: "pointer", padding: "4px 2px", fontFamily: "DM Mono,monospace" }}>{isSaved ? "✓" : "Salvar"}</button>
               {r.inactive
@@ -2337,7 +2339,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
     const activeEmps = restEmps.filter(emp => {
       // Must have a role and be admitted
       const r = restRoles.find(r => r.id === emp.roleId);
-      if (!r) return false;
+      if (!r || r.noTip) return false;
       if (emp.admission && emp.admission > tipDate) return false;
       // Must not be inactive
       if (emp.inactive && emp.inactiveFrom && emp.inactiveFrom <= tipDate) return false;
@@ -2466,7 +2468,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
 
     const activeEmps = allRestEmps.filter(emp => {
       const r = restRoles.find(r => r.id === emp.roleId);
-      if (!r) return false;
+      if (!r || r.noTip) return false;
       if (emp.admission && emp.admission > date) return false;
       const status = empDayStatus(emp.id);
       if (!status) return true; // trabalho = entra
