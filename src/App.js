@@ -798,7 +798,8 @@ function validateWeekSchedule(days) {
     const label = WEEK_DAYS_LABEL[parseInt(dayIdx)];
     const calc = calcDayHours(d.in, d.out, d.break || 0);
     if (calc.error) { errors.push(`${label}: ${calc.error}`); return; }
-    if (calc.worked > 10 * 60) errors.push(`${label}: jornada de ${fmtHHMM(calc.worked)} ultrapassa o máximo de 10h.`);
+    // 10h limit applies to CONTRACT hours (nocturnal ficta already inflated)
+    if (calc.totalContract > 10 * 60) errors.push(`${label}: jornada contratual de ${fmtHHMM(calc.totalContract)} ultrapassa o máximo de 10h (${fmtHHMM(calc.diurnal)} diurnas + ${fmtHHMM(calc.nocturnalFicta)} noturnas fictas).`);
     if ((d.break || 0) < 30) errors.push(`${label}: intervalo mínimo é 30 minutos (atual: ${d.break || 0}min).`);
   });
 
@@ -967,7 +968,7 @@ function WorkScheduleManagerTab({ restaurantId, employees, workSchedules, notifi
         <table style={{width:"100%",borderCollapse:"collapse",fontFamily:"DM Mono,monospace",fontSize:13}}>
           <thead>
             <tr>
-              {["Dia","Entrada","Saída","Intervalo (min)","Hrs trabalhadas","Hrs diurnas","Hrs noturnas","Ficta",""].map(h=>(
+              {["Dia","Entrada","Saída","Intervalo (min)","Hrs reais","Hrs diurnas","Hrs noturnas (real)","Hrs noturnas (ficta)","Hrs contratuais",""].map(h=>(
                 <th key={h} style={{padding:"8px 10px",textAlign:"left",color:"var(--text3)",fontSize:11,borderBottom:"1px solid var(--border)",whiteSpace:"nowrap"}}>{h}</th>
               ))}
             </tr>
@@ -993,10 +994,11 @@ function WorkScheduleManagerTab({ restaurantId, employees, workSchedules, notifi
                     <input type="number" min="0" max="120" value={d.break||""} onChange={e=>handleDayChange(dayIdx,"break",parseInt(e.target.value)||0)}
                       placeholder="30" style={{...S.input,width:70,padding:"4px 6px",fontSize:12}} disabled={!hasDay}/>
                   </td>
-                  <td style={{padding:"6px 10px",color:dayErr?"#ef4444":"#10b981",fontWeight:calc?600:400}}>{calc?fmtHHMM(calc.worked):"—"}</td>
+                  <td style={{padding:"6px 10px",color:calc&&calc.totalContract>10*60?"#ef4444":"#10b981",fontWeight:calc?600:400}}>{calc?fmtHHMM(calc.worked):"—"}</td>
                   <td style={{padding:"6px 10px",color:"var(--text2)"}}>{calc?fmtHHMM(calc.diurnal):"—"}</td>
                   <td style={{padding:"6px 10px",color:"#8b5cf6"}}>{calc?fmtHHMM(calc.nocturnal):"—"}</td>
                   <td style={{padding:"6px 10px",color:"#ec4899"}}>{calc?fmtHHMM(calc.nocturnalFicta):"—"}</td>
+                  <td style={{padding:"6px 10px",color:calc&&calc.totalContract>10*60?"#ef4444":"#f5c842",fontWeight:700}}>{calc?fmtHHMM(calc.totalContract):"—"}</td>
                   <td style={{padding:"4px 6px"}}>
                     {hasDay && <button onClick={()=>clearDay(dayIdx)} style={{background:"none",border:"1px solid #e74c3c33",borderRadius:6,color:"#e74c3c",cursor:"pointer",padding:"3px 8px",fontSize:11,fontFamily:"DM Mono,monospace"}}>Folga</button>}
                   </td>
@@ -1005,10 +1007,11 @@ function WorkScheduleManagerTab({ restaurantId, employees, workSchedules, notifi
             })}
           </tbody>
           <tfoot>
-            <tr style={{borderTop:"2px solid #2a2a2a"}}>
-              <td colSpan={4} style={{padding:"8px 10px",color:"var(--text3)",fontSize:12}}>Total semanal</td>
+            <tr style={{borderTop:"2px solid var(--border)"}}>
+              <td colSpan={4} style={{padding:"8px 10px",color:"var(--text3)",fontSize:12}}>Total semanal (contratual)</td>
+              <td colSpan={4} style={{padding:"8px 10px",color:"var(--text3)",fontSize:11}}></td>
               <td style={{padding:"8px 10px",color:weekOk?"#10b981":"#ef4444",fontWeight:700,fontSize:14}}>{fmtHHMM(totalContract)}</td>
-              <td colSpan={4} style={{padding:"8px 10px",color:"var(--text3)",fontSize:11}}>{weekOk?"✅ Dentro do limite":"⚠️ Fora do limite (43:55 – 44:00)"}</td>
+              <td style={{padding:"8px 10px",color:"var(--text3)",fontSize:11}}>{weekOk?"✅ OK":"⚠️ Fora do limite (43:55–44:00)"}</td>
             </tr>
           </tfoot>
         </table>
