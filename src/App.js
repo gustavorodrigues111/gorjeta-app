@@ -687,7 +687,7 @@ function EmployeePortal({ employees, roles, tips, schedules, restaurants, commun
   const now = new Date();
   const [year, setYear] = useState(now.getFullYear());
   const [month, setMonth] = useState(now.getMonth());
-  const [tab, setTab] = useState("extrato");
+  const [tab, setTab] = useState("comunicados");
   const [firstCpf, setFirstCpf] = useState("");
   const [firstPin, setFirstPin] = useState("");
   const [firstPin2, setFirstPin2] = useState("");
@@ -797,16 +797,32 @@ function EmployeePortal({ employees, roles, tips, schedules, restaurants, commun
         </div>
         <button onClick={() => { setEmpId(null); setCpf(""); setPin(""); }} style={{ ...S.btnSecondary, fontSize: 12 }}>Sair</button>
       </div>
-      <div style={{ display: "flex", borderBottom: "1px solid #1e1e1e", background: "#111" }}>
-        {[["extrato", "💸 Gorjeta"], ["escala", "📅 Minha Escala"]].map(([id, lbl]) => (
-          <button key={id} onClick={() => setTab(id)} style={{ flex: 1, padding: "12px 0", background: "none", border: "none", borderBottom: `2px solid ${tab === id ? ac : "transparent"}`, color: tab === id ? ac : "#555", cursor: "pointer", fontSize: 13, fontFamily: "DM Mono,monospace", fontWeight: tab === id ? 700 : 400 }}>{lbl}</button>
-        ))}
+      <div style={{ display: "flex", borderBottom: "1px solid #1e1e1e", background: "#111", overflowX: "auto" }}>
+        {TABS.map(([id, lbl]) => {
+          const blocked = hasPending && id !== "comunicados";
+          return (
+            <button key={id} onClick={() => handleTabChange(id)}
+              style={{ padding: "11px 12px", background: "none", border: "none", borderBottom: `2px solid ${tab === id ? ac : "transparent"}`, color: tab === id ? ac : blocked ? "#333" : "#555", cursor: blocked ? "not-allowed" : "pointer", fontSize: 11, fontFamily: "DM Mono,monospace", fontWeight: tab === id ? 700 : 400, whiteSpace: "nowrap" }}>
+              {lbl}
+              {id === "comunicados" && pendingComms.length > 0 && <span style={{ background: "#e74c3c", color: "#fff", borderRadius: 10, padding: "1px 5px", fontSize: 9, marginLeft: 4 }}>{pendingComms.length}</span>}
+            </button>
+          );
+        })}
       </div>
-      <div style={{ padding: "24px 20px", maxWidth: 540, margin: "0 auto" }}>
-        <div style={{ marginBottom: 20 }}><MonthNav year={year} month={month} onChange={(y, m) => { setYear(y); setMonth(m); }} /></div>
+      {hasPending && (
+        <div style={{ background: "#e74c3c22", padding: "8px 16px", fontSize: 12, color: "#e74c3c", fontFamily: "DM Mono,monospace", textAlign: "center" }}>
+          ⚠️ Dê ciência nos comunicados pendentes para acessar as outras abas.
+        </div>
+      )}
+      <div style={{ padding: "20px 16px", maxWidth: 540, margin: "0 auto" }}>
+
+        {tab === "comunicados" && (
+          <ComunicadosTab empId={empId} restaurantId={emp?.restaurantId} communications={communications} commAcks={commAcks} onUpdate={onUpdate} />
+        )}
 
         {tab === "extrato" && (
           <div>
+            <div style={{ marginBottom: 20 }}><MonthNav year={year} month={month} onChange={(y, m) => { setYear(y); setMonth(m); }} /></div>
             {/* Legal disclaimer */}
             <div style={{ background: "#111", border: "1px solid #2a2a2a", borderRadius: 10, padding: "10px 14px", marginBottom: 16, fontSize: 11, color: "#555", lineHeight: 1.5 }}>
               ⚠️ <strong style={{ color: "#666" }}>Aviso:</strong> Os valores exibidos são aproximados, apurados até o momento atual e sujeitos a alterações. Esta tela tem caráter informativo e de transparência, podendo conter imprecisões. Os valores definitivos serão apurados pela empresa e comunicados pelos canais oficiais.
@@ -838,6 +854,7 @@ function EmployeePortal({ employees, roles, tips, schedules, restaurants, commun
 
         {tab === "escala" && (
           <div>
+            <div style={{ marginBottom: 20 }}><MonthNav year={year} month={month} onChange={(y, m) => { setYear(y); setMonth(m); }} /></div>
             <p style={{ color: "#555", fontSize: 13, marginBottom: 16, textTransform: "capitalize" }}>Sua escala em {monthLabel(year, month)}</p>
             <CalendarGrid year={year} month={month} dayMap={dayMap} readOnly />
             <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 8, marginTop: 20 }}>
@@ -871,13 +888,23 @@ function EmployeePortal({ employees, roles, tips, schedules, restaurants, commun
             </div>
           </div>
         )}
+
+        {tab === "comunicados" && (
+          <ComunicadosTab empId={empId} restaurantId={emp?.restaurantId} communications={communications} commAcks={commAcks} onUpdate={onUpdate} />
+        )}
+
+        {tab === "faq" && (
+          <FaqTab restaurantId={emp?.restaurantId} faq={faq} />
+        )}
+
+        {tab === "dp" && (
+          <FaleDpTab empId={empId} emp={emp} restaurantId={emp?.restaurantId} dpMessages={dpMessages} onUpdate={onUpdate} />
+        )}
+
       </div>
     </div>
   );
-}
-
-// ══════════════════════════════════════════════════════════════════════════════
-// RESTAURANT PANEL (shared by manager and super manager, with permission guard)
+} (shared by manager and super manager, with permission guard)
 // ══════════════════════════════════════════════════════════════════════════════
 // ── Role Spreadsheet ──────────────────────────────────────────────────────────
 function RoleSpreadsheet({ restRoles, rid, roles, onUpdate }) {
