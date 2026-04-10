@@ -2253,7 +2253,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                   <table style={{borderCollapse:"collapse",fontFamily:"DM Mono,monospace",fontSize:11,minWidth:"100%"}}>
                     <thead>
                       <tr>
-                        <th style={{position:"sticky",left:0,background:"#1a1a1a",zIndex:2,padding:"6px 10px",textAlign:"left",color:"#555",fontSize:11,borderBottom:"1px solid #2a2a2a",whiteSpace:"nowrap",minWidth:140}}>
+                        <th style={{position:"sticky",left:0,background:"#1a1a1a",zIndex:2,padding:"6px 10px",textAlign:"left",color:"#555",fontSize:11,borderBottom:"1px solid #2a2a2a",whiteSpace:"nowrap",minWidth:90,maxWidth:110}}>
                           Empregado
                         </th>
                         {Array.from({length:daysInMonth},(_,i)=>{
@@ -2262,7 +2262,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                           const wd = new Date(date+"T12:00:00").getDay();
                           const isWe = wd===0||wd===6;
                           return (
-                            <th key={d} style={{padding:"3px 1px",textAlign:"center",color:isWe?"#f59e0b":"#555",fontSize:9,borderBottom:"1px solid #2a2a2a",minWidth:22,width:22}}>
+                            <th key={d} style={{padding:"3px 1px",textAlign:"center",color:isWe?"#f59e0b":"#555",fontSize:9,borderBottom:"1px solid #2a2a2a",minWidth:30,width:30}}>
                               <div>{d}</div>
                               <div style={{fontSize:8}}>{["D","S","T","Q","Q","S","S"][wd]}</div>
                             </th>
@@ -2281,9 +2281,9 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                         workC = daysInMonth - offC - Object.values(dayMap).filter(v=>v===DAY_COMP).length;
                         return (
                           <tr key={emp.id} style={{background:ei%2===0?"#111":"#141414"}}>
-                            <td style={{position:"sticky",left:0,background:ei%2===0?"#111":"#141414",zIndex:1,padding:"5px 10px",borderRight:"1px solid #2a2a2a",whiteSpace:"nowrap"}}>
-                              <div style={{color:"#fff",fontSize:12,fontWeight:600}}>{emp.name}</div>
-                              <div style={{color:"#555",fontSize:10}}>{role?.name}</div>
+                            <td style={{position:"sticky",left:0,background:ei%2===0?"#111":"#141414",zIndex:1,padding:"5px 8px",borderRight:"1px solid #2a2a2a",whiteSpace:"nowrap",maxWidth:110,overflow:"hidden"}}>
+                              <div style={{color:"#fff",fontSize:11,fontWeight:600,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",maxWidth:100}}>{emp.name}</div>
+                              <div style={{color:"#555",fontSize:9,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",maxWidth:100}}>{role?.name}</div>
                             </td>
                             {Array.from({length:daysInMonth},(_,i)=>{
                               const d = i+1;
@@ -2295,7 +2295,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                               const isWe = wd===0||wd===6;
                               return (
                                 <td key={d} onClick={()=>cycleStatus(emp.id, date)}
-                                  style={{textAlign:"center",padding:"2px 1px",cursor:"pointer",background:status?color+"33":(isWe?"#1a1a0a":"transparent"),borderRight:"1px solid #1a1a1a",width:22}}>
+                                  style={{textAlign:"center",padding:"3px 2px",cursor:"pointer",background:status?color+"33":(isWe?"#1a1a0a":"transparent"),borderRight:"1px solid #1a1a1a",width:30}}>
                                   <span style={{color:color,fontSize:status?9:11,fontWeight:status?700:400}}>{label}</span>
                                 </td>
                               );
