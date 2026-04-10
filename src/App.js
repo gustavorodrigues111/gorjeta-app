@@ -24,9 +24,9 @@ const today = () => new Date().toISOString().slice(0, 10);
 const monthKey = (y, m) => `${y}-${String(m + 1).padStart(2, "0")}`;
 const monthLabel = (y, m) => new Date(y, m, 1).toLocaleDateString("pt-BR", { month: "long", year: "numeric" });
 const WEEKDAYS = ["Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb"];
-const AREAS = ["Bar", "Cozinha", "Salão", "Limpeza"];
-const AREA_COLORS = { Bar: "#3b82f6", Cozinha: "#f59e0b", Salão: "#10b981", Limpeza: "#8b5cf6" };
-const DEFAULT_SPLIT = { Bar: 12, Cozinha: 40, Salão: 40, Limpeza: 8 };
+const AREAS = ["Bar", "Cozinha", "Salão", "Limpeza", "Produção"];
+const AREA_COLORS = { Bar: "#3b82f6", Cozinha: "#f59e0b", Salão: "#10b981", Limpeza: "#8b5cf6", "Produção": "#ec4899" };
+const DEFAULT_SPLIT = { Bar: 12, Cozinha: 35, Salão: 35, Limpeza: 8, "Produção": 10 };
 const TAX = 0.33;
 const DAY_OFF       = "off";    // folga programada
 const DAY_COMP      = "comp";   // compensacao banco de horas
@@ -1174,7 +1174,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
       return empDayMap[tipDate]; // undefined = work
     };
 
-    const isProdArea = (area) => area === "Cozinha"; // Producao = Cozinha rule
+    const isProdArea = (area) => area === "Produção";
 
     const activeEmps = restEmps.filter(emp => {
       // Must have a role and be admitted
@@ -1261,8 +1261,6 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
       const empDayMap = daySchedule[empId] ?? {};
       return empDayMap[date];
     };
-    console.log(`[recalc] date:${date} tKey:${tKey} rid:${rid}`);
-    console.log(`[recalc] schedules structure:`, JSON.stringify(schedules?.[rid]?.[tKey]));
 
     const allRestEmps = employees.filter(e =>
       e.restaurantId === rid &&
@@ -1274,12 +1272,11 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
       if (!r) return false;
       if (emp.admission && emp.admission > date) return false;
       const status = empDayStatus(emp.id);
-      console.log(`[recalc] ${emp.name} | area:${r.area} | status:${status ?? "trabalho"} | daySchedule keys:`, Object.keys(daySchedule));
-      if (!status) return true;
-      if (status === DAY_COMP) return true;
-      if (status === DAY_FAULT_J || status === DAY_FAULT_U) return false;
-      if (r.area === "Cozinha") return true;
-      return false;
+      if (!status) return true; // trabalho = entra
+      if (status === DAY_COMP) return true; // compensacao = entra
+      if (status === DAY_FAULT_J || status === DAY_FAULT_U) return false; // faltas = nao entra
+      if (r.area === "Produção") return true; // producao entra em folga/ferias
+      return false; // demais: folga/ferias = nao entra
     }).map(emp => ({
       ...emp,
       points: parseFloat(restRoles.find(r => r.id === emp.roleId)?.points) || 1,
@@ -1441,10 +1438,10 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                           const r = restRoles.find(r=>r.id===e.roleId);
                           if (!r || (e.admission && e.admission > tipDate)) return false;
                           const status = getStatus(e.id);
-                          if (!status) return true; // trabalho = entra
-                          if (status === DAY_COMP) return true; // comp = entra
-                          if (status === DAY_FAULT_J || status === DAY_FAULT_U) return false; // faltas = nao entra
-                          if (r.area === "Cozinha") return true; // cozinha entra em folga/ferias
+                          if (!status) return true;
+                          if (status === DAY_COMP) return true;
+                          if (status === DAY_FAULT_J || status === DAY_FAULT_U) return false;
+                          if (r.area === "Produção") return true; // producao entra em folga/ferias
                           return false;
                         });
                         const excluded = restEmps.filter(e => {
@@ -1452,9 +1449,9 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                           if (!r || (e.admission && e.admission > tipDate)) return false;
                           const status = getStatus(e.id);
                           if (!status || status === DAY_COMP) return false;
-                          if (status === DAY_FAULT_J || status === DAY_FAULT_U) return true; // faltas sempre excluem
-                          if (r.area === "Cozinha") return false; // cozinha nao excluida por folga/ferias
-                          return true; // outros em folga/ferias = excluidos
+                          if (status === DAY_FAULT_J || status === DAY_FAULT_U) return true;
+                          if (r.area === "Produção") return false; // producao nao excluida por folga/ferias
+                          return true;
                         });
                         return (<div>
                           {excluded.length > 0 && <div style={{marginBottom:8,padding:"6px 8px",background:"#e74c3c11",borderRadius:8,border:"1px solid #e74c3c22"}}>
