@@ -1256,19 +1256,38 @@ function ReceibosManagerTab({ restaurantId, employees, roles, restaurants, recei
         let extractedName = "";
         let extractedCpf = "";
         let extractedAdmission = "";
+        let extractedRole = "";
+
+        // First extract CPF from text to use for matching
+        const cpfInText = text.match(/CPF:\s*(\d{3}[.-]\d{3}[.-]\d{3}[.-]\d{2})/);
+        const cpfDigitsInText = cpfInText ? cpfInText[1].replace(/\D/g,"") : null;
 
         for (const emp of restEmps) {
-          if (emp.cpf) {
+          if (emp.cpf && cpfDigitsInText) {
             const cleanCpf = emp.cpf.replace(/\D/g, "");
-            if (cleanCpf.length >= 11 && text.replace(/\D/g,"").includes(cleanCpf)) {
+            if (cleanCpf.length >= 11 && cleanCpf === cpfDigitsInText) {
               matchedEmp = emp; break;
             }
           }
         }
-        if (!matchedEmp) {
+        if (!matchedEmp && cpfDigitsInText) {
+          // Also try raw text search for CPF
           for (const emp of restEmps) {
-            const firstName = emp.name.split(" ")[0].toUpperCase();
-            if (firstName.length >= 3 && text.toUpperCase().includes(firstName)) {
+            if (emp.cpf) {
+              const cleanCpf = emp.cpf.replace(/\D/g, "");
+              if (cleanCpf.length >= 11 && text.replace(/\D/g,"").includes(cleanCpf)) {
+                matchedEmp = emp; break;
+              }
+            }
+          }
+        }
+        if (!matchedEmp) {
+          // Try name match — extract name first, then compare
+          const nameInText = text.match(/Nome\s+do\s+Colaborador\s+([A-ZÁÉÍÓÚÃÕÂÊÎÔÛÇÀÜ][A-ZÁÉÍÓÚÃÕÂÊÎÔÛÇÀÜ\s]{3,50}?)(?=\s{2,}|PIS|CTPS|CPF)/);
+          const nameFromPdf = nameInText ? nameInText[1].trim().toUpperCase() : null;
+          for (const emp of restEmps) {
+            const empNameUpper = emp.name.toUpperCase();
+            if (nameFromPdf && (empNameUpper === nameFromPdf || nameFromPdf.includes(empNameUpper) || empNameUpper.includes(nameFromPdf.split(" ")[0]))) {
               matchedEmp = emp; break;
             }
           }
@@ -1277,43 +1296,39 @@ function ReceibosManagerTab({ restaurantId, employees, roles, restaurants, recei
         // DEBUG — remove after fix
         console.log(`[PDF p.${p}] raw text:`, text.slice(0, 500));
 
-        // Extract name: try multiple patterns for Brazilian payroll PDFs
-        // Pattern 1: "Código Nome do Colaborador\n000058 NOME COMPLETO"
-        const codeNameMatch = text.match(/\d{5,6}\s+([A-ZÁÉÍÓÚÃÕÂÊÎÔÛÇÀÜ]{2,}(?:\s+[A-ZÁÉÍÓÚÃÕÂÊÎÔÛÇÀÜa-záéíóúãõâêîôûçàü]{2,})+)/);
-        // Pattern 2: after "Nome do Colaborador" or "Colaborador:"
-        const namedMatch = text.match(/(?:nome\s+do\s+colaborador|colaborador|funcionário)[:\s]+([A-ZÁÉÍÓÚÃÕÂÊÎÔÛÇÀÜ]{2,}(?:\s+[A-ZÁÉÍÓÚÃÕÂÊÎÔÛÇÀÜ]{2,})+)/i);
-        if (namedMatch) {
-          extractedName = namedMatch[1].trim();
-        } else if (codeNameMatch) {
-          extractedName = codeNameMatch[1].trim();
+        // Extract using exact patterns from this payroll PDF format:
+        // "Nome do Colaborador\nNOME COMPLETO" or "Nome do Colaborador NOME COMPLETO"
+        // "CPF: 000.000.000-00"
+        // "Admissão: DD/MM/YYYY"
+        // "Função: CARGO"
+
+        // Name: appears right after "Nome do Colaborador"
+        const nameAfterLabel = text.match(/Nome\s+do\s+Colaborador\s+([A-ZÁÉÍÓÚÃÕÂÊÎÔÛÇÀÜ][A-ZÁÉÍÓÚÃÕÂÊÎÔÛÇÀÜ\s]{3,50}?)(?=\s{2,}|PIS|CTPS|CPF|\n\n)/);
+        if (nameAfterLabel) {
+          extractedName = nameAfterLabel[1].trim();
         } else {
-          // Fallback: longest sequence of capitalized words (at least 2 words)
-          const allNames = [...text.matchAll(/[A-ZÁÉÍÓÚÃÕÂÊÎÔÛÇÀÜ]{3,}(?:\s+[A-ZÁÉÍÓÚÃÕÂÊÎÔÛÇÀÜ]{2,}){1,5}/g)];
-          // Filter out known non-name patterns and pick longest
-          const filtered = allNames.map(m=>m[0]).filter(n => !n.match(/^(RECIBO|SALÁRIO|PAGAMENTO|CNPJ|LTDA|FUNC|SENADOR|CEP|SAO|SÃO|RUA|AV|PAULO)/i));
-          if (filtered.length) extractedName = filtered.reduce((a,b) => b.split(" ").length > a.split(" ").length ? b : a, "");
+          // Fallback: code + name pattern "000058 ROMILDO DE BRITO"
+          const codeNameMatch = text.match(/\b\d{5,6}\s+([A-ZÁÉÍÓÚÃÕÂÊÎÔÛÇÀÜ]{2,}(?:\s+[A-ZÁÉÍÓÚÃÕÂÊÎÔÛÇÀÜ]{2,})+)/);
+          if (codeNameMatch) extractedName = codeNameMatch[1].trim();
         }
 
-        // Extract CPF: pattern 000.000.000-00 — look for labeled one first
-        const cpfLabelMatch = text.match(/CPF[:\s]+(\d{3}[.-]\d{3}[.-]\d{3}[.-]\d{2})/i);
-        const cpfRawMatch = text.match(/\d{3}[.-]\d{3}[.-]\d{3}[.-]\d{2}/);
-        const cpfFound = cpfLabelMatch ? cpfLabelMatch[1] : (cpfRawMatch ? cpfRawMatch[0] : null);
-        if (cpfFound) {
-          const digits = cpfFound.replace(/\D/g,"");
+        // CPF: labeled "CPF: 000.000.000-00"
+        const cpfLabelMatch = text.match(/CPF:\s*(\d{3}[.-]\d{3}[.-]\d{3}[.-]\d{2})/);
+        if (cpfLabelMatch) {
+          const digits = cpfLabelMatch[1].replace(/\D/g,"");
           if (digits.length === 11) extractedCpf = `${digits.slice(0,3)}.${digits.slice(3,6)}.${digits.slice(6,9)}-${digits.slice(9)}`;
         }
 
-        // Extract admission date
-        const admMatch = text.match(/(?:admiss[aã]o|admitido\s+em|data\s+de\s+admiss[aã]o)[:\s]+(\d{2}[/]\d{2}[/]\d{4})/i);
-        if (admMatch) {
-          const [d,m,y] = admMatch[1].split("/");
+        // Admission: "Admissão: DD/MM/YYYY"
+        const admLabelMatch = text.match(/Admiss[aã]o:\s*(\d{2}[/]\d{2}[/]\d{4})/i);
+        if (admLabelMatch) {
+          const [d,m,y] = admLabelMatch[1].split("/");
           extractedAdmission = `${y}-${m}-${d}`;
         }
 
-        // Extract role/function: "Função: GARCOM III" or "Cargo: ..." or "CBO: 5134-05 Função: GARCOM III"
-        let extractedRole = "";
-        const funcMatch = text.match(/(?:fun[çc][aã]o|cargo)[:\s]+([A-ZÁÉÍÓÚÃÕÂÊÎÔÛÇÀÜa-záéíóúãõâêîôûçàü][A-ZÁÉÍÓÚÃÕÂÊÎÔÛÇÀÜa-záéíóúãõâêîôûçàü\s]{1,30}?)(?=\s{2,}|CPF|CBO|PIS|$)/i);
-        if (funcMatch) extractedRole = funcMatch[1].trim();
+        // Role: "Função: CARGO NAME"
+        const funcLabelMatch = text.match(/Fun[çc][aã]o:\s*([A-ZÁÉÍÓÚÃÕÂÊÎÔÛÇÀÜ][A-ZÁÉÍÓÚÃÕÂÊÎÔÛÇÀÜa-záéíóúãõâêîôûçàü\s()]{1,40}?)(?=\s{2,}|CPF|CBO|PIS|RUA|$)/);
+        if (funcLabelMatch) extractedRole = funcLabelMatch[1].trim();
 
         const viewport = page.getViewport({ scale: 1.5 });
         const canvas = document.createElement("canvas");
