@@ -53,7 +53,7 @@ const S = {
 
 // ─── Shared UI ────────────────────────────────────────────────────────────────
 function Toast({ msg, onClose }) {
-  useEffect(() => { if (msg) { const t = setTimeout(onClose, 3200); return () => clearTimeout(t); } }, [msg]);
+  useEffect(() => { if (msg) { const t = setTimeout(onClose, 3200); return () => clearTimeout(t); } }, [msg, onClose]); // eslint-disable-line react-hooks/exhaustive-deps
   if (!msg) return null;
   return <div style={{ position: "fixed", bottom: 32, left: "50%", transform: "translateX(-50%)", background: "#1a1a1a", color: "#f5c842", padding: "12px 28px", borderRadius: 40, fontFamily: "DM Mono,monospace", fontSize: 14, boxShadow: "0 8px 32px rgba(0,0,0,.5)", zIndex: 9999, letterSpacing: 1, whiteSpace: "nowrap" }}>{msg}</div>;
 }
@@ -181,8 +181,6 @@ function ExportModal({ onClose, employees, roles, tips, restaurant }) {
   const [dateFrom, setDateFrom] = useState(`${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,"0")}-01`);
   const [dateTo, setDateTo] = useState(today());
   const [status, setStatus] = useState("");
-  const ac = "#f5c842";
-
   function buildMatrix() {
     const filtered = tips.filter(t => t.restaurantId === restaurant.id && t.date >= dateFrom && t.date <= dateTo);
     const dates = [...new Set(filtered.map(t => t.date))].sort();
@@ -519,7 +517,6 @@ function RestaurantPanel({ restaurant, employees, roles, tips, splits, schedules
 
   const areaEmps = restEmps.filter(e => restRoles.find(r => r.id === e.roleId)?.area === schedArea);
   const dim = new Date(year, month + 1, 0).getDate();
-  const allDays = Array.from({ length: dim }, (_, i) => `${year}-${String(month+1).padStart(2,"0")}-${String(i+1).padStart(2,"0")}`);
 
   const ac = "#f5c842";
   const canTips = perms.tips || isSuperManager;
@@ -1157,7 +1154,8 @@ export default function App() {
   const [loaded, setLoaded] = useState(false);
   const [toast, setToast] = useState("");
   const [currentUser, setCurrentUser] = useState(null);
-  const [userRole, setUserRole] = useState(null); // "super"|"manager"
+  // eslint-disable-next-line no-unused-vars
+  const [userRole, setUserRole] = useState(null);
 
   const [superManagers, setSuperManagers] = useState([]);
   const [managers,      setManagers]      = useState([]);
