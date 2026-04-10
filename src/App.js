@@ -1208,9 +1208,6 @@ function ReceibosManagerTab({ restaurantId, employees, roles, restaurants, recei
         // Only skip if we have a valid fingerprint AND already seen it
         const isDuplicate = fingerprint && pageTexts.includes(fingerprint);
 
-        // DEBUG — remove after fix
-        console.log(`[PDF p.${p}] CPF: "${cpfDigitsInText}" | fp: "${fingerprint}" | dup: ${isDuplicate} | matched: ${matchedEmp?.name ?? "NONE"} | name in text: "${text.match(/Nome\s+do\s+Colaborador\s+(.{0,40})/)?.[1]?.trim()?.slice(0,30) ?? "not found"}"`);
-
         if (isDuplicate) {
           setProgress(`Página ${p} de ${numPages} — cópia ignorada ✓`);
           continue;
@@ -1352,6 +1349,9 @@ function ReceibosManagerTab({ restaurantId, employees, roles, restaurants, recei
         // Role: "Função: CARGO NAME"
         const funcLabelMatch = text.match(/Fun[çc][aã]o:\s*([A-ZÁÉÍÓÚÃÕÂÊÎÔÛÇÀÜ][A-ZÁÉÍÓÚÃÕÂÊÎÔÛÇÀÜa-záéíóúãõâêîôûçàü\s()]{1,40}?)(?=\s{2,}|CPF|CBO|PIS|RUA|$)/);
         if (funcLabelMatch) extractedRole = funcLabelMatch[1].trim();
+
+        // DEBUG
+        console.log(`[PDF p.${p}] CPF:"${cpfDigitsInText}" fp:"${fingerprint}" matched:"${matchedEmp?.name ?? "NONE"}" name:"${text.match(/Nome\s+do\s+Colaborador\s+(.{0,35})/)?.[1]?.trim() ?? "?"}"`);
 
         const viewport = page.getViewport({ scale: 1.5 });
         const canvas = document.createElement("canvas");
