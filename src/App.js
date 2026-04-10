@@ -33,6 +33,7 @@ const DAY_VACATION  = "vac";    // férias
 const DAY_FAULT_J   = "faultj"; // falta justificada
 const DAY_FAULT_U   = "faultu"; // falta injustificada
 
+// eslint-disable-next-line no-unused-vars
 const DAY_LABELS = {
   [DAY_OFF]:      { label: "Folga",          color: "#e74c3c" },
   [DAY_COMP]:     { label: "Compensação",    color: "#3b82f6" },
@@ -41,8 +42,8 @@ const DAY_LABELS = {
   [DAY_FAULT_U]:  { label: "Falta Injust.",  color: "#ef4444" },
 };
 // Days that count for gorjeta
-const DAYS_EARN_TIP = new Set([DAY_COMP]); // comp earns tip; work (undefined) also earns
-// Days that block tip entirely
+const DAYS_EARN_TIP = new Set([DAY_COMP]);
+// eslint-disable-next-line no-unused-vars
 const DAYS_NO_TIP   = new Set([DAY_OFF, DAY_VACATION, DAY_FAULT_J, DAY_FAULT_U]);
 
 // Division mode constants
