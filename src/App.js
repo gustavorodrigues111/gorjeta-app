@@ -875,7 +875,6 @@ function ReceibosManagerTab({ restaurantId, employees, receipts, onUpdate }) {
       {months.length === 0 && <p style={{color:"#555",textAlign:"center"}}>Nenhum recibo importado.</p>}
       {months.map(m => {
         const mReceipts = myReceipts.filter(r => r.month === m && !r.unmatched);
-        const [expanded, setExpanded] = [true, ()=>{}]; // always expanded for now
         const pag = mReceipts.filter(r=>r.type==="pagamento");
         const adi = mReceipts.filter(r=>r.type==="adiantamento");
         // Format month display
@@ -1278,13 +1277,14 @@ function EmployeePortal({ employees, roles, tips, schedules, restaurants, commun
           <FaleDpTab empId={empId} emp={emp} restaurantId={emp?.restaurantId} dpMessages={dpMessages} onUpdate={onUpdate} />
         )}
 
+        {tab === "recibos" && (
+          <ReceibosEmployeeTab empId={empId} restaurantId={emp?.restaurantId} receipts={receipts ?? []} />
+        )}
+
       </div>
     </div>
   );
 }
-
-//
-// RESTAURANT PANEL (shared by manager and super manager, with permission guard)
 //
 //
 function RoleSpreadsheet({ restRoles, rid, roles, onUpdate }) {
