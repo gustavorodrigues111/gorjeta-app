@@ -30,11 +30,15 @@ const TAX = 0.33;
 const DAY_OFF = "off";
 const DAY_COMP = "comp";
 
+// Division mode constants
+const MODE_AREA_POINTS = "area_points"; // default: split by area % then by points within area
+const MODE_GLOBAL_POINTS = "global_points"; // split only by total points across all employees
+
 // ─── Storage keys (all data scoped by restaurantId where relevant) ─────────────
 const K = {
   superManagers: "v4:superManagers",   // [{id, name, cpf, pin}]
   managers:      "v4:managers",        // [{id, name, cpf, pin, restaurantIds:[], perms:{tips,schedule}}]
-  restaurants:   "v4:restaurants",     // [{id, name, cnpj, address}]
+  restaurants:   "v4:restaurants",     // [{id, name, cnpj, address, divisionMode}]
   employees:     "v4:employees",       // [{id, restaurantId, name, cpf, pin, roleId, admission}]
   roles:         "v4:roles",           // [{id, restaurantId, name, area, points}]
   tips:          "v4:tips",            // [{id, restaurantId, employeeId, date, monthKey, ...}]
@@ -465,32 +469,52 @@ function RestaurantPanel({ restaurant, employees, roles, tips, splits, schedules
     if (!total || isNaN(total) || total <= 0) return 0;
     const td = new Date(tipDate + "T12:00:00");
     const tKey = monthKey(td.getFullYear(), td.getMonth());
-    const tSplit = splits?.[rid]?.[tKey] ?? DEFAULT_SPLIT;
     const totalTaxAmt = total * TAX;
     const toDistribute = total - totalTaxAmt;
-    const empsByArea = {};
-    AREAS.forEach(a => { empsByArea[a] = []; });
-    restEmps.forEach(emp => {
-      const r = restRoles.find(r => r.id === emp.roleId);
-      if (!r || (emp.admission && emp.admission > tipDate)) return;
-      empsByArea[r.area].push({ ...emp, points: parseFloat(r.points) || 1 });
-    });
     const newTips = [];
-    AREAS.forEach(area => {
-      const areaPool = toDistribute * (tSplit[area] / 100);
-      const emps = empsByArea[area];
-      const totalPoints = emps.reduce((a, e) => a + e.points, 0);
-      if (!totalPoints) return;
-      emps.forEach(emp => {
-        const myGross    = total * (tSplit[area] / 100) * (emp.points / totalPoints);
-        const myTaxShare = totalTaxAmt * (tSplit[area] / 100) * (emp.points / totalPoints);
+    const mode = restaurant.divisionMode ?? MODE_AREA_POINTS;
+
+    const activeEmps = restEmps.filter(emp => {
+      const r = restRoles.find(r => r.id === emp.roleId);
+      return r && (!emp.admission || emp.admission <= tipDate);
+    }).map(emp => ({ ...emp, points: parseFloat(restRoles.find(r => r.id === emp.roleId)?.points) || 1, area: restRoles.find(r => r.id === emp.roleId)?.area }));
+
+    if (mode === MODE_GLOBAL_POINTS) {
+      // Mode 2: divide by total points of all employees, no area split
+      const totalPoints = activeEmps.reduce((a, e) => a + e.points, 0);
+      if (!totalPoints) return 0;
+      activeEmps.forEach(emp => {
+        const myGross    = total * (emp.points / totalPoints);
+        const myTaxShare = totalTaxAmt * (emp.points / totalPoints);
         newTips.push({
           id: `${Date.now()}-${emp.id}-${Math.random().toString(36).slice(2,6)}`,
           restaurantId: rid, employeeId: emp.id, date: tipDate, monthKey: tKey,
-          poolTotal: total, areaPool, area, myShare: myGross, myTax: myTaxShare, myNet: myGross - myTaxShare, note: tipNote,
+          poolTotal: total, areaPool: toDistribute, area: emp.area ?? "—",
+          myShare: myGross, myTax: myTaxShare, myNet: myGross - myTaxShare, note: tipNote,
         });
       });
-    });
+    } else {
+      // Mode 1 (default): split by area % then by points within area
+      const tSplit = splits?.[rid]?.[tKey] ?? DEFAULT_SPLIT;
+      const empsByArea = {};
+      AREAS.forEach(a => { empsByArea[a] = []; });
+      activeEmps.forEach(emp => { if (emp.area) empsByArea[emp.area].push(emp); });
+      AREAS.forEach(area => {
+        const areaPool = toDistribute * (tSplit[area] / 100);
+        const emps = empsByArea[area];
+        const totalPoints = emps.reduce((a, e) => a + e.points, 0);
+        if (!totalPoints) return;
+        emps.forEach(emp => {
+          const myGross    = total * (tSplit[area] / 100) * (emp.points / totalPoints);
+          const myTaxShare = totalTaxAmt * (tSplit[area] / 100) * (emp.points / totalPoints);
+          newTips.push({
+            id: `${Date.now()}-${emp.id}-${Math.random().toString(36).slice(2,6)}`,
+            restaurantId: rid, employeeId: emp.id, date: tipDate, monthKey: tKey,
+            poolTotal: total, areaPool, area, myShare: myGross, myTax: myTaxShare, myNet: myGross - myTaxShare, note: tipNote,
+          });
+        });
+      });
+    }
     onUpdate("tips", [...tips, ...newTips]);
     setTipTotal(""); setTipNote("");
     return newTips.length;
@@ -614,12 +638,26 @@ function RestaurantPanel({ restaurant, employees, roles, tips, splits, schedules
                       <div style={{ display:"flex",justifyContent:"space-between",color:"#aaa",marginBottom:4 }}><span>Total bruto</span><span style={{color:"#fff"}}>{fmt(total)}</span></div>
                       <div style={{ display:"flex",justifyContent:"space-between",color:"#aaa",marginBottom:4 }}><span>Retenção (33%)</span><span style={{color:"#e74c3c"}}>-{fmt(tax)}</span></div>
                       <div style={{ display:"flex",justifyContent:"space-between",color:"#aaa",borderTop:"1px solid #2a2a2a",paddingTop:6,marginTop:4,marginBottom:10 }}><span>A distribuir</span><span style={{color:ac,fontWeight:700}}>{fmt(total-tax)}</span></div>
-                      {AREAS.map(a => {
-                        const emps = restEmps.filter(e => restRoles.find(r=>r.id===e.roleId)?.area===a && (!e.admission||e.admission<=tipDate));
-                        if (!emps.length) return null;
-                        const pts = emps.reduce((s,e)=>s+(parseFloat(restRoles.find(r=>r.id===e.roleId)?.points)||1),0);
-                        return <div key={a} style={{display:"flex",justifyContent:"space-between",color:"#aaa",marginBottom:2}}><span style={{color:AREA_COLORS[a]}}>{a} ({tSplit[a]}%)</span><span>{fmt((total-tax)*(tSplit[a]/100))} · {emps.length} emp · {pts}pt</span></div>;
-                      })}
+                      {(() => {
+                        const mode = restaurant.divisionMode ?? MODE_AREA_POINTS;
+                        const activeEmps = restEmps.filter(e => {
+                          const r = restRoles.find(r=>r.id===e.roleId);
+                          return r && (!e.admission||e.admission<=tipDate);
+                        });
+                        if (mode === MODE_GLOBAL_POINTS) {
+                          const totalPts = activeEmps.reduce((s,e)=>s+(parseFloat(restRoles.find(r=>r.id===e.roleId)?.points)||1),0);
+                          return <div style={{color:"#aaa",fontSize:12}}>
+                            <span style={{color:"#f5c842"}}>Pontos Global</span> · {activeEmps.length} emp · {totalPts}pt total
+                            <div style={{marginTop:4,color:"#555"}}>Cada ponto vale: {fmt((total-tax)/totalPts)}</div>
+                          </div>;
+                        }
+                        return AREAS.map(a => {
+                          const emps = activeEmps.filter(e => restRoles.find(r=>r.id===e.roleId)?.area===a);
+                          if (!emps.length) return null;
+                          const pts = emps.reduce((s,e)=>s+(parseFloat(restRoles.find(r=>r.id===e.roleId)?.points)||1),0);
+                          return <div key={a} style={{display:"flex",justifyContent:"space-between",color:"#aaa",marginBottom:2}}><span style={{color:AREA_COLORS[a]}}>{a} ({tSplit[a]}%)</span><span>{fmt((total-tax)*(tSplit[a]/100))} · {emps.length} emp · {pts}pt</span></div>;
+                        });
+                      })()}
                     </div>
                   );
                 })()}
@@ -720,7 +758,27 @@ function RestaurantPanel({ restaurant, employees, roles, tips, splits, schedules
         {tab === "config" && (
           <div>
             <div style={{...S.card,marginBottom:20}}>
+              <p style={{color:ac,fontSize:14,fontWeight:700,margin:"0 0 8px"}}>Modalidade de Divisão</p>
+              <p style={{color:"#555",fontSize:12,marginBottom:14}}>Define como a gorjeta é dividida entre os empregados.</p>
+              <div style={{display:"flex",flexDirection:"column",gap:10}}>
+                {[[MODE_AREA_POINTS,"🏷️ Áreas + Pontos","Divide por área (%) e depois por pontos dentro de cada área"],[MODE_GLOBAL_POINTS,"⚡ Pontos Global","Divide diretamente pelos pontos de todos os empregados, sem separação por área"]].map(([mode,label,desc])=>{
+                  const selected = (restaurant.divisionMode ?? MODE_AREA_POINTS) === mode;
+                  return (
+                    <button key={mode} onClick={()=>{
+                      const updated = restaurants.map(r=>r.id===rid?{...r,divisionMode:mode}:r);
+                      onUpdate("restaurants",updated);
+                      onUpdate("_toast","Modalidade salva!");
+                    }} style={{padding:"14px 16px",borderRadius:12,border:`2px solid ${selected?ac:"#2a2a2a"}`,background:selected?ac+"11":"transparent",cursor:"pointer",textAlign:"left",fontFamily:"DM Mono,monospace"}}>
+                      <div style={{color:selected?ac:"#fff",fontWeight:700,fontSize:14}}>{label}</div>
+                      <div style={{color:"#555",fontSize:12,marginTop:4}}>{desc}</div>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+            <div style={{...S.card,marginBottom:20}}>
               <p style={{color:ac,fontSize:14,fontWeight:700,margin:"0 0 4px"}}>Distribuição por Área</p>
+              <p style={{color:"#555",fontSize:11,margin:"0 0 14px"}}>(Usado apenas na modalidade Áreas + Pontos)</p>
               <div style={{marginBottom:14}}><MonthNav year={year} month={month} onChange={(y,m)=>{setYear(y);setMonth(m);setSplitForm(null);}}/></div>
               {splitForm ? (
                 <div>
