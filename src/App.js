@@ -2808,6 +2808,45 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                   <span style={{color:"var(--text2)",fontSize:12,padding:"6px 8px",background:"var(--card-bg)",borderRadius:8,whiteSpace:"nowrap"}}>{monthLabel(year,month)}</span>
                   <button onClick={()=>{setYear(month===11?year+1:year);setMonth(month===11?0:month+1);}} style={{...S.btnSecondary,padding:"6px 10px",fontSize:13}}>›</button>
                 </div>
+
+                {/* Pre-fill contract days off */}
+                <button onClick={()=>{
+                  const emps = areaEmps;
+                  if (!emps.length) return;
+                  const daysInMonth = new Date(year, month+1, 0).getDate();
+                  let newSchedules = { ...schedules };
+                  let count = 0;
+                  emps.forEach(emp => {
+                    const empScheds = data?.workSchedules?.[rid]?.[emp.id] ?? [];
+                    const currentSched = empScheds[empScheds.length - 1];
+                    if (!currentSched) return;
+                    // Days WITHOUT a shift = folga fixa (dias sem entrada/saída)
+                    const folgaDays = [0,1,2,3,4,5,6].filter(d => !currentSched.days[d]?.in || !currentSched.days[d]?.out);
+                    if (!folgaDays.length) return;
+                    const empDayMap = { ...(newSchedules?.[rid]?.[mk]?.[emp.id] ?? {}) };
+                    for (let d = 1; d <= daysInMonth; d++) {
+                      const date = `${year}-${String(month+1).padStart(2,"0")}-${String(d).padStart(2,"0")}`;
+                      const weekday = new Date(date+"T12:00:00").getDay();
+                      // Only fill if day not already set
+                      if (!empDayMap[date] && folgaDays.includes(weekday)) {
+                        empDayMap[date] = DAY_OFF;
+                        count++;
+                      }
+                    }
+                    newSchedules = {
+                      ...newSchedules,
+                      [rid]: { ...(newSchedules?.[rid]??{}), [mk]: { ...(newSchedules?.[rid]?.[mk]??{}), [emp.id]: empDayMap } }
+                    };
+                  });
+                  if (count > 0) {
+                    onUpdate("schedules", newSchedules);
+                    onUpdate("_toast", `✅ ${count} folga(s) do contrato preenchidas`);
+                  } else {
+                    onUpdate("_toast", "Nenhuma folga nova para preencher (dias já marcados ou sem horário cadastrado)");
+                  }
+                }} style={{padding:"8px 12px",borderRadius:10,border:"1px solid #e74c3c44",background:"transparent",color:"#e74c3c",cursor:"pointer",fontFamily:"DM Mono,monospace",fontSize:12,whiteSpace:"nowrap"}}>
+                  📅 Folgas do contrato
+                </button>
                 <button onClick={async () => {
                   await loadScript("https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js");
                   await loadScript("https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js");
