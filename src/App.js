@@ -79,6 +79,7 @@ const K = {
   commAcks:      "v4:commAcks",       // {commId: {empId: isoDate}}
   faq:           "v4:faq",            // {restaurantId: [{id,q,a}]}
   dpMessages:    "v4:dpMessages",     // [{id,restaurantId,empId|null,name|null,category,body,date,read}]
+  receipts:      "v4:receipts",       // [{id,restaurantId,empId,empName,month,type,dataUrl,uploadedAt}]
 };
 
 //
@@ -680,7 +681,219 @@ function DpManagerTab({ restaurantId, dpMessages, onUpdate }) {
   );
 }
 
-function EmployeePortal({ employees, roles, tips, schedules, restaurants, communications, commAcks, faq, dpMessages, onBack, onUpdateEmployee, onUpdate }) {
+// ── Recibos Manager Tab ──────────────────────────────────────────────────────
+function ReceibosManagerTab({ restaurantId, employees, receipts, onUpdate }) {
+  const restEmps = employees.filter(e => e.restaurantId === restaurantId && !e.inactive);
+  const [uploading, setUploading] = useState(false);
+  const [progress, setProgress] = useState("");
+  const [selMonth, setSelMonth] = useState(() => {
+    const now = new Date();
+    return `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,"0")}`;
+  });
+  const [type, setType] = useState("pagamento");
+  const ac = "#f5c842";
+
+  async function handleUpload(e) {
+    const file = e.target.files[0];
+    if (!file) return;
+    setUploading(true);
+    setProgress("Carregando PDF...");
+
+    try {
+      // Load pdf.js
+      if (!window.pdfjsLib) {
+        await new Promise((res, rej) => {
+          const s = document.createElement("script");
+          s.src = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js";
+          s.onload = res; s.onerror = rej;
+          document.head.appendChild(s);
+        });
+        window.pdfjsLib.GlobalWorkerOptions.workerSrc =
+          "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+      }
+
+      const arrayBuffer = await file.arrayBuffer();
+      const pdf = await window.pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+      const numPages = pdf.numPages;
+      setProgress(`Lendo ${numPages} páginas...`);
+
+      const newReceipts = [];
+      const matched = [];
+      const unmatched = [];
+
+      for (let p = 1; p <= numPages; p++) {
+        setProgress(`Processando página ${p} de ${numPages}...`);
+        const page = await pdf.getPage(p);
+        const textContent = await page.getTextContent();
+        const text = textContent.items.map(i => i.str).join(" ");
+
+        // Try to match to an employee by CPF first, then by name
+        let matchedEmp = null;
+        for (const emp of restEmps) {
+          if (emp.cpf) {
+            const cleanCpf = emp.cpf.replace(/\D/g, "");
+            if (cleanCpf.length >= 11 && text.replace(/\D/g,"").includes(cleanCpf)) {
+              matchedEmp = emp;
+              break;
+            }
+          }
+        }
+        if (!matchedEmp) {
+          for (const emp of restEmps) {
+            const firstName = emp.name.split(" ")[0].toUpperCase();
+            if (firstName.length >= 3 && text.toUpperCase().includes(firstName)) {
+              matchedEmp = emp;
+              break;
+            }
+          }
+        }
+
+        // Render page to canvas to get image
+        const viewport = page.getViewport({ scale: 1.5 });
+        const canvas = document.createElement("canvas");
+        canvas.width = viewport.width;
+        canvas.height = viewport.height;
+        await page.render({ canvasContext: canvas.getContext("2d"), viewport }).promise;
+        const dataUrl = canvas.toDataURL("image/jpeg", 0.8);
+
+        if (matchedEmp) {
+          newReceipts.push({
+            id: `${Date.now()}-${p}-${Math.random().toString(36).slice(2,5)}`,
+            restaurantId, empId: matchedEmp.id, empName: matchedEmp.name,
+            month: selMonth, type, dataUrl, uploadedAt: new Date().toISOString(), page: p
+          });
+          matched.push(`p.${p} → ${matchedEmp.name}`);
+        } else {
+          unmatched.push(`p.${p} — não identificado`);
+        }
+      }
+
+      // Remove old receipts for same month+type+restaurant and add new
+      const existing = receipts.filter(r =>
+        !(r.restaurantId === restaurantId && r.month === selMonth && r.type === type)
+      );
+      onUpdate("receipts", [...existing, ...newReceipts]);
+      setProgress(`✅ ${matched.length} recibos importados!${unmatched.length ? `\n⚠️ ${unmatched.length} páginas não identificadas` : ""}`);
+    } catch (err) {
+      setProgress(`❌ Erro: ${err.message}`);
+    }
+    setUploading(false);
+    e.target.value = "";
+  }
+
+  const myReceipts = receipts.filter(r => r.restaurantId === restaurantId);
+  const months = [...new Set(myReceipts.map(r => r.month))].sort().reverse();
+
+  return (
+    <div style={{fontFamily:"DM Mono,monospace"}}>
+      <div style={{...S.card, marginBottom:20}}>
+        <p style={{color:ac,fontSize:14,fontWeight:700,margin:"0 0 14px"}}>📤 Importar Recibos</p>
+        <div style={{display:"flex",flexDirection:"column",gap:10}}>
+          <div>
+            <label style={S.label}>Mês de referência</label>
+            <input type="month" value={selMonth} onChange={e=>setSelMonth(e.target.value)} style={S.input}/>
+          </div>
+          <div>
+            <label style={S.label}>Tipo</label>
+            <div style={{display:"flex",gap:8}}>
+              {[["pagamento","💰 Pagamento"],["adiantamento","💵 Adiantamento"]].map(([v,l])=>(
+                <button key={v} onClick={()=>setType(v)} style={{flex:1,padding:"10px",borderRadius:10,border:`1px solid ${type===v?ac:"#2a2a2a"}`,background:type===v?ac+"22":"transparent",color:type===v?ac:"#555",cursor:"pointer",fontFamily:"DM Mono,monospace",fontSize:13}}>
+                  {l}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div>
+            <label style={S.label}>Arquivo PDF</label>
+            <input type="file" accept=".pdf" onChange={handleUpload} disabled={uploading}
+              style={{...S.input, cursor:"pointer"}}/>
+          </div>
+          {progress && (
+            <div style={{background:"#111",borderRadius:8,padding:"10px 12px",fontSize:12,color:progress.startsWith("✅")?"#10b981":progress.startsWith("❌")?"#e74c3c":"#aaa",whiteSpace:"pre-line"}}>
+              {progress}
+            </div>
+          )}
+        </div>
+      </div>
+
+      <p style={{color:"#555",fontSize:12,marginBottom:12}}>Recibos importados: {myReceipts.length}</p>
+      {months.map(m => {
+        const mReceipts = myReceipts.filter(r => r.month === m);
+        return (
+          <div key={m} style={{...S.card,marginBottom:12}}>
+            <p style={{color:ac,fontWeight:700,margin:"0 0 10px",fontSize:13}}>{m}</p>
+            {["pagamento","adiantamento"].map(t => {
+              const tR = mReceipts.filter(r=>r.type===t);
+              if(!tR.length) return null;
+              return (
+                <div key={t} style={{marginBottom:8}}>
+                  <p style={{color:"#555",fontSize:11,margin:"0 0 6px"}}>{t==="pagamento"?"💰 Pagamento":"💵 Adiantamento"} ({tR.length})</p>
+                  {tR.map(r=>(
+                    <div key={r.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"4px 0",borderBottom:"1px solid #1a1a1a"}}>
+                      <span style={{color:"#aaa",fontSize:12}}>{r.empName}</span>
+                      <button onClick={()=>{onUpdate("receipts",receipts.filter(x=>x.id!==r.id));}} style={{background:"none",border:"1px solid #e74c3c33",borderRadius:6,color:"#e74c3c",cursor:"pointer",fontSize:11,padding:"3px 8px",fontFamily:"DM Mono,monospace"}}>✕</button>
+                    </div>
+                  ))}
+                </div>
+              );
+            })}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+// ── Recibos Employee Tab ──────────────────────────────────────────────────────
+function ReceibosEmployeeTab({ empId, restaurantId, receipts }) {
+  const myReceipts = receipts
+    .filter(r => r.empId === empId && r.restaurantId === restaurantId)
+    .sort((a,b) => b.month.localeCompare(a.month));
+  const months = [...new Set(myReceipts.map(r => r.month))];
+  const [selReceipt, setSelReceipt] = useState(null);
+  const ac = "#f5c842";
+
+  if (selReceipt) {
+    return (
+      <div>
+        <button onClick={()=>setSelReceipt(null)} style={{...S.btnSecondary,marginBottom:16}}>← Voltar</button>
+        <div style={{color:"#fff",fontWeight:700,marginBottom:4}}>{selReceipt.empName}</div>
+        <div style={{color:"#555",fontSize:12,marginBottom:12}}>{selReceipt.month} · {selReceipt.type==="pagamento"?"💰 Pagamento":"💵 Adiantamento"}</div>
+        <img src={selReceipt.dataUrl} alt="Recibo" style={{width:"100%",borderRadius:10,border:"1px solid #2a2a2a"}}/>
+        <a href={selReceipt.dataUrl} download={`recibo_${selReceipt.month}_${selReceipt.type}.jpg`}
+          style={{display:"block",marginTop:12,...S.btnPrimary,textAlign:"center",textDecoration:"none",padding:"12px",borderRadius:12,background:ac,color:"#111",fontWeight:700,fontFamily:"DM Mono,monospace",fontSize:14}}>
+          ⬇️ Baixar Recibo
+        </a>
+      </div>
+    );
+  }
+
+  if (myReceipts.length === 0) return (
+    <p style={{color:"#555",textAlign:"center",marginTop:20,fontSize:14}}>Nenhum recibo disponível ainda.</p>
+  );
+
+  return (
+    <div>
+      {months.map(m => {
+        const mR = myReceipts.filter(r => r.month === m);
+        return (
+          <div key={m} style={{...S.card,marginBottom:12}}>
+            <p style={{color:ac,fontWeight:700,margin:"0 0 10px",fontSize:13}}>{m}</p>
+            {mR.map(r=>(
+              <button key={r.id} onClick={()=>setSelReceipt(r)}
+                style={{width:"100%",display:"flex",justifyContent:"space-between",alignItems:"center",padding:"12px",borderRadius:10,border:"1px solid #2a2a2a",background:"#111",cursor:"pointer",fontFamily:"DM Mono,monospace",marginBottom:6}}>
+                <span style={{color:"#fff",fontSize:13}}>{r.type==="pagamento"?"💰 Recibo de Pagamento":"💵 Recibo de Adiantamento"}</span>
+                <span style={{color:"#555",fontSize:11}}>Ver →</span>
+              </button>
+            ))}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function EmployeePortal({ employees, roles, tips, schedules, restaurants, communications, commAcks, faq, dpMessages, receipts, onBack, onUpdateEmployee, onUpdate }) {
   const [cpf, setCpf] = useState("");
   const [pin, setPin] = useState("");
   const [err, setErr] = useState("");
@@ -715,7 +928,7 @@ function EmployeePortal({ employees, roles, tips, schedules, restaurants, commun
   const hasPending = pendingComms.length > 0;
 
   // Force comunicados tab if there are pending
-  const TABS = [["comunicados","📢 Comunicados"],["escala","📅 Escala"],["extrato","💸 Gorjeta"],["faq","❓ FAQ"],["dp","💬 Fale com DP"]];
+  const TABS = [["comunicados","📢 Comunicados"],["escala","📅 Escala"],["extrato","💸 Gorjeta"],["recibos","📄 Recibos"],["faq","❓ FAQ"],["dp","💬 Fale com DP"]];
 
   function handleTabChange(id) {
     if (hasPending && id !== "comunicados") {
@@ -1401,6 +1614,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
     canComms  && ["comunicados",  "📢 Comunicados"],
     canFaq    && ["faq",          "❓ FAQ"],
     canDp     && ["dp",           "💬 Fale com DP"],
+    (canTips || isSuperManager) && ["recibos", "📄 Recibos"],
     (canTips || isSuperManager) && ["config", "⚙️ Config"],
   ].filter(Boolean);
 
@@ -1708,6 +1922,11 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
         {/* FALE COM DP */}
         {tab === "dp" && (
           <DpManagerTab restaurantId={rid} dpMessages={data?.dpMessages ?? []} onUpdate={onUpdate} />
+        )}
+
+        {/* RECIBOS */}
+        {tab === "recibos" && (
+          <ReceibosManagerTab restaurantId={rid} employees={employees} receipts={data?.receipts ?? []} onUpdate={onUpdate} />
         )}
 
         {/* CONFIG */}
@@ -2211,26 +2430,27 @@ export default function App() {
   const [commAcks,      setCommAcks]      = useState({});
   const [faq,           setFaq]           = useState({});
   const [dpMessages,    setDpMessages]    = useState([]);
+  const [receipts,      setReceipts]      = useState([]);
 
   useEffect(() => {
     (async () => {
       const vals = await Promise.all(Object.values(K).map(load));
       const keys = Object.keys(K);
-      const map = { superManagers:setSuperManagers, managers:setManagers, restaurants:setRestaurants, employees:setEmployees, roles:setRoles, tips:setTips, splits:setSplits, schedules:setSchedules, communications:setCommunications, commAcks:setCommAcks, faq:setFaq, dpMessages:setDpMessages };
+      const map = { superManagers:setSuperManagers, managers:setManagers, restaurants:setRestaurants, employees:setEmployees, roles:setRoles, tips:setTips, splits:setSplits, schedules:setSchedules, communications:setCommunications, commAcks:setCommAcks, faq:setFaq, dpMessages:setDpMessages, receipts:setReceipts };
       keys.forEach((k, i) => { if (vals[i]) map[k]?.(vals[i]); });
       setLoaded(true);
     })();
   }, []);
 
-  const data = { superManagers, managers, restaurants, employees, roles, tips, splits, schedules, communications, commAcks, faq, dpMessages };
+  const data = { superManagers, managers, restaurants, employees, roles, tips, splits, schedules, communications, commAcks, faq, dpMessages, receipts };
 
   async function handleUpdate(field, value) {
     if (field === "_toast") { setToast(value); return; }
-    const setters = { superManagers:setSuperManagers, managers:setManagers, restaurants:setRestaurants, employees:setEmployees, roles:setRoles, tips:setTips, splits:setSplits, schedules:setSchedules, communications:setCommunications, commAcks:setCommAcks, faq:setFaq, dpMessages:setDpMessages };
-    const keys    = { superManagers:K.superManagers, managers:K.managers, restaurants:K.restaurants, employees:K.employees, roles:K.roles, tips:K.tips, splits:K.splits, schedules:K.schedules, communications:K.communications, commAcks:K.commAcks, faq:K.faq, dpMessages:K.dpMessages };
+    const setters = { superManagers:setSuperManagers, managers:setManagers, restaurants:setRestaurants, employees:setEmployees, roles:setRoles, tips:setTips, splits:setSplits, schedules:setSchedules, communications:setCommunications, commAcks:setCommAcks, faq:setFaq, dpMessages:setDpMessages, receipts:setReceipts };
+    const keys    = { superManagers:K.superManagers, managers:K.managers, restaurants:K.restaurants, employees:K.employees, roles:K.roles, tips:K.tips, splits:K.splits, schedules:K.schedules, communications:K.communications, commAcks:K.commAcks, faq:K.faq, dpMessages:K.dpMessages, receipts:K.receipts };
     setters[field]?.(value);
     await save(keys[field], value);
-    const labels = { superManagers:"Super Gestores atualizados", managers:"Gestores atualizados", restaurants:"Restaurantes atualizados", employees:"Empregados atualizados", roles:"Cargos atualizados", tips:"Gorjetas atualizadas", splits:"Percentuais salvos", schedules:"Escala atualizada", communications:"Comunicados atualizados", commAcks:"Ciências atualizadas", faq:"FAQ atualizado", dpMessages:"Mensagem enviada" };
+    const labels = { superManagers:"Super Gestores atualizados", managers:"Gestores atualizados", restaurants:"Restaurantes atualizados", employees:"Empregados atualizados", roles:"Cargos atualizados", tips:"Gorjetas atualizadas", splits:"Percentuais salvos", schedules:"Escala atualizada", communications:"Comunicados atualizados", commAcks:"Ciências atualizadas", faq:"FAQ atualizado", dpMessages:"Mensagem enviada", receipts:"Recibos atualizados" };
     setToast(labels[field] ?? "Salvo!");
   }
 
@@ -2253,7 +2473,7 @@ export default function App() {
       )}
       {view === "super"    && <SuperManagerPortal data={data} onUpdate={handleUpdate} onBack={doLogout} currentUser={currentUser} />}
       {view === "manager"  && <ManagerPortal manager={currentUser} data={data} onUpdate={handleUpdate} onBack={doLogout} />}
-      {view === "employee" && <EmployeePortal employees={employees} roles={roles} tips={tips} schedules={schedules} restaurants={restaurants} communications={communications} commAcks={commAcks} faq={faq} dpMessages={dpMessages} onBack={()=>setView("home")} onUpdateEmployee={emp=>{const next=employees.map(e=>e.id===emp.id?emp:e);handleUpdate("employees",next);}} onUpdate={handleUpdate} />}
+      {view === "employee" && <EmployeePortal employees={employees} roles={roles} tips={tips} schedules={schedules} restaurants={restaurants} communications={communications} commAcks={commAcks} faq={faq} dpMessages={dpMessages} receipts={receipts} onBack={()=>setView("home")} onUpdateEmployee={emp=>{const next=employees.map(e=>e.id===emp.id?emp:e);handleUpdate("employees",next);}} onUpdate={handleUpdate} />}
       <Toast msg={toast} onClose={()=>setToast("")} />
     </>
   );
