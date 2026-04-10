@@ -1587,7 +1587,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
   const [tipDate, setTipDate]   = useState(today());
   const [tipTotal, setTipTotal] = useState("");
   const [tipNote, setTipNote]   = useState("");
-  const [showTipTable, setShowTipTable] = useState(false);
+  const [showTipTable, setShowTipTable] = useState(true);
   const [tipRows, setTipRows]   = useState([{date:today(),total:"",note:""}]);
   const [showRecalc, setShowRecalc] = useState(false);
   const [splitForm, setSplitForm]         = useState(null);
@@ -1725,11 +1725,14 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
   }
 
   function applyFaultPenalty(tKey, allTips) {
-    // Find Producao employees with falta injustificada this month
+    // Find employees with falta injustificada this month
     const monthSchedule = schedules?.[rid]?.[tKey] ?? {};
     const penaltyEmps = restEmps.filter(emp => {
       const r = restRoles.find(r => r.id === emp.roleId);
-      if (!r || r.area !== "Produção") return false;
+      if (!r) return false;
+      // Producao has fixed 4%, others use configured rate
+      const rate = r.area === "Produção" ? 4 : (restaurant.faultPenalty?.[r.area] ?? 0);
+      if (rate <= 0) return false;
       const empDayMap = monthSchedule[emp.id] ?? {};
       return Object.values(empDayMap).some(s => s === DAY_FAULT_U);
     });
@@ -1744,17 +1747,15 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
       }, 0);
     if (!monthPool) return;
 
-    const penaltyAmount = monthPool * 0.04; // 4% of total monthly pool per fault
-
-    // Apply penalty: reduce net for each falta injustificada day
     const updated = allTips.map(t => {
       if (t.restaurantId !== rid || t.monthKey !== tKey) return t;
       const emp = penaltyEmps.find(e => e.id === t.employeeId);
       if (!emp) return t;
+      const r = restRoles.find(r => r.id === emp.roleId);
+      const rate = r?.area === "Produção" ? 4 : (restaurant.faultPenalty?.[r?.area] ?? 0);
       const empDayMap = monthSchedule[emp.id] ?? {};
       const faultDays = Object.values(empDayMap).filter(s => s === DAY_FAULT_U).length;
-      const totalPenalty = penaltyAmount * faultDays;
-      // Spread penalty across all tip entries for this employee this month
+      const totalPenalty = monthPool * (rate / 100) * faultDays;
       const empTipsCount = allTips.filter(x => x.restaurantId === rid && x.monthKey === tKey && x.employeeId === emp.id).length;
       const penaltyPerEntry = empTipsCount > 0 ? totalPenalty / empTipsCount : 0;
       return { ...t, myNet: Math.max(0, t.myNet - penaltyPerEntry), penalty: penaltyPerEntry };
@@ -1940,7 +1941,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
               <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
                 <p style={{ color: ac, fontSize: 14, margin: 0, fontWeight: 700 }}>+ Lançar Gorjeta</p>
                 <button onClick={()=>setShowTipTable(!showTipTable)} style={{...S.btnSecondary,fontSize:11,padding:"4px 10px"}}>
-                  {showTipTable ? "Modo simples" : "Modo tabela"}
+                  {showTipTable ? "Modo simples" : "Modo tabela (recomendado)"}
                 </button>
               </div>
 
@@ -2232,6 +2233,35 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                     </button>
                   );
                 })}
+              </div>
+            </div>
+            {/* Fault Penalty */}
+            <div style={{...S.card,marginBottom:20}}>
+              <p style={{color:ac,fontSize:14,fontWeight:700,margin:"0 0 6px"}}>Penalidade por Falta Injustificada</p>
+              <p style={{color:"#555",fontSize:12,marginBottom:14}}>% do pool mensal descontado por falta injustificada. Produção tem regra própria (sempre 4%). Configure as demais áreas abaixo.</p>
+              <div style={{display:"flex",flexDirection:"column",gap:10}}>
+                {AREAS.filter(a => a !== "Produção").map(area => {
+                  const current = restaurant.faultPenalty?.[area] ?? 0;
+                  return (
+                    <div key={area} style={{display:"flex",alignItems:"center",gap:10}}>
+                      <div style={{minWidth:80}}><AreaBadge area={area}/></div>
+                      <input type="number" min="0" max="20" step="0.5" value={current}
+                        onChange={e => {
+                          const val = parseFloat(e.target.value) || 0;
+                          const updated = restaurants.map(r => r.id===rid ? {...r, faultPenalty:{...(r.faultPenalty??{}), [area]: val}} : r);
+                          onUpdate("restaurants", updated);
+                        }}
+                        style={{...S.input, width:70, textAlign:"center"}}
+                      />
+                      <span style={{color:"#555",fontSize:13}}>% do pool mensal</span>
+                    </div>
+                  );
+                })}
+                <div style={{display:"flex",alignItems:"center",gap:10}}>
+                  <div style={{minWidth:80}}><AreaBadge area="Produção"/></div>
+                  <div style={{...S.input,width:70,textAlign:"center",color:"#555",background:"#0a0a0a",border:"1px solid #1a1a1a"}}>4%</div>
+                  <span style={{color:"#555",fontSize:12}}>fixo (regra Produção)</span>
+                </div>
               </div>
             </div>
             <div style={{...S.card,marginBottom:20}}>
