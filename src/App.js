@@ -764,7 +764,39 @@ function ReceibosManagerTab({ restaurantId, employees, receipts, onUpdate }) {
         }
         pageTexts.push(fingerprint);
 
-        // Try to match by CPF first, then by name
+        // Auto-detect month from text (e.g. "Março/2026", "03/2026", "Referente ao mês: Março 2026")
+        let detectedMonth = selMonth; // fallback to selected
+        const MONTHS_PT = {janeiro:"01",fevereiro:"02",março:"03",abril:"04",maio:"05",junho:"06",julho:"07",agosto:"08",setembro:"09",outubro:"10",novembro:"11",dezembro:"12"};
+        const textLower = text.toLowerCase();
+        // Try "Mês/Ano" or "Mês Ano" patterns
+        for (const [name, num] of Object.entries(MONTHS_PT)) {
+          const patterns = [
+            new RegExp(name + "[/\\s]+(\\d{4})","i"),
+            new RegExp("referente.*" + name + ".*?(\\d{4})","i"),
+            new RegExp("compet.*" + name + ".*?(\\d{4})","i"),
+          ];
+          for (const pat of patterns) {
+            const m = textLower.match(pat);
+            if (m) { detectedMonth = `${m[1]}-${num}`; break; }
+          }
+          if (detectedMonth !== selMonth) break;
+        }
+        // Try numeric pattern MM/YYYY after "competência" or "referente"
+        if (detectedMonth === selMonth) {
+          const numPat = text.match(/(?:competência|compet\.|referente|ref\.|mês)[:\s]+(\d{2})\/(\d{4})/i);
+          if (numPat) detectedMonth = `${numPat[2]}-${numPat[1]}`;
+        }
+
+        // Auto-detect type from text
+        let detectedType = type; // fallback to selected
+        const tLow = text.toLowerCase();
+        if (tLow.includes("adiantamento") || tLow.includes("antecipação") || tLow.includes("1ª parcela") || tLow.includes("1a parcela")) {
+          detectedType = "adiantamento";
+        } else if (tLow.includes("13") || tLow.includes("décimo") || tLow.includes("decimo")) {
+          detectedType = "13salario";
+        } else if (tLow.includes("salário") || tLow.includes("salario") || tLow.includes("pagamento") || tLow.includes("holerite") || tLow.includes("contra-cheque") || tLow.includes("contracheque")) {
+          detectedType = "pagamento";
+        }
         let matchedEmp = null;
         let extractedName = "";
         for (const emp of restEmps) {
@@ -799,7 +831,7 @@ function ReceibosManagerTab({ restaurantId, employees, receipts, onUpdate }) {
           empId: matchedEmp ? matchedEmp.id : null,
           empName: matchedEmp ? matchedEmp.name : (extractedName || `Página ${p} — não identificado`),
           unmatched: !matchedEmp,
-          month: selMonth, type, dataUrl,
+          month: detectedMonth, type: detectedType, dataUrl,
           uploadedAt: new Date().toISOString(), page: p
         });
       }
@@ -808,11 +840,16 @@ function ReceibosManagerTab({ restaurantId, employees, receipts, onUpdate }) {
       const unmatched = newReceipts.filter(r => r.unmatched).length;
       const skipped = numPages - newReceipts.length;
 
+      // Remove old receipts for same month+type combos found in this batch
+      const batchKeys = new Set(newReceipts.map(r => `${r.month}|${r.type}`));
       const existing = receipts.filter(r =>
-        !(r.restaurantId === restaurantId && r.month === selMonth && r.type === type)
+        !(r.restaurantId === restaurantId && batchKeys.has(`${r.month}|${r.type}`))
       );
       onUpdate("receipts", [...existing, ...newReceipts]);
-      setProgress(`✅ ${matched} identificados automaticamente.${skipped ? `\n📋 ${skipped} página(s) duplicada(s) ignorada(s).` : ""}${unmatched ? `\n⚠️ ${unmatched} página(s) não identificada(s) — associe manualmente abaixo.` : ""}`);
+
+      // Summary of detected months/types
+      const summary = [...new Set(newReceipts.map(r => `${r.month} · ${r.type==="pagamento"?"Pagamento":r.type==="adiantamento"?"Adiantamento":"13º Salário"}`))].join(", ");
+      setProgress(`✅ ${matched} identificados automaticamente.\n📅 Detectado: ${summary}${skipped ? `\n📋 ${skipped} duplicata(s) ignorada(s).` : ""}${unmatched ? `\n⚠️ ${unmatched} página(s) não identificada(s) — associe manualmente abaixo.` : ""}`);
     } catch (err) {
       setProgress(`❌ Erro: ${err.message}`);
     }
@@ -835,20 +872,21 @@ function ReceibosManagerTab({ restaurantId, employees, receipts, onUpdate }) {
   return (
     <div style={{fontFamily:"DM Mono,monospace"}}>
       <div style={{...S.card, marginBottom:20}}>
-        <p style={{color:ac,fontSize:14,fontWeight:700,margin:"0 0 14px"}}>📤 Importar Recibos</p>
+        <p style={{color:ac,fontSize:14,fontWeight:700,margin:"0 0 6px"}}>📤 Importar Recibos</p>
+        <p style={{color:"#555",fontSize:12,marginBottom:14}}>O sistema detecta mês e tipo automaticamente pelo PDF. Os campos abaixo são usados só se não conseguir detectar.</p>
         <div style={{display:"flex",flexDirection:"column",gap:10}}>
-          <div>
-            <label style={S.label}>Mês de referência</label>
-            <input type="month" value={selMonth} onChange={e=>setSelMonth(e.target.value)} style={S.input}/>
-          </div>
-          <div>
-            <label style={S.label}>Tipo</label>
-            <div style={{display:"flex",gap:8}}>
-              {[["pagamento","💰 Pagamento"],["adiantamento","💵 Adiantamento"]].map(([v,l])=>(
-                <button key={v} onClick={()=>setType(v)} style={{flex:1,padding:"10px",borderRadius:10,border:`1px solid ${type===v?ac:"#2a2a2a"}`,background:type===v?ac+"22":"transparent",color:type===v?ac:"#555",cursor:"pointer",fontFamily:"DM Mono,monospace",fontSize:13}}>
-                  {l}
-                </button>
-              ))}
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+            <div>
+              <label style={S.label}>Mês (fallback)</label>
+              <input type="month" value={selMonth} onChange={e=>setSelMonth(e.target.value)} style={S.input}/>
+            </div>
+            <div>
+              <label style={S.label}>Tipo (fallback)</label>
+              <select value={type} onChange={e=>setType(e.target.value)} style={{...S.input,cursor:"pointer"}}>
+                <option value="pagamento">💰 Pagamento</option>
+                <option value="adiantamento">💵 Adiantamento</option>
+                <option value="13salario">🎄 13º Salário</option>
+              </select>
             </div>
           </div>
           <div>
@@ -1010,7 +1048,7 @@ function ReceibosEmployeeTab({ empId, restaurantId, receipts }) {
             {mR.map(r=>(
               <button key={r.id} onClick={()=>setSelReceipt(r)}
                 style={{width:"100%",display:"flex",justifyContent:"space-between",alignItems:"center",padding:"12px",borderRadius:10,border:"1px solid #2a2a2a",background:"#111",cursor:"pointer",fontFamily:"DM Mono,monospace",marginBottom:6}}>
-                <span style={{color:"#fff",fontSize:13}}>{r.type==="pagamento"?"💰 Recibo de Pagamento":"💵 Recibo de Adiantamento"}</span>
+                <span style={{color:"#fff",fontSize:13}}>{r.type==="pagamento"?"💰 Recibo de Pagamento":r.type==="adiantamento"?"💵 Recibo de Adiantamento":"🎄 13º Salário"}</span>
                 <span style={{color:"#555",fontSize:11}}>Ver →</span>
               </button>
             ))}
