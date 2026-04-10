@@ -1939,9 +1939,9 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
           <div>
             <div style={{ ...S.card, marginBottom: 24 }}>
               <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
-                <p style={{ color: ac, fontSize: 14, margin: 0, fontWeight: 700 }}>+ Lançar Gorjeta</p>
+                <p style={{ color: ac, fontSize: 14, margin: 0, fontWeight: 700 }}>💸 Lançar Gorjeta</p>
                 <button onClick={()=>setShowTipTable(!showTipTable)} style={{...S.btnSecondary,fontSize:11,padding:"4px 10px"}}>
-                  {showTipTable ? "Modo simples" : "Modo tabela (recomendado)"}
+                  {showTipTable ? "Modo simples" : "Modo tabela"}
                 </button>
               </div>
 
@@ -1949,98 +1949,133 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
               <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
                 <div><label style={S.label}>Data</label><input type="date" value={tipDate} onChange={e => setTipDate(e.target.value)} style={S.input} /></div>
                 <div><label style={S.label}>Valor Total (R$)</label><input type="number" min="0" step="0.01" value={tipTotal} onChange={e => setTipTotal(e.target.value)} placeholder="Ex: 1500.00" style={S.input} /></div>
-                {tipTotal && !isNaN(parseFloat(tipTotal)) && (() => {
-                  const total = parseFloat(tipTotal);
-                  const taxRate = restaurant.taxRate ?? TAX;
-                  const tax = total * taxRate;
-                  const tSplit = splits?.[rid]?.[monthKey(new Date(tipDate+"T12:00:00").getFullYear(), new Date(tipDate+"T12:00:00").getMonth())] ?? DEFAULT_SPLIT;
-                  return (
-                    <div style={{ background: "#111", borderRadius: 10, padding: 12, fontSize: 12 }}>
-                      <div style={{ display:"flex",justifyContent:"space-between",color:"#aaa",marginBottom:4 }}><span>Total bruto</span><span style={{color:"#fff"}}>{fmt(total)}</span></div>
-                      <div style={{ display:"flex",justifyContent:"space-between",color:"#aaa",marginBottom:4 }}><span>Retenção ({Math.round(taxRate*100)}%)</span><span style={{color:"#e74c3c"}}>-{fmt(tax)}</span></div>
-                      <div style={{ display:"flex",justifyContent:"space-between",color:"#aaa",borderTop:"1px solid #2a2a2a",paddingTop:6,marginTop:4,marginBottom:10 }}><span>A distribuir</span><span style={{color:ac,fontWeight:700}}>{fmt(total-tax)}</span></div>
-                      {(() => {
-                        const mode = restaurant.divisionMode ?? MODE_AREA_POINTS;
-                        const previewTKey = monthKey(new Date(tipDate+"T12:00:00").getFullYear(), new Date(tipDate+"T12:00:00").getMonth());
-                        const getStatus = (empId) => schedules?.[rid]?.[previewTKey]?.[empId]?.[tipDate];
-                        const activeEmps = restEmps.filter(e => {
-                          const r = restRoles.find(r=>r.id===e.roleId);
-                          if (!r || (e.admission && e.admission > tipDate)) return false;
-                          const status = getStatus(e.id);
-                          if (!status) return true;
-                          if (status === DAY_COMP) return true;
-                          if (status === DAY_FAULT_J || status === DAY_FAULT_U) return false;
-                          if (status === DAY_VACATION) return false; // ferias = nao entra
-                          if (r.area === "Produção") return true; // producao entra em folga
-                          return false;
-                        });
-                        const excluded = restEmps.filter(e => {
-                          const r = restRoles.find(r=>r.id===e.roleId);
-                          if (!r || (e.admission && e.admission > tipDate)) return false;
-                          const status = getStatus(e.id);
-                          if (!status || status === DAY_COMP) return false;
-                          if (status === DAY_FAULT_J || status === DAY_FAULT_U) return true;
-                          if (status === DAY_VACATION) return true; // ferias exclui todos
-                          if (r.area === "Produção") return false; // producao nao excluida por folga
-                          return true;
-                        });
-                        return (<div>
-                          {excluded.length > 0 && <div style={{marginBottom:8,padding:"6px 8px",background:"#e74c3c11",borderRadius:8,border:"1px solid #e74c3c22"}}>
-                            <div style={{color:"#e74c3c",fontSize:11,marginBottom:4}}>Fora do rateio hoje:</div>
-                            {excluded.map(e => {
-                              const st = getStatus(e.id);
-                              const stLabels = {off:"Folga",vac:"Férias",faultj:"Falta Just.",faultu:"Falta Injust."};
-                              return <div key={e.id} style={{color:"#555",fontSize:11}}>{e.name} — {stLabels[st]??st}</div>;
-                            })}
-                          </div>}
-                          {mode === MODE_GLOBAL_POINTS ? (
-                            <div style={{color:"#aaa",fontSize:12}}>
-                              <span style={{color:"#f5c842"}}>Pontos Global</span> · {activeEmps.length} emp
-                              {activeEmps.length > 0 && <div style={{marginTop:4,color:"#555"}}>Cada ponto vale: {fmt((total-tax)/(activeEmps.reduce((s,e)=>s+(parseFloat(restRoles.find(r=>r.id===e.roleId)?.points)||1),0)||1))}</div>}
-                            </div>
-                          ) : AREAS.map(a => {
-                            const emps = activeEmps.filter(e => restRoles.find(r=>r.id===e.roleId)?.area===a);
-                            if (!emps.length) return null;
-                            const pts = emps.reduce((s,e)=>s+(parseFloat(restRoles.find(r=>r.id===e.roleId)?.points)||1),0);
-                            return <div key={a} style={{display:"flex",justifyContent:"space-between",color:"#aaa",marginBottom:2}}><span style={{color:AREA_COLORS[a]}}>{a} ({tSplit[a]}%)</span><span>{fmt((total-tax)*(tSplit[a]/100))} · {emps.length} emp · {pts}pt</span></div>;
-                          })}
-                        </div>);
-                      })()}
-                    </div>
-                  );
-                })()}
                 <div><label style={S.label}>Observação</label><input value={tipNote} onChange={e => setTipNote(e.target.value)} placeholder="Ex: Sábado à noite" style={S.input} /></div>
                 <button onClick={() => { const n = calcTip(); if (n > 0) onUpdate("_toast", `✅ Distribuído para ${n} empregados!`); }} style={S.btnPrimary}>Calcular e Distribuir</button>
               </div>
               ) : (
-              /* MODO TABELA */
-              <div>
-                <p style={{color:"#555",fontSize:12,marginBottom:10}}>Adicione múltiplos lançamentos de uma vez. Clique em + para nova linha.</p>
-                {/* Table header */}
-                <div style={{display:"grid",gridTemplateColumns:"1fr 1.2fr 2fr auto",gap:6,marginBottom:6,padding:"0 4px"}}>
-                  {["Data","Valor Bruto (R$)","Observação",""].map(h=><div key={h} style={{color:"#555",fontSize:10,fontWeight:700}}>{h}</div>)}
-                </div>
-                {tipRows.map((row,i)=>(
-                  <div key={i} style={{display:"grid",gridTemplateColumns:"1fr 1.2fr 2fr auto",gap:6,marginBottom:6}}>
-                    <input type="date" value={row.date} onChange={e=>{const r=[...tipRows];r[i]={...r[i],date:e.target.value};setTipRows(r);}} style={{...S.input,fontSize:12,padding:"8px 8px"}}/>
-                    <input type="number" min="0" step="0.01" value={row.total} onChange={e=>{const r=[...tipRows];r[i]={...r[i],total:e.target.value};setTipRows(r);}} placeholder="0.00" style={{...S.input,fontSize:12,padding:"8px 8px"}}/>
-                    <input value={row.note} onChange={e=>{const r=[...tipRows];r[i]={...r[i],note:e.target.value};setTipRows(r);}} placeholder="Obs." style={{...S.input,fontSize:12,padding:"8px 8px"}}/>
-                    <button onClick={()=>setTipRows(tipRows.filter((_,j)=>j!==i))} style={{background:"none",border:"1px solid #e74c3c33",borderRadius:8,color:"#e74c3c",cursor:"pointer",padding:"0 10px",fontFamily:"DM Mono,monospace",fontSize:14}}>✕</button>
+              /* MODO TABELA — pré-carregado com todos os dias do mês */
+              (() => {
+                const daysInMonth = new Date(year, month+1, 0).getDate();
+                const allDays = Array.from({length: daysInMonth}, (_, i) => {
+                  const d = i+1;
+                  return `${year}-${String(month+1).padStart(2,"0")}-${String(d).padStart(2,"0")}`;
+                });
+                const taxRate = restaurant.taxRate ?? TAX;
+                const tSplit = splits?.[rid]?.[mk] ?? DEFAULT_SPLIT;
+                const mode = restaurant.divisionMode ?? MODE_AREA_POINTS;
+                // Already-launched dates this month
+                const launchedDates = new Set(tipDates);
+
+                // Helper: get active emps for a date
+                const getActiveEmps = (date) => restEmps.filter(emp => {
+                  const r = restRoles.find(r=>r.id===emp.roleId);
+                  if (!r || (emp.admission && emp.admission > date)) return false;
+                  const status = schedules?.[rid]?.[mk]?.[emp.id]?.[date];
+                  if (!status) return true;
+                  if (status === DAY_COMP) return true;
+                  if (status === DAY_FAULT_J || status === DAY_FAULT_U || status === DAY_VACATION) return false;
+                  if (r.area === "Produção") return true;
+                  return false;
+                });
+
+                return (
+                  <div>
+                    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
+                      <span style={{color:"#555",fontSize:12}}>{monthLabel(year,month)} — {daysInMonth} dias</span>
+                      <MonthNav year={year} month={month} onChange={(y,m)=>{setYear(y);setMonth(m);}} />
+                    </div>
+
+                    {/* Day rows */}
+                    {allDays.map(date => {
+                      const row = tipRows.find(r=>r.date===date) ?? {date,total:"",note:""};
+                      const val = parseFloat(row.total);
+                      const hasVal = val > 0 && !isNaN(val);
+                      const launched = launchedDates.has(date);
+                      const activeEmps = getActiveEmps(date);
+                      const weekday = new Date(date+"T12:00:00").toLocaleDateString("pt-BR",{weekday:"short"});
+                      const isWeekend = [0,6].includes(new Date(date+"T12:00:00").getDay());
+
+                      return (
+                        <div key={date} style={{marginBottom:8,borderRadius:10,border:`1px solid ${launched?"#10b98133":hasVal?"#f5c84233":"#1a1a1a"}`,background:launched?"#0a1a0a":hasVal?"#1a1a0a":"#111",overflow:"hidden"}}>
+                          {/* Row header */}
+                          <div style={{display:"grid",gridTemplateColumns:"50px 1fr 1.5fr auto",gap:8,padding:"8px 10px",alignItems:"center"}}>
+                            <div style={{textAlign:"center"}}>
+                              <div style={{color:isWeekend?"#f59e0b":"#aaa",fontSize:13,fontWeight:700}}>{parseInt(date.slice(-2))}</div>
+                              <div style={{color:"#555",fontSize:10}}>{weekday}</div>
+                            </div>
+                            <input
+                              type="number" min="0" step="0.01"
+                              value={row.total}
+                              onChange={e=>{
+                                const newRows = tipRows.filter(r=>r.date!==date);
+                                setTipRows([...newRows, {...row, total:e.target.value}]);
+                              }}
+                              placeholder={launched?"Já lançado":"R$ 0,00"}
+                              style={{...S.input,fontSize:13,padding:"6px 8px",background:launched?"#0d1a0d":"#1a1a1a",color:launched?"#10b981":"#fff"}}
+                            />
+                            <input
+                              value={row.note}
+                              onChange={e=>{
+                                const newRows = tipRows.filter(r=>r.date!==date);
+                                setTipRows([...newRows, {...row, note:e.target.value}]);
+                              }}
+                              placeholder="Observação"
+                              style={{...S.input,fontSize:12,padding:"6px 8px"}}
+                            />
+                            {hasVal && !launched && (
+                              <button onClick={()=>{
+                                const n = calcTipForDate(date, val, row.note);
+                                if(n>0) onUpdate("_toast",`✅ ${fmtDate(date)}: ${n} empregados`);
+                              }} style={{padding:"6px 12px",borderRadius:8,border:"none",background:ac,color:"#111",fontWeight:700,cursor:"pointer",fontFamily:"DM Mono,monospace",fontSize:12,whiteSpace:"nowrap"}}>
+                                Lançar
+                              </button>
+                            )}
+                            {launched && <span style={{color:"#10b981",fontSize:11,whiteSpace:"nowrap"}}>✓ Lançado</span>}
+                          </div>
+
+                          {/* Rateio preview */}
+                          {hasVal && !launched && (
+                            <div style={{padding:"6px 10px 8px",borderTop:"1px solid #2a2a2a",background:"#0d0d0d"}}>
+                              <div style={{display:"flex",justifyContent:"space-between",fontSize:11,color:"#555",marginBottom:4}}>
+                                <span>Pool: {fmt(val)} → Retenção {Math.round(taxRate*100)}%: -{fmt(val*taxRate)} → Distribuir: {fmt(val*(1-taxRate))}</span>
+                                <span>{activeEmps.length} empregados</span>
+                              </div>
+                              {mode === MODE_GLOBAL_POINTS ? (
+                                <div style={{fontSize:11,color:"#555"}}>
+                                  {activeEmps.length > 0 && `Cada ponto vale: ${fmt(val*(1-taxRate)/(activeEmps.reduce((s,e)=>s+(parseFloat(restRoles.find(r=>r.id===e.roleId)?.points)||1),0)||1))}`}
+                                </div>
+                              ) : (
+                                <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+                                  {AREAS.map(a => {
+                                    const emps = activeEmps.filter(e=>restRoles.find(r=>r.id===e.roleId)?.area===a);
+                                    if(!emps.length) return null;
+                                    const pts = emps.reduce((s,e)=>s+(parseFloat(restRoles.find(r=>r.id===e.roleId)?.points)||1),0);
+                                    const aPool = val*(1-taxRate)*(tSplit[a]/100);
+                                    return <span key={a} style={{fontSize:11,color:AREA_COLORS[a]}}>{a}: {fmt(aPool)} ({emps.length}emp/{pts}pt)</span>;
+                                  })}
+                                </div>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+
+                    {/* Lançar todos button */}
+                    {tipRows.filter(r=>parseFloat(r.total)>0&&!launchedDates.has(r.date)).length > 0 && (
+                      <button onClick={()=>{
+                        let count = 0;
+                        tipRows.filter(r=>parseFloat(r.total)>0&&!launchedDates.has(r.date)).forEach(row=>{
+                          count += calcTipForDate(row.date, parseFloat(row.total), row.note);
+                        });
+                        if(count>0) onUpdate("_toast",`✅ ${tipRows.filter(r=>parseFloat(r.total)>0).length} dias distribuídos!`);
+                      }} style={{...S.btnPrimary,marginTop:8}}>
+                        Lançar Todos os Dias Preenchidos
+                      </button>
+                    )}
                   </div>
-                ))}
-                <button onClick={()=>setTipRows([...tipRows,{date:today(),total:"",note:""}])} style={{...S.btnSecondary,width:"100%",marginBottom:10,fontSize:13}}>+ Adicionar linha</button>
-                <button onClick={()=>{
-                  let total = 0;
-                  tipRows.forEach(row => {
-                    const v = parseFloat(row.total);
-                    if (!v || isNaN(v) || v <= 0) return;
-                    setTipDate(row.date); setTipTotal(String(v)); setTipNote(row.note);
-                    const n = calcTipForDate(row.date, v, row.note);
-                    total += n;
-                  });
-                  if (total > 0) { onUpdate("_toast", `✅ ${tipRows.filter(r=>parseFloat(r.total)>0).length} dias distribuídos!`); setTipRows([{date:today(),total:"",note:""}]); }
-                }} style={S.btnPrimary}>Distribuir Todos</button>
-              </div>
+                );
+              })()
               )}
             </div>
 
