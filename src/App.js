@@ -426,6 +426,178 @@ function EmployeePortal({ employees, roles, tips, schedules, restaurants, onBack
 // ══════════════════════════════════════════════════════════════════════════════
 // RESTAURANT PANEL (shared by manager and super manager, with permission guard)
 // ══════════════════════════════════════════════════════════════════════════════
+// ── Role Spreadsheet ──────────────────────────────────────────────────────────
+function RoleSpreadsheet({ restRoles, rid, roles, onUpdate }) {
+  const blank = () => ({ id: null, name: "", area: "Bar", points: "1", restaurantId: rid });
+  const [newRow, setNewRow] = useState(blank());
+  const [editRows, setEditRows] = useState({});
+  const [saved, setSaved] = useState({});
+
+  const sorted = [...restRoles].sort((a, b) => a.area.localeCompare(b.area) || a.name.localeCompare(b.name));
+
+  function getRow(r) { return editRows[r.id] ?? { name: r.name, area: r.area, points: String(r.points) }; }
+  function setRow(id, field, val) { setEditRows(prev => ({ ...prev, [id]: { ...getRow({ id }), [field]: val } })); }
+
+  function saveRole(r) {
+    const row = getRow(r);
+    if (!row.name.trim()) return;
+    const updated = { ...r, name: row.name.trim(), area: row.area, points: parseFloat(row.points) || 1 };
+    onUpdate("roles", roles.map(x => x.id === r.id ? updated : x));
+    setSaved(p => ({ ...p, [r.id]: true }));
+    setTimeout(() => setSaved(p => ({ ...p, [r.id]: false })), 1500);
+  }
+
+  function saveNew() {
+    if (!newRow.name.trim()) return;
+    const r = { ...newRow, id: Date.now().toString(), points: parseFloat(newRow.points) || 1 };
+    onUpdate("roles", [...roles, r]);
+    setNewRow(blank());
+  }
+
+  function deleteRole(id) { onUpdate("roles", roles.filter(x => x.id !== id)); }
+
+  const inStyle = { background: "#111", border: "1px solid #2a2a2a", borderRadius: 8, color: "#fff", fontFamily: "DM Mono,monospace", fontSize: 12, padding: "8px 10px", outline: "none", width: "100%" };
+  const sel = { ...inStyle, cursor: "pointer" };
+  const ac = "#f5c842";
+
+  return (
+    <div style={{ fontFamily: "DM Mono,monospace" }}>
+      <p style={{ color: "#555", fontSize: 12, marginBottom: 16 }}>Edite inline e clique em Salvar na linha. Nova linha no topo para adicionar.</p>
+
+      {/* Header */}
+      <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr 80px 80px", gap: 6, marginBottom: 8, padding: "0 6px" }}>
+        {["Nome do Cargo", "Área", "Pontos", ""].map(h => <div key={h} style={{ color: "#555", fontSize: 11 }}>{h}</div>)}
+      </div>
+
+      {/* New row */}
+      <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr 80px 80px", gap: 6, marginBottom: 6, background: "#1a2a1a", borderRadius: 10, padding: 8, border: "1px solid #10b98144" }}>
+        <input value={newRow.name} onChange={e => setNewRow(p => ({ ...p, name: e.target.value }))} placeholder="Nome do cargo…" style={inStyle} />
+        <select value={newRow.area} onChange={e => setNewRow(p => ({ ...p, area: e.target.value }))} style={sel}>
+          {AREAS.map(a => <option key={a} value={a}>{a}</option>)}
+        </select>
+        <input type="number" min="0.5" step="0.5" value={newRow.points} onChange={e => setNewRow(p => ({ ...p, points: e.target.value }))} style={inStyle} />
+        <button onClick={saveNew} style={{ background: "#10b981", border: "none", borderRadius: 8, color: "#fff", fontWeight: 700, fontSize: 12, cursor: "pointer", padding: "8px 4px", fontFamily: "DM Mono,monospace" }}>+ Add</button>
+      </div>
+
+      {/* Existing rows */}
+      {sorted.length === 0 && <p style={{ color: "#555", textAlign: "center", marginTop: 20 }}>Nenhum cargo cadastrado.</p>}
+      {sorted.map(r => {
+        const row = getRow(r);
+        const isSaved = saved[r.id];
+        return (
+          <div key={r.id} style={{ display: "grid", gridTemplateColumns: "2fr 1fr 80px 80px", gap: 6, marginBottom: 6, background: "#1a1a1a", borderRadius: 10, padding: 8, border: `1px solid ${isSaved ? "#10b98166" : "#2a2a2a"}`, transition: "border-color 0.3s" }}>
+            <input value={row.name} onChange={e => setRow(r.id, "name", e.target.value)} style={inStyle} />
+            <select value={row.area} onChange={e => setRow(r.id, "area", e.target.value)} style={sel}>
+              {AREAS.map(a => <option key={a} value={a}>{a}</option>)}
+            </select>
+            <input type="number" min="0.5" step="0.5" value={row.points} onChange={e => setRow(r.id, "points", e.target.value)} style={inStyle} />
+            <div style={{ display: "flex", gap: 4 }}>
+              <button onClick={() => saveRole(r)} style={{ flex: 1, background: isSaved ? "#10b981" : ac, border: "none", borderRadius: 8, color: "#111", fontWeight: 700, fontSize: 11, cursor: "pointer", padding: "4px 2px", fontFamily: "DM Mono,monospace" }}>{isSaved ? "✓" : "Salvar"}</button>
+              <button onClick={() => deleteRole(r.id)} style={{ background: "none", border: "1px solid #e74c3c44", borderRadius: 8, color: "#e74c3c", cursor: "pointer", fontSize: 12, padding: "4px 8px" }}>✕</button>
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+// ── Employee Spreadsheet ──────────────────────────────────────────────────────
+function EmployeeSpreadsheet({ restEmps, restRoles, rid, employees, onUpdate }) {
+  const blank = () => ({ id: null, name: "", cpf: "", admission: today(), pin: "", roleId: "", restaurantId: rid });
+  const [newRow, setNewRow] = useState(blank());
+  const [editRows, setEditRows] = useState({});
+  const [saved, setSaved] = useState({});
+
+  // Sort by role area then employee name
+  const sorted = [...restEmps].sort((a, b) => {
+    const rA = restRoles.find(r => r.id === a.roleId);
+    const rB = restRoles.find(r => r.id === b.roleId);
+    const areaA = rA?.area ?? "z";
+    const areaB = rB?.area ?? "z";
+    return areaA.localeCompare(areaB) || a.name.localeCompare(b.name);
+  });
+
+  function getRow(e) { return editRows[e.id] ?? { name: e.name, cpf: e.cpf ?? "", admission: e.admission ?? today(), pin: e.pin ?? "", roleId: e.roleId ?? "" }; }
+  function setRow(id, field, val) { setEditRows(prev => ({ ...prev, [id]: { ...getRow({ id }), [field]: val } })); }
+
+  function saveEmp(e) {
+    const row = getRow(e);
+    if (!row.name.trim()) return;
+    const updated = { ...e, name: row.name.trim(), cpf: row.cpf, admission: row.admission, pin: row.pin, roleId: row.roleId };
+    onUpdate("employees", employees.map(x => x.id === e.id ? updated : x));
+    setSaved(p => ({ ...p, [e.id]: true }));
+    setTimeout(() => setSaved(p => ({ ...p, [e.id]: false })), 1500);
+  }
+
+  function saveNew() {
+    if (!newRow.name.trim()) return;
+    onUpdate("employees", [...employees, { ...newRow, id: Date.now().toString() }]);
+    setNewRow(blank());
+  }
+
+  function deleteEmp(id) { onUpdate("employees", employees.filter(x => x.id !== id)); }
+
+  const inStyle = { background: "#111", border: "1px solid #2a2a2a", borderRadius: 8, color: "#fff", fontFamily: "DM Mono,monospace", fontSize: 12, padding: "8px 10px", outline: "none", width: "100%", boxSizing: "border-box" };
+  const sel = { ...inStyle, cursor: "pointer" };
+  const ac = "#f5c842";
+
+  // Mobile-friendly: stack in cards
+  const RowCard = ({ row, onChange, onSave, onDelete, isSaved, isNew }) => (
+    <div style={{ background: isNew ? "#1a2a1a" : "#1a1a1a", borderRadius: 12, padding: 12, marginBottom: 8, border: `1px solid ${isSaved ? "#10b98166" : isNew ? "#10b98144" : "#2a2a2a"}`, transition: "border-color 0.3s" }}>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6, marginBottom: 6 }}>
+        <div><div style={{ color: "#555", fontSize: 10, marginBottom: 3 }}>Nome</div><input value={row.name} onChange={e => onChange("name", e.target.value)} placeholder="Nome completo" style={inStyle} /></div>
+        <div><div style={{ color: "#555", fontSize: 10, marginBottom: 3 }}>CPF</div><input value={row.cpf} onChange={e => onChange("cpf", e.target.value)} placeholder="000.000.000-00" style={inStyle} inputMode="numeric" /></div>
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6, marginBottom: 6 }}>
+        <div><div style={{ color: "#555", fontSize: 10, marginBottom: 3 }}>Admissão</div><input type="date" value={row.admission} onChange={e => onChange("admission", e.target.value)} style={inStyle} /></div>
+        <div><div style={{ color: "#555", fontSize: 10, marginBottom: 3 }}>PIN</div><input type="password" value={row.pin} onChange={e => onChange("pin", e.target.value)} maxLength={6} placeholder="••••" style={inStyle} /></div>
+      </div>
+      <div style={{ marginBottom: 8 }}>
+        <div style={{ color: "#555", fontSize: 10, marginBottom: 3 }}>Cargo</div>
+        <select value={row.roleId} onChange={e => onChange("roleId", e.target.value)} style={sel}>
+          <option value="">Selecionar cargo…</option>
+          {AREAS.map(a => (
+            <optgroup key={a} label={a}>
+              {restRoles.filter(r => r.area === a).map(r => <option key={r.id} value={r.id}>{r.name} ({r.points}pt)</option>)}
+            </optgroup>
+          ))}
+        </select>
+      </div>
+      <div style={{ display: "flex", gap: 8 }}>
+        <button onClick={onSave} style={{ flex: 1, background: isSaved ? "#10b981" : isNew ? "#10b981" : ac, border: "none", borderRadius: 8, color: "#111", fontWeight: 700, fontSize: 13, cursor: "pointer", padding: "10px", fontFamily: "DM Mono,monospace" }}>
+          {isSaved ? "✓ Salvo!" : isNew ? "+ Adicionar" : "Salvar"}
+        </button>
+        {!isNew && <button onClick={onDelete} style={{ background: "none", border: "1px solid #e74c3c44", borderRadius: 8, color: "#e74c3c", cursor: "pointer", fontSize: 13, padding: "10px 14px" }}>✕</button>}
+      </div>
+    </div>
+  );
+
+  const newRowState = { name: newRow.name, cpf: newRow.cpf, admission: newRow.admission, pin: newRow.pin, roleId: newRow.roleId };
+
+  return (
+    <div style={{ fontFamily: "DM Mono,monospace" }}>
+      <p style={{ color: "#555", fontSize: 12, marginBottom: 16 }}>Edite e clique em Salvar. Use o card verde para adicionar novos empregados.</p>
+      <RowCard row={newRowState} isNew onChange={(f, v) => setNewRow(p => ({ ...p, [f]: v }))} onSave={saveNew} isSaved={false} />
+      {sorted.length === 0 && <p style={{ color: "#555", textAlign: "center", marginTop: 10 }}>Nenhum empregado cadastrado.</p>}
+      {sorted.map(e => {
+        const row = getRow(e);
+        const role = restRoles.find(r => r.id === (editRows[e.id]?.roleId ?? e.roleId));
+        return (
+          <div key={e.id}>
+            {role && <div style={{ color: AREA_COLORS[role.area] ?? "#555", fontSize: 11, fontWeight: 700, marginBottom: 4, marginTop: 12, paddingLeft: 4 }}>{role.area}</div>}
+            <RowCard row={row} isSaved={saved[e.id]} isNew={false}
+              onChange={(f, v) => setRow(e.id, f, v)}
+              onSave={() => saveEmp(e)}
+              onDelete={() => deleteEmp(e.id)}
+            />
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, splits, schedules, onUpdate, perms, isSuperManager }) {
   const [tab, setTab] = useState(perms.tips ? "dashboard" : "schedule");
   const now = new Date();
@@ -448,12 +620,6 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
   const [tipDate, setTipDate]   = useState(today());
   const [tipTotal, setTipTotal] = useState("");
   const [tipNote, setTipNote]   = useState("");
-  const [showEmpModal, setShowEmpModal]   = useState(false);
-  const [editEmpId, setEditEmpId]         = useState(null);
-  const [empForm, setEmpForm]             = useState({ name: "", cpf: "", roleId: "", admission: today(), pin: "" });
-  const [showRoleModal, setShowRoleModal] = useState(false);
-  const [editRoleId, setEditRoleId]       = useState(null);
-  const [roleForm, setRoleForm]           = useState({ name: "", area: "Salão", points: "1" });
   const [splitForm, setSplitForm]         = useState(null);
   const [schedArea, setSchedArea]         = useState("Salão");
   const [showExport, setShowExport]       = useState(false);
@@ -520,18 +686,6 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
     return newTips.length;
   }
 
-  function saveEmp() {
-    if (!empForm.name.trim()) return;
-    const e = { ...empForm, restaurantId: rid, id: editEmpId ?? Date.now().toString() };
-    onUpdate("employees", editEmpId ? employees.map(x => x.id === editEmpId ? e : x) : [...employees, e]);
-    setShowEmpModal(false);
-  }
-  function saveRole() {
-    if (!roleForm.name.trim()) return;
-    const r = { ...roleForm, points: parseFloat(roleForm.points) || 1, restaurantId: rid, id: editRoleId ?? Date.now().toString() };
-    onUpdate("roles", editRoleId ? roles.map(x => x.id === editRoleId ? r : x) : [...roles, r]);
-    setShowRoleModal(false);
-  }
   function saveSplit() {
     const total = AREAS.reduce((a, k) => a + parseFloat(splitForm[k] || 0), 0);
     if (Math.abs(total - 100) > 0.01) { alert("Os percentuais devem somar 100%."); return; }
@@ -589,22 +743,24 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                 </div>
               ))}
             </div>
-            <div style={{ ...S.card, marginBottom: 20 }}>
-              <p style={{ color: "#555", fontSize: 12, margin: "0 0 12px" }}>Distribuição por Área</p>
-              {AREAS.map(a => {
-                const aNet = monthTips.filter(t => t.area === a).reduce((s,t) => s + t.myNet, 0);
-                return (
-                  <div key={a} style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8 }}>
-                    <div style={{ minWidth: 70 }}><AreaBadge area={a} /></div>
-                    <div style={{ flex: 1, background: "#111", borderRadius: 4, height: 6, overflow: "hidden" }}>
-                      <div style={{ width: `${curSplit[a]}%`, height: "100%", background: AREA_COLORS[a] }} />
+            {(restaurant.divisionMode ?? MODE_AREA_POINTS) === MODE_AREA_POINTS && (
+              <div style={{ ...S.card, marginBottom: 20 }}>
+                <p style={{ color: "#555", fontSize: 12, margin: "0 0 12px" }}>Distribuição por Área</p>
+                {AREAS.map(a => {
+                  const aNet = monthTips.filter(t => t.area === a).reduce((s,t) => s + t.myNet, 0);
+                  return (
+                    <div key={a} style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8 }}>
+                      <div style={{ minWidth: 70 }}><AreaBadge area={a} /></div>
+                      <div style={{ flex: 1, background: "#111", borderRadius: 4, height: 6, overflow: "hidden" }}>
+                        <div style={{ width: `${curSplit[a]}%`, height: "100%", background: AREA_COLORS[a] }} />
+                      </div>
+                      <span style={{ color: "#aaa", fontSize: 12, minWidth: 36 }}>{curSplit[a]}%</span>
+                      <span style={{ color: ac, fontSize: 13, fontWeight: 600, minWidth: 80, textAlign: "right" }}>{fmt(aNet)}</span>
                     </div>
-                    <span style={{ color: "#aaa", fontSize: 12, minWidth: 36 }}>{curSplit[a]}%</span>
-                    <span style={{ color: ac, fontSize: 13, fontWeight: 600, minWidth: 80, textAlign: "right" }}>{fmt(aNet)}</span>
-                  </div>
-                );
-              })}
-            </div>
+                  );
+                })}
+              </div>
+            )}
             {empSummary.map((e, i) => (
               <div key={e.id} style={{ ...S.card, marginBottom: 8, display: "flex", alignItems: "center", gap: 12 }}>
                 <span style={{ color: ac, minWidth: 24 }}>{i===0?"🥇":i===1?"🥈":i===2?"🥉":`${i+1}`}</span>
@@ -696,39 +852,18 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
 
         {/* EQUIPE */}
         {tab === "employees" && (
-          <div>
-            <button onClick={() => { setEditEmpId(null); setEmpForm({ name:"",cpf:"",roleId:"",admission:today(),pin:"" }); setShowEmpModal(true); }} style={{ ...S.btnPrimary, marginBottom: 20 }}>+ Novo Empregado</button>
-            {restEmps.length === 0 && <p style={{ color: "#555", textAlign: "center" }}>Nenhum empregado cadastrado.</p>}
-            {restEmps.map(e => {
-              const r = restRoles.find(r => r.id === e.roleId);
-              return (
-                <div key={e.id} style={{ ...S.card, marginBottom: 10, display:"flex",justifyContent:"space-between",alignItems:"flex-start" }}>
-                  <div>
-                    <div style={{color:"#fff",fontWeight:600}}>{e.name}</div>
-                    <div style={{color:"#555",fontSize:12}}>CPF: {e.cpf||"—"} · Admissão: {fmtDate(e.admission)}</div>
-                    <div style={{marginTop:4,display:"flex",gap:6,alignItems:"center"}}>{r?<><span style={{color:"#aaa",fontSize:12}}>{r.name}</span><AreaBadge area={r.area}/><span style={{color:"#555",fontSize:12}}>{r.points}pt</span></>:<span style={{color:"#555",fontSize:12}}>Sem cargo</span>}</div>
-                  </div>
-                  <div style={{display:"flex",gap:8}}>
-                    <button onClick={()=>{setEditEmpId(e.id);setEmpForm({name:e.name,cpf:e.cpf??"",roleId:e.roleId??"",admission:e.admission??today(),pin:e.pin??""});setShowEmpModal(true);}} style={{...S.btnSecondary,fontSize:12}}>Editar</button>
-                    <button onClick={()=>onUpdate("employees",employees.filter(x=>x.id!==e.id))} style={{background:"none",border:"1px solid #e74c3c33",borderRadius:8,color:"#e74c3c",cursor:"pointer",fontSize:12,padding:"6px 12px",fontFamily:"DM Mono,monospace"}}>✕</button>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
+          <EmployeeSpreadsheet
+            restEmps={restEmps} restRoles={restRoles} rid={rid}
+            employees={employees} onUpdate={onUpdate}
+          />
         )}
 
         {/* CARGOS (super only) */}
         {tab === "roles" && (
-          <div>
-            <button onClick={() => { setEditRoleId(null); setRoleForm({ name:"",area:"Salão",points:"1" }); setShowRoleModal(true); }} style={{ ...S.btnPrimary, marginBottom: 16 }}>+ Novo Cargo</button>
-            {AREAS.map(a => {
-              const aR = restRoles.filter(r => r.area === a);
-              if (!aR.length) return null;
-              return <div key={a} style={{marginBottom:20}}><div style={{marginBottom:8}}><AreaBadge area={a}/></div>{aR.map(r=><div key={r.id} style={{...S.card,marginBottom:8,display:"flex",justifyContent:"space-between",alignItems:"center"}}><div><div style={{color:"#fff",fontWeight:600}}>{r.name}</div><div style={{color:AREA_COLORS[a],fontSize:13}}>{r.points}pt</div></div><div style={{display:"flex",gap:8}}><button onClick={()=>{setEditRoleId(r.id);setRoleForm({name:r.name,area:r.area,points:String(r.points)});setShowRoleModal(true);}} style={{...S.btnSecondary,fontSize:12}}>Editar</button><button onClick={()=>onUpdate("roles",roles.filter(x=>x.id!==r.id))} style={{background:"none",border:"1px solid #e74c3c33",borderRadius:8,color:"#e74c3c",cursor:"pointer",fontSize:12,padding:"6px 12px",fontFamily:"DM Mono,monospace"}}>✕</button></div></div>)}</div>;
-            })}
-            {restRoles.length === 0 && <p style={{color:"#555",textAlign:"center"}}>Nenhum cargo.</p>}
-          </div>
+          <RoleSpreadsheet
+            restRoles={restRoles} rid={rid}
+            roles={roles} onUpdate={onUpdate}
+          />
         )}
 
         {/* ESCALA */}
@@ -776,54 +911,29 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                 })}
               </div>
             </div>
-            <div style={{...S.card,marginBottom:20}}>
-              <p style={{color:ac,fontSize:14,fontWeight:700,margin:"0 0 4px"}}>Distribuição por Área</p>
-              <p style={{color:"#555",fontSize:11,margin:"0 0 14px"}}>(Usado apenas na modalidade Áreas + Pontos)</p>
-              <div style={{marginBottom:14}}><MonthNav year={year} month={month} onChange={(y,m)=>{setYear(y);setMonth(m);setSplitForm(null);}}/></div>
-              {splitForm ? (
-                <div>
-                  {AREAS.map(a=><div key={a} style={{display:"flex",alignItems:"center",gap:10,marginBottom:10}}><div style={{minWidth:70}}><AreaBadge area={a}/></div><input type="number" min="0" max="100" step="0.5" value={splitForm[a]} onChange={e=>setSplitForm({...splitForm,[a]:e.target.value})} style={{...S.input,width:80,textAlign:"center"}}/><span style={{color:"#555",fontSize:13}}>%</span></div>)}
-                  <div style={{color:Math.abs(AREAS.reduce((a,k)=>a+parseFloat(splitForm[k]||0),0)-100)<0.01?"#10b981":"#e74c3c",fontSize:13,marginBottom:10}}>Total: {AREAS.reduce((a,k)=>a+parseFloat(splitForm[k]||0),0).toFixed(1)}%</div>
-                  <div style={{display:"flex",gap:8}}><button onClick={saveSplit} style={{...S.btnPrimary,flex:1}}>Salvar</button><button onClick={()=>setSplitForm(null)} style={S.btnSecondary}>Cancelar</button></div>
-                </div>
-              ) : (
-                <div>
-                  {AREAS.map(a=><div key={a} style={{display:"flex",justifyContent:"space-between",marginBottom:8,alignItems:"center"}}><AreaBadge area={a}/><span style={{color:"#aaa",fontSize:14}}>{curSplit[a]}%</span></div>)}
-                  <button onClick={()=>setSplitForm({...curSplit})} style={{...S.btnSecondary,marginTop:12,width:"100%",textAlign:"center"}}>Editar percentuais</button>
-                </div>
-              )}
-            </div>
+            {(restaurant.divisionMode ?? MODE_AREA_POINTS) === MODE_AREA_POINTS && (
+              <div style={{...S.card,marginBottom:20}}>
+                <p style={{color:ac,fontSize:14,fontWeight:700,margin:"0 0 4px"}}>Distribuição por Área</p>
+                <p style={{color:"#555",fontSize:11,margin:"0 0 14px"}}>Percentuais de cada área no pool total.</p>
+                <div style={{marginBottom:14}}><MonthNav year={year} month={month} onChange={(y,m)=>{setYear(y);setMonth(m);setSplitForm(null);}}/></div>
+                {splitForm ? (
+                  <div>
+                    {AREAS.map(a=><div key={a} style={{display:"flex",alignItems:"center",gap:10,marginBottom:10}}><div style={{minWidth:70}}><AreaBadge area={a}/></div><input type="number" min="0" max="100" step="0.5" value={splitForm[a]} onChange={e=>setSplitForm({...splitForm,[a]:e.target.value})} style={{...S.input,width:80,textAlign:"center"}}/><span style={{color:"#555",fontSize:13}}>%</span></div>)}
+                    <div style={{color:Math.abs(AREAS.reduce((a,k)=>a+parseFloat(splitForm[k]||0),0)-100)<0.01?"#10b981":"#e74c3c",fontSize:13,marginBottom:10}}>Total: {AREAS.reduce((a,k)=>a+parseFloat(splitForm[k]||0),0).toFixed(1)}%</div>
+                    <div style={{display:"flex",gap:8}}><button onClick={saveSplit} style={{...S.btnPrimary,flex:1}}>Salvar</button><button onClick={()=>setSplitForm(null)} style={S.btnSecondary}>Cancelar</button></div>
+                  </div>
+                ) : (
+                  <div>
+                    {AREAS.map(a=><div key={a} style={{display:"flex",justifyContent:"space-between",marginBottom:8,alignItems:"center"}}><AreaBadge area={a}/><span style={{color:"#aaa",fontSize:14}}>{curSplit[a]}%</span></div>)}
+                    <button onClick={()=>setSplitForm({...curSplit})} style={{...S.btnSecondary,marginTop:12,width:"100%",textAlign:"center"}}>Editar percentuais</button>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         )}
       </div>
 
-      {/* Modals */}
-      {showEmpModal && (
-        <Modal title={editEmpId?"Editar Empregado":"Novo Empregado"} onClose={()=>setShowEmpModal(false)}>
-          <div style={{display:"flex",flexDirection:"column",gap:10}}>
-            {[["name","Nome completo","text"],["cpf","CPF","text"],["admission","Data de Admissão","date"],["pin","PIN (4–6 dígitos)","password"]].map(([f,lbl,t])=>(
-              <div key={f}><label style={S.label}>{lbl}</label><input type={t} value={empForm[f]} onChange={e=>setEmpForm({...empForm,[f]:e.target.value})} style={S.input}/></div>
-            ))}
-            <div><label style={S.label}>Cargo</label>
-              <select value={empForm.roleId} onChange={e=>setEmpForm({...empForm,roleId:e.target.value})} style={S.input}>
-                <option value="">Selecionar cargo…</option>
-                {AREAS.map(a=><optgroup key={a} label={a}>{restRoles.filter(r=>r.area===a).map(r=><option key={r.id} value={r.id}>{r.name} ({r.points}pt)</option>)}</optgroup>)}
-              </select>
-            </div>
-            <button onClick={saveEmp} style={S.btnPrimary}>{editEmpId?"Salvar":"Cadastrar"}</button>
-          </div>
-        </Modal>
-      )}
-      {showRoleModal && (
-        <Modal title={editRoleId?"Editar Cargo":"Novo Cargo"} onClose={()=>setShowRoleModal(false)}>
-          <div style={{display:"flex",flexDirection:"column",gap:10}}>
-            <div><label style={S.label}>Nome</label><input value={roleForm.name} onChange={e=>setRoleForm({...roleForm,name:e.target.value})} placeholder="Ex: Garçom, Chef…" style={S.input}/></div>
-            <div><label style={S.label}>Área</label><select value={roleForm.area} onChange={e=>setRoleForm({...roleForm,area:e.target.value})} style={S.input}>{AREAS.map(a=><option key={a} value={a}>{a}</option>)}</select></div>
-            <div><label style={S.label}>Pontuação</label><input type="number" min="0.5" step="0.5" value={roleForm.points} onChange={e=>setRoleForm({...roleForm,points:e.target.value})} style={S.input}/></div>
-            <button onClick={saveRole} style={S.btnPrimary}>{editRoleId?"Salvar":"Criar"}</button>
-          </div>
-        </Modal>
-      )}
       {showExport && <ExportModal onClose={()=>setShowExport(false)} employees={employees} roles={roles} tips={tips} restaurant={restaurant}/>}
     </div>
   );
