@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { db } from "./firebase";
 import { doc, getDoc, setDoc } from "firebase/firestore";
 
+/* eslint-disable no-unused-vars */
 // ─── Storage (Firebase Firestore) ────────────────────────────────────────────
 async function load(key) {
   try {
