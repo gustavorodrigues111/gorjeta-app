@@ -2067,77 +2067,38 @@ function RoleSpreadsheet({ restRoles, rid, roles, onUpdate }) {
 }
 
 //
-// EmpRowCard defined OUTSIDE to prevent focus loss on re-render
-const empInS = { background: "var(--bg1)", border: "1px solid var(--border)", borderRadius: 8, color: "var(--text)", fontFamily: "DM Mono,monospace", fontSize: 12, padding: "8px 10px", outline: "none", width: "100%", boxSizing: "border-box" };
-
-function EmpRowCard({ row, onChange, onSave, onDelete, onToggleInactive, isSaved, isNew, restRoles }) {
-  const ac = "#f5c842";
-  const isInactive = row.inactive && row.inactiveFrom && row.inactiveFrom <= today();
-  return (
-    <div style={{ background: isNew ? "#1a2a1a" : isInactive ? "#1a1a2a" : "#1a1a1a", borderRadius: 12, padding: 12, marginBottom: 8, border: `1px solid ${isSaved ? "#10b98166" : isNew ? "#10b98144" : isInactive ? "#8b5cf644" : "#2a2a2a"}`, transition: "border-color 0.3s", opacity: isInactive ? 0.7 : 1 }}>
-      {isInactive && <div style={{ color: "#8b5cf6", fontSize: 11, marginBottom: 8, fontFamily: "DM Mono,monospace" }}>⚫ Inativo desde {fmtDate(row.inactiveFrom)}</div>}
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6, marginBottom: 6 }}>
-        <div><div style={{ color: "var(--text3)", fontSize: 10, marginBottom: 3 }}>Nome</div><input value={row.name} onChange={e => onChange("name", e.target.value)} placeholder="Nome completo" style={empInS} /></div>
-        <div><div style={{ color: "var(--text3)", fontSize: 10, marginBottom: 3 }}>CPF</div><input value={row.cpf} onChange={e => onChange("cpf", e.target.value)} placeholder="000.000.000-00" style={empInS} inputMode="numeric" /></div>
-      </div>
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6, marginBottom: 6 }}>
-        <div><div style={{ color: "var(--text3)", fontSize: 10, marginBottom: 3 }}>Admissão</div><input type="date" value={row.admission} onChange={e => onChange("admission", e.target.value)} style={empInS} /></div>
-        <div><div style={{ color: "var(--text3)", fontSize: 10, marginBottom: 3 }}>PIN</div><input type="password" value={row.pin} onChange={e => onChange("pin", e.target.value)} maxLength={4} placeholder="••••" style={empInS} /></div>
-      </div>
-      <div style={{ marginBottom: 6 }}>
-        <div style={{ color: "var(--text3)", fontSize: 10, marginBottom: 3 }}>Cargo</div>
-        <select value={row.roleId} onChange={e => onChange("roleId", e.target.value)} style={{ ...empInS, cursor: "pointer" }}>
-          <option value="">Selecionar cargo…</option>
-          {AREAS.map(a => (
-            <optgroup key={a} label={a}>
-              {restRoles.filter(r => r.area === a).map(r => <option key={r.id} value={r.id}>{r.name} ({r.points}pt)</option>)}
-            </optgroup>
-          ))}
-        </select>
-      </div>
-      {!isNew && (
-        <div style={{ marginBottom: 8 }}>
-          <div style={{ color: "var(--text3)", fontSize: 10, marginBottom: 3 }}>Inativar a partir de</div>
-          <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-            <input type="date" value={row.inactiveFrom ?? ""} onChange={e => onChange("inactiveFrom", e.target.value)} style={{ ...empInS, flex: 1 }} />
-            <button onClick={onToggleInactive} style={{ padding: "8px 12px", borderRadius: 8, border: `1px solid ${row.inactive ? "#10b981" : "#e74c3c44"}`, background: "transparent", color: row.inactive ? "#10b981" : "#e74c3c", cursor: "pointer", fontFamily: "DM Mono,monospace", fontSize: 11, whiteSpace: "nowrap" }}>
-              {row.inactive ? "Reativar" : "Inativar"}
-            </button>
-          </div>
-        </div>
-      )}
-      <div style={{ display: "flex", gap: 8 }}>
-        <button onClick={onSave} style={{ flex: 1, background: isSaved ? "#10b981" : isNew ? "#10b981" : ac, border: "none", borderRadius: 8, color: "#111", fontWeight: 700, fontSize: 13, cursor: "pointer", padding: "10px", fontFamily: "DM Mono,monospace" }}>
-          {isSaved ? "✓ Salvo!" : isNew ? "+ Adicionar" : "Salvar"}
-        </button>
-        {!isNew && onDelete && <button onClick={onDelete} style={{ background: "none", border: "1px solid #e74c3c44", borderRadius: 8, color: "#e74c3c", cursor: "pointer", fontSize: 13, padding: "10px 14px" }}>✕</button>}
-      </div>
-    </div>
-  );
-}
-
-function EmployeeSpreadsheet({ restEmps, restRoles, rid, employees, onUpdate, restCode: restCode_ }) {
-  const blank = () => ({ id: null, name: "", cpf: "", admission: "", pin: "", roleId: "", restaurantId: rid });
+function EmployeeSpreadsheet({ restEmps, restRoles, rid, employees, onUpdate, restCode: restCode_, isSuperManager }) {
+  const blank = () => ({ id: null, name: "", cpf: "", admission: today(), pin: "", roleId: "", restaurantId: rid });
   const [newRow, setNewRow] = useState(blank());
   const [editRows, setEditRows] = useState({});
   const [saved, setSaved] = useState({});
+  const [showInactive, setShowInactive] = useState(false);
+  const ac = "#f5c842";
 
-  const sorted = [...restEmps].sort((a, b) => {
-    const rA = restRoles.find(r => r.id === a.roleId);
-    const rB = restRoles.find(r => r.id === b.roleId);
-    return (rA?.area ?? "z").localeCompare(rB?.area ?? "z") || a.name.localeCompare(b.name);
+  const inS = { background: "var(--bg1)", border: "1px solid var(--border)", borderRadius: 6, color: "var(--text)", fontFamily: "DM Mono,monospace", fontSize: 12, padding: "6px 8px", outline: "none", width: "100%", boxSizing: "border-box" };
+
+  const sorted = [...restEmps].sort((a,b) => {
+    const rA = restRoles.find(r=>r.id===a.roleId);
+    const rB = restRoles.find(r=>r.id===b.roleId);
+    return (rA?.area??"z").localeCompare(rB?.area??"z") || a.name.localeCompare(b.name);
   });
+  const activeEmps   = sorted.filter(e => !e.inactive || (e.inactiveFrom && e.inactiveFrom > today()));
+  const inactiveEmps = sorted.filter(e => e.inactive && e.inactiveFrom && e.inactiveFrom <= today());
+  const list = showInactive ? inactiveEmps : activeEmps;
 
-  function getRow(e) { return editRows[e.id] ?? { name: e.name, cpf: e.cpf ?? "", admission: e.admission ?? "", pin: e.pin ?? "", roleId: e.roleId ?? "" }; }
-  function setRow(id, field, val) { setEditRows(prev => ({ ...prev, [id]: { ...(prev[id] ?? getRow({ id, name:"", cpf:"", admission:"", pin:"", roleId:"" })), [field]: val } })); }
+  function getRow(e) {
+    return editRows[e.id] ?? { name:e.name, cpf:e.cpf??"", admission:e.admission??"", pin:e.pin??"", roleId:e.roleId??"", inactiveFrom:e.inactiveFrom??"" };
+  }
+  function setRow(id, field, val) {
+    setEditRows(prev => ({ ...prev, [id]: { ...(prev[id] ?? getRow({id,name:"",cpf:"",admission:"",pin:"",roleId:"",inactiveFrom:""})), [field]: val } }));
+  }
 
   function saveEmp(e) {
     const row = getRow(e);
     if (!row.name.trim()) return;
-    const updated = { ...e, name: row.name.trim(), cpf: row.cpf, admission: row.admission, pin: row.pin, roleId: row.roleId };
-    onUpdate("employees", employees.map(x => x.id === e.id ? updated : x));
-    setSaved(p => ({ ...p, [e.id]: true }));
-    setTimeout(() => setSaved(p => ({ ...p, [e.id]: false })), 1500);
+    onUpdate("employees", employees.map(x => x.id===e.id ? {...e, name:row.name.trim(), cpf:row.cpf, admission:row.admission, pin:row.pin, roleId:row.roleId, inactiveFrom:row.inactiveFrom} : x));
+    setSaved(p=>({...p,[e.id]:true}));
+    setTimeout(()=>setSaved(p=>({...p,[e.id]:false})),1500);
   }
 
   function saveNew() {
@@ -2145,61 +2106,103 @@ function EmployeeSpreadsheet({ restEmps, restRoles, rid, employees, onUpdate, re
     const restCode = restCode_ || "XXX";
     const seq = nextEmpSeq(employees, restCode);
     const empCode = makeEmpCode(restCode, seq);
-    const pin = String(seq).padStart(4, "0");
-    onUpdate("employees", [...employees, { ...newRow, id: Date.now().toString(), empCode, pin, restaurantId: rid }]);
+    const pin = newRow.pin || String(seq).padStart(4,"0");
+    onUpdate("employees", [...employees, { ...newRow, id:Date.now().toString(), empCode, pin, restaurantId:rid }]);
     setNewRow(blank());
   }
 
-  // Employees are never deleted, only inactivated via EmpRowCard
-
   function toggleInactive(e) {
     const row = getRow(e);
-    const updated = { ...e, inactive: !e.inactive, inactiveFrom: row.inactiveFrom || today() };
-    onUpdate("employees", employees.map(x => x.id === e.id ? updated : x));
+    onUpdate("employees", employees.map(x => x.id===e.id ? {...e, inactive:!e.inactive, inactiveFrom:row.inactiveFrom||today()} : x));
   }
 
-  const activeEmps   = sorted.filter(e => !e.inactive || (e.inactiveFrom && e.inactiveFrom > today()));
-  const inactiveEmps = sorted.filter(e => e.inactive && e.inactiveFrom && e.inactiveFrom <= today());
-  const [showInactive, setShowInactive] = useState(false);
+  function deleteEmp(e) {
+    if (!window.confirm(`Excluir permanentemente "${e.name}"? Esta ação não pode ser desfeita.`)) return;
+    onUpdate("employees", employees.filter(x => x.id !== e.id));
+  }
 
-  const renderEmpList = (list) => list.map(e => {
-    const row = getRow(e);
-    const role = restRoles.find(r => r.id === (editRows[e.id]?.roleId ?? e.roleId));
+  // Grid: Nome | CPF | Admissão | PIN | Cargo | Inativar desde | Ações
+  const cols = "2fr 1.2fr 100px 80px 1.5fr 100px auto";
+
+  const HeaderRow = () => (
+    <div style={{display:"grid",gridTemplateColumns:cols,gap:6,padding:"4px 8px",marginBottom:4}}>
+      {["Nome","CPF","Admissão","PIN","Cargo","Inativo desde",""].map(h=>(
+        <div key={h} style={{color:"var(--text3)",fontSize:10,fontWeight:700}}>{h}</div>
+      ))}
+    </div>
+  );
+
+  const EmpRow = ({ e, isNew }) => {
+    const row = isNew ? newRow : getRow(e);
+    const isSaved = !isNew && saved[e?.id];
+    const isInactive = !isNew && e?.inactive && e?.inactiveFrom <= today();
+    const onChange = isNew
+      ? (f,v) => setNewRow(p=>({...p,[f]:v}))
+      : (f,v) => setRow(e.id, f, v);
+
     return (
-      <div key={e.id}>
-        {role && <div style={{ color: AREA_COLORS[role.area] ?? "#555", fontSize: 11, fontWeight: 700, marginBottom: 4, marginTop: 12, paddingLeft: 4 }}>{role.area}</div>}
-        {e.empCode && <div style={{ color: "var(--text3)", fontSize: 11, marginBottom: 2, paddingLeft: 4 }}>ID: <span style={{color:"#f5c842"}}>{e.empCode}</span></div>}
-        <EmpRowCard row={row} isSaved={saved[e.id]} isNew={false} restRoles={restRoles}
-          onChange={(f, v) => setRow(e.id, f, v)}
-          onSave={() => saveEmp(e)}
-          onDelete={null}
-          onToggleInactive={() => toggleInactive(e)}
-        />
+      <div style={{display:"grid",gridTemplateColumns:cols,gap:6,padding:"6px 8px",marginBottom:4,background:isNew?"#0d1a0d":isInactive?"#1a1a2a":"var(--card-bg)",borderRadius:10,border:`1px solid ${isSaved?"#10b98166":isNew?"#10b98144":isInactive?"#8b5cf644":"var(--border)"}`,alignItems:"center",opacity:isInactive?0.75:1}}>
+        <input value={row.name} onChange={e=>onChange("name",e.target.value)} placeholder="Nome completo" style={inS}/>
+        <input value={row.cpf} onChange={e=>onChange("cpf",e.target.value)} placeholder="000.000.000-00" style={inS} inputMode="numeric"/>
+        <input type="date" value={row.admission} onChange={e=>onChange("admission",e.target.value)} style={inS}/>
+        <input type="password" value={row.pin} onChange={e=>onChange("pin",e.target.value)} maxLength={6} placeholder="••••" style={inS}/>
+        <select value={row.roleId} onChange={e=>onChange("roleId",e.target.value)} style={{...inS,cursor:"pointer"}}>
+          <option value="">Selecionar…</option>
+          {AREAS.map(a=>(
+            <optgroup key={a} label={a}>
+              {restRoles.filter(r=>r.area===a&&!r.inactive).map(r=><option key={r.id} value={r.id}>{r.name} ({r.points}pt)</option>)}
+            </optgroup>
+          ))}
+        </select>
+        {isNew
+          ? <div style={{fontSize:10,color:"var(--text3)"}}>Auto</div>
+          : <input type="date" value={row.inactiveFrom??""} onChange={e=>onChange("inactiveFrom",e.target.value)} style={inS}/>
+        }
+        <div style={{display:"flex",gap:4}}>
+          {isNew
+            ? <button onClick={saveNew} style={{padding:"6px 12px",borderRadius:8,border:"none",background:"#10b981",color:"#fff",fontWeight:700,cursor:"pointer",fontFamily:"DM Mono,monospace",fontSize:12,whiteSpace:"nowrap"}}>+ Add</button>
+            : <>
+                <button onClick={()=>saveEmp(e)} style={{padding:"4px 10px",borderRadius:6,border:"none",background:isSaved?"#10b981":ac,color:"#111",fontWeight:700,cursor:"pointer",fontFamily:"DM Mono,monospace",fontSize:11}}>{isSaved?"✓":"Salvar"}</button>
+                <button onClick={()=>toggleInactive(e)} title={isInactive?"Reativar":"Inativar"} style={{padding:"4px 8px",borderRadius:6,border:`1px solid ${isInactive?"#10b98144":"#f59e0b44"}`,background:"transparent",color:isInactive?"#10b981":"#f59e0b",cursor:"pointer",fontSize:11,fontFamily:"DM Mono,monospace"}}>
+                  {isInactive?"↑":"↓"}
+                </button>
+                {isSuperManager && isInactive && (
+                  <button onClick={()=>deleteEmp(e)} title="Excluir permanentemente" style={{padding:"4px 8px",borderRadius:6,border:"1px solid #e74c3c44",background:"transparent",color:"#e74c3c",cursor:"pointer",fontSize:11,fontFamily:"DM Mono,monospace"}}>✕</button>
+                )}
+              </>
+          }
+        </div>
       </div>
     );
-  });
+  };
 
   return (
-    <div style={{ fontFamily: "DM Mono,monospace" }}>
-      <p style={{ color: "var(--text3)", fontSize: 12, marginBottom: 16 }}>Card verde para novo empregado. Edite e clique Salvar em cada card.</p>
-      <EmpRowCard row={newRow} isNew restRoles={restRoles}
-        onChange={(f, v) => setNewRow(p => ({ ...p, [f]: v }))}
-        onSave={saveNew} isSaved={false} />
-
-      {/* Active / Inactive toggle */}
-      <div style={{ display: "flex", gap: 8, marginBottom: 16, marginTop: 8 }}>
-        <button onClick={() => setShowInactive(false)} style={{ flex: 1, padding: "8px", borderRadius: 10, border: `1px solid ${!showInactive ? "#10b981" : "#2a2a2a"}`, background: !showInactive ? "#10b98122" : "transparent", color: !showInactive ? "#10b981" : "#555", cursor: "pointer", fontFamily: "DM Mono,monospace", fontSize: 13 }}>
+    <div style={{fontFamily:"DM Mono,monospace"}}>
+      {/* Toggle active/inactive */}
+      <div style={{display:"flex",gap:8,marginBottom:16}}>
+        <button onClick={()=>setShowInactive(false)} style={{flex:1,padding:"8px",borderRadius:10,border:`1px solid ${!showInactive?"#10b981":"var(--border)"}`,background:!showInactive?"#10b98122":"transparent",color:!showInactive?"#10b981":"var(--text3)",cursor:"pointer",fontFamily:"DM Mono,monospace",fontSize:13}}>
           Ativos ({activeEmps.length})
         </button>
-        <button onClick={() => setShowInactive(true)} style={{ flex: 1, padding: "8px", borderRadius: 10, border: `1px solid ${showInactive ? "#8b5cf6" : "#2a2a2a"}`, background: showInactive ? "#8b5cf622" : "transparent", color: showInactive ? "#8b5cf6" : "#555", cursor: "pointer", fontFamily: "DM Mono,monospace", fontSize: 13 }}>
-          Inativos ({inactiveEmps.length})
+        <button onClick={()=>setShowInactive(true)} style={{flex:1,padding:"8px",borderRadius:10,border:`1px solid ${showInactive?"#8b5cf6":"var(--border)"}`,background:showInactive?"#8b5cf622":"transparent",color:showInactive?"#8b5cf6":"var(--text3)",cursor:"pointer",fontFamily:"DM Mono,monospace",fontSize:13}}>
+          Inativos ({inactiveEmps.length}){isSuperManager && inactiveEmps.length>0 && " · clique ✕ p/ excluir"}
         </button>
       </div>
 
-      {!showInactive && activeEmps.length === 0 && <p style={{ color: "var(--text3)", textAlign: "center" }}>Nenhum empregado ativo.</p>}
-      {showInactive && inactiveEmps.length === 0 && <p style={{ color: "var(--text3)", textAlign: "center" }}>Nenhum empregado inativo.</p>}
-      {!showInactive && renderEmpList(activeEmps)}
-      {showInactive && renderEmpList(inactiveEmps)}
+      <HeaderRow />
+
+      {/* New row (only when showing active) */}
+      {!showInactive && <EmpRow isNew e={null}/>}
+
+      {list.length === 0 && <p style={{color:"var(--text3)",textAlign:"center",marginTop:16}}>Nenhum empregado {showInactive?"inativo":"ativo"}.</p>}
+      {list.map(e => {
+        const role = restRoles.find(r=>r.id===e.roleId);
+        return (
+          <div key={e.id}>
+            {role && <div style={{color:AREA_COLORS[role.area]??"#555",fontSize:10,fontWeight:700,padding:"6px 8px 2px"}}>{role.area} · {e.empCode}</div>}
+            <EmpRow e={e} isNew={false}/>
+          </div>
+        );
+      })}
     </div>
   );
 }
@@ -2782,6 +2785,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
             restEmps={employees.filter(e => e.restaurantId === rid)}
             restRoles={restRoles} rid={rid}
             employees={employees} onUpdate={onUpdate} restCode={restaurant.shortCode}
+            isSuperManager={isSuperManager}
           />
         )}
 
