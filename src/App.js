@@ -2520,7 +2520,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
           <span style={{ color: "var(--text)", fontWeight: 600 }}>{restaurant.name}</span>
           {restaurant.cnpj && <span style={{ color: "var(--text3)", fontSize: 12, marginLeft: 10 }}>{restaurant.cnpj}</span>}
         </div>
-        {canTips && <button onClick={() => setShowExport(true)} style={{ ...S.btnSecondary, fontSize: 12, color: ac, borderColor: ac }}>📤 Exportar</button>}
+        {(canTips || isSuperManager) && <button onClick={() => setTab("config")} style={{ ...S.btnSecondary, fontSize: 12 }}>⚙️ Config</button>}
       </div>
 
       {/* Tabs */}
@@ -2583,6 +2583,12 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
         {/* GORJETAS */}
         {tab === "tips" && (
           <div>
+            {/* Export button inside tips tab */}
+            {canTips && (
+              <div style={{display:"flex",justifyContent:"flex-end",marginBottom:12}}>
+                <button onClick={() => setShowExport(true)} style={{ ...S.btnSecondary, fontSize: 12, color: ac, borderColor: ac }}>📤 Exportar Gorjeta</button>
+              </div>
+            )}
             <div style={{ ...S.card, marginBottom: 24 }}>
               <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
                 <p style={{ color: ac, fontSize: 14, margin: 0, fontWeight: 700 }}>💸 Lançar Gorjeta</p>
