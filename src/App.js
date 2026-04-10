@@ -1258,31 +1258,36 @@ function ReceibosManagerTab({ restaurantId, employees, roles, restaurants, recei
         let extractedAdmission = "";
         let extractedRole = "";
 
-        // First extract CPF from text to use for matching
+        // Extract ALL CPFs from text, pick the one labeled "CPF:"
         const cpfInText = text.match(/CPF:\s*(\d{3}[.-]\d{3}[.-]\d{3}[.-]\d{2})/);
-        const cpfDigitsInText = cpfInText ? cpfInText[1].replace(/\D/g,"") : null;
+        // Also try without separator (11 digits after CPF:)
+        const cpfRawInText = text.match(/CPF:\s*(\d{11})/);
+        const cpfStr = cpfInText ? cpfInText[1] : (cpfRawInText ? cpfRawInText[1] : null);
+        // Normalize to exactly 11 digits with leading zeros preserved
+        const cpfDigitsInText = cpfStr ? cpfStr.replace(/\D/g,"").padStart(11,"0") : null;
 
         for (const emp of restEmps) {
           if (emp.cpf && cpfDigitsInText) {
-            const cleanCpf = emp.cpf.replace(/\D/g, "");
-            if (cleanCpf.length >= 11 && cleanCpf === cpfDigitsInText) {
+            // Normalize stored CPF to 11 digits too
+            const cleanCpf = emp.cpf.replace(/\D/g,"").padStart(11,"0");
+            if (cleanCpf === cpfDigitsInText) {
               matchedEmp = emp; break;
             }
           }
         }
-        if (!matchedEmp && cpfDigitsInText) {
-          // Also try raw text search for CPF
+        if (!matchedEmp) {
+          // Try raw text search for CPF digits
           for (const emp of restEmps) {
             if (emp.cpf) {
-              const cleanCpf = emp.cpf.replace(/\D/g, "");
-              if (cleanCpf.length >= 11 && text.replace(/\D/g,"").includes(cleanCpf)) {
+              const cleanCpf = emp.cpf.replace(/\D/g,"").padStart(11,"0");
+              if (cleanCpf.length === 11 && text.replace(/\D/g,"").includes(cleanCpf)) {
                 matchedEmp = emp; break;
               }
             }
           }
         }
         if (!matchedEmp) {
-          // Try name match — extract name first, then compare
+          // Try name match
           const nameInText = text.match(/Nome\s+do\s+Colaborador\s+([A-ZÁÉÍÓÚÃÕÂÊÎÔÛÇÀÜ][A-ZÁÉÍÓÚÃÕÂÊÎÔÛÇÀÜ\s]{3,50}?)(?=\s{2,}|PIS|CTPS|CPF)/);
           const nameFromPdf = nameInText ? nameInText[1].trim().toUpperCase() : null;
           for (const emp of restEmps) {
@@ -1315,7 +1320,7 @@ function ReceibosManagerTab({ restaurantId, employees, roles, restaurants, recei
         // CPF: labeled "CPF: 000.000.000-00"
         const cpfLabelMatch = text.match(/CPF:\s*(\d{3}[.-]\d{3}[.-]\d{3}[.-]\d{2})/);
         if (cpfLabelMatch) {
-          const digits = cpfLabelMatch[1].replace(/\D/g,"");
+          const digits = cpfLabelMatch[1].replace(/\D/g,"").padStart(11,"0");
           if (digits.length === 11) extractedCpf = `${digits.slice(0,3)}.${digits.slice(3,6)}.${digits.slice(6,9)}-${digits.slice(9)}`;
         }
 
