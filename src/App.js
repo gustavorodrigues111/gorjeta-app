@@ -1255,18 +1255,29 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
     const toDistribute = poolTotal - totalTaxAmt;
     const mode = restaurant.divisionMode ?? MODE_AREA_POINTS;
 
-    const empDayStatus = (empId) => schedules?.[rid]?.[tKey]?.[empId]?.[date];
+    // Use schedules directly from closure — same as calcTip
+    const daySchedule = schedules?.[rid]?.[tKey] ?? {};
+    const empDayStatus = (empId) => {
+      const empDayMap = daySchedule[empId] ?? {};
+      return empDayMap[date]; // undefined = trabalho
+    };
 
-    const activeEmps = restEmps.filter(emp => {
+    // Use all restaurant employees (including those that might be in restEmps)
+    const allRestEmps = employees.filter(e =>
+      e.restaurantId === rid &&
+      !(e.inactive && e.inactiveFrom && e.inactiveFrom <= date)
+    );
+
+    const activeEmps = allRestEmps.filter(emp => {
       const r = restRoles.find(r => r.id === emp.roleId);
       if (!r) return false;
       if (emp.admission && emp.admission > date) return false;
-      if (emp.inactive && emp.inactiveFrom && emp.inactiveFrom <= date) return false;
       const status = empDayStatus(emp.id);
-      if (!status) return true;
-      if (status === DAY_COMP) return true;
+      if (!status) return true; // working
+      if (status === DAY_COMP) return true; // comp earns
+      // Cozinha always earns except faltas
       if (r.area === "Cozinha" && status !== DAY_FAULT_J && status !== DAY_FAULT_U) return true;
-      return false;
+      return false; // folga, ferias, faltas = nao entra
     }).map(emp => ({
       ...emp,
       points: parseFloat(restRoles.find(r => r.id === emp.roleId)?.points) || 1,
