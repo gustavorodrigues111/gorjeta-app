@@ -2027,13 +2027,14 @@ function RoleSpreadsheet({ restRoles, rid, roles, onUpdate }) {
 
   const sorted = [...restRoles].sort((a, b) => a.area.localeCompare(b.area) || a.name.localeCompare(b.name));
 
-  function getRow(r) { return editRows[r.id] ?? { name: r.name, area: r.area, points: String(r.points) }; }
+  function getRow(r) { return editRows[r.id] ?? { name: r.name, area: r.area, points: r.points === 0 ? "0" : String(r.points || "") }; }
   function setRow(id, field, val) { setEditRows(prev => ({ ...prev, [id]: { ...getRow({ id }), [field]: val } })); }
 
   function saveRole(r) {
     const row = getRow(r);
     if (!row.name.trim()) return;
-    const updated = { ...r, name: row.name.trim(), area: row.area, points: parseFloat(row.points) ?? 0 };
+    const pts = row.points === "" ? 0 : (Number(row.points) || 0);
+    const updated = { ...r, name: row.name.trim(), area: row.area, points: pts };
     onUpdate("roles", roles.map(x => x.id === r.id ? updated : x));
     setSaved(p => ({ ...p, [r.id]: true }));
     setTimeout(() => setSaved(p => ({ ...p, [r.id]: false })), 1500);
@@ -2041,7 +2042,8 @@ function RoleSpreadsheet({ restRoles, rid, roles, onUpdate }) {
 
   function saveNew() {
     if (!newRow.name.trim()) return;
-    const r = { ...newRow, id: Date.now().toString(), points: parseFloat(newRow.points) ?? 0 };
+    const pts = newRow.points === "" ? 0 : (Number(newRow.points) || 0);
+    const r = { ...newRow, id: Date.now().toString(), points: pts };
     onUpdate("roles", [...roles, r]);
     setNewRow(blank());
   }
