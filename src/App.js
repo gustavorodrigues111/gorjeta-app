@@ -1274,6 +1274,9 @@ function ReceibosManagerTab({ restaurantId, employees, roles, restaurants, recei
           }
         }
 
+        // DEBUG — remove after fix
+        console.log(`[PDF p.${p}] raw text:`, text.slice(0, 500));
+
         // Extract name: try multiple patterns for Brazilian payroll PDFs
         // Pattern 1: "Código Nome do Colaborador\n000058 NOME COMPLETO"
         const codeNameMatch = text.match(/\d{5,6}\s+([A-ZÁÉÍÓÚÃÕÂÊÎÔÛÇÀÜ]{2,}(?:\s+[A-ZÁÉÍÓÚÃÕÂÊÎÔÛÇÀÜa-záéíóúãõâêîôûçàü]{2,})+)/);
