@@ -1185,15 +1185,13 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
       if (emp.inactive && emp.inactiveFrom && emp.inactiveFrom <= tipDate) return false;
       // Check schedule
       const status = empDayStatus(emp.id);
-      if (!status) return true; // working day = earns
-      if (status === DAY_COMP) return true; // compensacao = earns
-      // Falta injustificada: nobody earns
-      if (status === DAY_FAULT_U) return false;
-      // Falta justificada: nobody earns
-      if (status === DAY_FAULT_J) return false;
-      // Folga or ferias: Cozinha (Producao) still earns, others don't
+      if (!status) return true; // trabalho = entra
+      if (status === DAY_COMP) return true; // compensacao = entra
+      if (status === DAY_FAULT_J || status === DAY_FAULT_U) return false; // faltas = nao entra
+      if (status === DAY_VACATION) return false; // ferias = nao entra (inclusive Producao)
+      // Folga: so Producao entra
       if (isProdArea(r.area)) return true;
-      return false; // folga/ferias = nao entra
+      return false; // demais: folga = nao entra
     }).map(emp => ({
       ...emp,
       points: parseFloat(restRoles.find(r => r.id === emp.roleId)?.points) || 1,
@@ -1275,8 +1273,9 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
       if (!status) return true; // trabalho = entra
       if (status === DAY_COMP) return true; // compensacao = entra
       if (status === DAY_FAULT_J || status === DAY_FAULT_U) return false; // faltas = nao entra
-      if (r.area === "Produção") return true; // producao entra em folga/ferias
-      return false; // demais: folga/ferias = nao entra
+      if (status === DAY_VACATION) return false; // ferias = nao entra
+      if (r.area === "Produção") return true; // producao entra em folga
+      return false; // demais: folga = nao entra
     }).map(emp => ({
       ...emp,
       points: parseFloat(restRoles.find(r => r.id === emp.roleId)?.points) || 1,
@@ -1441,7 +1440,8 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                           if (!status) return true;
                           if (status === DAY_COMP) return true;
                           if (status === DAY_FAULT_J || status === DAY_FAULT_U) return false;
-                          if (r.area === "Produção") return true; // producao entra em folga/ferias
+                          if (status === DAY_VACATION) return false; // ferias = nao entra
+                          if (r.area === "Produção") return true; // producao entra em folga
                           return false;
                         });
                         const excluded = restEmps.filter(e => {
@@ -1450,7 +1450,8 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                           const status = getStatus(e.id);
                           if (!status || status === DAY_COMP) return false;
                           if (status === DAY_FAULT_J || status === DAY_FAULT_U) return true;
-                          if (r.area === "Produção") return false; // producao nao excluida por folga/ferias
+                          if (status === DAY_VACATION) return true; // ferias exclui todos
+                          if (r.area === "Produção") return false; // producao nao excluida por folga
                           return true;
                         });
                         return (<div>
