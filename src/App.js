@@ -1255,18 +1255,23 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
     const toDistribute = poolTotal - totalTaxAmt;
     const mode = restaurant.divisionMode ?? MODE_AREA_POINTS;
 
-    // Use schedules directly from closure — same as calcTip
     const daySchedule = schedules?.[rid]?.[tKey] ?? {};
     const empDayStatus = (empId) => {
       const empDayMap = daySchedule[empId] ?? {};
-      return empDayMap[date]; // undefined = trabalho
+      return empDayMap[date];
     };
 
-    // Use all restaurant employees (including those that might be in restEmps)
     const allRestEmps = employees.filter(e =>
       e.restaurantId === rid &&
       !(e.inactive && e.inactiveFrom && e.inactiveFrom <= date)
     );
+
+    // DIAGNOSTIC - remove after fix confirmed
+    const diagLines = allRestEmps.map(emp => {
+      const status = empDayStatus(emp.id) ?? "trabalho";
+      return `${emp.name}: ${status}`;
+    });
+    alert(`Diagnóstico recálculo ${date}:\n\nEscala encontrada:\n${diagLines.join("\n")}\n\ntKey: ${tKey}\nschedules[rid][tKey] keys: ${Object.keys(daySchedule).length} empregados`);
 
     const activeEmps = allRestEmps.filter(emp => {
       const r = restRoles.find(r => r.id === emp.roleId);
