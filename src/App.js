@@ -3,7 +3,7 @@ import { db } from "./firebase";
 import { doc, getDoc, setDoc } from "firebase/firestore";
 
 /* eslint-disable no-unused-vars */
-// ─── Storage (Firebase Firestore) ────────────────────────────────────────────
+//
 async function load(key) {
   try {
     const snap = await getDoc(doc(db, "appdata", key));
@@ -16,7 +16,7 @@ async function save(key, value) {
   } catch (e) { console.error("save error", e); }
 }
 
-// ─── Formatters ───────────────────────────────────────────────────────────────
+//
 const fmt = (v) => new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(v ?? 0);
 const fmtBR = (v) => new Intl.NumberFormat("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(v ?? 0);
 const fmtDate = (d) => d ? new Date(d + "T12:00:00").toLocaleDateString("pt-BR") : "—";
@@ -29,8 +29,8 @@ const AREA_COLORS = { Bar: "#3b82f6", Cozinha: "#f59e0b", Salão: "#10b981", Lim
 const DEFAULT_SPLIT = { Bar: 12, Cozinha: 40, Salão: 40, Limpeza: 8 };
 const TAX = 0.33;
 const DAY_OFF       = "off";    // folga programada
-const DAY_COMP      = "comp";   // compensação banco de horas
-const DAY_VACATION  = "vac";    // férias
+const DAY_COMP      = "comp";   // compensacao banco de horas
+const DAY_VACATION  = "vac";    // ferias
 const DAY_FAULT_J   = "faultj"; // falta justificada
 const DAY_FAULT_U   = "faultu"; // falta injustificada
 
@@ -51,9 +51,9 @@ const DAYS_NO_TIP   = new Set([DAY_OFF, DAY_VACATION, DAY_FAULT_J, DAY_FAULT_U])
 const MODE_AREA_POINTS = "area_points"; // default: split by area % then by points within area
 const MODE_GLOBAL_POINTS = "global_points"; // split only by total points across all employees
 
-// ─── Employee ID generation ──────────────────────────────────────────────────
+//
 function nextEmpSeq(employees, restaurantCode) {
-  // Find all seqs ever used for this restaurant (including deleted — stored in usedSeqs)
+  // Find all seqs ever used for this restaurant (including deleted)
   const used = employees
     .filter(e => e.restaurantId && e.empCode && e.empCode.startsWith(restaurantCode))
     .map(e => parseInt(e.empCode.slice(restaurantCode.length)) || 0);
@@ -65,7 +65,7 @@ function makeEmpCode(restaurantCode, seq) {
   return restaurantCode.toUpperCase() + String(seq).padStart(4, "0");
 }
 
-// ─── Storage keys (all data scoped by restaurantId where relevant) ─────────────
+//
 const K = {
   superManagers: "v4:superManagers",
   managers:      "v4:managers",
@@ -81,7 +81,7 @@ const K = {
   dpMessages:    "v4:dpMessages",     // [{id,restaurantId,empId|null,name|null,category,body,date,read}]
 };
 
-// ─── Shared styles ────────────────────────────────────────────────────────────
+//
 const S = {
   input: { width: "100%", boxSizing: "border-box", padding: "11px 14px", borderRadius: 10, border: "1px solid #2a2a2a", background: "#111", color: "#fff", fontSize: 14, fontFamily: "DM Mono,monospace", outline: "none" },
   btnPrimary: { width: "100%", padding: "12px", borderRadius: 12, background: "#f5c842", border: "none", color: "#111", fontWeight: 700, fontSize: 14, cursor: "pointer", fontFamily: "DM Mono,monospace" },
@@ -90,7 +90,7 @@ const S = {
   label: { color: "#555", fontSize: 12, marginBottom: 4, display: "block" },
 };
 
-// ─── Shared UI ────────────────────────────────────────────────────────────────
+//
 function Toast({ msg, onClose }) {
   useEffect(() => { if (msg) { const t = setTimeout(onClose, 3200); return () => clearTimeout(t); } }, [msg, onClose]); // eslint-disable-line react-hooks/exhaustive-deps
   if (!msg) return null;
@@ -141,7 +141,7 @@ function PermBadge({ label, on }) {
   return <span style={{ background: on ? "#10b98122" : "#e74c3c22", color: on ? "#10b981" : "#e74c3c", borderRadius: 6, padding: "2px 10px", fontSize: 11, fontWeight: 700 }}>{on ? "✓" : "✗"} {label}</span>;
 }
 
-// ─── Calendar ─────────────────────────────────────────────────────────────────
+//
 function CalendarGrid({ year, month, dayMap, onDayClick, readOnly }) {
   const firstDay = new Date(year, month, 1).getDay();
   const daysInMonth = new Date(year, month + 1, 0).getDate();
@@ -200,7 +200,7 @@ function CalendarGrid({ year, month, dayMap, onDayClick, readOnly }) {
   );
 }
 
-// Cycle order: work → off → comp → vacation → faultJ → faultU → work
+// Cycle order: work > off > comp > vacation > faultJ > faultU > work
 const DAY_CYCLE = [DAY_OFF, DAY_COMP, DAY_VACATION, DAY_FAULT_J, DAY_FAULT_U];
 
 function ScheduleCalendar({ empId, restaurantId, year, month, schedules, onUpdate }) {
@@ -220,7 +220,7 @@ function ScheduleCalendar({ empId, restaurantId, year, month, schedules, onUpdat
   return <CalendarGrid year={year} month={month} dayMap={dayMap} onDayClick={cycleDay} />;
 }
 
-// ─── Script loader ────────────────────────────────────────────────────────────
+//
 function loadScript(src) {
   return new Promise((res, rej) => {
     if (document.querySelector(`script[src="${src}"]`)) { res(); return; }
@@ -230,7 +230,7 @@ function loadScript(src) {
   });
 }
 
-// ─── Export Modal ─────────────────────────────────────────────────────────────
+//
 function ExportModal({ onClose, employees, roles, tips, restaurant }) {
   const now = new Date();
   const [dateFrom, setDateFrom] = useState(`${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,"0")}-01`);
@@ -352,12 +352,12 @@ function ExportModal({ onClose, employees, roles, tips, restaurant }) {
   );
 }
 
-// ══════════════════════════════════════════════════════════════════════════════
+//
 // EMPLOYEE PORTAL
-// ══════════════════════════════════════════════════════════════════════════════
-// ══════════════════════════════════════════════════════════════════════════════
+//
+//
 // COMUNICADOS TAB (employee view)
-// ══════════════════════════════════════════════════════════════════════════════
+//
 function ComunicadosTab({ empId, restaurantId, communications, commAcks, onUpdate }) {
   const myComms = communications.filter(c => c.restaurantId === restaurantId)
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
@@ -408,9 +408,9 @@ function ComunicadosTab({ empId, restaurantId, communications, commAcks, onUpdat
   );
 }
 
-// ══════════════════════════════════════════════════════════════════════════════
+//
 // FAQ TAB (employee view)
-// ══════════════════════════════════════════════════════════════════════════════
+//
 function FaqTab({ restaurantId, faq }) {
   const items = faq?.[restaurantId] ?? [];
   const [open, setOpen] = useState(null);
@@ -430,9 +430,9 @@ function FaqTab({ restaurantId, faq }) {
   );
 }
 
-// ══════════════════════════════════════════════════════════════════════════════
+//
 // FALE COM DP TAB (employee view)
-// ══════════════════════════════════════════════════════════════════════════════
+//
 function FaleDpTab({ empId, emp, restaurantId, dpMessages, onUpdate }) {
   const [category, setCategory] = useState("sugestao");
   const [body, setBody] = useState("");
@@ -487,9 +487,9 @@ function FaleDpTab({ empId, emp, restaurantId, dpMessages, onUpdate }) {
   );
 }
 
-// ══════════════════════════════════════════════════════════════════════════════
+//
 // COMUNICADOS MANAGER TAB (manager/super view)
-// ══════════════════════════════════════════════════════════════════════════════
+//
 function ComunicadosManagerTab({ restaurantId, communications, commAcks, employees, onUpdate, currentManagerName }) {
   const myComms = communications.filter(c => c.restaurantId === restaurantId)
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
@@ -584,9 +584,9 @@ function ComunicadosManagerTab({ restaurantId, communications, commAcks, employe
   );
 }
 
-// ══════════════════════════════════════════════════════════════════════════════
+//
 // FAQ MANAGER TAB
-// ══════════════════════════════════════════════════════════════════════════════
+//
 function FaqManagerTab({ restaurantId, faq, onUpdate }) {
   const items = faq?.[restaurantId] ?? [];
   const [editIdx, setEditIdx] = useState(null);
@@ -636,9 +636,9 @@ function FaqManagerTab({ restaurantId, faq, onUpdate }) {
   );
 }
 
-// ══════════════════════════════════════════════════════════════════════════════
+//
 // DP MESSAGES MANAGER TAB
-// ══════════════════════════════════════════════════════════════════════════════
+//
 function DpManagerTab({ restaurantId, dpMessages, onUpdate }) {
   const msgs = dpMessages.filter(m => m.restaurantId === restaurantId)
     .sort((a, b) => b.date.localeCompare(a.date));
@@ -816,10 +816,6 @@ function EmployeePortal({ employees, roles, tips, schedules, restaurants, commun
       )}
       <div style={{ padding: "20px 16px", maxWidth: 540, margin: "0 auto" }}>
 
-        {tab === "comunicados" && (
-          <ComunicadosTab empId={empId} restaurantId={emp?.restaurantId} communications={communications} commAcks={commAcks} onUpdate={onUpdate} />
-        )}
-
         {tab === "extrato" && (
           <div>
             <div style={{ marginBottom: 20 }}><MonthNav year={year} month={month} onChange={(y, m) => { setYear(y); setMonth(m); }} /></div>
@@ -904,9 +900,12 @@ function EmployeePortal({ employees, roles, tips, schedules, restaurants, commun
       </div>
     </div>
   );
-} (shared by manager and super manager, with permission guard)
-// ══════════════════════════════════════════════════════════════════════════════
-// ── Role Spreadsheet ──────────────────────────────────────────────────────────
+}
+
+//
+// RESTAURANT PANEL (shared by manager and super manager, with permission guard)
+//
+//
 function RoleSpreadsheet({ restRoles, rid, roles, onUpdate }) {
   const blank = () => ({ id: null, name: "", area: "Bar", points: "1", restaurantId: rid });
   const [newRow, setNewRow] = useState(blank());
@@ -982,7 +981,7 @@ function RoleSpreadsheet({ restRoles, rid, roles, onUpdate }) {
   );
 }
 
-// ── Employee Spreadsheet ──────────────────────────────────────────────────────
+//
 // EmpRowCard defined OUTSIDE to prevent focus loss on re-render
 const empInS = { background: "#111", border: "1px solid #2a2a2a", borderRadius: 8, color: "#fff", fontFamily: "DM Mono,monospace", fontSize: 12, padding: "8px 10px", outline: "none", width: "100%", boxSizing: "border-box" };
 
@@ -1170,7 +1169,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
       return empDayMap[tipDate]; // undefined = work
     };
 
-    const isProdArea = (area) => area === "Cozinha"; // Produção = Cozinha rule
+    const isProdArea = (area) => area === "Cozinha"; // Producao = Cozinha rule
 
     const activeEmps = restEmps.filter(emp => {
       // Must have a role and be admitted
@@ -1550,9 +1549,9 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
   );
 }
 
-// ══════════════════════════════════════════════════════════════════════════════
+//
 // SUPER MANAGER PORTAL
-// ══════════════════════════════════════════════════════════════════════════════
+//
 function SuperManagerPortal({ data, onUpdate, onBack, currentUser }) {
   const { superManagers, managers, restaurants, employees, roles, tips, splits, schedules } = data;
   const [tab, setTab] = useState("restaurants");
@@ -1789,9 +1788,9 @@ function SuperManagerPortal({ data, onUpdate, onBack, currentUser }) {
   );
 }
 
-// ══════════════════════════════════════════════════════════════════════════════
+//
 // MANAGER PORTAL (regular manager, single or multi restaurant)
-// ══════════════════════════════════════════════════════════════════════════════
+//
 function ManagerPortal({ manager, data, onUpdate, onBack }) {
   const { restaurants, employees, roles, tips, splits, schedules } = data;
   const myRestaurants = restaurants.filter(r => manager.restaurantIds?.includes(r.id));
@@ -1842,9 +1841,9 @@ function ManagerPortal({ manager, data, onUpdate, onBack }) {
   );
 }
 
-// ══════════════════════════════════════════════════════════════════════════════
+//
 // LOGIN
-// ══════════════════════════════════════════════════════════════════════════════
+//
 function LoginScreen({ superManagers, managers, onLoginSuper, onLoginManager, onBack, onSetupFirst }) {
   const [role, setRole] = useState("manager"); // "manager" | "super"
   const [cpf, setCpf]   = useState("");
@@ -1890,9 +1889,9 @@ function LoginScreen({ superManagers, managers, onLoginSuper, onLoginManager, on
   );
 }
 
-// ══════════════════════════════════════════════════════════════════════════════
+//
 // FIRST SETUP
-// ══════════════════════════════════════════════════════════════════════════════
+//
 function FirstSetup({ onDone }) {
   const [form, setForm] = useState({ name:"",cpf:"",pin:"",pin2:"" });
   const [err, setErr] = useState("");
@@ -1924,9 +1923,9 @@ function FirstSetup({ onDone }) {
   );
 }
 
-// ══════════════════════════════════════════════════════════════════════════════
+//
 // HOME
-// ══════════════════════════════════════════════════════════════════════════════
+//
 function Home({ onManager, onEmployee }) {
   return (
     <div style={{minHeight:"100vh",background:"#0f0f0f",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",fontFamily:"DM Mono,monospace",padding:24}}>
@@ -1941,9 +1940,9 @@ function Home({ onManager, onEmployee }) {
   );
 }
 
-// ══════════════════════════════════════════════════════════════════════════════
+//
 // APP ROOT
-// ══════════════════════════════════════════════════════════════════════════════
+//
 export default function App() {
   const [view, setView] = useState("home");
   const [loaded, setLoaded] = useState(false);
