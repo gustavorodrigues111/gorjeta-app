@@ -309,34 +309,66 @@ function ExportModal({ onClose, employees, roles, tips, restaurant }) {
       const { dates, rows, dayTotals, grandBruto, grandDeducao, grandLiquido } = buildMatrix();
       const ds = (d) => new Date(d + "T12:00:00").toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" });
       const doc = new jsPDF({ orientation: "landscape", unit: "mm", format: "a4" });
-      doc.setFontSize(14); doc.setFont("helvetica", "bold");
-      doc.text(restaurant.name, 14, 14);
-      doc.setFontSize(10); doc.setFont("helvetica", "normal");
-      doc.text(`Relatório de Gorjetas: ${fmtDate(dateFrom)} a ${fmtDate(dateTo)}`, 14, 21);
-      doc.text(`Gerado em: ${new Date().toLocaleDateString("pt-BR")}`, 14, 27);
-      const head = [["Nome", "Cargo", "Área", ...dates.map(ds), "Total Bruto", "Dedução 33%", "Líquido"]];
+
+      // A4 landscape = 297mm wide, margins 10mm each side = 277mm usable
+      const pageW = 277;
+      // Fixed columns: Nome(32) Cargo(28) Área(16) TotalBruto(22) Deducao(20) Liquido(22) = 140mm
+      const fixedW = 140;
+      // Remaining for day columns
+      const dayW = Math.max(10, Math.floor((pageW - fixedW) / Math.max(dates.length, 1)));
+
+      doc.setFontSize(13); doc.setFont("helvetica", "bold");
+      doc.text(restaurant.name, 10, 12);
+      doc.setFontSize(9); doc.setFont("helvetica", "normal");
+      doc.text(`Relatório de Gorjetas: ${fmtDate(dateFrom)} a ${fmtDate(dateTo)}   |   Gerado em: ${new Date().toLocaleDateString("pt-BR")}`, 10, 19);
+
+      const head = [["Nome", "Cargo", "Área", ...dates.map(ds), "Total Bruto", "Dedução", "Líquido"]];
       const body = [
-        ...rows.map(r => [r.name, r.role, r.area, ...dates.map(d => r.byDay[d] ? fmtBR(r.byDay[d]) : "-"), fmtBR(r.totalBruto), fmtBR(r.deducao), fmtBR(r.liquido)]),
-        ["TOTAL", "", "", ...dates.map(d => fmtBR(dayTotals[d])), fmtBR(grandBruto), fmtBR(grandDeducao), fmtBR(grandLiquido)],
+        ...rows.map(r => [r.name, r.role, r.area, ...dates.map(d => r.byDay[d] ? fmtBR(r.byDay[d]) : "–"), fmtBR(r.totalBruto), fmtBR(r.deducao), fmtBR(r.liquido)]),
+        ["TOTAL", "", "", ...dates.map(d => dayTotals[d] ? fmtBR(dayTotals[d]) : "–"), fmtBR(grandBruto), fmtBR(grandDeducao), fmtBR(grandLiquido)],
       ];
+
       doc.autoTable({
-        head, body, startY: 32,
-        styles: { fontSize: 7, font: "helvetica", cellPadding: 2 },
-        headStyles: { fillColor: [20, 20, 20], textColor: [245, 200, 66], fontStyle: "bold" },
-        alternateRowStyles: { fillColor: [245, 245, 245] },
+        head, body,
+        startY: 23,
+        margin: { left: 10, right: 10 },
+        styles: {
+          fontSize: dates.length > 20 ? 6 : 7,
+          font: "helvetica",
+          cellPadding: { top: 2, bottom: 2, left: 2, right: 2 },
+          overflow: "linebreak",  // allow name/role to wrap
+          lineColor: [200, 200, 200],
+          lineWidth: 0.1,
+        },
+        headStyles: {
+          fillColor: [30, 30, 30],
+          textColor: [245, 200, 66],
+          fontStyle: "bold",
+          halign: "center",
+          overflow: "hidden",
+        },
+        alternateRowStyles: { fillColor: [248, 248, 248] },
         columnStyles: {
-          0: { cellWidth: 30 }, 1: { cellWidth: 22 }, 2: { cellWidth: 16 },
-          ...Object.fromEntries(dates.map((_, i) => [i + 3, { cellWidth: 13, halign: "right" }])),
-          [dates.length + 3]: { cellWidth: 20, halign: "right", fontStyle: "bold" },
-          [dates.length + 4]: { cellWidth: 18, halign: "right", textColor: [200, 50, 50] },
-          [dates.length + 5]: { cellWidth: 18, halign: "right", textColor: [10, 130, 80], fontStyle: "bold" },
+          0: { cellWidth: 32, overflow: "linebreak" },   // Nome — pode quebrar
+          1: { cellWidth: 28, overflow: "linebreak" },   // Cargo — pode quebrar
+          2: { cellWidth: 16, halign: "center" },        // Área
+          // Day columns — fixed width, no wrap
+          ...Object.fromEntries(dates.map((_, i) => [i + 3, { cellWidth: dayW, halign: "right", overflow: "hidden" }])),
+          [dates.length + 3]: { cellWidth: 22, halign: "right", fontStyle: "bold", overflow: "hidden" },
+          [dates.length + 4]: { cellWidth: 20, halign: "right", textColor: [180, 40, 40], overflow: "hidden" },
+          [dates.length + 5]: { cellWidth: 22, halign: "right", textColor: [10, 130, 60], fontStyle: "bold", overflow: "hidden" },
         },
         didParseCell: (data) => {
-          if (data.row.index === body.length - 1) { data.cell.styles.fillColor = [20,20,20]; data.cell.styles.textColor = [245,200,66]; data.cell.styles.fontStyle = "bold"; }
+          if (data.row.index === body.length - 1) {
+            data.cell.styles.fillColor = [30, 30, 30];
+            data.cell.styles.textColor = [245, 200, 66];
+            data.cell.styles.fontStyle = "bold";
+          }
         },
       });
-      doc.setFontSize(8); doc.setTextColor(120);
-      doc.text("* Valores brutos sem dedução fiscal. Documento gerado pelo GorjetaApp.", 14, doc.lastAutoTable.finalY + 6);
+
+      doc.setFontSize(7); doc.setTextColor(150);
+      doc.text("* Valores brutos sem dedução fiscal. Documento gerado pelo GorjetaApp.", 10, doc.lastAutoTable.finalY + 5);
       doc.save(`gorjetas_${restaurant.name}_${dateFrom}_${dateTo}.pdf`);
       setStatus("done");
     } catch (e) { console.error(e); setStatus("error"); }
@@ -2266,7 +2298,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
       if (status === DAY_VACATION) return false;
       if (isProd(r.area)) return true;
       return false;
-    }).map(emp => ({ ...emp, points: parseFloat(restRoles.find(r=>r.id===emp.roleId)?.points)||1, area: restRoles.find(r=>r.id===emp.roleId)?.area }));
+    }).map(emp => ({ ...emp, points: parseFloat(restRoles.find(r=>r.id===emp.roleId)?.points) || 0, area: restRoles.find(r=>r.id===emp.roleId)?.area }));
     const newTips = [];
     if (mode === MODE_GLOBAL_POINTS) {
       const totalPoints = activeEmps.reduce((a,e)=>a+e.points,0);
@@ -2318,7 +2350,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
       return false; // demais: folga = nao entra
     }).map(emp => ({
       ...emp,
-      points: parseFloat(restRoles.find(r => r.id === emp.roleId)?.points) || 1,
+      points: parseFloat(restRoles.find(r => r.id === emp.roleId)?.points) || 0,
       area: restRoles.find(r => r.id === emp.roleId)?.area,
       dayStatus: empDayStatus(emp.id),
     }));
@@ -2443,7 +2475,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
       return false; // demais: folga = nao entra
     }).map(emp => ({
       ...emp,
-      points: parseFloat(restRoles.find(r => r.id === emp.roleId)?.points) || 1,
+      points: parseFloat(restRoles.find(r => r.id === emp.roleId)?.points) || 0,
       area: restRoles.find(r => r.id === emp.roleId)?.area,
     }));
 
@@ -2694,14 +2726,14 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                               </div>
                               {mode === MODE_GLOBAL_POINTS ? (
                                 <div style={{fontSize:11,color:"var(--text3)"}}>
-                                  {activeEmps.length > 0 && `Cada ponto vale: ${fmt(val*(1-taxRate)/(activeEmps.reduce((s,e)=>s+(parseFloat(restRoles.find(r=>r.id===e.roleId)?.points)||1),0)||1))}`}
+                                  {activeEmps.length > 0 && `Cada ponto vale: ${fmt(val*(1-taxRate)/(activeEmps.reduce((s,e)=>s+(parseFloat(restRoles.find(r=>r.id===e.roleId)?.points) || 0),0)||1))}`}
                                 </div>
                               ) : (
                                 <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
                                   {AREAS.map(a => {
                                     const emps = activeEmps.filter(e=>restRoles.find(r=>r.id===e.roleId)?.area===a);
                                     if(!emps.length) return null;
-                                    const pts = emps.reduce((s,e)=>s+(parseFloat(restRoles.find(r=>r.id===e.roleId)?.points)||1),0);
+                                    const pts = emps.reduce((s,e)=>s+(parseFloat(restRoles.find(r=>r.id===e.roleId)?.points) || 0),0);
                                     const aPool = val*(1-taxRate)*(tSplit[a]/100);
                                     return <span key={a} style={{fontSize:11,color:AREA_COLORS[a]}}>{a}: {fmt(aPool)} ({emps.length}emp/{pts}pt)</span>;
                                   })}
