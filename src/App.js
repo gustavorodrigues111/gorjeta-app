@@ -2155,73 +2155,161 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
           <div>
             <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12,flexWrap:"wrap",gap:8}}>
               <div style={{flex:1}}><PillBar options={AREAS} value={schedArea} onChange={setSchedArea}/></div>
-              <button onClick={async () => {
-                await loadScript("https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js");
-                const { jsPDF } = window.jspdf;
-                const doc = new jsPDF({ orientation:"landscape", unit:"mm", format:"a4" });
-                const emps = restEmps.filter(e => restRoles.find(r=>r.id===e.roleId)?.area === schedArea);
-                const daysInMonth = new Date(year, month+1, 0).getDate();
-                doc.setFontSize(12);
-                doc.text(`Escala — ${schedArea} — ${monthLabel(year,month)} — ${restaurant.name}`, 14, 14);
-                // Header row
-                doc.setFontSize(7);
-                doc.text("Empregado", 14, 24);
-                for(let d=1;d<=daysInMonth;d++){
-                  doc.text(String(d), 40+(d-1)*7, 24);
-                }
-                doc.text("T", 40+daysInMonth*7+2, 24);
-                // Employee rows
-                const STATUS_SHORT = {off:"F",comp:"C",vac:"Fér",faultj:"FJ",faultu:"FI"};
-                emps.forEach((emp, i) => {
-                  const y2 = 30 + i*7;
-                  const dayMap = schedules?.[rid]?.[mk]?.[emp.id] ?? {};
-                  doc.setFontSize(7);
-                  doc.text(emp.name.slice(0,18), 14, y2);
-                  let workDays = 0;
-                  for(let d=1;d<=daysInMonth;d++){
-                    const k = `${year}-${String(month+1).padStart(2,"0")}-${String(d).padStart(2,"0")}`;
-                    const s = dayMap[k];
-                    const label = STATUS_SHORT[s] ?? "•";
-                    if(!s) workDays++;
-                    doc.text(label, 40+(d-1)*7, y2);
-                  }
-                  doc.text(String(workDays), 40+daysInMonth*7+2, y2);
-                });
-                doc.save(`escala_${schedArea}_${year}_${String(month+1).padStart(2,"0")}.pdf`);
-              }} style={{padding:"8px 14px",borderRadius:10,border:"1px solid #2a2a2a",background:"transparent",color:"#aaa",cursor:"pointer",fontFamily:"DM Mono,monospace",fontSize:12,whiteSpace:"nowrap"}}>
-                📄 Exportar PDF
-              </button>
+              <div style={{display:"flex",gap:8}}>
+                <div style={{display:"flex",gap:4}}>
+                  <button onClick={()=>{setYear(month===0?year-1:year);setMonth(month===0?11:month-1);}} style={{...S.btnSecondary,padding:"6px 10px",fontSize:13}}>‹</button>
+                  <span style={{color:"#aaa",fontSize:12,padding:"6px 8px",background:"#1a1a1a",borderRadius:8,whiteSpace:"nowrap"}}>{monthLabel(year,month)}</span>
+                  <button onClick={()=>{setYear(month===11?year+1:year);setMonth(month===11?0:month+1);}} style={{...S.btnSecondary,padding:"6px 10px",fontSize:13}}>›</button>
+                </div>
+                <button onClick={async () => {
+                  await loadScript("https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js");
+                  const { jsPDF } = window.jspdf;
+                  const doc = new jsPDF({ orientation:"landscape", unit:"mm", format:"a4" });
+                  const emps = areaEmps;
+                  const daysInMonth = new Date(year, month+1, 0).getDate();
+                  doc.setFontSize(11);
+                  doc.text(`Escala — ${schedArea} — ${monthLabel(year,month)} — ${restaurant.name}`, 14, 12);
+                  doc.setFontSize(6);
+                  doc.text("Empregado / Cargo", 14, 22);
+                  for(let d=1;d<=daysInMonth;d++) doc.text(String(d), 58+(d-1)*7.5, 22);
+                  doc.text("T", 58+daysInMonth*7.5+2, 22);
+                  const STATUS_SHORT = {off:"F",comp:"C",vac:"Fér",faultj:"FJ",faultu:"FI"};
+                  const STATUS_COLORS = {off:[231,76,60],comp:[59,130,246],vac:[139,92,246],faultj:[245,158,11],faultu:[239,68,68]};
+                  emps.forEach((emp, i) => {
+                    const y2 = 28 + i*8;
+                    const role = restRoles.find(r=>r.id===emp.roleId);
+                    const dayMap = schedules?.[rid]?.[mk]?.[emp.id] ?? {};
+                    doc.setTextColor(255,255,255);
+                    doc.text(`${emp.name.slice(0,16)} (${role?.name?.slice(0,10)??"?"})`, 14, y2);
+                    let workDays = 0;
+                    for(let d=1;d<=daysInMonth;d++){
+                      const k = `${year}-${String(month+1).padStart(2,"0")}-${String(d).padStart(2,"0")}`;
+                      const s = dayMap[k];
+                      const x = 58+(d-1)*7.5, w=7, h=6;
+                      if(s && STATUS_COLORS[s]) {
+                        doc.setFillColor(...STATUS_COLORS[s]);
+                        doc.rect(x-1, y2-5, w, h, "F");
+                        doc.setTextColor(255,255,255);
+                        doc.text(STATUS_SHORT[s]??"•", x, y2);
+                      } else {
+                        doc.setTextColor(100,200,100);
+                        doc.text("•", x, y2);
+                        workDays++;
+                      }
+                    }
+                    doc.setTextColor(100,200,100);
+                    doc.text(String(workDays), 58+daysInMonth*7.5+2, y2);
+                  });
+                  doc.save(`escala_${schedArea}_${year}_${String(month+1).padStart(2,"0")}.pdf`);
+                }} style={{padding:"8px 12px",borderRadius:10,border:"1px solid #2a2a2a",background:"transparent",color:"#aaa",cursor:"pointer",fontFamily:"DM Mono,monospace",fontSize:12,whiteSpace:"nowrap"}}>
+                  📄 PDF
+                </button>
+              </div>
             </div>
-            <p style={{color:"#555",fontSize:11,marginBottom:16}}>Clique para ciclar: <span style={{color:"#10b981"}}>Trabalho</span> → <span style={{color:"#e74c3c"}}>Folga</span> → <span style={{color:"#3b82f6"}}>Comp.</span> → <span style={{color:"#8b5cf6"}}>Férias</span> → <span style={{color:"#f59e0b"}}>F.Just.</span> → <span style={{color:"#ef4444"}}>F.Injust.</span> → Trabalho</p>
-            {areaEmps.length === 0 && <p style={{color:"#555",textAlign:"center"}}>Nenhum empregado nesta área.</p>}
-            {areaEmps.map(emp => {
-              const dayMap = schedules?.[rid]?.[mk]?.[emp.id] ?? {};
-              const counts = { off:0, comp:0, vac:0, fj:0, fu:0 };
-              Object.values(dayMap).forEach(v => {
-                if (v===DAY_OFF) counts.off++;
-                else if (v===DAY_COMP) counts.comp++;
-                else if (v===DAY_VACATION) counts.vac++;
-                else if (v===DAY_FAULT_J) counts.fj++;
-                else if (v===DAY_FAULT_U) counts.fu++;
-              });
-              const workC = dim - counts.off - counts.comp - counts.vac - counts.fj - counts.fu;
-              return (
-                <div key={emp.id} style={{...S.card,marginBottom:20}}>
-                  <div style={{display:"flex",justifyContent:"space-between",marginBottom:8,flexWrap:"wrap",gap:4}}>
-                    <div><div style={{color:"#fff",fontWeight:600}}>{emp.name}</div><div style={{color:"#555",fontSize:12}}>{restRoles.find(r=>r.id===emp.roleId)?.name}</div></div>
-                    <div style={{fontSize:11,display:"flex",gap:6,flexWrap:"wrap",alignItems:"center"}}>
-                      <span style={{color:"#10b981"}}>{workC}T</span>
-                      <span style={{color:"#e74c3c"}}>{counts.off}F</span>
-                      <span style={{color:"#3b82f6"}}>{counts.comp}C</span>
-                      <span style={{color:"#8b5cf6"}}>{counts.vac}Fér</span>
-                      <span style={{color:"#f59e0b"}}>{counts.fj}FJ</span>
-                      <span style={{color:"#ef4444"}}>{counts.fu}FI</span>
-                    </div>
+
+            {/* Legend */}
+            <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:12}}>
+              {[["#10b981","T","Trabalho"],["#e74c3c","F","Folga"],["#3b82f6","C","Comp."],["#8b5cf6","Fér","Férias"],["#f59e0b","FJ","Falta Just."],["#ef4444","FI","Falta Injust."]].map(([c,s,l])=>(
+                <div key={s} style={{display:"flex",alignItems:"center",gap:3}}>
+                  <div style={{width:20,height:16,borderRadius:3,background:c+"33",border:`1px solid ${c}`,display:"flex",alignItems:"center",justifyContent:"center"}}>
+                    <span style={{color:c,fontSize:9,fontWeight:700}}>{s}</span>
                   </div>
-                  <ScheduleCalendar empId={emp.id} restaurantId={rid} year={year} month={month} schedules={schedules} onUpdate={onUpdate}/>
+                  <span style={{color:"#555",fontSize:10,fontFamily:"DM Mono,monospace"}}>{l}</span>
+                </div>
+              ))}
+            </div>
+
+            {areaEmps.length === 0 && <p style={{color:"#555",textAlign:"center"}}>Nenhum empregado nesta área.</p>}
+
+            {areaEmps.length > 0 && (() => {
+              const daysInMonth = dim;
+              const STATUS_COLORS = {
+                [DAY_OFF]:      "#e74c3c",
+                [DAY_COMP]:     "#3b82f6",
+                [DAY_VACATION]: "#8b5cf6",
+                [DAY_FAULT_J]:  "#f59e0b",
+                [DAY_FAULT_U]:  "#ef4444",
+              };
+              const STATUS_SHORT = {
+                [DAY_OFF]:"F",[DAY_COMP]:"C",[DAY_VACATION]:"Fér",
+                [DAY_FAULT_J]:"FJ",[DAY_FAULT_U]:"FI",
+              };
+
+              function cycleStatus(empId, dateStr) {
+                const empDayMap = schedules?.[rid]?.[mk]?.[empId] ?? {};
+                const cur = empDayMap[dateStr];
+                const idx = DAY_CYCLE.indexOf(cur);
+                const next = idx === DAY_CYCLE.length - 1 ? null : DAY_CYCLE[idx + 1];
+                const newMap = { ...empDayMap };
+                if (next === null) delete newMap[dateStr]; else newMap[dateStr] = next;
+                onUpdate("schedules", {
+                  ...schedules,
+                  [rid]: { ...(schedules?.[rid]??{}), [mk]: { ...(schedules?.[rid]?.[mk]??{}), [empId]: newMap } }
+                });
+              }
+
+              return (
+                <div style={{overflowX:"auto",WebkitOverflowScrolling:"touch"}}>
+                  <table style={{borderCollapse:"collapse",fontFamily:"DM Mono,monospace",fontSize:11,minWidth:"100%"}}>
+                    <thead>
+                      <tr>
+                        <th style={{position:"sticky",left:0,background:"#1a1a1a",zIndex:2,padding:"6px 10px",textAlign:"left",color:"#555",fontSize:11,borderBottom:"1px solid #2a2a2a",whiteSpace:"nowrap",minWidth:120}}>
+                          Empregado
+                        </th>
+                        {Array.from({length:daysInMonth},(_,i)=>{
+                          const d = i+1;
+                          const date = `${year}-${String(month+1).padStart(2,"0")}-${String(d).padStart(2,"0")}`;
+                          const wd = new Date(date+"T12:00:00").getDay();
+                          const isWe = wd===0||wd===6;
+                          return (
+                            <th key={d} style={{padding:"4px 2px",textAlign:"center",color:isWe?"#f59e0b":"#555",fontSize:10,borderBottom:"1px solid #2a2a2a",minWidth:28}}>
+                              <div>{d}</div>
+                              <div style={{fontSize:8}}>{["D","S","T","Q","Q","S","S"][wd]}</div>
+                            </th>
+                          );
+                        })}
+                        <th style={{padding:"4px 6px",textAlign:"center",color:"#10b981",fontSize:10,borderBottom:"1px solid #2a2a2a",minWidth:28}}>T</th>
+                        <th style={{padding:"4px 6px",textAlign:"center",color:"#e74c3c",fontSize:10,borderBottom:"1px solid #2a2a2a",minWidth:28}}>F</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {areaEmps.map((emp,ei) => {
+                        const role = restRoles.find(r=>r.id===emp.roleId);
+                        const dayMap = schedules?.[rid]?.[mk]?.[emp.id] ?? {};
+                        let workC=0, offC=0;
+                        Object.values(dayMap).forEach(v=>{ if(v===DAY_OFF||v===DAY_FAULT_J||v===DAY_FAULT_U||v===DAY_VACATION) offC++; });
+                        workC = daysInMonth - offC - Object.values(dayMap).filter(v=>v===DAY_COMP).length;
+                        return (
+                          <tr key={emp.id} style={{background:ei%2===0?"#111":"#141414"}}>
+                            <td style={{position:"sticky",left:0,background:ei%2===0?"#111":"#141414",zIndex:1,padding:"5px 10px",borderRight:"1px solid #2a2a2a",whiteSpace:"nowrap"}}>
+                              <div style={{color:"#fff",fontSize:12,fontWeight:600}}>{emp.name}</div>
+                              <div style={{color:"#555",fontSize:10}}>{role?.name}</div>
+                            </td>
+                            {Array.from({length:daysInMonth},(_,i)=>{
+                              const d = i+1;
+                              const date = `${year}-${String(month+1).padStart(2,"0")}-${String(d).padStart(2,"0")}`;
+                              const status = dayMap[date];
+                              const color = STATUS_COLORS[status] ?? "#10b981";
+                              const label = STATUS_SHORT[status] ?? "•";
+                              const wd = new Date(date+"T12:00:00").getDay();
+                              const isWe = wd===0||wd===6;
+                              return (
+                                <td key={d} onClick={()=>cycleStatus(emp.id, date)}
+                                  style={{textAlign:"center",padding:"3px 2px",cursor:"pointer",background:status?color+"33":(isWe?"#1a1a0a":"transparent"),borderRight:"1px solid #1a1a1a"}}>
+                                  <span style={{color:color,fontSize:status?10:12,fontWeight:status?700:400}}>{label}</span>
+                                </td>
+                              );
+                            })}
+                            <td style={{textAlign:"center",color:"#10b981",fontSize:11,fontWeight:700,padding:"3px 6px"}}>{workC}</td>
+                            <td style={{textAlign:"center",color:"#e74c3c",fontSize:11,padding:"3px 6px"}}>{offC}</td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
                 </div>
               );
-            })}
+            })()}
           </div>
         )}
 
