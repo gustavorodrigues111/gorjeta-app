@@ -1287,19 +1287,39 @@ function ReceibosManagerTab({ restaurantId, employees, roles, restaurants, recei
           }
         }
         if (!matchedEmp) {
-          // Try name match
-          const nameInText = text.match(/Nome\s+do\s+Colaborador\s+([A-ZÁÉÍÓÚÃÕÂÊÎÔÛÇÀÜ][A-ZÁÉÍÓÚÃÕÂÊÎÔÛÇÀÜ\s]{3,50}?)(?=\s{2,}|PIS|CTPS|CPF)/);
-          const nameFromPdf = nameInText ? nameInText[1].trim().toUpperCase() : null;
-          for (const emp of restEmps) {
-            const empNameUpper = emp.name.toUpperCase();
-            if (nameFromPdf && (empNameUpper === nameFromPdf || nameFromPdf.includes(empNameUpper) || empNameUpper.includes(nameFromPdf.split(" ")[0]))) {
-              matchedEmp = emp; break;
+          // Try name match — more flexible comparison
+          const nameInText = text.match(/Nome\s+do\s+Colaborador\s+([A-ZÁÉÍÓÚÃÕÂÊÎÔÛÇÀÜ][A-ZÁÉÍÓÚÃÕÂÊÎÔÛÇÀÜ\s]{3,60}?)(?=\s{2,}|PIS|CTPS|\d{3})/);
+          const nameFromPdf = nameInText ? nameInText[1].trim().toUpperCase().replace(/\s+/g," ") : null;
+          if (nameFromPdf) {
+            for (const emp of restEmps) {
+              const empUpper = emp.name.toUpperCase().replace(/\s+/g," ");
+              // Exact match
+              if (empUpper === nameFromPdf) { matchedEmp = emp; break; }
+              // PDF name contains emp name
+              if (nameFromPdf.includes(empUpper)) { matchedEmp = emp; break; }
+              // Emp name contains PDF name
+              if (empUpper.includes(nameFromPdf)) { matchedEmp = emp; break; }
+              // First + last name match
+              const pdfParts = nameFromPdf.split(" ");
+              const empParts = empUpper.split(" ");
+              if (pdfParts[0] === empParts[0] && pdfParts[pdfParts.length-1] === empParts[empParts.length-1]) {
+                matchedEmp = emp; break;
+              }
+            }
+          }
+          // Last resort: any word from PDF name (3+ chars) found in emp name
+          if (!matchedEmp && nameFromPdf) {
+            const pdfWords = nameFromPdf.split(" ").filter(w => w.length >= 4);
+            for (const emp of restEmps) {
+              const empUpper = emp.name.toUpperCase();
+              const matchCount = pdfWords.filter(w => empUpper.includes(w)).length;
+              if (matchCount >= 2) { matchedEmp = emp; break; }
             }
           }
         }
 
         // DEBUG — remove after fix
-        console.log(`[PDF p.${p}] raw text:`, text.slice(0, 500));
+        console.log(`[PDF p.${p}] CPF found: "${cpfDigitsInText}" | Name pattern: "${text.match(/Nome\s+do\s+Colaborador\s+(.{0,50})/)?.[1]?.trim()}" | matched: ${matchedEmp?.name ?? "NONE"}`);
 
         // Extract using exact patterns from this payroll PDF format:
         // "Nome do Colaborador\nNOME COMPLETO" or "Nome do Colaborador NOME COMPLETO"
