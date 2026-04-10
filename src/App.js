@@ -683,7 +683,7 @@ function DpManagerTab({ restaurantId, dpMessages, onUpdate }) {
 
 // ── Recibos Manager Tab ──────────────────────────────────────────────────────
 function ReceibosManagerTab({ restaurantId, employees, receipts, onUpdate }) {
-  const restEmps = employees.filter(e => e.restaurantId === restaurantId && !e.inactive);
+  const restEmps = employees.filter(e => e.restaurantId === restaurantId);
   const [uploading, setUploading] = useState(false);
   const [progress, setProgress] = useState("");
   const [selMonth, setSelMonth] = useState(() => {
@@ -691,6 +691,7 @@ function ReceibosManagerTab({ restaurantId, employees, receipts, onUpdate }) {
     return `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,"0")}`;
   });
   const [type, setType] = useState("pagamento");
+  const [assignTarget, setAssignTarget] = useState({}); // {receiptId: empId}
   const ac = "#f5c842";
 
   async function handleUpload(e) {
@@ -700,7 +701,6 @@ function ReceibosManagerTab({ restaurantId, employees, receipts, onUpdate }) {
     setProgress("Carregando PDF...");
 
     try {
-      // Load pdf.js
       if (!window.pdfjsLib) {
         await new Promise((res, rej) => {
           const s = document.createElement("script");
@@ -718,8 +718,6 @@ function ReceibosManagerTab({ restaurantId, employees, receipts, onUpdate }) {
       setProgress(`Lendo ${numPages} páginas...`);
 
       const newReceipts = [];
-      const matched = [];
-      const unmatched = [];
 
       for (let p = 1; p <= numPages; p++) {
         setProgress(`Processando página ${p} de ${numPages}...`);
@@ -727,14 +725,14 @@ function ReceibosManagerTab({ restaurantId, employees, receipts, onUpdate }) {
         const textContent = await page.getTextContent();
         const text = textContent.items.map(i => i.str).join(" ");
 
-        // Try to match to an employee by CPF first, then by name
+        // Try to match by CPF first, then by name
         let matchedEmp = null;
+        let extractedName = "";
         for (const emp of restEmps) {
           if (emp.cpf) {
             const cleanCpf = emp.cpf.replace(/\D/g, "");
             if (cleanCpf.length >= 11 && text.replace(/\D/g,"").includes(cleanCpf)) {
-              matchedEmp = emp;
-              break;
+              matchedEmp = emp; break;
             }
           }
         }
@@ -742,38 +740,39 @@ function ReceibosManagerTab({ restaurantId, employees, receipts, onUpdate }) {
           for (const emp of restEmps) {
             const firstName = emp.name.split(" ")[0].toUpperCase();
             if (firstName.length >= 3 && text.toUpperCase().includes(firstName)) {
-              matchedEmp = emp;
-              break;
+              matchedEmp = emp; break;
             }
           }
         }
+        // Try to extract a name from the PDF text for display
+        const nameMatch = text.match(/[A-ZÁÉÍÓÚÃÕÂÊÎÔÛÇÀÜ]{2,}(?:\s+[A-ZÁÉÍÓÚÃÕÂÊÎÔÛÇÀÜ]{2,})+/);
+        if (nameMatch) extractedName = nameMatch[0];
 
-        // Render page to canvas to get image
         const viewport = page.getViewport({ scale: 1.5 });
         const canvas = document.createElement("canvas");
-        canvas.width = viewport.width;
-        canvas.height = viewport.height;
+        canvas.width = viewport.width; canvas.height = viewport.height;
         await page.render({ canvasContext: canvas.getContext("2d"), viewport }).promise;
         const dataUrl = canvas.toDataURL("image/jpeg", 0.8);
 
-        if (matchedEmp) {
-          newReceipts.push({
-            id: `${Date.now()}-${p}-${Math.random().toString(36).slice(2,5)}`,
-            restaurantId, empId: matchedEmp.id, empName: matchedEmp.name,
-            month: selMonth, type, dataUrl, uploadedAt: new Date().toISOString(), page: p
-          });
-          matched.push(`p.${p} → ${matchedEmp.name}`);
-        } else {
-          unmatched.push(`p.${p} — não identificado`);
-        }
+        newReceipts.push({
+          id: `${Date.now()}-${p}-${Math.random().toString(36).slice(2,5)}`,
+          restaurantId,
+          empId: matchedEmp ? matchedEmp.id : null,
+          empName: matchedEmp ? matchedEmp.name : (extractedName || `Página ${p} — não identificado`),
+          unmatched: !matchedEmp,
+          month: selMonth, type, dataUrl,
+          uploadedAt: new Date().toISOString(), page: p
+        });
       }
 
-      // Remove old receipts for same month+type+restaurant and add new
+      const matched = newReceipts.filter(r => !r.unmatched).length;
+      const unmatched = newReceipts.filter(r => r.unmatched).length;
+
       const existing = receipts.filter(r =>
         !(r.restaurantId === restaurantId && r.month === selMonth && r.type === type)
       );
       onUpdate("receipts", [...existing, ...newReceipts]);
-      setProgress(`✅ ${matched.length} recibos importados!${unmatched.length ? `\n⚠️ ${unmatched.length} páginas não identificadas` : ""}`);
+      setProgress(`✅ ${matched} identificados automaticamente.${unmatched ? `\n⚠️ ${unmatched} página(s) não identificada(s) — associe manualmente abaixo.` : ""}`);
     } catch (err) {
       setProgress(`❌ Erro: ${err.message}`);
     }
@@ -781,8 +780,17 @@ function ReceibosManagerTab({ restaurantId, employees, receipts, onUpdate }) {
     e.target.value = "";
   }
 
+  function assignReceipt(receiptId, empId) {
+    const emp = restEmps.find(e => e.id === empId);
+    if (!emp) return;
+    onUpdate("receipts", receipts.map(r =>
+      r.id === receiptId ? { ...r, empId: emp.id, empName: emp.name, unmatched: false } : r
+    ));
+  }
+
   const myReceipts = receipts.filter(r => r.restaurantId === restaurantId);
-  const months = [...new Set(myReceipts.map(r => r.month))].sort().reverse();
+  const unmatched = myReceipts.filter(r => r.unmatched);
+  const months = [...new Set(myReceipts.filter(r=>!r.unmatched).map(r => r.month))].sort().reverse();
 
   return (
     <div style={{fontFamily:"DM Mono,monospace"}}>
@@ -816,9 +824,38 @@ function ReceibosManagerTab({ restaurantId, employees, receipts, onUpdate }) {
         </div>
       </div>
 
-      <p style={{color:"#555",fontSize:12,marginBottom:12}}>Recibos importados: {myReceipts.length}</p>
+      {/* Unmatched receipts - manual assignment */}
+      {unmatched.length > 0 && (
+        <div style={{...S.card,marginBottom:20,border:"1px solid #f59e0b44"}}>
+          <p style={{color:"#f59e0b",fontWeight:700,fontSize:13,margin:"0 0 12px"}}>⚠️ {unmatched.length} recibo(s) não identificado(s) — associe manualmente:</p>
+          {unmatched.map(r => (
+            <div key={r.id} style={{marginBottom:14,padding:10,background:"#111",borderRadius:10}}>
+              <div style={{color:"#aaa",fontSize:12,marginBottom:6}}>Página {r.page} — {r.empName}</div>
+              <img src={r.dataUrl} alt="" style={{width:"100%",borderRadius:6,marginBottom:8,maxHeight:200,objectFit:"cover"}}/>
+              <div style={{display:"flex",gap:8}}>
+                <select value={assignTarget[r.id]??""} onChange={e=>setAssignTarget(p=>({...p,[r.id]:e.target.value}))}
+                  style={{...S.input,flex:1}}>
+                  <option value="">Selecionar empregado…</option>
+                  {restEmps.map(e=><option key={e.id} value={e.id}>{e.name}</option>)}
+                </select>
+                <button onClick={()=>assignReceipt(r.id,assignTarget[r.id])}
+                  disabled={!assignTarget[r.id]}
+                  style={{padding:"8px 14px",borderRadius:8,border:"none",background:assignTarget[r.id]?ac:"#2a2a2a",color:"#111",fontWeight:700,cursor:assignTarget[r.id]?"pointer":"default",fontFamily:"DM Mono,monospace",fontSize:12}}>
+                  Associar
+                </button>
+                <button onClick={()=>onUpdate("receipts",receipts.filter(x=>x.id!==r.id))}
+                  style={{padding:"8px 10px",borderRadius:8,border:"1px solid #e74c3c33",background:"transparent",color:"#e74c3c",cursor:"pointer",fontFamily:"DM Mono,monospace",fontSize:12}}>
+                  ✕
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <p style={{color:"#555",fontSize:12,marginBottom:12}}>Recibos importados: {myReceipts.filter(r=>!r.unmatched).length}</p>
       {months.map(m => {
-        const mReceipts = myReceipts.filter(r => r.month === m);
+        const mReceipts = myReceipts.filter(r => r.month === m && !r.unmatched);
         return (
           <div key={m} style={{...S.card,marginBottom:12}}>
             <p style={{color:ac,fontWeight:700,margin:"0 0 10px",fontSize:13}}>{m}</p>
@@ -829,9 +866,9 @@ function ReceibosManagerTab({ restaurantId, employees, receipts, onUpdate }) {
                 <div key={t} style={{marginBottom:8}}>
                   <p style={{color:"#555",fontSize:11,margin:"0 0 6px"}}>{t==="pagamento"?"💰 Pagamento":"💵 Adiantamento"} ({tR.length})</p>
                   {tR.map(r=>(
-                    <div key={r.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"4px 0",borderBottom:"1px solid #1a1a1a"}}>
+                    <div key={r.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"6px 0",borderBottom:"1px solid #1a1a1a"}}>
                       <span style={{color:"#aaa",fontSize:12}}>{r.empName}</span>
-                      <button onClick={()=>{onUpdate("receipts",receipts.filter(x=>x.id!==r.id));}} style={{background:"none",border:"1px solid #e74c3c33",borderRadius:6,color:"#e74c3c",cursor:"pointer",fontSize:11,padding:"3px 8px",fontFamily:"DM Mono,monospace"}}>✕</button>
+                      <button onClick={()=>onUpdate("receipts",receipts.filter(x=>x.id!==r.id))} style={{background:"none",border:"1px solid #e74c3c33",borderRadius:6,color:"#e74c3c",cursor:"pointer",fontSize:11,padding:"3px 8px",fontFamily:"DM Mono,monospace"}}>✕</button>
                     </div>
                   ))}
                 </div>
