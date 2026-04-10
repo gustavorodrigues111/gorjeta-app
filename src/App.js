@@ -2163,43 +2163,60 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                 </div>
                 <button onClick={async () => {
                   await loadScript("https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js");
+                  await loadScript("https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js");
                   const { jsPDF } = window.jspdf;
                   const doc = new jsPDF({ orientation:"landscape", unit:"mm", format:"a4" });
-                  const emps = areaEmps;
                   const daysInMonth = new Date(year, month+1, 0).getDate();
-                  doc.setFontSize(11);
-                  doc.text(`Escala — ${schedArea} — ${monthLabel(year,month)} — ${restaurant.name}`, 14, 12);
-                  doc.setFontSize(6);
-                  doc.text("Empregado / Cargo", 14, 22);
-                  for(let d=1;d<=daysInMonth;d++) doc.text(String(d), 58+(d-1)*7.5, 22);
-                  doc.text("T", 58+daysInMonth*7.5+2, 22);
                   const STATUS_SHORT = {off:"F",comp:"C",vac:"Fér",faultj:"FJ",faultu:"FI"};
                   const STATUS_COLORS = {off:[231,76,60],comp:[59,130,246],vac:[139,92,246],faultj:[245,158,11],faultu:[239,68,68]};
-                  emps.forEach((emp, i) => {
-                    const y2 = 28 + i*8;
+
+                  doc.setFontSize(11);
+                  doc.setTextColor(30,30,30);
+                  doc.text(`Escala — ${schedArea} — ${monthLabel(year,month)} — ${restaurant.name}`, 14, 12);
+
+                  // Build head row: name + days + T
+                  const head = [["Empregado", ...Array.from({length:daysInMonth},(_,i)=>String(i+1)), "T"]];
+
+                  // Build body rows
+                  const body = areaEmps.map(emp => {
                     const role = restRoles.find(r=>r.id===emp.roleId);
                     const dayMap = schedules?.[rid]?.[mk]?.[emp.id] ?? {};
-                    doc.setTextColor(255,255,255);
-                    doc.text(`${emp.name.slice(0,16)} (${role?.name?.slice(0,10)??"?"})`, 14, y2);
                     let workDays = 0;
-                    for(let d=1;d<=daysInMonth;d++){
-                      const k = `${year}-${String(month+1).padStart(2,"0")}-${String(d).padStart(2,"0")}`;
+                    const dayCells = Array.from({length:daysInMonth},(_,i)=>{
+                      const k = `${year}-${String(month+1).padStart(2,"0")}-${String(i+1).padStart(2,"0")}`;
                       const s = dayMap[k];
-                      const x = 58+(d-1)*7.5, w=7, h=6;
-                      if(s && STATUS_COLORS[s]) {
-                        doc.setFillColor(...STATUS_COLORS[s]);
-                        doc.rect(x-1, y2-5, w, h, "F");
-                        doc.setTextColor(255,255,255);
-                        doc.text(STATUS_SHORT[s]??"•", x, y2);
-                      } else {
-                        doc.setTextColor(100,200,100);
-                        doc.text("•", x, y2);
-                        workDays++;
-                      }
-                    }
-                    doc.setTextColor(100,200,100);
-                    doc.text(String(workDays), 58+daysInMonth*7.5+2, y2);
+                      if(!s) { workDays++; return ""; }
+                      return STATUS_SHORT[s] ?? "";
+                    });
+                    return [`${emp.name}\n${role?.name??""}`, ...dayCells, String(workDays)];
                   });
+
+                  doc.autoTable({
+                    head, body,
+                    startY: 16,
+                    styles: { fontSize: 6, cellPadding: 1.5, halign:"center", textColor:[30,30,30], lineColor:[200,200,200], lineWidth:0.1 },
+                    headStyles: { fillColor:[40,40,40], textColor:[220,220,220], fontStyle:"bold", fontSize:6 },
+                    columnStyles: { 0: { halign:"left", cellWidth:30, fontSize:7 } },
+                    didDrawCell: (data) => {
+                      if(data.section==="body" && data.column.index > 0 && data.column.index <= daysInMonth) {
+                        const dayIdx = data.column.index - 1;
+                        const emp = areaEmps[data.row.index];
+                        if(!emp) return;
+                        const k = `${year}-${String(month+1).padStart(2,"0")}-${String(dayIdx+1).padStart(2,"0")}`;
+                        const s = schedules?.[rid]?.[mk]?.[emp.id]?.[k];
+                        if(s && STATUS_COLORS[s]) {
+                          const {x,y,width,height} = data.cell;
+                          doc.setFillColor(...STATUS_COLORS[s]);
+                          doc.rect(x,y,width,height,"F");
+                          doc.setTextColor(255,255,255);
+                          doc.setFontSize(5);
+                          doc.text(STATUS_SHORT[s], x+width/2, y+height/2+1, {align:"center"});
+                        }
+                      }
+                    },
+                    theme: "grid",
+                  });
+
                   doc.save(`escala_${schedArea}_${year}_${String(month+1).padStart(2,"0")}.pdf`);
                 }} style={{padding:"8px 12px",borderRadius:10,border:"1px solid #2a2a2a",background:"transparent",color:"#aaa",cursor:"pointer",fontFamily:"DM Mono,monospace",fontSize:12,whiteSpace:"nowrap"}}>
                   📄 PDF
@@ -2253,7 +2270,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                   <table style={{borderCollapse:"collapse",fontFamily:"DM Mono,monospace",fontSize:11,minWidth:"100%"}}>
                     <thead>
                       <tr>
-                        <th style={{position:"sticky",left:0,background:"#1a1a1a",zIndex:2,padding:"6px 10px",textAlign:"left",color:"#555",fontSize:11,borderBottom:"1px solid #2a2a2a",whiteSpace:"nowrap",minWidth:90,maxWidth:110}}>
+                        <th style={{position:"sticky",left:0,background:"#1a1a1a",zIndex:2,padding:"6px 10px",textAlign:"left",color:"#555",fontSize:11,borderBottom:"1px solid #2a2a2a",whiteSpace:"nowrap",minWidth:120}}>
                           Empregado
                         </th>
                         {Array.from({length:daysInMonth},(_,i)=>{
@@ -2281,9 +2298,9 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                         workC = daysInMonth - offC - Object.values(dayMap).filter(v=>v===DAY_COMP).length;
                         return (
                           <tr key={emp.id} style={{background:ei%2===0?"#111":"#141414"}}>
-                            <td style={{position:"sticky",left:0,background:ei%2===0?"#111":"#141414",zIndex:1,padding:"5px 8px",borderRight:"1px solid #2a2a2a",whiteSpace:"nowrap",maxWidth:110,overflow:"hidden"}}>
-                              <div style={{color:"#fff",fontSize:11,fontWeight:600,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",maxWidth:100}}>{emp.name}</div>
-                              <div style={{color:"#555",fontSize:9,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",maxWidth:100}}>{role?.name}</div>
+                            <td style={{position:"sticky",left:0,background:ei%2===0?"#111":"#141414",zIndex:1,padding:"5px 10px",borderRight:"1px solid #2a2a2a",minWidth:130}}>
+                              <div style={{color:"#fff",fontSize:11,fontWeight:600}}>{emp.name}</div>
+                              <div style={{color:"#555",fontSize:9}}>{role?.name}</div>
                             </td>
                             {Array.from({length:daysInMonth},(_,i)=>{
                               const d = i+1;
