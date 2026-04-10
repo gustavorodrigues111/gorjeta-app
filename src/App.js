@@ -354,7 +354,331 @@ function ExportModal({ onClose, employees, roles, tips, restaurant }) {
 // ══════════════════════════════════════════════════════════════════════════════
 // EMPLOYEE PORTAL
 // ══════════════════════════════════════════════════════════════════════════════
-function EmployeePortal({ employees, roles, tips, schedules, restaurants, onBack, onUpdateEmployee }) {
+// ══════════════════════════════════════════════════════════════════════════════
+// COMUNICADOS TAB (employee view)
+// ══════════════════════════════════════════════════════════════════════════════
+function ComunicadosTab({ empId, restaurantId, communications, commAcks, onUpdate }) {
+  const myComms = communications.filter(c => c.restaurantId === restaurantId)
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  const pending = myComms.filter(c => !commAcks?.[c.id]?.[empId]);
+  const done    = myComms.filter(c =>  commAcks?.[c.id]?.[empId]);
+  const [tab, setTab] = useState("pending");
+  const ac = "#f5c842";
+
+  function ack(commId) {
+    const now = new Date().toISOString();
+    onUpdate("commAcks", {
+      ...commAcks,
+      [commId]: { ...(commAcks?.[commId] ?? {}), [empId]: now }
+    });
+  }
+
+  const list = tab === "pending" ? pending : done;
+
+  return (
+    <div>
+      {pending.length > 0 && (
+        <div style={{ background: "#e74c3c22", border: "1px solid #e74c3c44", borderRadius: 10, padding: "10px 14px", marginBottom: 16, fontSize: 12, color: "#e74c3c", fontFamily: "DM Mono,monospace" }}>
+          ⚠️ Você tem <strong>{pending.length}</strong> comunicado{pending.length > 1 ? "s" : ""} pendente{pending.length > 1 ? "s" : ""} de ciência.
+        </div>
+      )}
+      <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
+        {[["pending", `Pendentes (${pending.length})`], ["done", `Lidos (${done.length})`]].map(([id, lbl]) => (
+          <button key={id} onClick={() => setTab(id)} style={{ flex: 1, padding: "8px", borderRadius: 10, border: `1px solid ${tab === id ? ac : "#2a2a2a"}`, background: tab === id ? ac + "22" : "transparent", color: tab === id ? ac : "#555", cursor: "pointer", fontFamily: "DM Mono,monospace", fontSize: 12 }}>{lbl}</button>
+        ))}
+      </div>
+      {list.length === 0 && <p style={{ color: "#555", textAlign: "center", fontSize: 14 }}>Nenhum comunicado {tab === "pending" ? "pendente" : "lido"}.</p>}
+      {list.map(c => (
+        <div key={c.id} style={{ background: "#1a1a1a", borderRadius: 14, padding: 16, marginBottom: 12, border: `1px solid ${!commAcks?.[c.id]?.[empId] ? "#e74c3c44" : "#2a2a2a"}` }}>
+          <div style={{ color: "#fff", fontWeight: 700, fontSize: 15, marginBottom: 6 }}>{c.title}</div>
+          <div style={{ color: "#aaa", fontSize: 13, marginBottom: 12, lineHeight: 1.6, whiteSpace: "pre-wrap" }}>{c.body}</div>
+          <div style={{ color: "#555", fontSize: 11, marginBottom: commAcks?.[c.id]?.[empId] ? 0 : 12 }}>
+            Publicado em {fmtDate(c.createdAt?.slice(0,10))}
+            {commAcks?.[c.id]?.[empId] && <span style={{ color: "#10b981", marginLeft: 12 }}>✓ Ciência em {new Date(commAcks[c.id][empId]).toLocaleString("pt-BR")}</span>}
+          </div>
+          {!commAcks?.[c.id]?.[empId] && (
+            <button onClick={() => ack(c.id)} style={{ width: "100%", padding: "11px", borderRadius: 10, background: "#f5c842", border: "none", color: "#111", fontWeight: 700, fontSize: 14, cursor: "pointer", fontFamily: "DM Mono,monospace" }}>
+              ✓ Dar Ciência
+            </button>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// FAQ TAB (employee view)
+// ══════════════════════════════════════════════════════════════════════════════
+function FaqTab({ restaurantId, faq }) {
+  const items = faq?.[restaurantId] ?? [];
+  const [open, setOpen] = useState(null);
+  if (items.length === 0) return <p style={{ color: "#555", textAlign: "center", fontSize: 14, marginTop: 20 }}>Nenhuma pergunta cadastrada ainda.</p>;
+  return (
+    <div>
+      {items.map((item, i) => (
+        <div key={item.id ?? i} style={{ background: "#1a1a1a", borderRadius: 12, marginBottom: 8, border: "1px solid #2a2a2a", overflow: "hidden" }}>
+          <button onClick={() => setOpen(open === i ? null : i)} style={{ width: "100%", padding: "14px 16px", background: "none", border: "none", color: open === i ? "#f5c842" : "#fff", textAlign: "left", cursor: "pointer", fontFamily: "DM Mono,monospace", fontSize: 14, fontWeight: 600, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <span>{item.q}</span>
+            <span style={{ fontSize: 18, color: "#555" }}>{open === i ? "−" : "+"}</span>
+          </button>
+          {open === i && <div style={{ padding: "0 16px 14px", color: "#aaa", fontSize: 13, lineHeight: 1.6, borderTop: "1px solid #2a2a2a", paddingTop: 12, whiteSpace: "pre-wrap" }}>{item.a}</div>}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// FALE COM DP TAB (employee view)
+// ══════════════════════════════════════════════════════════════════════════════
+function FaleDpTab({ empId, emp, restaurantId, dpMessages, onUpdate }) {
+  const [category, setCategory] = useState("sugestao");
+  const [body, setBody] = useState("");
+  const [anon, setAnon] = useState(false);
+  const [sent, setSent] = useState(false);
+  const CATS = [["sugestao","💡 Sugestão"],["elogio","👏 Elogio"],["reclamacao","⚠️ Reclamação"],["denuncia","🚨 Denúncia"]];
+  const ac = "#f5c842";
+
+  function send() {
+    if (!body.trim()) return;
+    const msg = {
+      id: Date.now().toString(),
+      restaurantId,
+      empId: anon ? null : empId,
+      empName: anon ? "Anônimo" : (emp?.name ?? "—"),
+      category,
+      body: body.trim(),
+      date: new Date().toISOString(),
+      read: false,
+    };
+    onUpdate("dpMessages", [...dpMessages, msg]);
+    setBody(""); setSent(true);
+    setTimeout(() => setSent(false), 3000);
+  }
+
+  return (
+    <div>
+      <p style={{ color: "#555", fontSize: 13, marginBottom: 16, lineHeight: 1.5 }}>
+        Envie sugestões, elogios, reclamações ou denúncias ao Departamento Pessoal. Você pode escolher se quer se identificar ou enviar de forma anônima.
+      </p>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 14 }}>
+        {CATS.map(([val, lbl]) => (
+          <button key={val} onClick={() => setCategory(val)} style={{ padding: "10px", borderRadius: 10, border: `1px solid ${category === val ? ac : "#2a2a2a"}`, background: category === val ? ac + "22" : "transparent", color: category === val ? ac : "#555", cursor: "pointer", fontFamily: "DM Mono,monospace", fontSize: 12, fontWeight: category === val ? 700 : 400 }}>{lbl}</button>
+        ))}
+      </div>
+      <div style={{ marginBottom: 12 }}>
+        <label style={S.label}>Mensagem</label>
+        <textarea value={body} onChange={e => setBody(e.target.value)} placeholder="Escreva sua mensagem aqui…" rows={5} style={{ ...S.input, resize: "vertical", lineHeight: 1.5 }} />
+      </div>
+      <div style={{ marginBottom: 14 }}>
+        <button onClick={() => setAnon(!anon)} style={{ display: "flex", alignItems: "center", gap: 8, background: "none", border: "none", cursor: "pointer", fontFamily: "DM Mono,monospace", color: anon ? ac : "#555", fontSize: 13, padding: 0 }}>
+          <div style={{ width: 18, height: 18, borderRadius: 4, border: `2px solid ${anon ? ac : "#555"}`, background: anon ? ac : "transparent", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, color: "#111" }}>{anon ? "✓" : ""}</div>
+          Enviar de forma anônima
+        </button>
+        {!anon && <p style={{ color: "#555", fontSize: 11, marginTop: 4, marginLeft: 26 }}>Identificado como: <strong style={{ color: "#aaa" }}>{emp?.name}</strong></p>}
+      </div>
+      {sent && <p style={{ color: "#10b981", fontSize: 13, marginBottom: 10 }}>✅ Mensagem enviada com sucesso!</p>}
+      <button onClick={send} disabled={!body.trim()} style={{ width: "100%", padding: "12px", borderRadius: 12, background: body.trim() ? ac : "#2a2a2a", border: "none", color: "#111", fontWeight: 700, fontSize: 14, cursor: body.trim() ? "pointer" : "default", fontFamily: "DM Mono,monospace" }}>
+        Enviar Mensagem
+      </button>
+    </div>
+  );
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// COMUNICADOS MANAGER TAB (manager/super view)
+// ══════════════════════════════════════════════════════════════════════════════
+function ComunicadosManagerTab({ restaurantId, communications, commAcks, employees, onUpdate, currentManagerName }) {
+  const myComms = communications.filter(c => c.restaurantId === restaurantId)
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  const restEmps = employees.filter(e => e.restaurantId === restaurantId && !(e.inactive && e.inactiveFrom && e.inactiveFrom <= today()));
+  const [showNew, setShowNew] = useState(false);
+  const [title, setTitle] = useState("");
+  const [body, setBody]   = useState("");
+  const [selComm, setSelComm] = useState(null);
+  const ac = "#f5c842";
+
+  function publish() {
+    if (!title.trim() || !body.trim()) return;
+    const c = { id: Date.now().toString(), restaurantId, title: title.trim(), body: body.trim(), createdAt: new Date().toISOString(), createdBy: currentManagerName };
+    onUpdate("communications", [...communications, c]);
+    setTitle(""); setBody(""); setShowNew(false);
+  }
+
+  function remove(id) {
+    onUpdate("communications", communications.filter(c => c.id !== id));
+    const newAcks = { ...commAcks };
+    delete newAcks[id];
+    onUpdate("commAcks", newAcks);
+  }
+
+  if (selComm) {
+    const c = myComms.find(x => x.id === selComm);
+    return (
+      <div>
+        <button onClick={() => setSelComm(null)} style={{ ...S.btnSecondary, marginBottom: 16 }}>← Voltar</button>
+        <div style={{ ...S.card, marginBottom: 16 }}>
+          <div style={{ color: "#fff", fontWeight: 700, fontSize: 16, marginBottom: 4 }}>{c.title}</div>
+          <div style={{ color: "#555", fontSize: 12, marginBottom: 12 }}>Publicado em {new Date(c.createdAt).toLocaleString("pt-BR")} por {c.createdBy}</div>
+          <div style={{ color: "#aaa", fontSize: 13, lineHeight: 1.6, whiteSpace: "pre-wrap", marginBottom: 12 }}>{c.body}</div>
+        </div>
+        <p style={{ color: "#555", fontSize: 12, marginBottom: 10 }}>Tabela de ciências ({restEmps.length} empregados)</p>
+        <div style={{ ...S.card }}>
+          {/* Header */}
+          <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr 1fr", gap: 6, marginBottom: 8, paddingBottom: 8, borderBottom: "1px solid #2a2a2a" }}>
+            {["Empregado", "Envio", "Ciência"].map(h => <div key={h} style={{ color: "#555", fontSize: 11 }}>{h}</div>)}
+          </div>
+          {restEmps.map(e => {
+            const ackDate = commAcks?.[c.id]?.[e.id];
+            return (
+              <div key={e.id} style={{ display: "grid", gridTemplateColumns: "2fr 1fr 1fr", gap: 6, padding: "6px 0", borderBottom: "1px solid #1a1a1a" }}>
+                <div style={{ color: "#fff", fontSize: 13 }}>{e.name}</div>
+                <div style={{ color: "#555", fontSize: 11 }}>{fmtDate(c.createdAt?.slice(0,10))}</div>
+                <div style={{ color: ackDate ? "#10b981" : "#e74c3c", fontSize: 11 }}>{ackDate ? new Date(ackDate).toLocaleDateString("pt-BR") : "Pendente"}</div>
+              </div>
+            );
+          })}
+          <div style={{ marginTop: 12, color: "#555", fontSize: 12 }}>
+            ✓ {restEmps.filter(e => commAcks?.[c.id]?.[e.id]).length} de {restEmps.length} confirmados
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      <button onClick={() => setShowNew(!showNew)} style={{ ...S.btnPrimary, marginBottom: 16 }}>
+        {showNew ? "Cancelar" : "+ Novo Comunicado"}
+      </button>
+      {showNew && (
+        <div style={{ ...S.card, marginBottom: 20 }}>
+          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+            <div><label style={S.label}>Título</label><input value={title} onChange={e => setTitle(e.target.value)} placeholder="Título do comunicado" style={S.input} /></div>
+            <div><label style={S.label}>Conteúdo</label><textarea value={body} onChange={e => setBody(e.target.value)} rows={5} placeholder="Texto do comunicado…" style={{ ...S.input, resize: "vertical" }} /></div>
+            <button onClick={publish} style={{ ...S.btnPrimary }}>Publicar</button>
+          </div>
+        </div>
+      )}
+      {myComms.length === 0 && <p style={{ color: "#555", textAlign: "center" }}>Nenhum comunicado publicado.</p>}
+      {myComms.map(c => {
+        const ackCount = restEmps.filter(e => commAcks?.[c.id]?.[e.id]).length;
+        return (
+          <div key={c.id} style={{ ...S.card, marginBottom: 10 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+              <div style={{ flex: 1 }}>
+                <div style={{ color: "#fff", fontWeight: 600, marginBottom: 4 }}>{c.title}</div>
+                <div style={{ color: "#555", fontSize: 12 }}>{fmtDate(c.createdAt?.slice(0,10))} · {ackCount}/{restEmps.length} ciências</div>
+              </div>
+              <div style={{ display: "flex", gap: 8 }}>
+                <button onClick={() => setSelComm(c.id)} style={{ ...S.btnSecondary, fontSize: 12 }}>Ver ciências</button>
+                <button onClick={() => remove(c.id)} style={{ background: "none", border: "1px solid #e74c3c33", borderRadius: 8, color: "#e74c3c", cursor: "pointer", fontSize: 12, padding: "6px 12px", fontFamily: "DM Mono,monospace" }}>✕</button>
+              </div>
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// FAQ MANAGER TAB
+// ══════════════════════════════════════════════════════════════════════════════
+function FaqManagerTab({ restaurantId, faq, onUpdate }) {
+  const items = faq?.[restaurantId] ?? [];
+  const [editIdx, setEditIdx] = useState(null);
+  const [form, setForm] = useState({ q: "", a: "" });
+  const ac = "#f5c842";
+
+  function saveItem() {
+    if (!form.q.trim() || !form.a.trim()) return;
+    const newItem = { id: Date.now().toString(), q: form.q.trim(), a: form.a.trim() };
+    const newItems = editIdx === "new" ? [...items, newItem] : items.map((x, i) => i === editIdx ? newItem : x);
+    onUpdate("faq", { ...faq, [restaurantId]: newItems });
+    setEditIdx(null); setForm({ q: "", a: "" });
+  }
+  function removeItem(i) { onUpdate("faq", { ...faq, [restaurantId]: items.filter((_, idx) => idx !== i) }); }
+
+  return (
+    <div>
+      <button onClick={() => { setEditIdx("new"); setForm({ q: "", a: "" }); }} style={{ ...S.btnPrimary, marginBottom: 16 }}>+ Nova Pergunta</button>
+      {(editIdx === "new" || editIdx !== null) && (
+        <div style={{ ...S.card, marginBottom: 16 }}>
+          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+            <div><label style={S.label}>Pergunta</label><input value={form.q} onChange={e => setForm(p => ({...p, q: e.target.value}))} placeholder="Ex: Como funciona o rateio?" style={S.input} /></div>
+            <div><label style={S.label}>Resposta</label><textarea value={form.a} onChange={e => setForm(p => ({...p, a: e.target.value}))} rows={4} placeholder="Resposta detalhada…" style={{ ...S.input, resize: "vertical" }} /></div>
+            <div style={{ display: "flex", gap: 8 }}>
+              <button onClick={saveItem} style={{ ...S.btnPrimary, flex: 1 }}>Salvar</button>
+              <button onClick={() => setEditIdx(null)} style={S.btnSecondary}>Cancelar</button>
+            </div>
+          </div>
+        </div>
+      )}
+      {items.length === 0 && <p style={{ color: "#555", textAlign: "center" }}>Nenhuma pergunta cadastrada.</p>}
+      {items.map((item, i) => (
+        <div key={item.id ?? i} style={{ ...S.card, marginBottom: 8 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+            <div style={{ flex: 1 }}>
+              <div style={{ color: ac, fontWeight: 600, fontSize: 14, marginBottom: 4 }}>{item.q}</div>
+              <div style={{ color: "#555", fontSize: 12 }}>{item.a.slice(0, 80)}{item.a.length > 80 ? "…" : ""}</div>
+            </div>
+            <div style={{ display: "flex", gap: 8, marginLeft: 8 }}>
+              <button onClick={() => { setEditIdx(i); setForm({ q: item.q, a: item.a }); }} style={{ ...S.btnSecondary, fontSize: 12 }}>Editar</button>
+              <button onClick={() => removeItem(i)} style={{ background: "none", border: "1px solid #e74c3c33", borderRadius: 8, color: "#e74c3c", cursor: "pointer", fontSize: 12, padding: "6px 12px", fontFamily: "DM Mono,monospace" }}>✕</button>
+            </div>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// DP MESSAGES MANAGER TAB
+// ══════════════════════════════════════════════════════════════════════════════
+function DpManagerTab({ restaurantId, dpMessages, onUpdate }) {
+  const msgs = dpMessages.filter(m => m.restaurantId === restaurantId)
+    .sort((a, b) => b.date.localeCompare(a.date));
+  const [filter, setFilter] = useState("all");
+  const CATS = { all: "Todos", sugestao: "💡 Sugestões", elogio: "👏 Elogios", reclamacao: "⚠️ Reclamações", denuncia: "🚨 Denúncias" };
+  const filtered = filter === "all" ? msgs : msgs.filter(m => m.category === filter);
+  const unread = msgs.filter(m => !m.read).length;
+  const ac = "#f5c842";
+
+  function markRead(id) {
+    onUpdate("dpMessages", dpMessages.map(m => m.id === id ? { ...m, read: true } : m));
+  }
+
+  return (
+    <div>
+      {unread > 0 && <div style={{ background: "#f5c84222", border: "1px solid #f5c84244", borderRadius: 10, padding: "8px 14px", marginBottom: 12, fontSize: 12, color: ac, fontFamily: "DM Mono,monospace" }}>📬 {unread} mensagem{unread > 1 ? "s" : ""} não lida{unread > 1 ? "s" : ""}</div>}
+      <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 16 }}>
+        {Object.entries(CATS).map(([val, lbl]) => (
+          <button key={val} onClick={() => setFilter(val)} style={{ padding: "6px 12px", borderRadius: 20, border: `1px solid ${filter === val ? ac : "#2a2a2a"}`, background: filter === val ? ac + "22" : "transparent", color: filter === val ? ac : "#555", cursor: "pointer", fontFamily: "DM Mono,monospace", fontSize: 11 }}>{lbl}</button>
+        ))}
+      </div>
+      {filtered.length === 0 && <p style={{ color: "#555", textAlign: "center" }}>Nenhuma mensagem.</p>}
+      {filtered.map(m => (
+        <div key={m.id} style={{ ...S.card, marginBottom: 10, opacity: m.read ? 0.7 : 1, borderColor: m.read ? "#2a2a2a" : "#f5c84244" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}>
+            <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+              <span style={{ color: "#aaa", fontSize: 12 }}>{CATS[m.category] ?? m.category}</span>
+              {!m.read && <span style={{ background: ac, color: "#111", borderRadius: 4, padding: "1px 6px", fontSize: 10, fontWeight: 700 }}>Novo</span>}
+            </div>
+            <span style={{ color: "#555", fontSize: 11 }}>{new Date(m.date).toLocaleString("pt-BR")}</span>
+          </div>
+          <div style={{ color: "#aaa", fontSize: 12, marginBottom: 8 }}>De: <span style={{ color: m.empName === "Anônimo" ? "#8b5cf6" : "#fff" }}>{m.empName}</span></div>
+          <div style={{ color: "#fff", fontSize: 13, lineHeight: 1.6, whiteSpace: "pre-wrap", marginBottom: 8 }}>{m.body}</div>
+          {!m.read && <button onClick={() => markRead(m.id)} style={{ ...S.btnSecondary, fontSize: 12 }}>Marcar como lida</button>}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function EmployeePortal({ employees, roles, tips, schedules, restaurants, communications, commAcks, faq, dpMessages, onBack, onUpdateEmployee, onUpdate }) {
   const [cpf, setCpf] = useState("");
   const [pin, setPin] = useState("");
   const [err, setErr] = useState("");
@@ -381,6 +705,26 @@ function EmployeePortal({ employees, roles, tips, schedules, restaurants, onBack
   const netTotal   = myTips.reduce((a, t) => a + (t.myNet   ?? 0), 0);
   const dayMap = emp ? (schedules?.[emp.restaurantId]?.[mk]?.[empId] ?? {}) : {};
   const ac = "#f5c842"; const bg = "#0f0f0f";
+
+  // Pending communications
+  const myComms = emp ? communications.filter(c => c.restaurantId === emp.restaurantId) : [];
+  const pendingComms = myComms.filter(c => !commAcks?.[c.id]?.[empId]);
+  const hasPending = pendingComms.length > 0;
+
+  // Force comunicados tab if there are pending
+  const TABS = [["comunicados","📢 Comunicados"],["escala","📅 Escala"],["extrato","💸 Gorjeta"],["faq","❓ FAQ"],["dp","💬 Fale com DP"]];
+
+  function handleTabChange(id) {
+    if (hasPending && id !== "comunicados") {
+      return; // block navigation while pending comms exist
+    }
+    setTab(id);
+  }
+
+  // Auto-switch to comunicados if pending
+  useEffect(() => {
+    if (hasPending && tab !== "comunicados") setTab("comunicados");
+  }, [hasPending, tab]);
 
   function tryLogin() {
     const cleanInput = cpf.trim().toUpperCase().replace(/\s/g,"");
@@ -749,7 +1093,7 @@ function EmployeeSpreadsheet({ restEmps, restRoles, rid, employees, onUpdate, re
 }
 
 
-function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, splits, schedules, onUpdate, perms, isSuperManager }) {
+function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, splits, schedules, onUpdate, perms, isSuperManager, data }) {
   const [tab, setTab] = useState(perms.tips ? "dashboard" : "schedule");
   const now = new Date();
   const [year, setYear] = useState(now.getFullYear());
@@ -877,16 +1221,22 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
   const dim = new Date(year, month + 1, 0).getDate();
 
   const ac = "#f5c842";
-  const canTips = perms.tips || isSuperManager;
+  const canTips  = perms.tips     || isSuperManager;
   const canSched = perms.schedule || isSuperManager;
+  const canComms = perms.comunicados !== false || isSuperManager;
+  const canFaq   = perms.faq   !== false || isSuperManager;
+  const canDp    = perms.dp    !== false || isSuperManager;
 
   const TABS = [
-    canTips   && ["dashboard", "📊 Dashboard"],
-    canTips   && ["tips",      "💸 Gorjetas"],
+    canTips   && ["dashboard",    "📊 Dashboard"],
+    canTips   && ["tips",         "💸 Gorjetas"],
     (canTips || isSuperManager) && ["employees", "👥 Equipe"],
-    isSuperManager && ["roles", "🏷️ Cargos"],
-    canSched  && ["schedule",  "📅 Escala"],
-    (canTips || isSuperManager) && ["config",    "⚙️ Config"],
+    isSuperManager && ["roles",   "🏷️ Cargos"],
+    canSched  && ["schedule",     "📅 Escala"],
+    canComms  && ["comunicados",  "📢 Comunicados"],
+    canFaq    && ["faq",          "❓ FAQ"],
+    canDp     && ["dp",           "💬 Fale com DP"],
+    (canTips || isSuperManager) && ["config", "⚙️ Config"],
   ].filter(Boolean);
 
   return (
@@ -1085,6 +1435,25 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
           </div>
         )}
 
+        {/* COMUNICADOS */}
+        {tab === "comunicados" && (
+          <ComunicadosManagerTab
+            restaurantId={rid} communications={data?.communications ?? []}
+            commAcks={data?.commAcks ?? {}} employees={employees}
+            onUpdate={onUpdate} currentManagerName="Gestor"
+          />
+        )}
+
+        {/* FAQ */}
+        {tab === "faq" && (
+          <FaqManagerTab restaurantId={rid} faq={data?.faq ?? {}} onUpdate={onUpdate} />
+        )}
+
+        {/* FALE COM DP */}
+        {tab === "dp" && (
+          <DpManagerTab restaurantId={rid} dpMessages={data?.dpMessages ?? []} onUpdate={onUpdate} />
+        )}
+
         {/* CONFIG */}
         {tab === "config" && (
           <div>
@@ -1210,7 +1579,7 @@ function SuperManagerPortal({ data, onUpdate, onBack, currentUser }) {
           </div>
           <button onClick={onBack} style={{ ...S.btnSecondary, fontSize:12 }}>Sair</button>
         </div>
-        <RestaurantPanel restaurant={rest} restaurants={restaurants} employees={employees} roles={roles} tips={tips} splits={splits} schedules={schedules} onUpdate={onUpdate} perms={{ tips:true, schedule:true }} isSuperManager />
+        <RestaurantPanel restaurant={rest} restaurants={restaurants} employees={employees} roles={roles} tips={tips} splits={splits} schedules={schedules} onUpdate={onUpdate} perms={{ tips:true, schedule:true }} isSuperManager data={data} />
       </div>
     );
   }
@@ -1277,8 +1646,7 @@ function SuperManagerPortal({ data, onUpdate, onBack, currentUser }) {
                     <div style={{color:"#fff",fontWeight:600,fontSize:15}}>{m.name}</div>
                     <div style={{color:"#555",fontSize:12}}>CPF: {m.cpf||"—"}</div>
                     <div style={{marginTop:6,display:"flex",gap:6,flexWrap:"wrap"}}>
-                      <PermBadge label="Gorjetas" on={m.perms?.tips}/>
-                      <PermBadge label="Escala" on={m.perms?.schedule}/>
+                      {[["tips","Gorjetas"],["schedule","Escala"],["comunicados","Comuns."],["faq","FAQ"],["dp","DP"]].map(([k,lbl])=><PermBadge key={k} label={lbl} on={m.perms?.[k]!==false}/>)}
                     </div>
                     <div style={{marginTop:6,display:"flex",gap:4,flexWrap:"wrap"}}>
                       {(m.restaurantIds??[]).map(rid=>{const r=restaurants.find(x=>x.id===rid);return r?<span key={rid} style={{background:"#2a2a2a",color:"#aaa",borderRadius:6,padding:"2px 8px",fontSize:11}}>{r.name}</span>:null;})}
@@ -1345,14 +1713,17 @@ function SuperManagerPortal({ data, onUpdate, onBack, currentUser }) {
             <div><label style={S.label}>PIN (4–6 dígitos)</label><input type="password" value={mgrForm.pin} onChange={e=>setMgrForm({...mgrForm,pin:e.target.value})} maxLength={6} style={S.input}/></div>
 
             <div>
-              <label style={S.label}>Permissões</label>
-              <div style={{display:"flex",gap:10}}>
-                {[["tips","Gorjetas"],["schedule","Escala"]].map(([k,lbl])=>(
-                  <button key={k} onClick={()=>setMgrForm({...mgrForm,perms:{...mgrForm.perms,[k]:!mgrForm.perms?.[k]}})}
-                    style={{flex:1,padding:"10px",borderRadius:10,border:`1px solid ${mgrForm.perms?.[k]?"#10b981":"#2a2a2a"}`,background:mgrForm.perms?.[k]?"#10b98122":"transparent",color:mgrForm.perms?.[k]?"#10b981":"#555",cursor:"pointer",fontFamily:"DM Mono,monospace",fontSize:13}}>
-                    {mgrForm.perms?.[k]?"✓":"✗"} {lbl}
-                  </button>
-                ))}
+              <label style={S.label}>Permissões de acesso às abas</label>
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+                {[["tips","💸 Gorjetas"],["schedule","📅 Escala"],["comunicados","📢 Comunicados"],["faq","❓ FAQ"],["dp","💬 Fale c/ DP"]].map(([k,lbl])=>{
+                  const on = mgrForm.perms?.[k] !== false;
+                  return (
+                    <button key={k} onClick={()=>setMgrForm({...mgrForm,perms:{...mgrForm.perms,[k]:!on}})}
+                      style={{padding:"10px",borderRadius:10,border:`1px solid ${on?"#10b981":"#2a2a2a"}`,background:on?"#10b98122":"transparent",color:on?"#10b981":"#555",cursor:"pointer",fontFamily:"DM Mono,monospace",fontSize:12,textAlign:"left"}}>
+                      {on?"✓":"✗"} {lbl}
+                    </button>
+                  );
+                })}
               </div>
             </div>
 
@@ -1422,8 +1793,7 @@ function ManagerPortal({ manager, data, onUpdate, onBack }) {
               <div style={{color:"#fff",fontWeight:600,fontSize:15}}>{r.name}</div>
               {r.address&&<div style={{color:"#555",fontSize:12}}>{r.address}</div>}
               <div style={{marginTop:6,display:"flex",gap:6}}>
-                <PermBadge label="Gorjetas" on={manager.perms?.tips}/>
-                <PermBadge label="Escala" on={manager.perms?.schedule}/>
+                {[["tips","Gorjetas"],["schedule","Escala"],["comunicados","Comuns."],["faq","FAQ"],["dp","DP"]].map(([k,lbl])=><PermBadge key={k} label={lbl} on={manager.perms?.[k]!==false}/>)}
               </div>
             </button>
           ))}
@@ -1437,7 +1807,7 @@ function ManagerPortal({ manager, data, onUpdate, onBack }) {
               <button onClick={()=>setSelId(null)} style={{...S.btnSecondary,fontSize:12,padding:"4px 12px"}}>← Trocar restaurante</button>
             </div>
           )}
-          <RestaurantPanel restaurant={selRest} restaurants={restaurants} employees={employees} roles={roles} tips={tips} splits={splits} schedules={schedules} onUpdate={onUpdate} perms={manager.perms ?? {tips:true,schedule:true}} isSuperManager={false}/>
+          <RestaurantPanel restaurant={selRest} restaurants={restaurants} employees={employees} roles={roles} tips={tips} splits={splits} schedules={schedules} onUpdate={onUpdate} perms={manager.perms ?? {tips:true,schedule:true}} isSuperManager={false} data={data}/>
         </div>
       )}
     </div>
@@ -1547,7 +1917,7 @@ function Home({ onManager, onEmployee }) {
 // APP ROOT
 // ══════════════════════════════════════════════════════════════════════════════
 export default function App() {
-  const [view, setView] = useState("home"); // home|login|setup|super|manager|employee
+  const [view, setView] = useState("home");
   const [loaded, setLoaded] = useState(false);
   const [toast, setToast] = useState("");
   const [currentUser, setCurrentUser] = useState(null);
@@ -1562,31 +1932,30 @@ export default function App() {
   const [tips,          setTips]          = useState([]);
   const [splits,        setSplits]        = useState({});
   const [schedules,     setSchedules]     = useState({});
+  const [communications,setCommunications]= useState([]);
+  const [commAcks,      setCommAcks]      = useState({});
+  const [faq,           setFaq]           = useState({});
+  const [dpMessages,    setDpMessages]    = useState([]);
 
   useEffect(() => {
     (async () => {
-      const [sm,mg,rs,em,ro,ti,sp,sc] = await Promise.all(Object.values(K).map(load));
-      if (sm) setSuperManagers(sm);
-      if (mg) setManagers(mg);
-      if (rs) setRestaurants(rs);
-      if (em) setEmployees(em);
-      if (ro) setRoles(ro);
-      if (ti) setTips(ti);
-      if (sp) setSplits(sp);
-      if (sc) setSchedules(sc);
+      const vals = await Promise.all(Object.values(K).map(load));
+      const keys = Object.keys(K);
+      const map = { superManagers:setSuperManagers, managers:setManagers, restaurants:setRestaurants, employees:setEmployees, roles:setRoles, tips:setTips, splits:setSplits, schedules:setSchedules, communications:setCommunications, commAcks:setCommAcks, faq:setFaq, dpMessages:setDpMessages };
+      keys.forEach((k, i) => { if (vals[i]) map[k]?.(vals[i]); });
       setLoaded(true);
     })();
   }, []);
 
-  const data = { superManagers, managers, restaurants, employees, roles, tips, splits, schedules };
+  const data = { superManagers, managers, restaurants, employees, roles, tips, splits, schedules, communications, commAcks, faq, dpMessages };
 
   async function handleUpdate(field, value) {
     if (field === "_toast") { setToast(value); return; }
-    const setters = { superManagers:setSuperManagers, managers:setManagers, restaurants:setRestaurants, employees:setEmployees, roles:setRoles, tips:setTips, splits:setSplits, schedules:setSchedules };
-    const keys    = { superManagers:K.superManagers,  managers:K.managers,  restaurants:K.restaurants,  employees:K.employees,  roles:K.roles,  tips:K.tips,  splits:K.splits,  schedules:K.schedules };
+    const setters = { superManagers:setSuperManagers, managers:setManagers, restaurants:setRestaurants, employees:setEmployees, roles:setRoles, tips:setTips, splits:setSplits, schedules:setSchedules, communications:setCommunications, commAcks:setCommAcks, faq:setFaq, dpMessages:setDpMessages };
+    const keys    = { superManagers:K.superManagers, managers:K.managers, restaurants:K.restaurants, employees:K.employees, roles:K.roles, tips:K.tips, splits:K.splits, schedules:K.schedules, communications:K.communications, commAcks:K.commAcks, faq:K.faq, dpMessages:K.dpMessages };
     setters[field]?.(value);
     await save(keys[field], value);
-    const labels = { superManagers:"Super Gestores atualizados", managers:"Gestores atualizados", restaurants:"Restaurantes atualizados", employees:"Empregados atualizados", roles:"Cargos atualizados", tips:"Gorjetas atualizadas", splits:"Percentuais salvos", schedules:"Escala atualizada" };
+    const labels = { superManagers:"Super Gestores atualizados", managers:"Gestores atualizados", restaurants:"Restaurantes atualizados", employees:"Empregados atualizados", roles:"Cargos atualizados", tips:"Gorjetas atualizadas", splits:"Percentuais salvos", schedules:"Escala atualizada", communications:"Comunicados atualizados", commAcks:"Ciências atualizadas", faq:"FAQ atualizado", dpMessages:"Mensagem enviada" };
     setToast(labels[field] ?? "Salvo!");
   }
 
@@ -1609,7 +1978,7 @@ export default function App() {
       )}
       {view === "super"    && <SuperManagerPortal data={data} onUpdate={handleUpdate} onBack={doLogout} currentUser={currentUser} />}
       {view === "manager"  && <ManagerPortal manager={currentUser} data={data} onUpdate={handleUpdate} onBack={doLogout} />}
-      {view === "employee" && <EmployeePortal employees={employees} roles={roles} tips={tips} schedules={schedules} restaurants={restaurants} onBack={()=>setView("home")} onUpdateEmployee={emp=>{const next=employees.map(e=>e.id===emp.id?emp:e);handleUpdate("employees",next);}} />}
+      {view === "employee" && <EmployeePortal employees={employees} roles={roles} tips={tips} schedules={schedules} restaurants={restaurants} communications={communications} commAcks={commAcks} faq={faq} dpMessages={dpMessages} onBack={()=>setView("home")} onUpdateEmployee={emp=>{const next=employees.map(e=>e.id===emp.id?emp:e);handleUpdate("employees",next);}} onUpdate={handleUpdate} />}
       <Toast msg={toast} onClose={()=>setToast("")} />
     </>
   );
