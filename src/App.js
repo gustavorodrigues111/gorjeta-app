@@ -34,6 +34,20 @@ const DAY_COMP = "comp";
 const MODE_AREA_POINTS = "area_points"; // default: split by area % then by points within area
 const MODE_GLOBAL_POINTS = "global_points"; // split only by total points across all employees
 
+// ─── Employee ID generation ──────────────────────────────────────────────────
+function nextEmpSeq(employees, restaurantCode) {
+  // Find all seqs ever used for this restaurant (including deleted — stored in usedSeqs)
+  const used = employees
+    .filter(e => e.restaurantId && e.empCode && e.empCode.startsWith(restaurantCode))
+    .map(e => parseInt(e.empCode.slice(restaurantCode.length)) || 0);
+  let seq = 1;
+  while (used.includes(seq)) seq++;
+  return seq;
+}
+function makeEmpCode(restaurantCode, seq) {
+  return restaurantCode.toUpperCase() + String(seq).padStart(4, "0");
+}
+
 // ─── Storage keys (all data scoped by restaurantId where relevant) ─────────────
 const K = {
   superManagers: "v4:superManagers",   // [{id, name, cpf, pin}]
@@ -304,7 +318,7 @@ function ExportModal({ onClose, employees, roles, tips, restaurant }) {
 // ══════════════════════════════════════════════════════════════════════════════
 // EMPLOYEE PORTAL
 // ══════════════════════════════════════════════════════════════════════════════
-function EmployeePortal({ employees, roles, tips, schedules, restaurants, onBack }) {
+function EmployeePortal({ employees, roles, tips, schedules, restaurants, onBack, onUpdateEmployee }) {
   const [cpf, setCpf] = useState("");
   const [pin, setPin] = useState("");
   const [err, setErr] = useState("");
@@ -319,10 +333,15 @@ function EmployeePortal({ employees, roles, tips, schedules, restaurants, onBack
   const restaurant = emp ? restaurants.find(r => r.id === emp.restaurantId) : null;
 
   function tryLogin() {
-    const cleanCpf = cpf.replace(/\D/g, "");
-    const found = employees.find(e => e.cpf?.replace(/\D/g, "") === cleanCpf && String(e.pin) === String(pin));
+    const cleanInput = cpf.trim().toUpperCase().replace(/\s/g,"");
+    const cleanPin = pin.trim();
+    // Try by empCode first, then by CPF
+    const found = employees.find(e =>
+      (e.empCode && e.empCode.toUpperCase() === cleanInput && String(e.pin) === cleanPin) ||
+      (e.cpf && e.cpf.replace(/\D/g,"") === cleanInput.replace(/\D/g,"") && String(e.pin) === cleanPin)
+    );
     if (found) { setErr(""); setEmpId(found.id); }
-    else setErr("CPF ou PIN incorretos.");
+    else setErr("ID/CPF ou PIN incorretos.");
   }
 
   const mk = monthKey(year, month);
@@ -338,14 +357,50 @@ function EmployeePortal({ employees, roles, tips, schedules, restaurants, onBack
       <div style={{ ...S.card, maxWidth: 340, width: "100%", textAlign: "center" }}>
         <div style={{ fontSize: 36, marginBottom: 8 }}>👤</div>
         <h2 style={{ color: ac, margin: "0 0 4px" }}>Área do Empregado</h2>
-        <p style={{ color: "#555", fontSize: 13, marginBottom: 22 }}>Entre com CPF e PIN</p>
+        <p style={{ color: "#555", fontSize: 13, marginBottom: 22 }}>Use seu ID (ex: QUI0001) ou CPF + PIN</p>
         <div style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 14, textAlign: "left" }}>
-          <div><label style={S.label}>CPF</label><input value={cpf} onChange={e => setCpf(e.target.value)} placeholder="000.000.000-00" style={S.input} inputMode="numeric" /></div>
-          <div><label style={S.label}>PIN</label><input type="password" inputMode="numeric" maxLength={6} value={pin} onChange={e => setPin(e.target.value)} placeholder="••••" style={{ ...S.input, letterSpacing: 6, fontSize: 18, textAlign: "center" }} onKeyDown={e => e.key === "Enter" && tryLogin()} /></div>
+          <div><label style={S.label}>ID ou CPF</label><input value={cpf} onChange={e => setCpf(e.target.value)} placeholder="QUI0001 ou 000.000.000-00" style={S.input} /></div>
+          <div><label style={S.label}>PIN (4 dígitos)</label><input type="password" inputMode="numeric" maxLength={4} value={pin} onChange={e => setPin(e.target.value)} placeholder="••••" style={{ ...S.input, letterSpacing: 6, fontSize: 18, textAlign: "center" }} onKeyDown={e => e.key === "Enter" && tryLogin()} /></div>
         </div>
         {err && <p style={{ color: "#e74c3c", fontSize: 13, marginBottom: 10 }}>{err}</p>}
         <button onClick={tryLogin} style={{ ...S.btnPrimary, marginBottom: 12 }}>Entrar</button>
         <button onClick={onBack} style={{ ...S.btnSecondary, width: "100%" }}>← Voltar</button>
+      </div>
+    </div>
+  );
+
+  // First access: force CPF + PIN change
+  const isFirstAccess = emp && (String(emp.pin) === String(emp.empCode?.slice(-4)) || String(emp.pin) === String(emp.empCode));
+  const needsCpf = emp && !emp.cpf;
+  const [firstCpf, setFirstCpf] = useState("");
+  const [firstPin, setFirstPin] = useState("");
+  const [firstPin2, setFirstPin2] = useState("");
+  const [firstErr, setFirstErr] = useState("");
+
+  function completeFirstAccess() {
+    if (needsCpf && !firstCpf.trim()) { setFirstErr("Informe seu CPF."); return; }
+    if (firstPin.length !== 4 || !/^\d{4}$/.test(firstPin)) { setFirstErr("PIN deve ter exatamente 4 dígitos numéricos."); return; }
+    if (firstPin !== firstPin2) { setFirstErr("PINs não coincidem."); return; }
+    const updated = { ...emp, pin: firstPin, cpf: firstCpf.trim() || emp.cpf };
+    // eslint-disable-next-line no-undef
+    onUpdateEmployee(updated);
+  }
+
+  if (empId && isFirstAccess) return (
+    <div style={{ minHeight:"100vh", background:bg, display:"flex", alignItems:"center", justifyContent:"center", fontFamily:"DM Mono,monospace", padding:24 }}>
+      <div style={{ ...S.card, maxWidth:360, width:"100%" }}>
+        <div style={{ textAlign:"center", marginBottom:20 }}>
+          <div style={{ fontSize:32 }}>🔑</div>
+          <h2 style={{ color:ac, margin:"8px 0 4px" }}>Primeiro Acesso</h2>
+          <p style={{ color:"#555", fontSize:13 }}>Bem-vindo, {emp?.name}!{needsCpf?" Complete seu cadastro e defina seu PIN.":" Defina seu PIN de acesso."}</p>
+        </div>
+        <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
+          {needsCpf && <div><label style={S.label}>Seu CPF</label><input value={firstCpf} onChange={e=>setFirstCpf(e.target.value)} placeholder="000.000.000-00" style={S.input} inputMode="numeric"/></div>}
+          <div><label style={S.label}>Novo PIN (4 dígitos)</label><input type="password" inputMode="numeric" maxLength={4} value={firstPin} onChange={e=>setFirstPin(e.target.value)} placeholder="••••" style={{ ...S.input, letterSpacing:6, fontSize:20, textAlign:"center" }}/></div>
+          <div><label style={S.label}>Confirmar PIN</label><input type="password" inputMode="numeric" maxLength={4} value={firstPin2} onChange={e=>setFirstPin2(e.target.value)} placeholder="••••" style={{ ...S.input, letterSpacing:6, fontSize:20, textAlign:"center" }} onKeyDown={e=>e.key==="Enter"&&completeFirstAccess()}/></div>
+          {firstErr && <p style={{ color:"#e74c3c", fontSize:13, margin:0 }}>{firstErr}</p>}
+          <button onClick={completeFirstAccess} style={S.btnPrimary}>Confirmar e Entrar</button>
+        </div>
       </div>
     </div>
   );
@@ -503,8 +558,9 @@ function RoleSpreadsheet({ restRoles, rid, roles, onUpdate }) {
 }
 
 // ── Employee Spreadsheet ──────────────────────────────────────────────────────
-function EmployeeSpreadsheet({ restEmps, restRoles, rid, employees, onUpdate }) {
-  const blank = () => ({ id: null, name: "", cpf: "", admission: today(), pin: "", roleId: "", restaurantId: rid });
+function EmployeeSpreadsheet({ restEmps, restRoles, rid, employees, onUpdate, restCode: restCode_ }) {
+  const restaurant = (typeof restRoles !== "undefined" ? null : null); // placeholder
+  const blank = () => ({ id: null, name: "", cpf: "", admission: "", pin: "", roleId: "", restaurantId: rid });
   const [newRow, setNewRow] = useState(blank());
   const [editRows, setEditRows] = useState({});
   const [saved, setSaved] = useState({});
@@ -532,7 +588,14 @@ function EmployeeSpreadsheet({ restEmps, restRoles, rid, employees, onUpdate }) 
 
   function saveNew() {
     if (!newRow.name.trim()) return;
-    onUpdate("employees", [...employees, { ...newRow, id: Date.now().toString() }]);
+    // Find restaurant shortCode
+    const allEmps = employees; // closure
+    // Get restaurant from employees with same restaurantId or from restCode prop
+    const restCode = restCode_ || "XXX";
+    const seq = nextEmpSeq(allEmps, restCode);
+    const empCode = makeEmpCode(restCode, seq);
+    const pin = String(seq).padStart(4, "0"); // initial PIN = last 4 digits of empCode
+    onUpdate("employees", [...employees, { ...newRow, id: Date.now().toString(), empCode, pin, restaurantId: rid }]);
     setNewRow(blank());
   }
 
@@ -854,7 +917,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
         {tab === "employees" && (
           <EmployeeSpreadsheet
             restEmps={restEmps} restRoles={restRoles} rid={rid}
-            employees={employees} onUpdate={onUpdate}
+            employees={employees} onUpdate={onUpdate} restCode={restaurant.shortCode}
           />
         )}
 
@@ -950,7 +1013,7 @@ function SuperManagerPortal({ data, onUpdate, onBack, currentUser }) {
   // forms
   const [showRestModal, setShowRestModal]   = useState(false);
   const [editRestId, setEditRestId]         = useState(null);
-  const [restForm, setRestForm]             = useState({ name:"",cnpj:"",address:"" });
+  const [restForm, setRestForm]             = useState({ name:"",shortCode:"",cnpj:"",address:"" });
   const [showMgrModal, setShowMgrModal]     = useState(false);
   const [editMgrId, setEditMgrId]           = useState(null);
   const [mgrForm, setMgrForm]               = useState({ name:"",cpf:"",pin:"",restaurantIds:[],perms:{tips:true,schedule:true} });
@@ -960,7 +1023,12 @@ function SuperManagerPortal({ data, onUpdate, onBack, currentUser }) {
 
   function saveRest() {
     if (!restForm.name.trim()) return;
-    const r = { ...restForm, id: editRestId ?? Date.now().toString() };
+    const code = restForm.shortCode.trim().toUpperCase().replace(/[^A-Z]/g,"").slice(0,3);
+    if (code.length !== 3) { alert("O ID deve ter exatamente 3 letras (ex: QUI)."); return; }
+    // Check uniqueness
+    const conflict = restaurants.find(r => r.shortCode === code && r.id !== editRestId);
+    if (conflict) { alert(`ID "${code}" já está em uso por "${conflict.name}".`); return; }
+    const r = { ...restForm, shortCode: code, id: editRestId ?? Date.now().toString() };
     onUpdate("restaurants", editRestId ? restaurants.map(x=>x.id===editRestId?r:x) : [...restaurants,r]);
     setShowRestModal(false);
   }
@@ -1026,14 +1094,17 @@ function SuperManagerPortal({ data, onUpdate, onBack, currentUser }) {
                 <div key={r.id} style={{...S.card,marginBottom:10}}>
                   <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
                     <div>
-                      <div style={{color:"#fff",fontWeight:700,fontSize:16}}>{r.name}</div>
+                      <div style={{display:"flex",alignItems:"center",gap:8}}>
+                      <span style={{color:"#f5c842",fontWeight:700,fontSize:13,background:"#f5c84222",borderRadius:6,padding:"2px 8px"}}>{r.shortCode||"—"}</span>
+                      <span style={{color:"#fff",fontWeight:700,fontSize:16}}>{r.name}</span>
+                    </div>
                       {r.cnpj && <div style={{color:"#555",fontSize:12}}>CNPJ: {r.cnpj}</div>}
                       {r.address && <div style={{color:"#555",fontSize:12}}>{r.address}</div>}
                       <div style={{marginTop:6,color:"#555",fontSize:12}}>{empCount} empregado{empCount!==1?"s":""} · {mgrCount} gestor{mgrCount!==1?"es":""}</div>
                     </div>
                     <div style={{display:"flex",gap:8,flexWrap:"wrap",justifyContent:"flex-end"}}>
                       <button onClick={()=>setSelRestaurant(r.id)} style={{...S.btnSecondary,fontSize:12,color:ac,borderColor:ac}}>Abrir →</button>
-                      <button onClick={()=>{setEditRestId(r.id);setRestForm({name:r.name,cnpj:r.cnpj??"",address:r.address??""});setShowRestModal(true);}} style={{...S.btnSecondary,fontSize:12}}>Editar</button>
+                      <button onClick={()=>{setEditRestId(r.id);setRestForm({name:r.name,shortCode:r.shortCode??"",cnpj:r.cnpj??"",address:r.address??""});setShowRestModal(true);}} style={{...S.btnSecondary,fontSize:12}}>Editar</button>
                       <button onClick={()=>onUpdate("restaurants",restaurants.filter(x=>x.id!==r.id))} style={{background:"none",border:"1px solid #e74c3c33",borderRadius:8,color:"#e74c3c",cursor:"pointer",fontSize:12,padding:"6px 12px",fontFamily:"DM Mono,monospace"}}>✕</button>
                     </div>
                   </div>
@@ -1099,8 +1170,15 @@ function SuperManagerPortal({ data, onUpdate, onBack, currentUser }) {
         <Modal title={editRestId?"Editar Restaurante":"Novo Restaurante"} onClose={()=>setShowRestModal(false)}>
           <div style={{display:"flex",flexDirection:"column",gap:10}}>
             <div><label style={S.label}>Nome do restaurante</label><input value={restForm.name} onChange={e=>setRestForm({...restForm,name:e.target.value})} style={S.input}/></div>
-            <div><label style={S.label}>CNPJ</label><input value={restForm.cnpj} onChange={e=>setRestForm({...restForm,cnpj:e.target.value})} placeholder="00.000.000/0000-00" style={S.input}/></div>
-            <div><label style={S.label}>Endereço</label><input value={restForm.address} onChange={e=>setRestForm({...restForm,address:e.target.value})} style={S.input}/></div>
+            <div>
+              <label style={S.label}>ID do restaurante (3 letras únicas, ex: QUI)</label>
+              <input value={restForm.shortCode} onChange={e=>setRestForm({...restForm,shortCode:e.target.value.toUpperCase().replace(/[^A-Z]/g,"").slice(0,3)})}
+                placeholder="QUI" maxLength={3} style={{...S.input, textTransform:"uppercase", letterSpacing:6, fontSize:18, textAlign:"center"}}
+                disabled={!!editRestId}/>
+              {editRestId && <p style={{color:"#555",fontSize:11,marginTop:4}}>O ID não pode ser alterado após criação.</p>}
+            </div>
+            <div><label style={S.label}>CNPJ (opcional)</label><input value={restForm.cnpj} onChange={e=>setRestForm({...restForm,cnpj:e.target.value})} placeholder="00.000.000/0000-00" style={S.input}/></div>
+            <div><label style={S.label}>Endereço (opcional)</label><input value={restForm.address} onChange={e=>setRestForm({...restForm,address:e.target.value})} style={S.input}/></div>
             <button onClick={saveRest} style={S.btnPrimary}>{editRestId?"Salvar":"Cadastrar"}</button>
           </div>
         </Modal>
@@ -1111,7 +1189,7 @@ function SuperManagerPortal({ data, onUpdate, onBack, currentUser }) {
           <div style={{display:"flex",flexDirection:"column",gap:12}}>
             <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
               <div><label style={S.label}>Nome completo</label><input value={mgrForm.name} onChange={e=>setMgrForm({...mgrForm,name:e.target.value})} style={S.input}/></div>
-              <div><label style={S.label}>CPF</label><input value={mgrForm.cpf} onChange={e=>setMgrForm({...mgrForm,cpf:e.target.value})} placeholder="000.000.000-00" style={S.input} inputMode="numeric"/></div>
+              <div><label style={S.label}>CPF (opcional)</label><input value={mgrForm.cpf} onChange={e=>setMgrForm({...mgrForm,cpf:e.target.value})} placeholder="000.000.000-00" style={S.input} inputMode="numeric"/></div>
             </div>
             <div><label style={S.label}>PIN (4–6 dígitos)</label><input type="password" value={mgrForm.pin} onChange={e=>setMgrForm({...mgrForm,pin:e.target.value})} maxLength={6} style={S.input}/></div>
 
@@ -1380,7 +1458,7 @@ export default function App() {
       )}
       {view === "super"    && <SuperManagerPortal data={data} onUpdate={handleUpdate} onBack={doLogout} currentUser={currentUser} />}
       {view === "manager"  && <ManagerPortal manager={currentUser} data={data} onUpdate={handleUpdate} onBack={doLogout} />}
-      {view === "employee" && <EmployeePortal employees={employees} roles={roles} tips={tips} schedules={schedules} restaurants={restaurants} onBack={()=>setView("home")} />}
+      {view === "employee" && <EmployeePortal employees={employees} roles={roles} tips={tips} schedules={schedules} restaurants={restaurants} onBack={()=>setView("home")} onUpdateEmployee={emp=>{const next=employees.map(e=>e.id===emp.id?emp:e);handleUpdate("employees",next);}} />}
       <Toast msg={toast} onClose={()=>setToast("")} />
     </>
   );
