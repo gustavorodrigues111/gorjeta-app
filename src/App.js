@@ -1386,70 +1386,57 @@ function ReceibosManagerTab({ restaurantId, employees, receipts, onUpdate }) {
       {months.length === 0 && <p style={{color:"var(--text3)",textAlign:"center"}}>Nenhum recibo importado.</p>}
       {months.map(m => {
         const mReceipts = myReceipts.filter(r => r.month === m && !r.unmatched);
-        const pag = mReceipts.filter(r=>r.type==="pagamento");
-        const adi = mReceipts.filter(r=>r.type==="adiantamento");
-        // Format month display
         const [y,mo] = m.split("-");
         const mLabel = new Date(parseInt(y), parseInt(mo)-1, 1).toLocaleDateString("pt-BR",{month:"long",year:"numeric"});
+        const TYPE_INFO = {
+          pagamento:   { label:"💰 Pagamento",    color:"#10b981" },
+          adiantamento:{ label:"💵 Adiantamento", color:"#3b82f6" },
+          "13salario": { label:"🎄 13º Salário",  color:"#f59e0b" },
+        };
+        const typeKeys = Object.keys(TYPE_INFO).filter(t => mReceipts.some(r=>r.type===t));
+
         return (
-          <div key={m} style={{...S.card, marginBottom:16}}>
-            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
-              <span style={{color:ac,fontWeight:700,fontSize:14,textTransform:"capitalize"}}>{mLabel}</span>
+          <details key={m} open style={{marginBottom:12,background:"var(--card-bg)",borderRadius:14,border:"1px solid var(--border)",overflow:"hidden"}}>
+            <summary style={{padding:"12px 16px",cursor:"pointer",display:"flex",justifyContent:"space-between",alignItems:"center",listStyle:"none",userSelect:"none"}}>
+              <span style={{color:ac,fontWeight:700,fontSize:14,textTransform:"capitalize"}}>📁 {mLabel}</span>
               <span style={{color:"var(--text3)",fontSize:12}}>{mReceipts.length} recibo(s)</span>
+            </summary>
+
+            <div style={{padding:"0 12px 12px"}}>
+              {typeKeys.map(t => {
+                const tReceipts = mReceipts.filter(r=>r.type===t);
+                const { label, color } = TYPE_INFO[t];
+                return (
+                  <details key={t} open style={{marginBottom:8,background:"var(--bg2)",borderRadius:10,border:`1px solid ${color}33`,overflow:"hidden"}}>
+                    <summary style={{padding:"8px 12px",cursor:"pointer",display:"flex",justifyContent:"space-between",alignItems:"center",listStyle:"none",userSelect:"none"}}>
+                      <span style={{color,fontSize:12,fontWeight:700}}>{label} ({tReceipts.length})</span>
+                      <button onClick={e=>{e.preventDefault();e.stopPropagation();if(window.confirm(`Excluir TODOS os ${tReceipts.length} recibos de ${label} de ${mLabel}?`)) onUpdate("receipts", receipts.filter(r=>!(r.month===m&&r.type===t&&r.restaurantId===restaurantId)));}} style={{background:"none",border:"1px solid #e74c3c33",borderRadius:6,color:"#e74c3c",cursor:"pointer",fontSize:11,padding:"2px 8px",fontFamily:"DM Mono,monospace"}}>
+                        Excluir todos
+                      </button>
+                    </summary>
+
+                    <div style={{padding:"4px 8px 8px"}}>
+                      {tReceipts.map(r=>(
+                        <div key={r.id} style={{display:"flex",alignItems:"center",gap:8,padding:"6px 8px",background:"var(--bg1)",borderRadius:8,marginBottom:4}}>
+                          <span style={{flex:1,color:"var(--text)",fontSize:13}}>{r.empName}</span>
+                          {/* Change type */}
+                          <select value={r.type} onChange={e=>{
+                            onUpdate("receipts", receipts.map(x=>x.id===r.id?{...x,type:e.target.value}:x));
+                          }} style={{...S.input,width:"auto",fontSize:11,padding:"3px 6px",color:"var(--text2)"}}>
+                            <option value="pagamento">💰 Pagamento</option>
+                            <option value="adiantamento">💵 Adiantamento</option>
+                            <option value="13salario">🎄 13º Salário</option>
+                          </select>
+                          <button onClick={()=>{if(window.confirm(`Excluir recibo de ${r.empName}?`)) onUpdate("receipts", receipts.filter(x=>x.id!==r.id));}} style={{background:"none",border:"1px solid #e74c3c33",borderRadius:6,color:"#e74c3c",cursor:"pointer",fontSize:12,padding:"4px 8px",fontFamily:"DM Mono,monospace",flexShrink:0}}>✕</button>
+                        </div>
+                      ))}
+                    </div>
+                  </details>
+                );
+              })}
+              {typeKeys.length === 0 && <p style={{color:"var(--text3)",fontSize:12,textAlign:"center",padding:8}}>Nenhum recibo identificado neste mês.</p>}
             </div>
-
-            {/* Pagamento */}
-            {pag.length > 0 && (
-              <div style={{marginBottom:12}}>
-                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
-                  <span style={{color:"#10b981",fontSize:12,fontWeight:700}}>💰 Pagamento ({pag.length})</span>
-                  <button onClick={()=>{
-                    if(window.confirm(`Excluir TODOS os ${pag.length} recibo(s) de pagamento de ${mLabel}?`))
-                      onUpdate("receipts", receipts.filter(r=>!(r.month===m&&r.type==="pagamento"&&r.restaurantId===restaurantId)));
-                  }} style={{background:"none",border:"1px solid #e74c3c33",borderRadius:6,color:"#e74c3c",cursor:"pointer",fontSize:11,padding:"3px 8px",fontFamily:"DM Mono,monospace"}}>
-                    Excluir todos
-                  </button>
-                </div>
-                {pag.map(r=>(
-                  <div key={r.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"7px 10px",background:"var(--bg1)",borderRadius:8,marginBottom:4}}>
-                    <span style={{color:"var(--text)",fontSize:13}}>{r.empName}</span>
-                    <button onClick={()=>{
-                      if(window.confirm(`Excluir recibo de ${r.empName}?`))
-                        onUpdate("receipts", receipts.filter(x=>x.id!==r.id));
-                    }} style={{background:"none",border:"1px solid #e74c3c33",borderRadius:6,color:"#e74c3c",cursor:"pointer",fontSize:11,padding:"3px 8px",fontFamily:"DM Mono,monospace"}}>✕</button>
-                  </div>
-                ))}
-              </div>
-            )}
-
-            {/* Adiantamento */}
-            {adi.length > 0 && (
-              <div>
-                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
-                  <span style={{color:"#3b82f6",fontSize:12,fontWeight:700}}>💵 Adiantamento ({adi.length})</span>
-                  <button onClick={()=>{
-                    if(window.confirm(`Excluir TODOS os ${adi.length} recibo(s) de adiantamento de ${mLabel}?`))
-                      onUpdate("receipts", receipts.filter(r=>!(r.month===m&&r.type==="adiantamento"&&r.restaurantId===restaurantId)));
-                  }} style={{background:"none",border:"1px solid #e74c3c33",borderRadius:6,color:"#e74c3c",cursor:"pointer",fontSize:11,padding:"3px 8px",fontFamily:"DM Mono,monospace"}}>
-                    Excluir todos
-                  </button>
-                </div>
-                {adi.map(r=>(
-                  <div key={r.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"7px 10px",background:"var(--bg1)",borderRadius:8,marginBottom:4}}>
-                    <span style={{color:"var(--text)",fontSize:13}}>{r.empName}</span>
-                    <button onClick={()=>{
-                      if(window.confirm(`Excluir recibo de ${r.empName}?`))
-                        onUpdate("receipts", receipts.filter(x=>x.id!==r.id));
-                    }} style={{background:"none",border:"1px solid #e74c3c33",borderRadius:6,color:"#e74c3c",cursor:"pointer",fontSize:11,padding:"3px 8px",fontFamily:"DM Mono,monospace"}}>✕</button>
-                  </div>
-                ))}
-              </div>
-            )}
-
-            {pag.length === 0 && adi.length === 0 && (
-              <p style={{color:"var(--text3)",fontSize:12,textAlign:"center"}}>Nenhum recibo identificado neste mês.</p>
-            )}
-          </div>
+          </details>
         );
       })}
     </div>
