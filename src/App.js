@@ -1261,6 +1261,8 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
       const empDayMap = daySchedule[empId] ?? {};
       return empDayMap[date];
     };
+    console.log(`[recalc] date:${date} tKey:${tKey} rid:${rid}`);
+    console.log(`[recalc] schedules structure:`, JSON.stringify(schedules?.[rid]?.[tKey]));
 
     const allRestEmps = employees.filter(e =>
       e.restaurantId === rid &&
@@ -1272,12 +1274,12 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
       if (!r) return false;
       if (emp.admission && emp.admission > date) return false;
       const status = empDayStatus(emp.id);
-      if (!status) return true; // trabalho = entra
-      if (status === DAY_COMP) return true; // compensacao = entra
-      if (status === DAY_FAULT_J || status === DAY_FAULT_U) return false; // faltas = nao entra
-      // Folga ou ferias: Cozinha (Producao) entra, outros nao
+      console.log(`[recalc] ${emp.name} | area:${r.area} | status:${status ?? "trabalho"} | daySchedule keys:`, Object.keys(daySchedule));
+      if (!status) return true;
+      if (status === DAY_COMP) return true;
+      if (status === DAY_FAULT_J || status === DAY_FAULT_U) return false;
       if (r.area === "Cozinha") return true;
-      return false; // folga/ferias = nao entra
+      return false;
     }).map(emp => ({
       ...emp,
       points: parseFloat(restRoles.find(r => r.id === emp.roleId)?.points) || 1,
