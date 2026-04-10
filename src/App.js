@@ -1185,14 +1185,15 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
       if (emp.inactive && emp.inactiveFrom && emp.inactiveFrom <= tipDate) return false;
       // Check schedule
       const status = empDayStatus(emp.id);
-      if (!status) return true; // working day
-      if (DAYS_EARN_TIP.has(status)) return true; // comp = earns tip
-      // Produção (Cozinha) always earns EXCEPT falta justificada or injustificada
-      if (isProdArea(r.area)) {
-        if (status === DAY_FAULT_J || status === DAY_FAULT_U) return false;
-        return true; // folga/férias still earns for Produção
-      }
-      return false; // all others on off/vacation/fault don't earn
+      if (!status) return true; // working day = earns
+      if (status === DAY_COMP) return true; // compensacao = earns
+      // Falta injustificada: nobody earns
+      if (status === DAY_FAULT_U) return false;
+      // Falta justificada: nobody earns
+      if (status === DAY_FAULT_J) return false;
+      // Folga or ferias: Cozinha (Producao) still earns, others don't
+      if (isProdArea(r.area)) return true;
+      return false; // folga/ferias = nao entra
     }).map(emp => ({
       ...emp,
       points: parseFloat(restRoles.find(r => r.id === emp.roleId)?.points) || 1,
@@ -1266,23 +1267,17 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
       !(e.inactive && e.inactiveFrom && e.inactiveFrom <= date)
     );
 
-    // DIAGNOSTIC - remove after fix confirmed
-    const diagLines = allRestEmps.map(emp => {
-      const status = empDayStatus(emp.id) ?? "trabalho";
-      return `${emp.name}: ${status}`;
-    });
-    alert(`Diagnóstico recálculo ${date}:\n\nEscala encontrada:\n${diagLines.join("\n")}\n\ntKey: ${tKey}\nschedules[rid][tKey] keys: ${Object.keys(daySchedule).length} empregados`);
-
     const activeEmps = allRestEmps.filter(emp => {
       const r = restRoles.find(r => r.id === emp.roleId);
       if (!r) return false;
       if (emp.admission && emp.admission > date) return false;
       const status = empDayStatus(emp.id);
-      if (!status) return true; // working
-      if (status === DAY_COMP) return true; // comp earns
-      // Cozinha always earns except faltas
-      if (r.area === "Cozinha" && status !== DAY_FAULT_J && status !== DAY_FAULT_U) return true;
-      return false; // folga, ferias, faltas = nao entra
+      if (!status) return true; // trabalho = entra
+      if (status === DAY_COMP) return true; // compensacao = entra
+      if (status === DAY_FAULT_J || status === DAY_FAULT_U) return false; // faltas = nao entra
+      // Folga ou ferias: Cozinha (Producao) entra, outros nao
+      if (r.area === "Cozinha") return true;
+      return false; // folga/ferias = nao entra
     }).map(emp => ({
       ...emp,
       points: parseFloat(restRoles.find(r => r.id === emp.roleId)?.points) || 1,
@@ -1444,9 +1439,10 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                           const r = restRoles.find(r=>r.id===e.roleId);
                           if (!r || (e.admission && e.admission > tipDate)) return false;
                           const status = getStatus(e.id);
-                          if (!status) return true; // working
-                          if (status === DAY_COMP) return true;
-                          if (r.area === "Cozinha" && status !== DAY_FAULT_J && status !== DAY_FAULT_U) return true;
+                          if (!status) return true; // trabalho = entra
+                          if (status === DAY_COMP) return true; // comp = entra
+                          if (status === DAY_FAULT_J || status === DAY_FAULT_U) return false; // faltas = nao entra
+                          if (r.area === "Cozinha") return true; // cozinha entra em folga/ferias
                           return false;
                         });
                         const excluded = restEmps.filter(e => {
@@ -1454,8 +1450,9 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                           if (!r || (e.admission && e.admission > tipDate)) return false;
                           const status = getStatus(e.id);
                           if (!status || status === DAY_COMP) return false;
-                          if (r.area === "Cozinha" && status !== DAY_FAULT_J && status !== DAY_FAULT_U) return false;
-                          return true;
+                          if (status === DAY_FAULT_J || status === DAY_FAULT_U) return true; // faltas sempre excluem
+                          if (r.area === "Cozinha") return false; // cozinha nao excluida por folga/ferias
+                          return true; // outros em folga/ferias = excluidos
                         });
                         return (<div>
                           {excluded.length > 0 && <div style={{marginBottom:8,padding:"6px 8px",background:"#e74c3c11",borderRadius:8,border:"1px solid #e74c3c22"}}>
