@@ -138,7 +138,8 @@ function MonthNav({ year, month, onChange }) {
 }
 
 function PermBadge({ label, on }) {
-  return <span style={{ background: on ? "#10b98122" : "#e74c3c22", color: on ? "#10b981" : "#e74c3c", borderRadius: 6, padding: "2px 10px", fontSize: 11, fontWeight: 700 }}>{on ? "✓" : "✗"} {label}</span>;
+  if (!on) return null; // só mostra o que tem acesso
+  return <span style={{ background: "#10b98122", color: "#10b981", borderRadius: 6, padding: "2px 10px", fontSize: 11, fontWeight: 700 }}>✓ {label}</span>;
 }
 
 //
@@ -692,6 +693,7 @@ function EmployeePortal({ employees, roles, tips, schedules, restaurants, commun
   const [firstPin, setFirstPin] = useState("");
   const [firstPin2, setFirstPin2] = useState("");
   const [firstErr, setFirstErr] = useState("");
+  const [empSchedView, setEmpSchedView] = useState("mine");
 
   const emp = employees.find(e => e.id === empId);
   const role = emp ? roles.find(r => r.id === emp.roleId) : null;
@@ -832,56 +834,115 @@ function EmployeePortal({ employees, roles, tips, schedules, restaurants, commun
               ))}
             </div>
             {myTips.length === 0 && <p style={{ color: "#555", textAlign: "center" }}>Nenhuma gorjeta registrada neste mês.</p>}
-            {[...myTips].sort((a,b) => a.date.localeCompare(b.date)).map(t => (
-              <div key={t.id} style={{ ...S.card, marginBottom: 10 }}>
-                <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}>
-                  <span style={{ color: "#aaa", fontSize: 13 }}>{fmtDate(t.date)}</span>
-                  {t.note && <span style={{ color: "#555", fontSize: 11 }}>📝 {t.note}</span>}
+            {myTips.length > 0 && (() => {
+              const sorted = [...myTips].sort((a,b) => a.date.localeCompare(b.date));
+              let running = 0;
+              return (
+                <div>
+                  {/* Table header */}
+                  <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr 1fr",gap:4,padding:"6px 8px",background:"#111",borderRadius:"8px 8px 0 0",marginBottom:2}}>
+                    {["Data","Bruto","Desconto","Líquido"].map(h=><div key={h} style={{color:"#555",fontSize:10,fontWeight:700}}>{h}</div>)}
+                  </div>
+                  {sorted.map(t => {
+                    running += t.myNet;
+                    const statusOfDay = schedules?.[emp?.restaurantId]?.[mk]?.[empId]?.[t.date];
+                    const statusLabels = {off:"Folga",vac:"Férias",faultj:"Falta Just.",faultu:"Falta Injust.",comp:"Compensação"};
+                    return (
+                      <div key={t.id} style={{background:"#1a1a1a",borderBottom:"1px solid #222",padding:"8px",borderRadius:0}}>
+                        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr 1fr",gap:4,marginBottom: statusOfDay||t.note?4:0}}>
+                          <div style={{color:"#aaa",fontSize:12}}>{fmtDate(t.date)}</div>
+                          <div style={{color:"#fff",fontSize:12}}>{fmt(t.myShare)}</div>
+                          <div style={{color:"#e74c3c",fontSize:12}}>-{fmt(t.myTax)}</div>
+                          <div style={{color:ac,fontSize:12,fontWeight:700}}>{fmt(t.myNet)}</div>
+                        </div>
+                        {(statusOfDay || t.note) && (
+                          <div style={{color:"#555",fontSize:10}}>
+                            {statusOfDay && <span style={{marginRight:8}}>{statusLabels[statusOfDay]??statusOfDay}</span>}
+                            {t.note && <span>📝 {t.note}</span>}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                  {/* Running total */}
+                  <div style={{background:"#111",borderRadius:"0 0 8px 8px",padding:"10px 8px",display:"grid",gridTemplateColumns:"1fr 1fr 1fr 1fr",gap:4}}>
+                    <div style={{color:"#555",fontSize:11,fontWeight:700}}>Acumulado</div>
+                    <div style={{color:"#fff",fontSize:11}}>{fmt(myTips.reduce((a,t)=>a+t.myShare,0))}</div>
+                    <div style={{color:"#e74c3c",fontSize:11}}>-{fmt(myTips.reduce((a,t)=>a+t.myTax,0))}</div>
+                    <div style={{color:ac,fontSize:13,fontWeight:700}}>{fmt(running)}</div>
+                  </div>
                 </div>
-                <div style={{ background: "#111", borderRadius: 10, padding: 12, fontSize: 12 }}>
-                  <div style={{ display: "flex", justifyContent: "space-between", color: "#aaa", marginBottom: 3 }}><span>Bruto</span><span style={{ color: "#fff" }}>{fmt(t.myShare)}</span></div>
-                  <div style={{ display: "flex", justifyContent: "space-between", color: "#aaa", marginBottom: 3 }}><span>Retenção ({Math.round((t.taxRate ?? TAX) * 100)}%)</span><span style={{ color: "#e74c3c" }}>-{fmt(t.myTax)}</span></div>
-                  <div style={{ display: "flex", justifyContent: "space-between", color: "#aaa", borderTop: "1px solid #2a2a2a", paddingTop: 6, marginTop: 4 }}><span style={{ fontWeight: 700 }}>Líquido</span><span style={{ color: ac, fontWeight: 700 }}>{fmt(t.myNet)}</span></div>
-                </div>
-              </div>
-            ))}
+              );
+            })()}
           </div>
         )}
 
         {tab === "escala" && (
           <div>
             <div style={{ marginBottom: 20 }}><MonthNav year={year} month={month} onChange={(y, m) => { setYear(y); setMonth(m); }} /></div>
-            <p style={{ color: "#555", fontSize: 13, marginBottom: 16, textTransform: "capitalize" }}>Sua escala em {monthLabel(year, month)}</p>
-            <CalendarGrid year={year} month={month} dayMap={dayMap} readOnly />
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 8, marginTop: 20 }}>
-              {(() => {
-                const dim = new Date(year, month + 1, 0).getDate();
-                const counts = { work: 0, off: 0, comp: 0, vac: 0, fj: 0, fu: 0 };
-                for (let d = 1; d <= dim; d++) {
-                  const k = `${year}-${String(month+1).padStart(2,"0")}-${String(d).padStart(2,"0")}`;
-                  const s = dayMap[k];
-                  if (s === DAY_OFF) counts.off++;
-                  else if (s === DAY_COMP) counts.comp++;
-                  else if (s === DAY_VACATION) counts.vac++;
-                  else if (s === DAY_FAULT_J) counts.fj++;
-                  else if (s === DAY_FAULT_U) counts.fu++;
-                  else counts.work++;
-                }
-                return [
-                  ["Trabalho", counts.work, "#10b981"],
-                  ["Folga", counts.off, "#e74c3c"],
-                  ["Compensação", counts.comp, "#3b82f6"],
-                  ["Férias", counts.vac, "#8b5cf6"],
-                  ["Falta Just.", counts.fj, "#f59e0b"],
-                  ["Falta Injust.", counts.fu, "#ef4444"],
-                ].map(([lbl, val, col]) => (
-                  <div key={lbl} style={{ ...S.card, textAlign: "center", padding: "12px 8px" }}>
-                    <div style={{ color: "#555", fontSize: 9, marginBottom: 4 }}>{lbl}</div>
-                    <div style={{ color: col, fontWeight: 700, fontSize: 20 }}>{val}</div>
-                  </div>
-                ));
-              })()}
+            <div style={{display:"flex",gap:8,marginBottom:14}}>
+              <button onClick={()=>setEmpSchedView("mine")} style={{flex:1,padding:"8px",borderRadius:10,border:`1px solid ${empSchedView==="mine"?ac:"#2a2a2a"}`,background:empSchedView==="mine"?ac+"22":"transparent",color:empSchedView==="mine"?ac:"#555",cursor:"pointer",fontFamily:"DM Mono,monospace",fontSize:12}}>Minha Escala</button>
+              <button onClick={()=>setEmpSchedView("area")} style={{flex:1,padding:"8px",borderRadius:10,border:`1px solid ${empSchedView==="area"?ac:"#2a2a2a"}`,background:empSchedView==="area"?ac+"22":"transparent",color:empSchedView==="area"?ac:"#555",cursor:"pointer",fontFamily:"DM Mono,monospace",fontSize:12}}>Escala da Área</button>
             </div>
+
+            {empSchedView === "mine" && (
+              <div>
+                <p style={{ color: "#555", fontSize: 13, marginBottom: 16, textTransform: "capitalize" }}>Sua escala em {monthLabel(year, month)}</p>
+                <CalendarGrid year={year} month={month} dayMap={dayMap} readOnly />
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 8, marginTop: 20 }}>
+                  {(() => {
+                    const dim = new Date(year, month + 1, 0).getDate();
+                    const counts = { work: 0, off: 0, comp: 0, vac: 0, fj: 0, fu: 0 };
+                    for (let d = 1; d <= dim; d++) {
+                      const k = `${year}-${String(month+1).padStart(2,"0")}-${String(d).padStart(2,"0")}`;
+                      const s = dayMap[k];
+                      if (s === DAY_OFF) counts.off++;
+                      else if (s === DAY_COMP) counts.comp++;
+                      else if (s === DAY_VACATION) counts.vac++;
+                      else if (s === DAY_FAULT_J) counts.fj++;
+                      else if (s === DAY_FAULT_U) counts.fu++;
+                      else counts.work++;
+                    }
+                    return [
+                      ["Trabalho", counts.work, "#10b981"], ["Folga", counts.off, "#e74c3c"],
+                      ["Compensação", counts.comp, "#3b82f6"], ["Férias", counts.vac, "#8b5cf6"],
+                      ["Falta Just.", counts.fj, "#f59e0b"], ["Falta Injust.", counts.fu, "#ef4444"],
+                    ].map(([lbl, val, col]) => (
+                      <div key={lbl} style={{ ...S.card, textAlign: "center", padding: "12px 8px" }}>
+                        <div style={{ color: "#555", fontSize: 9, marginBottom: 4 }}>{lbl}</div>
+                        <div style={{ color: col, fontWeight: 700, fontSize: 20 }}>{val}</div>
+                      </div>
+                    ));
+                  })()}
+                </div>
+              </div>
+            )}
+
+            {empSchedView === "area" && (() => {
+              const empRole = roles.find(r => r.id === emp?.roleId);
+              const empArea = empRole?.area;
+              const areaEmpsList = employees.filter(e => {
+                const r = roles.find(r => r.id === e.roleId);
+                return r?.area === empArea && e.restaurantId === emp?.restaurantId &&
+                  !(e.inactive && e.inactiveFrom && e.inactiveFrom <= today());
+              });
+              return (
+                <div>
+                  <p style={{color:"#555",fontSize:12,marginBottom:16}}>Escala da área <span style={{color:AREA_COLORS[empArea]??ac}}>{empArea}</span> — {monthLabel(year,month)}</p>
+                  {areaEmpsList.map(e => {
+                    const dm = schedules?.[emp?.restaurantId]?.[mk]?.[e.id] ?? {};
+                    return (
+                      <div key={e.id} style={{...S.card,marginBottom:16}}>
+                        <div style={{color: e.id===empId?ac:"#fff",fontWeight:600,marginBottom:8,fontSize:13}}>
+                          {e.name}{e.id===empId?" (você)":""}
+                        </div>
+                        <CalendarGrid year={year} month={month} dayMap={dm} readOnly />
+                      </div>
+                    );
+                  })}
+                </div>
+              );
+            })()}
           </div>
         )}
 
@@ -1558,8 +1619,46 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
         {/* ESCALA */}
         {tab === "schedule" && (
           <div>
-            <div style={{marginBottom:16}}><PillBar options={AREAS} value={schedArea} onChange={setSchedArea}/></div>
-            <p style={{color:"#555",fontSize:12,marginBottom:16}}>Clique para ciclar: <span style={{color:"#10b981"}}>Trabalho</span> → <span style={{color:"#e74c3c"}}>Folga</span> → <span style={{color:"#3b82f6"}}>Comp.</span> → <span style={{color:"#8b5cf6"}}>Férias</span> → <span style={{color:"#f59e0b"}}>F.Just.</span> → <span style={{color:"#ef4444"}}>F.Injust.</span> → Trabalho</p>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12,flexWrap:"wrap",gap:8}}>
+              <div style={{flex:1}}><PillBar options={AREAS} value={schedArea} onChange={setSchedArea}/></div>
+              <button onClick={async () => {
+                await loadScript("https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js");
+                const { jsPDF } = window.jspdf;
+                const doc = new jsPDF({ orientation:"landscape", unit:"mm", format:"a4" });
+                const emps = restEmps.filter(e => restRoles.find(r=>r.id===e.roleId)?.area === schedArea);
+                const daysInMonth = new Date(year, month+1, 0).getDate();
+                doc.setFontSize(12);
+                doc.text(`Escala — ${schedArea} — ${monthLabel(year,month)} — ${restaurant.name}`, 14, 14);
+                // Header row
+                doc.setFontSize(7);
+                doc.text("Empregado", 14, 24);
+                for(let d=1;d<=daysInMonth;d++){
+                  doc.text(String(d), 40+(d-1)*7, 24);
+                }
+                doc.text("T", 40+daysInMonth*7+2, 24);
+                // Employee rows
+                const STATUS_SHORT = {off:"F",comp:"C",vac:"Fér",faultj:"FJ",faultu:"FI"};
+                emps.forEach((emp, i) => {
+                  const y2 = 30 + i*7;
+                  const dayMap = schedules?.[rid]?.[mk]?.[emp.id] ?? {};
+                  doc.setFontSize(7);
+                  doc.text(emp.name.slice(0,18), 14, y2);
+                  let workDays = 0;
+                  for(let d=1;d<=daysInMonth;d++){
+                    const k = `${year}-${String(month+1).padStart(2,"0")}-${String(d).padStart(2,"0")}`;
+                    const s = dayMap[k];
+                    const label = STATUS_SHORT[s] ?? "•";
+                    if(!s) workDays++;
+                    doc.text(label, 40+(d-1)*7, y2);
+                  }
+                  doc.text(String(workDays), 40+daysInMonth*7+2, y2);
+                });
+                doc.save(`escala_${schedArea}_${year}_${String(month+1).padStart(2,"0")}.pdf`);
+              }} style={{padding:"8px 14px",borderRadius:10,border:"1px solid #2a2a2a",background:"transparent",color:"#aaa",cursor:"pointer",fontFamily:"DM Mono,monospace",fontSize:12,whiteSpace:"nowrap"}}>
+                📄 Exportar PDF
+              </button>
+            </div>
+            <p style={{color:"#555",fontSize:11,marginBottom:16}}>Clique para ciclar: <span style={{color:"#10b981"}}>Trabalho</span> → <span style={{color:"#e74c3c"}}>Folga</span> → <span style={{color:"#3b82f6"}}>Comp.</span> → <span style={{color:"#8b5cf6"}}>Férias</span> → <span style={{color:"#f59e0b"}}>F.Just.</span> → <span style={{color:"#ef4444"}}>F.Injust.</span> → Trabalho</p>
             {areaEmps.length === 0 && <p style={{color:"#555",textAlign:"center"}}>Nenhum empregado nesta área.</p>}
             {areaEmps.map(emp => {
               const dayMap = schedules?.[rid]?.[mk]?.[emp.id] ?? {};
