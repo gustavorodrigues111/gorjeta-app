@@ -1761,6 +1761,8 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
     });
     onUpdate("tips", updated);
   }
+
+  function recalcTipDay(date) {
     // Find existing tips for this date
     const existing = tips.filter(t => t.restaurantId === rid && t.date === date);
     if (!existing.length) return 0;
