@@ -1884,7 +1884,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
         ))}
       </div>
 
-      <div style={{ padding: "20px 16px", maxWidth: 640, margin: "0 auto" }}>
+      <div style={{ padding: "20px 24px" }}>
         {["dashboard","tips","schedule"].includes(tab) && (
           <div style={{ marginBottom: 20 }}><MonthNav year={year} month={month} onChange={(y,m)=>{setYear(y);setMonth(m);}} /></div>
         )}
@@ -2253,7 +2253,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                   <table style={{borderCollapse:"collapse",fontFamily:"DM Mono,monospace",fontSize:11,minWidth:"100%"}}>
                     <thead>
                       <tr>
-                        <th style={{position:"sticky",left:0,background:"#1a1a1a",zIndex:2,padding:"6px 10px",textAlign:"left",color:"#555",fontSize:11,borderBottom:"1px solid #2a2a2a",whiteSpace:"nowrap",minWidth:120}}>
+                        <th style={{position:"sticky",left:0,background:"#1a1a1a",zIndex:2,padding:"6px 10px",textAlign:"left",color:"#555",fontSize:11,borderBottom:"1px solid #2a2a2a",whiteSpace:"nowrap",minWidth:140}}>
                           Empregado
                         </th>
                         {Array.from({length:daysInMonth},(_,i)=>{
@@ -2262,14 +2262,14 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                           const wd = new Date(date+"T12:00:00").getDay();
                           const isWe = wd===0||wd===6;
                           return (
-                            <th key={d} style={{padding:"4px 2px",textAlign:"center",color:isWe?"#f59e0b":"#555",fontSize:10,borderBottom:"1px solid #2a2a2a",minWidth:28}}>
+                            <th key={d} style={{padding:"3px 1px",textAlign:"center",color:isWe?"#f59e0b":"#555",fontSize:9,borderBottom:"1px solid #2a2a2a",minWidth:22,width:22}}>
                               <div>{d}</div>
                               <div style={{fontSize:8}}>{["D","S","T","Q","Q","S","S"][wd]}</div>
                             </th>
                           );
                         })}
-                        <th style={{padding:"4px 6px",textAlign:"center",color:"#10b981",fontSize:10,borderBottom:"1px solid #2a2a2a",minWidth:28}}>T</th>
-                        <th style={{padding:"4px 6px",textAlign:"center",color:"#e74c3c",fontSize:10,borderBottom:"1px solid #2a2a2a",minWidth:28}}>F</th>
+                        <th style={{padding:"4px 6px",textAlign:"center",color:"#10b981",fontSize:10,borderBottom:"1px solid #2a2a2a",minWidth:22}}>T</th>
+                        <th style={{padding:"4px 6px",textAlign:"center",color:"#e74c3c",fontSize:10,borderBottom:"1px solid #2a2a2a",minWidth:22}}>F</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -2295,8 +2295,8 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                               const isWe = wd===0||wd===6;
                               return (
                                 <td key={d} onClick={()=>cycleStatus(emp.id, date)}
-                                  style={{textAlign:"center",padding:"3px 2px",cursor:"pointer",background:status?color+"33":(isWe?"#1a1a0a":"transparent"),borderRight:"1px solid #1a1a1a"}}>
-                                  <span style={{color:color,fontSize:status?10:12,fontWeight:status?700:400}}>{label}</span>
+                                  style={{textAlign:"center",padding:"2px 1px",cursor:"pointer",background:status?color+"33":(isWe?"#1a1a0a":"transparent"),borderRight:"1px solid #1a1a1a",width:22}}>
+                                  <span style={{color:color,fontSize:status?9:11,fontWeight:status?700:400}}>{label}</span>
                                 </td>
                               );
                             })}
@@ -2512,7 +2512,7 @@ function SuperManagerPortal({ data, onUpdate, onBack, currentUser }) {
         ))}
       </div>
 
-      <div style={{ padding:"20px 16px", maxWidth:640, margin:"0 auto" }}>
+      <div style={{ padding:"20px 24px" }}>
 
         {/* RESTAURANTES */}
         {tab === "restaurants" && (
