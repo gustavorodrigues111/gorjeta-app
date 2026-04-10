@@ -736,12 +736,33 @@ function ReceibosManagerTab({ restaurantId, employees, receipts, onUpdate }) {
       setProgress(`Lendo ${numPages} páginas...`);
 
       const newReceipts = [];
+      const pageTexts = []; // store text of each page to detect duplicates
 
       for (let p = 1; p <= numPages; p++) {
         setProgress(`Processando página ${p} de ${numPages}...`);
         const page = await pdf.getPage(p);
         const textContent = await page.getTextContent();
         const text = textContent.items.map(i => i.str).join(" ");
+
+        // Duplicate detection: compare normalized text with previous pages
+        // Use first 300 chars as fingerprint (enough to detect same content)
+        const fingerprint = text.replace(/\s+/g," ").trim().slice(0, 300);
+        const isDuplicate = pageTexts.some(prev => {
+          // Calculate similarity: count matching characters in fingerprint
+          if (Math.abs(prev.length - fingerprint.length) > 50) return false;
+          let matches = 0;
+          const shorter = fingerprint.length < prev.length ? fingerprint : prev;
+          for (let i = 0; i < shorter.length; i++) {
+            if (fingerprint[i] === prev[i]) matches++;
+          }
+          return (matches / shorter.length) > 0.85; // 85% similarity = duplicate
+        });
+
+        if (isDuplicate) {
+          setProgress(`Página ${p} de ${numPages} — cópia ignorada ✓`);
+          continue; // skip duplicate
+        }
+        pageTexts.push(fingerprint);
 
         // Try to match by CPF first, then by name
         let matchedEmp = null;
@@ -785,12 +806,13 @@ function ReceibosManagerTab({ restaurantId, employees, receipts, onUpdate }) {
 
       const matched = newReceipts.filter(r => !r.unmatched).length;
       const unmatched = newReceipts.filter(r => r.unmatched).length;
+      const skipped = numPages - newReceipts.length;
 
       const existing = receipts.filter(r =>
         !(r.restaurantId === restaurantId && r.month === selMonth && r.type === type)
       );
       onUpdate("receipts", [...existing, ...newReceipts]);
-      setProgress(`✅ ${matched} identificados automaticamente.${unmatched ? `\n⚠️ ${unmatched} página(s) não identificada(s) — associe manualmente abaixo.` : ""}`);
+      setProgress(`✅ ${matched} identificados automaticamente.${skipped ? `\n📋 ${skipped} página(s) duplicada(s) ignorada(s).` : ""}${unmatched ? `\n⚠️ ${unmatched} página(s) não identificada(s) — associe manualmente abaixo.` : ""}`);
     } catch (err) {
       setProgress(`❌ Erro: ${err.message}`);
     }
