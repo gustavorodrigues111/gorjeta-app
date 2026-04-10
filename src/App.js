@@ -327,22 +327,16 @@ function EmployeePortal({ employees, roles, tips, schedules, restaurants, onBack
   const [year, setYear] = useState(now.getFullYear());
   const [month, setMonth] = useState(now.getMonth());
   const [tab, setTab] = useState("extrato");
+  const [firstCpf, setFirstCpf] = useState("");
+  const [firstPin, setFirstPin] = useState("");
+  const [firstPin2, setFirstPin2] = useState("");
+  const [firstErr, setFirstErr] = useState("");
 
   const emp = employees.find(e => e.id === empId);
   const role = emp ? roles.find(r => r.id === emp.roleId) : null;
   const restaurant = emp ? restaurants.find(r => r.id === emp.restaurantId) : null;
-
-  function tryLogin() {
-    const cleanInput = cpf.trim().toUpperCase().replace(/\s/g,"");
-    const cleanPin = pin.trim();
-    // Try by empCode first, then by CPF
-    const found = employees.find(e =>
-      (e.empCode && e.empCode.toUpperCase() === cleanInput && String(e.pin) === cleanPin) ||
-      (e.cpf && e.cpf.replace(/\D/g,"") === cleanInput.replace(/\D/g,"") && String(e.pin) === cleanPin)
-    );
-    if (found) { setErr(""); setEmpId(found.id); }
-    else setErr("ID/CPF ou PIN incorretos.");
-  }
+  const isFirstAccess = emp && (String(emp.pin) === String(emp.empCode?.slice(-4)) || String(emp.pin) === String(emp.empCode));
+  const needsCpf = emp && !emp.cpf;
 
   const mk = monthKey(year, month);
   const myTips = tips.filter(t => t.employeeId === empId && t.monthKey === mk);
@@ -351,6 +345,25 @@ function EmployeePortal({ employees, roles, tips, schedules, restaurants, onBack
   const netTotal   = myTips.reduce((a, t) => a + (t.myNet   ?? 0), 0);
   const dayMap = emp ? (schedules?.[emp.restaurantId]?.[mk]?.[empId] ?? {}) : {};
   const ac = "#f5c842"; const bg = "#0f0f0f";
+
+  function tryLogin() {
+    const cleanInput = cpf.trim().toUpperCase().replace(/\s/g,"");
+    const cleanPin = pin.trim();
+    const found = employees.find(e =>
+      (e.empCode && e.empCode.toUpperCase() === cleanInput && String(e.pin) === cleanPin) ||
+      (e.cpf && e.cpf.replace(/\D/g,"") === cleanInput.replace(/\D/g,"") && String(e.pin) === cleanPin)
+    );
+    if (found) { setErr(""); setEmpId(found.id); }
+    else setErr("ID/CPF ou PIN incorretos.");
+  }
+
+  function completeFirstAccess() {
+    if (needsCpf && !firstCpf.trim()) { setFirstErr("Informe seu CPF."); return; }
+    if (firstPin.length !== 4 || !/^\d{4}$/.test(firstPin)) { setFirstErr("PIN deve ter exatamente 4 dígitos numéricos."); return; }
+    if (firstPin !== firstPin2) { setFirstErr("PINs não coincidem."); return; }
+    const updated = { ...emp, pin: firstPin, cpf: firstCpf.trim() || emp.cpf };
+    onUpdateEmployee(updated);
+  }
 
   if (!empId) return (
     <div style={{ minHeight: "100vh", background: bg, display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "DM Mono,monospace", padding: 24 }}>
@@ -368,23 +381,6 @@ function EmployeePortal({ employees, roles, tips, schedules, restaurants, onBack
       </div>
     </div>
   );
-
-  // First access: force CPF + PIN change
-  const isFirstAccess = emp && (String(emp.pin) === String(emp.empCode?.slice(-4)) || String(emp.pin) === String(emp.empCode));
-  const needsCpf = emp && !emp.cpf;
-  const [firstCpf, setFirstCpf] = useState("");
-  const [firstPin, setFirstPin] = useState("");
-  const [firstPin2, setFirstPin2] = useState("");
-  const [firstErr, setFirstErr] = useState("");
-
-  function completeFirstAccess() {
-    if (needsCpf && !firstCpf.trim()) { setFirstErr("Informe seu CPF."); return; }
-    if (firstPin.length !== 4 || !/^\d{4}$/.test(firstPin)) { setFirstErr("PIN deve ter exatamente 4 dígitos numéricos."); return; }
-    if (firstPin !== firstPin2) { setFirstErr("PINs não coincidem."); return; }
-    const updated = { ...emp, pin: firstPin, cpf: firstCpf.trim() || emp.cpf };
-    // eslint-disable-next-line no-undef
-    onUpdateEmployee(updated);
-  }
 
   if (empId && isFirstAccess) return (
     <div style={{ minHeight:"100vh", background:bg, display:"flex", alignItems:"center", justifyContent:"center", fontFamily:"DM Mono,monospace", padding:24 }}>
