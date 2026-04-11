@@ -4413,22 +4413,21 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }
                 <div style={{background:"var(--bg2)",borderRadius:12,padding:"16px",marginBottom:14,border:"1px solid var(--border)"}}>
                   <div style={{color:"var(--text3)",fontSize:11,fontWeight:700,textTransform:"uppercase",letterSpacing:0.5,marginBottom:10}}>Próximo ciclo</div>
 
-                  {/* Datas calculadas — display principal */}
-                  <div style={{padding:"14px",borderRadius:10,background:"var(--card-bg)",border:"1px solid var(--border)",marginBottom:12}}>
-                    <div style={{color:"var(--text)",fontWeight:700,fontSize:16,marginBottom:4}}>{fmt(cobPeriodo||proxIni)} a {fmt(cobVenc||proxFim)}</div>
+                  <div style={{marginBottom:12}}>
+                    <div style={{color:"var(--text)",fontWeight:700,fontSize:15,marginBottom:2}}>{fmt(cobPeriodo||proxIni)} a {fmt(cobVenc||proxFim)}</div>
                     <div style={{color:"var(--text3)",fontSize:12,marginBottom:10}}>{tipo==="anual"?"Ciclo anual":"Ciclo 30 dias"} · Venc. {fmt(cobVenc||proxFim)}</div>
-                    <div style={{display:"flex",flexDirection:"column",gap:6}}>
-                      <div>
-                        <div style={{color:"var(--text3)",fontSize:10,marginBottom:3}}>Início</div>
+                    <div style={{display:"flex",flexDirection:"column",gap:8}}>
+                      <div style={{display:"flex",alignItems:"center",gap:8}}>
+                        <span style={{color:"var(--text3)",fontSize:12,width:80,flexShrink:0}}>Início:</span>
                         <input key={`ini-${proxIni}`} type="date" defaultValue={cobPeriodo||proxIni}
                           onChange={e=>setCobPeriodo(e.target.value)}
-                          style={{...S.input,fontSize:13,padding:"8px",width:"100%",boxSizing:"border-box",display:"block"}}/>
+                          style={{...S.input,fontSize:13,flex:1,boxSizing:"border-box"}}/>
                       </div>
-                      <div>
-                        <div style={{color:"var(--text3)",fontSize:10,marginBottom:3}}>Vencimento</div>
+                      <div style={{display:"flex",alignItems:"center",gap:8}}>
+                        <span style={{color:"var(--text3)",fontSize:12,width:80,flexShrink:0}}>Vencimento:</span>
                         <input key={`fim-${proxFim}`} type="date" defaultValue={cobVenc||proxFim}
                           onChange={e=>setCobVenc(e.target.value)}
-                          style={{...S.input,fontSize:13,padding:"8px",width:"100%",boxSizing:"border-box",display:"block"}}/>
+                          style={{...S.input,fontSize:13,flex:1,boxSizing:"border-box"}}/>
                       </div>
                     </div>
                   </div>
