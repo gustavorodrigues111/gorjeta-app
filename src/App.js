@@ -101,6 +101,7 @@ const K = {
   receipts:      "v4:receipts",       // [{id,restaurantId,empId,empName,month,type,dataUrl,uploadedAt}]
   workSchedules: "v4:workSchedules",  // {restaurantId: {empId: [{id,days:{0-6:{in,out,break}},validFrom,createdBy,createdAt}]}}
   notifications: "v4:notifications",  // [{id,restaurantId,type,body,date,read,targetRole:'dp'}]
+  noTipDays:    "v4:noTipDays",       // {restaurantId: [dateStr, ...]}
 };
 
 //
@@ -2872,13 +2873,15 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
             return s + (dt[0]?.poolTotal ?? 0);
           }, 0);
           const diasLancados = [...new Set(monthTips.map(t=>t.date))].length;
+          const restNoTipDays = (data?.noTipDays?.[rid] ?? []).filter(d=>d.startsWith(`${year}-${String(month+1).padStart(2,"0")}`));
+          const diasResolvidos = diasLancados + restNoTipDays.length;
           const limitDay = isCurrentMonth ? parseInt(todayStr.slice(-2)) : dim;
           let diasUteisPassados = 0;
           for (let d=1; d<=limitDay; d++) {
             const wd = new Date(`${year}-${String(month+1).padStart(2,"0")}-${String(d).padStart(2,"0")}T12:00:00`).getDay();
             if (wd!==0 && wd!==6) diasUteisPassados++;
           }
-          const diasSemLancamento = Math.max(0, diasUteisPassados - diasLancados);
+          const diasSemLancamento = Math.max(0, diasUteisPassados - diasResolvidos);
 
           // — Pendências —
           const semCargo = restEmps.filter(e=>!restRoles.find(r=>r.id===e.roleId)).length;
@@ -2930,7 +2933,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                     ["Pool total",    fmt(tipPoolTotal), "#fff"],
                     ["Retenção",      fmt(totalTax),     "#e74c3c"],
                     ["Distribuído",   fmt(totalNet),     ac],
-                    ["Dias lançados", `${diasLancados}/${dim}`, diasLancados===dim?"#10b981":"#f59e0b"],
+                    ["Dias resolvidos", `${diasResolvidos}/${dim}`, diasResolvidos===dim?"#10b981":diasResolvidos>=diasUteisPassados?"#10b981":"#f59e0b"],
                   ].map(([lbl,val,col])=>(
                     <div key={lbl} style={{background:"var(--bg1)",borderRadius:10,padding:"10px 8px",textAlign:"center"}}>
                       <div style={{color:"var(--text3)",fontSize:9,marginBottom:4,lineHeight:1.2}}>{lbl}</div>
@@ -3093,6 +3096,10 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                     </div>
 
                     {allDays.map(date => {
+                      // Dias sem gorjeta marcados explicitamente
+                      const restNoTipDays = data?.noTipDays?.[rid] ?? [];
+                      const isNoTip = restNoTipDays.includes(date);
+
                       // Pega tips já lançados para esse dia
                       const dayTips = monthTips.filter(t=>t.date===date);
                       const isLaunched = dayTips.length > 0;
@@ -3118,51 +3125,79 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                       // Cores do card
                       let cardBorder = "#1a1a1a";
                       let cardBg = "#111";
-                      if (isLaunched && !isDirty && !isCleared) { cardBorder = "#10b98133"; cardBg = "#0a1a0a"; }
+                      if (isNoTip) { cardBorder = "#55555544"; cardBg = "#0d0d0d"; }
+                      else if (isLaunched && !isDirty && !isCleared) { cardBorder = "#10b98133"; cardBg = "#0a1a0a"; }
                       else if (isDirty) { cardBorder = "#f59e0b55"; cardBg = "#1a1200"; }
                       else if (isCleared) { cardBorder = "#ef444455"; cardBg = "#1a0a0a"; }
                       else if (hasVal) { cardBorder = "#f5c84233"; cardBg = "#1a1a0a"; }
 
                       return (
-                        <div key={date} style={{marginBottom:8,borderRadius:10,border:`1px solid ${cardBorder}`,background:cardBg,overflow:"hidden"}}>
+                        <div key={date} style={{marginBottom:8,borderRadius:10,border:`1px solid ${cardBorder}`,background:cardBg,overflow:"hidden",opacity:isNoTip?0.55:1}}>
                           <div style={{display:"grid",gridTemplateColumns:"50px 1fr 1.5fr auto",gap:8,padding:"8px 10px",alignItems:"center"}}>
                             {/* Data */}
                             <div style={{textAlign:"center"}}>
                               <div style={{color:isWeekend?"#f59e0b":"#aaa",fontSize:13,fontWeight:700}}>{parseInt(date.slice(-2))}</div>
                               <div style={{color:"var(--text3)",fontSize:10}}>{weekday}</div>
+                              {isNoTip && <div style={{color:"#666",fontSize:8,marginTop:2}}>sem gorj.</div>}
                             </div>
 
-                            {/* Valor */}
+                            {/* Valor — desabilitado se isNoTip */}
                             <input
                               type="number" min="0" step="0.01"
-                              value={row.total}
+                              value={isNoTip ? "" : row.total}
+                              disabled={isNoTip}
                               onChange={e=>{
                                 const newRows = tipRows.filter(r=>r.date!==date);
                                 setTipRows([...newRows, {...row, total:e.target.value}]);
                               }}
-                              placeholder="R$ 0,00"
+                              placeholder={isNoTip ? "—" : "R$ 0,00"}
                               style={{...S.input,fontSize:13,padding:"6px 8px",
-                                background: isDirty?"#221500": isLaunched?"#0d1a0d":"#1a1a1a",
-                                color: isDirty?"#f59e0b": isLaunched?"#10b981":"#fff",
-                                borderColor: isDirty?"#f59e0b44": isLaunched?"#10b98133":"transparent"
+                                background: isNoTip?"#0d0d0d": isDirty?"#221500": isLaunched?"#0d1a0d":"#1a1a1a",
+                                color: isNoTip?"#444": isDirty?"#f59e0b": isLaunched?"#10b981":"#fff",
+                                borderColor: isNoTip?"#2a2a2a": isDirty?"#f59e0b44": isLaunched?"#10b98133":"transparent",
+                                opacity: isNoTip?0.5:1
                               }}
                             />
 
                             {/* Observação */}
                             <input
-                              value={row.note}
+                              value={isNoTip ? "" : row.note}
+                              disabled={isNoTip}
                               onChange={e=>{
                                 const newRows = tipRows.filter(r=>r.date!==date);
                                 setTipRows([...newRows, {...row, note:e.target.value}]);
                               }}
-                              placeholder="Observação"
-                              style={{...S.input,fontSize:12,padding:"6px 8px"}}
+                              placeholder={isNoTip ? "Dia sem gorjeta" : "Observação"}
+                              style={{...S.input,fontSize:12,padding:"6px 8px",opacity:isNoTip?0.4:1}}
                             />
 
                             {/* Ações */}
                             <div style={{display:"flex",gap:4,alignItems:"center"}}>
+                              {/* Marcar como "sem gorjeta" */}
+                              {!isLaunched && !isNoTip && (
+                                <button onClick={()=>{
+                                  const updated = { ...(data?.noTipDays??{}), [rid]: [...((data?.noTipDays?.[rid])??[]).filter(d=>d!==date), date] };
+                                  onUpdate("noTipDays", updated);
+                                  setTipRows(prev=>prev.filter(r=>r.date!==date));
+                                  onUpdate("_toast",`⛔ ${fmtDate(date)}: marcado como sem gorjeta`);
+                                }} title="Marcar dia como sem gorjeta" style={{padding:"6px 8px",borderRadius:8,border:"1px solid #55555544",background:"transparent",color:"#666",cursor:"pointer",fontFamily:"DM Mono,monospace",fontSize:10,whiteSpace:"nowrap"}}>
+                                  ⛔
+                                </button>
+                              )}
+
+                              {/* Desmarcar "sem gorjeta" */}
+                              {isNoTip && (
+                                <button onClick={()=>{
+                                  const updated = { ...(data?.noTipDays??{}), [rid]: ((data?.noTipDays?.[rid])??[]).filter(d=>d!==date) };
+                                  onUpdate("noTipDays", updated);
+                                  onUpdate("_toast",`✅ ${fmtDate(date)}: disponível para lançamento`);
+                                }} style={{padding:"6px 8px",borderRadius:8,border:"1px solid #55555544",background:"transparent",color:"#888",cursor:"pointer",fontFamily:"DM Mono,monospace",fontSize:10,whiteSpace:"nowrap"}}>
+                                  Desfazer
+                                </button>
+                              )}
+
                               {/* Não lançado + tem valor → Lançar */}
-                              {!isLaunched && hasVal && (
+                              {!isLaunched && !isNoTip && hasVal && (
                                 <button onClick={()=>{
                                   const n = calcTipForDate(date, val, row.note);
                                   if(n>0) {
@@ -3208,7 +3243,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                           </div>
 
                           {/* Preview rateio — só para dias não lançados com valor */}
-                          {!isLaunched && hasVal && (
+                          {!isLaunched && !isNoTip && hasVal && (
                             <div style={{padding:"6px 10px 8px",borderTop:"1px solid var(--border)",background:"#0d0d0d"}}>
                               <div style={{display:"flex",justifyContent:"space-between",fontSize:11,color:"var(--text3)",marginBottom:4}}>
                                 <span>Pool: {fmt(val)} → Retenção {Math.round(taxRate*100)}%: -{fmt(val*taxRate)} → Distribuir: {fmt(val*(1-taxRate))}</span>
@@ -3232,7 +3267,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                             </div>
                           )}
 
-                          {/* Info do lançado — mostra valor atual distribuído */}
+                          {/* Info do lançado */}
                           {isLaunched && !isDirty && (
                             <div style={{padding:"4px 10px 6px",borderTop:"1px solid #10b98122",background:"#081208"}}>
                               <span style={{fontSize:11,color:"#10b98199"}}>
@@ -4252,12 +4287,13 @@ export default function App() {
   const [receipts,      setReceipts]      = useState([]);
   const [workSchedules, setWorkSchedules] = useState({});
   const [notifications, setNotifications] = useState([]);
+  const [noTipDays,     setNoTipDays]     = useState({});
 
   useEffect(() => {
     (async () => {
       const vals = await Promise.all(Object.values(K).map(load));
       const keys = Object.keys(K);
-      const map = { superManagers:setSuperManagers, managers:setManagers, restaurants:setRestaurants, employees:setEmployees, roles:setRoles, tips:setTips, splits:setSplits, schedules:setSchedules, communications:setCommunications, commAcks:setCommAcks, faq:setFaq, dpMessages:setDpMessages, workSchedules:setWorkSchedules, notifications:setNotifications };
+      const map = { superManagers:setSuperManagers, managers:setManagers, restaurants:setRestaurants, employees:setEmployees, roles:setRoles, tips:setTips, splits:setSplits, schedules:setSchedules, communications:setCommunications, commAcks:setCommAcks, faq:setFaq, dpMessages:setDpMessages, workSchedules:setWorkSchedules, notifications:setNotifications, noTipDays:setNoTipDays };
       keys.forEach((k, i) => { if (k !== "receipts" && vals[i]) map[k]?.(vals[i]); });
       // Load receipts from separate collection
       const recs = await loadReceipts();
@@ -4266,7 +4302,7 @@ export default function App() {
     })();
   }, []);
 
-  const data = { superManagers, managers, restaurants, employees, roles, tips, splits, schedules, communications, commAcks, faq, dpMessages, receipts, workSchedules, notifications };
+  const data = { superManagers, managers, restaurants, employees, roles, tips, splits, schedules, communications, commAcks, faq, dpMessages, receipts, workSchedules, notifications, noTipDays };
 
   async function handleUpdate(field, value) {
     if (field === "_toast") { setToast(value); return; }
