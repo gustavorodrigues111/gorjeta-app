@@ -3805,9 +3805,9 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }
   const [showMgrModal, setShowMgrModal]     = useState(false);
   const [editMgrId, setEditMgrId]           = useState(null);
   const [mgrForm, setMgrForm]               = useState({ name:"",cpf:"",pin:"",restaurantIds:[],perms:{tips:true,schedule:true},isDP:false });
-  const [showOwnerModal, setShowSuperModal] = useState(false);
-  const [editOwnerId, setEditSuperId]       = useState(null);
-  const [ownerForm, setSuperForm]           = useState({ name:"",cpf:"",pin:"" });
+  const [showOwnerModal, setShowOwnerModal] = useState(false);
+  const [editOwnerId, setEditOwnerId]       = useState(null);
+  const [ownerForm, setOwnerForm]           = useState({ name:"",cpf:"",pin:"" });
 
   function saveRest() {
     if (!restForm.name.trim()) return;
@@ -4007,7 +4007,7 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }
                   {s.id===currentUser?.id&&<span style={{color:ac,fontSize:11}}>← você</span>}
                 </div>
                 <div style={{display:"flex",gap:8}}>
-                  <button onClick={()=>{setEditSuperId(s.id);setOwnerForm({name:s.name,cpf:s.cpf??"",pin:s.pin??""});setShowOwnerModal(true);}} style={{...S.btnSecondary,fontSize:12}}>Editar</button>
+                  <button onClick={()=>{setEditOwnerId(s.id);setOwnerForm({name:s.name,cpf:s.cpf??"",pin:s.pin??""});setShowOwnerModal(true);}} style={{...S.btnSecondary,fontSize:12}}>Editar</button>
                   {owners.length>1&&<button onClick={()=>onUpdate("owners",owners.filter(x=>x.id!==s.id))} style={{background:"none",border:"1px solid #e74c3c33",borderRadius:8,color:"var(--red)",cursor:"pointer",fontSize:12,padding:"6px 12px",fontFamily:"'DM Mono',monospace"}}>✕</button>}
                 </div>
               </div>
