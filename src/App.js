@@ -4090,20 +4090,34 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }
           const empMax = isEnterprise ? (rest?.empMaxCustom ?? 51) : (isOrcamento ? (rest?.empMaxCustom ?? 101) : plano.empMax);
           let valorBase = tipoCobranca === "anual" ? plano.anual : plano.mensal;
           let valorAdicionais = 0;
-          if (isEnterprise) {
-            valorBase = 0;
-            valorAdicionais = empMax * 7.99;
-          }
+          if (isEnterprise) { valorBase = 0; valorAdicionais = empMax * 7.99; }
           const valorTotal = isOrcamento ? null : (valorBase ?? 0) + valorAdicionais;
 
-          // Status de pagamento
-          const status = fin.status ?? "ativo"; // "ativo" | "aviso" | "inadimplente"
+          // Trial e ciclo
+          const trialInicio = fin.trialInicio ?? rest?.createdAt?.slice(0,10) ?? today();
+          const trialFim = fin.trialFim ?? (() => {
+            const d = new Date(trialInicio+"T12:00:00"); d.setDate(d.getDate()+7);
+            return d.toISOString().slice(0,10);
+          })();
+          const hoje = today();
+          const diasTrialRestantes = Math.ceil((new Date(trialFim+"T12:00:00")-new Date())/(1000*60*60*24));
+          const emTrial = !fin.cicloInicio && diasTrialRestantes > 0;
+          const trialVencido = !fin.cicloInicio && diasTrialRestantes <= 0;
+
+          // Ciclo ativo
+          const cicloInicio = fin.cicloInicio ?? null;
+          const cicloFim = fin.cicloFim ?? null;
+          const diasParaVencer = cicloFim ? Math.ceil((new Date(cicloFim+"T12:00:00")-new Date())/(1000*60*60*24)) : null;
+          const cicloVencido = cicloFim && cicloFim < hoje;
+          const alertaVencimento = diasParaVencer !== null && diasParaVencer <= 7 && diasParaVencer > 0;
+
+          // Status efetivo
+          const statusFin = fin.status ?? "ativo";
           const statusConfig = {
             ativo:        { label:"✅ Ativo", color:"var(--green)", bg:"var(--green-bg)" },
-            aviso:        { label:"⚠️ Aguardando confirmação", color:"#f59e0b", bg:"#f59e0b11" },
             inadimplente: { label:"🔴 Inadimplente — acesso bloqueado", color:"var(--red)", bg:"var(--red-bg)" },
           };
-          const sc = statusConfig[status];
+          const sc = statusConfig[statusFin] ?? statusConfig.ativo;
 
           const pagamentos = fin.pagamentos ?? [];
 
@@ -4112,32 +4126,90 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }
             onUpdate("restaurants", updated);
           }
 
+          // Ao confirmar pagamento — calcula próximo ciclo automaticamente
+          function confirmarPagamento(cob) {
+            const dataPag = today();
+            const cicloIni = dataPag;
+            const cicloEnd = (() => {
+              const d = new Date(dataPag+"T12:00:00");
+              if (tipoCobranca === "anual") d.setFullYear(d.getFullYear()+1);
+              else d.setDate(d.getDate()+30);
+              return d.toISOString().slice(0,10);
+            })();
+            const updated = (fin.cobrancas??[]).map(x=>x.id===cob.id?{...x,status:"pago",pagoEm:new Date().toISOString()}:x);
+            const novoPag = { id:Date.now().toString(), data:dataPag, valor:cob.valor, forma:cob.forma, obs:`Ref. ${cob.periodoLabel}`, registradoEm:new Date().toISOString() };
+            saveFinanceiro({
+              cobrancas: updated,
+              pagamentos: [novoPag,...pagamentos],
+              status: "ativo",
+              cicloInicio: cicloIni,
+              cicloFim: cicloEnd,
+              proximoVencimento: cicloEnd,
+            });
+            onUpdate("_toast","✅ Pagamento confirmado! Ciclo ativo até "+new Date(cicloEnd+"T12:00:00").toLocaleDateString("pt-BR"));
+          }
+
           return (
             <div style={{padding:"24px",maxWidth:700,margin:"0 auto"}}>
 
-              {/* Status atual */}
-              <div style={{...S.card,border:`1px solid ${sc.color}44`,background:sc.bg,marginBottom:20}}>
-                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:12}}>
+              {/* Status do ciclo */}
+              <div style={{...S.card,marginBottom:20,border:`1px solid ${
+                trialVencido||cicloVencido?"var(--red)44":
+                emTrial?"#f59e0b44":
+                alertaVencimento?"#f59e0b44":
+                "var(--green)44"
+              }`,background:
+                trialVencido||cicloVencido?"var(--red-bg)":
+                emTrial?"#fffbeb":
+                alertaVencimento?"#fffbeb":
+                "var(--green-bg)"
+              }}>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",flexWrap:"wrap",gap:12}}>
                   <div>
-                    <div style={{color:sc.color,fontWeight:700,fontSize:16,marginBottom:4}}>{sc.label}</div>
-                    {fin.proximoVencimento && (
-                      <div style={{color:"var(--text3)",fontSize:13}}>
-                        Próximo vencimento: <strong style={{color:"var(--text)"}}>{new Date(fin.proximoVencimento+"T12:00:00").toLocaleDateString("pt-BR")}</strong>
-                        {fin.proximoVencimento < today() && status !== "inadimplente" && (
-                          <span style={{color:"var(--red)",marginLeft:8,fontWeight:700}}>· VENCIDO</span>
-                        )}
-                      </div>
+                    {emTrial && (
+                      <>
+                        <div style={{color:"#92400e",fontWeight:700,fontSize:16,marginBottom:4}}>🎯 Em período de teste</div>
+                        <div style={{color:"#92400e",fontSize:13}}>
+                          {diasTrialRestantes > 0
+                            ? `${diasTrialRestantes} dia${diasTrialRestantes>1?"s":""} restante${diasTrialRestantes>1?"s":""} — trial até ${new Date(trialFim+"T12:00:00").toLocaleDateString("pt-BR")}`
+                            : "Trial encerrando hoje"}
+                        </div>
+                        <div style={{color:"#a16207",fontSize:12,marginTop:4}}>Envie a 1ª cobrança para ativar o ciclo pago</div>
+                      </>
                     )}
-                    {fin.obs && <div style={{color:"var(--text3)",fontSize:12,marginTop:4}}>📝 {fin.obs}</div>}
+                    {trialVencido && (
+                      <>
+                        <div style={{color:"var(--red)",fontWeight:700,fontSize:16,marginBottom:4}}>⏰ Trial encerrado</div>
+                        <div style={{color:"var(--red)",fontSize:13}}>Período de teste expirou. Gere a 1ª cobrança para reativar.</div>
+                      </>
+                    )}
+                    {cicloInicio && !cicloVencido && (
+                      <>
+                        <div style={{color:alertaVencimento?"#92400e":"var(--green)",fontWeight:700,fontSize:16,marginBottom:4}}>
+                          {alertaVencimento?`⚡ Vence em ${diasParaVencer} dia${diasParaVencer>1?"s":""}!`:"✅ Ciclo ativo"}
+                        </div>
+                        <div style={{color:"var(--text2)",fontSize:13}}>
+                          Início: {new Date(cicloInicio+"T12:00:00").toLocaleDateString("pt-BR")} · Fim: <strong>{new Date(cicloFim+"T12:00:00").toLocaleDateString("pt-BR")}</strong>
+                        </div>
+                        {alertaVencimento && <div style={{color:"#a16207",fontSize:12,marginTop:4}}>Envie a cobrança agora para garantir continuidade do serviço</div>}
+                      </>
+                    )}
+                    {cicloVencido && (
+                      <>
+                        <div style={{color:"var(--red)",fontWeight:700,fontSize:16,marginBottom:4}}>🔴 Ciclo vencido</div>
+                        <div style={{color:"var(--red)",fontSize:13}}>Venceu em {new Date(cicloFim+"T12:00:00").toLocaleDateString("pt-BR")} · {Math.abs(diasParaVencer)} dias sem pagamento</div>
+                      </>
+                    )}
+                    {fin.obs && <div style={{color:"var(--text3)",fontSize:12,marginTop:6}}>📝 {fin.obs}</div>}
                   </div>
                   <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
-                    {status !== "ativo" && (
+                    {statusFin !== "ativo" && (
                       <button onClick={()=>saveFinanceiro({status:"ativo"})}
                         style={{padding:"8px 16px",borderRadius:8,border:"1px solid var(--green)44",background:"var(--green-bg)",color:"var(--green)",cursor:"pointer",fontFamily:"'DM Sans',sans-serif",fontSize:13,fontWeight:700}}>
                         ✅ Liberar acesso
                       </button>
                     )}
-                    {status === "ativo" && (
+                    {statusFin === "ativo" && cicloInicio && (
                       <button onClick={()=>saveFinanceiro({status:"inadimplente"})}
                         style={{padding:"8px 16px",borderRadius:8,border:"1px solid var(--red)33",background:"transparent",color:"var(--red)",cursor:"pointer",fontFamily:"'DM Sans',sans-serif",fontSize:13,fontWeight:600}}>
                         🔴 Marcar inadimplente
@@ -4146,6 +4218,22 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }
                   </div>
                 </div>
               </div>
+
+              {/* Botão iniciar trial */}
+              {!fin.trialInicio && !cicloInicio && (
+                <div style={{...S.card,marginBottom:20,textAlign:"center",padding:28}}>
+                  <div style={{fontSize:32,marginBottom:12}}>🎯</div>
+                  <h4 style={{color:"var(--text)",fontWeight:700,fontSize:15,margin:"0 0 8px"}}>Iniciar período de teste</h4>
+                  <p style={{color:"var(--text3)",fontSize:13,margin:"0 0 16px"}}>7 dias gratuitos para o cliente experimentar o sistema</p>
+                  <button onClick={()=>{
+                    const d = new Date(); d.setDate(d.getDate()+7);
+                    saveFinanceiro({ trialInicio:today(), trialFim:d.toISOString().slice(0,10), status:"ativo" });
+                    onUpdate("_toast","🎯 Trial iniciado! Válido até "+d.toLocaleDateString("pt-BR"));
+                  }} style={{...S.btnPrimary,width:"auto",padding:"10px 28px"}}>
+                    Iniciar trial agora
+                  </button>
+                </div>
+              )}
 
               {/* Plano e cobrança — editável aqui */}
               <div style={{...S.card,marginBottom:20}}>
@@ -4383,12 +4471,8 @@ Qualquer duvida estamos a disposicao! 😊
                           <div style={{color:"var(--text3)",fontSize:12}}>{c.forma}{c.venc?` · Venc. ${new Date(c.venc+"T12:00:00").toLocaleDateString("pt-BR")}`:""} · Enviada em {new Date(c.criadaEm).toLocaleDateString("pt-BR")}</div>
                         </div>
                         <div style={{display:"flex",gap:8}}>
-                          <button onClick={()=>{
-                            const updated = (fin.cobrancas??[]).map(x=>x.id===c.id?{...x,status:"pago",pagoEm:new Date().toISOString()}:x);
-                            const novoPag = { id:Date.now().toString(), data:today(), valor:c.valor, forma:c.forma, obs:`Ref. ${c.periodoLabel}`, registradoEm:new Date().toISOString() };
-                            saveFinanceiro({ cobrancas:updated, pagamentos:[novoPag,...(fin.pagamentos??[])], status:"ativo", proximoVencimento:c.venc||fin.proximoVencimento });
-                            onUpdate("_toast","✅ Pagamento confirmado!");
-                          }} style={{padding:"7px 14px",borderRadius:8,border:"1px solid var(--green)44",background:"var(--green-bg)",color:"var(--green)",cursor:"pointer",fontFamily:"'DM Sans',sans-serif",fontSize:13,fontWeight:700}}>
+                          <button onClick={()=>confirmarPagamento(c)}
+                            style={{padding:"7px 14px",borderRadius:8,border:"1px solid var(--green)44",background:"var(--green-bg)",color:"var(--green)",cursor:"pointer",fontFamily:"'DM Sans',sans-serif",fontSize:13,fontWeight:700}}>
                             ✅ Confirmar pago
                           </button>
                           <button onClick={()=>{
@@ -4608,15 +4692,23 @@ Qualquer duvida estamos a disposicao! 😊
 
                     // Semáforo
                     let semaforo = "verde";
+                    let semaforo = "verde";
                     let semaforoMsg = "Ativo";
                     const finStatus = r.financeiro?.status ?? "ativo";
-                    const venc = r.financeiro?.proximoVencimento;
-                    const vencido = venc && venc < today();
-                    if (finStatus === "inadimplente") { semaforo = "vermelho"; semaforoMsg = "🔴 Inadimplente"; }
-                    else if (vencido) { semaforo = "vermelho"; semaforoMsg = "💳 Vencido"; }
-                    else if (pct >= 100) { semaforo = "vermelho"; semaforoMsg = "Limite atingido"; }
-                    else if (!temGorjetaMes) { semaforo = "amarelo"; semaforoMsg = "Sem gorjeta este mês"; }
-                    else if (pct >= 80) { semaforo = "amarelo"; semaforoMsg = "Próximo do limite"; }
+                    const cicloFimR = r.financeiro?.cicloFim;
+                    const trialFimR = r.financeiro?.trialFim;
+                    const cicloInicioR = r.financeiro?.cicloInicio;
+                    const diasCiclo = cicloFimR ? Math.ceil((new Date(cicloFimR+"T12:00:00")-new Date())/(1000*60*60*24)) : null;
+                    const diasTrial = (!cicloInicioR && trialFimR) ? Math.ceil((new Date(trialFimR+"T12:00:00")-new Date())/(1000*60*60*24)) : null;
+                    if (finStatus === "inadimplente")              { semaforo = "vermelho"; semaforoMsg = "🔴 Inadimplente"; }
+                    else if (!cicloInicioR && !trialFimR)          { semaforo = "amarelo";  semaforoMsg = "⚙️ Sem ciclo iniciado"; }
+                    else if (!cicloInicioR && diasTrial !== null && diasTrial <= 0) { semaforo = "vermelho"; semaforoMsg = "⏰ Trial encerrado"; }
+                    else if (!cicloInicioR && diasTrial !== null)  { semaforo = "amarelo";  semaforoMsg = `🎯 Trial — ${diasTrial}d restantes`; }
+                    else if (diasCiclo !== null && diasCiclo < 0)  { semaforo = "vermelho"; semaforoMsg = `⏰ Vencido há ${Math.abs(diasCiclo)}d`; }
+                    else if (diasCiclo !== null && diasCiclo <= 7) { semaforo = "amarelo";  semaforoMsg = `⚡ Vence em ${diasCiclo}d`; }
+                    else if (pct >= 100)                           { semaforo = "vermelho"; semaforoMsg = "Limite atingido"; }
+                    else if (!temGorjetaMes)                       { semaforo = "amarelo";  semaforoMsg = "Sem gorjeta este mês"; }
+                    else if (pct >= 80)                            { semaforo = "amarelo";  semaforoMsg = "Próximo do limite"; }
 
                     const semColor = semaforo === "verde" ? "var(--green)" : semaforo === "amarelo" ? "#f59e0b" : "var(--red)";
 
@@ -4820,16 +4912,26 @@ Qualquer duvida estamos a disposicao! 😊
 
                 {rowsFiltrados.map(({r, plano, fin, valorTotal, status, venc, diasParaVencer, ultimoPag})=>{
                   const isInad = status === "inadimplente";
-                  const isVencido = !isInad && diasParaVencer !== null && diasParaVencer < 0;
-                  const isVencendo = !isInad && diasParaVencer !== null && diasParaVencer >= 0 && diasParaVencer <= 7;
+                  const cicloFimRow = r.financeiro?.cicloFim;
+                  const cicloInicioRow = r.financeiro?.cicloInicio;
+                  const trialFimRow = r.financeiro?.trialFim;
+                  const emTrialRow = !cicloInicioRow && trialFimRow;
+                  const diasRow = cicloFimRow ? Math.ceil((new Date(cicloFimRow+"T12:00:00")-new Date())/(1000*60*60*24)) : null;
+                  const diasTrialRow = emTrialRow ? Math.ceil((new Date(trialFimRow+"T12:00:00")-new Date())/(1000*60*60*24)) : null;
+                  const isVencido = !isInad && cicloFimRow && diasRow < 0;
+                  const isVencendo = !isInad && diasRow !== null && diasRow >= 0 && diasRow <= 7;
 
                   const rowBg = isInad ? "var(--red-bg)" : isVencido ? "#fff8f0" : "transparent";
                   const statusEl = isInad
                     ? <span style={{color:"var(--red)",fontWeight:700,fontSize:12}}>🔴 Inadimplente</span>
                     : isVencido
-                    ? <span style={{color:"var(--red)",fontWeight:600,fontSize:12}}>⏰ Vencido {Math.abs(diasParaVencer)}d</span>
+                    ? <span style={{color:"var(--red)",fontWeight:600,fontSize:12}}>⏰ Vencido {Math.abs(diasRow)}d</span>
                     : isVencendo
-                    ? <span style={{color:"#f59e0b",fontWeight:600,fontSize:12}}>⚡ {diasParaVencer}d</span>
+                    ? <span style={{color:"#f59e0b",fontWeight:600,fontSize:12}}>⚡ {diasRow}d</span>
+                    : emTrialRow
+                    ? <span style={{color:"#92400e",fontWeight:600,fontSize:12}}>🎯 Trial {diasTrialRow}d</span>
+                    : !cicloInicioRow
+                    ? <span style={{color:"var(--text3)",fontSize:12}}>⚙️ Não iniciado</span>
                     : <span style={{color:"var(--green)",fontWeight:600,fontSize:12}}>✅ Em dia</span>;
 
                   return (
