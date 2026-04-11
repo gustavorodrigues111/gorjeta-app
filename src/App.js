@@ -3889,16 +3889,177 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }
 
   if (selRestaurant) {
     const rest = restaurants.find(r => r.id === selRestaurant);
+    const restMgrs = managers.filter(m => m.restaurantIds?.includes(selRestaurant));
+    const [restTab, setRestTab] = useState("operacional");
+
     return (
-      <div style={{ minHeight:"100vh", background:"var(--bg)", fontFamily:"'DM Mono',monospace" }}>
-        <div style={{ background:"var(--bg1)", borderBottom:"1px solid var(--border)", padding:"14px 20px", display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+      <div style={{ minHeight:"100vh", background:"var(--bg)", fontFamily:"'DM Sans',sans-serif" }}>
+        {/* Header */}
+        <div style={{ background:"var(--header-bg)", borderBottom:"1px solid var(--border)", padding:"12px 20px", display:"flex", justifyContent:"space-between", alignItems:"center", boxShadow:"0 1px 4px rgba(0,0,0,0.04)" }}>
           <div style={{ display:"flex", alignItems:"center", gap:8 }}>
             <button onClick={()=>setSelRestaurant(null)} style={{ ...S.btnSecondary, fontSize:12, padding:"6px 12px" }}>← Voltar</button>
-            <span style={{ color:"var(--text3)", fontSize:12 }}>⭐ {currentUser?.name}</span>
+            <span style={{ color:"var(--text)", fontWeight:700, fontSize:15 }}>{rest?.name}</span>
+            <span style={{ background:"var(--ac-bg)", color:"var(--ac-text)", borderRadius:6, padding:"2px 8px", fontSize:11, fontWeight:700 }}>{getPlano(rest).label}</span>
           </div>
           <button onClick={onBack} style={{ ...S.btnSecondary, fontSize:12 }}>Sair</button>
         </div>
-        <RestaurantPanel restaurant={rest} restaurants={restaurants} employees={employees} roles={roles} tips={tips} splits={splits} schedules={schedules} onUpdate={onUpdate} perms={{ tips:true, schedule:true }} isOwner data={data} currentUser={currentUser} />
+
+        {/* Sub-tabs */}
+        <div style={{ display:"flex", borderBottom:"1px solid var(--border)", background:"var(--header-bg)", overflowX:"auto" }}>
+          {[["operacional","⚙️ Operacional"],["gestores","👔 Gestores deste restaurante"]].map(([id,lbl])=>(
+            <button key={id} onClick={()=>setRestTab(id)}
+              style={{ padding:"10px 20px", background:"none", border:"none", borderBottom:`2px solid ${restTab===id?ac:"transparent"}`, color:restTab===id?ac:"var(--text3)", cursor:"pointer", fontSize:13, fontFamily:"'DM Sans',sans-serif", fontWeight:restTab===id?700:500, whiteSpace:"nowrap" }}>
+              {lbl}
+            </button>
+          ))}
+        </div>
+
+        {/* Operacional */}
+        {restTab === "operacional" && (
+          <RestaurantPanel restaurant={rest} restaurants={restaurants} employees={employees} roles={roles} tips={tips} splits={splits} schedules={schedules} onUpdate={onUpdate} perms={{ tips:true, schedule:true }} isOwner data={data} currentUser={currentUser} />
+        )}
+
+        {/* Gestores deste restaurante */}
+        {restTab === "gestores" && (
+          <div style={{ padding:"24px", maxWidth:800, margin:"0 auto" }}>
+            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:20 }}>
+              <div>
+                <h3 style={{ color:"var(--text)", fontSize:16, fontWeight:700, margin:"0 0 4px" }}>Gestores de {rest?.name}</h3>
+                <p style={{ color:"var(--text3)", fontSize:13, margin:0 }}>{restMgrs.length} gestor{restMgrs.length!==1?"es":""} com acesso</p>
+              </div>
+              <button onClick={()=>{
+                setEditMgrId(null);
+                setMgrForm({name:"",cpf:"",pin:"",restaurantIds:[selRestaurant],perms:{tips:true,schedule:true},isDP:false});
+                setShowMgrModal(true);
+              }} style={{...S.btnPrimary,width:"auto",padding:"10px 20px"}}>+ Novo Gestor</button>
+            </div>
+
+            {restMgrs.length === 0 && (
+              <div style={{...S.card, textAlign:"center", padding:40}}>
+                <div style={{fontSize:36,marginBottom:12}}>👔</div>
+                <p style={{color:"var(--text3)",fontSize:14,marginBottom:16}}>Nenhum gestor atribuído a este restaurante.</p>
+                <button onClick={()=>{
+                  setEditMgrId(null);
+                  setMgrForm({name:"",cpf:"",pin:"",restaurantIds:[selRestaurant],perms:{tips:true,schedule:true},isDP:false});
+                  setShowMgrModal(true);
+                }} style={{...S.btnPrimary,width:"auto",padding:"10px 24px"}}>Adicionar primeiro gestor</button>
+              </div>
+            )}
+
+            <div style={{display:"flex",flexDirection:"column",gap:10}}>
+              {restMgrs.map(m => (
+                <div key={m.id} style={{...S.card}}>
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
+                    <div>
+                      <div style={{color:"var(--text)",fontWeight:700,fontSize:15,marginBottom:2}}>{m.name}</div>
+                      <div style={{color:"var(--text3)",fontSize:12,marginBottom:8}}>CPF: {m.cpf||"—"}</div>
+                      <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:6}}>
+                        {[["tips","💸 Gorjetas"],["schedule","📅 Escala"],["roles","🏷️ Cargos"],["employees","👥 Equipe"],["comunicados","📢 Comuns."],["faq","❓ FAQ"],["dp","💬 DP"],["horarios","🕐 Horários"]].map(([k,lbl])=>
+                          m.perms?.[k]!==false ? <span key={k} style={{background:"var(--green-bg)",color:"var(--green)",borderRadius:6,padding:"2px 8px",fontSize:11,fontWeight:600}}>{lbl}</span> : null
+                        )}
+                        {m.isDP && <span style={{background:"var(--blue-bg)",color:"var(--blue)",borderRadius:6,padding:"2px 8px",fontSize:11,fontWeight:600}}>📬 DP</span>}
+                      </div>
+                      {/* Outros restaurantes que esse gestor acessa */}
+                      {(m.restaurantIds??[]).filter(rid=>rid!==selRestaurant).length > 0 && (
+                        <div style={{color:"var(--text3)",fontSize:11}}>
+                          Também acessa: {(m.restaurantIds??[]).filter(rid=>rid!==selRestaurant).map(rid=>restaurants.find(r=>r.id===rid)?.name).filter(Boolean).join(", ")}
+                        </div>
+                      )}
+                    </div>
+                    <div style={{display:"flex",gap:8,flexShrink:0}}>
+                      <button onClick={()=>{setEditMgrId(m.id);setMgrForm({name:m.name,cpf:m.cpf??"",pin:m.pin??"",restaurantIds:m.restaurantIds??[],perms:m.perms??{tips:true,schedule:true},isDP:m.isDP??false});setShowMgrModal(true);}} style={{...S.btnSecondary,fontSize:12}}>Editar</button>
+                      <button onClick={()=>{
+                        if(!window.confirm(`Remover ${m.name} deste restaurante?`)) return;
+                        const newIds = (m.restaurantIds??[]).filter(rid=>rid!==selRestaurant);
+                        if(newIds.length === 0) {
+                          onUpdate("managers", managers.filter(x=>x.id!==m.id));
+                        } else {
+                          onUpdate("managers", managers.map(x=>x.id===m.id?{...x,restaurantIds:newIds}:x));
+                        }
+                      }} style={{background:"none",border:"1px solid var(--red)33",borderRadius:8,color:"var(--red)",cursor:"pointer",fontSize:12,padding:"6px 12px",fontFamily:"'DM Sans',sans-serif"}}>Remover</button>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            {/* Adicionar gestor existente */}
+            {managers.filter(m=>!m.restaurantIds?.includes(selRestaurant)).length > 0 && (
+              <div style={{...S.card,marginTop:16,background:"var(--bg2)"}}>
+                <p style={{color:"var(--text3)",fontSize:13,marginBottom:12,fontWeight:600}}>Adicionar gestor existente a este restaurante:</p>
+                <div style={{display:"flex",flexDirection:"column",gap:8}}>
+                  {managers.filter(m=>!m.restaurantIds?.includes(selRestaurant)).map(m=>(
+                    <div key={m.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"10px 14px",borderRadius:10,background:"var(--card-bg)",border:"1px solid var(--border)"}}>
+                      <div>
+                        <span style={{color:"var(--text)",fontWeight:600,fontSize:14}}>{m.name}</span>
+                        <span style={{color:"var(--text3)",fontSize:12,marginLeft:8}}>já acessa: {(m.restaurantIds??[]).map(rid=>restaurants.find(r=>r.id===rid)?.name).filter(Boolean).join(", ")||"nenhum"}</span>
+                      </div>
+                      <button onClick={()=>{
+                        onUpdate("managers", managers.map(x=>x.id===m.id?{...x,restaurantIds:[...(x.restaurantIds??[]),selRestaurant]}:x));
+                        onUpdate("_toast",`✅ ${m.name} adicionado a ${rest?.name}`);
+                      }} style={{padding:"6px 14px",borderRadius:8,border:`1px solid ${ac}`,background:"transparent",color:"var(--ac-text)",cursor:"pointer",fontFamily:"'DM Sans',sans-serif",fontSize:12,fontWeight:600}}>
+                        + Adicionar
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Modais herdados */}
+        {showMgrModal && (
+          <Modal title={editMgrId?"Editar Gestor":"Novo Gestor"} onClose={()=>setShowMgrModal(false)} wide>
+            <div style={{display:"flex",flexDirection:"column",gap:12}}>
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+                <div><label style={S.label}>Nome completo</label><input value={mgrForm.name} onChange={e=>setMgrForm({...mgrForm,name:e.target.value})} style={S.input}/></div>
+                <div><label style={S.label}>CPF (opcional)</label><input value={mgrForm.cpf} onChange={e=>setMgrForm({...mgrForm,cpf:maskCpf(e.target.value)})} placeholder="000.000.000-00" style={S.input} inputMode="numeric"/></div>
+              </div>
+              <div><label style={S.label}>PIN (4–6 dígitos)</label><input type="password" value={mgrForm.pin} onChange={e=>setMgrForm({...mgrForm,pin:e.target.value})} maxLength={6} style={S.input}/></div>
+              <div>
+                <label style={S.label}>Permissões</label>
+                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+                  {[["tips","💸 Gorjetas"],["schedule","📅 Escala"],["roles","🏷️ Cargos"],["employees","👥 Equipe"],["comunicados","📢 Comunicados"],["faq","❓ FAQ"],["dp","💬 Fale c/ DP"],["horarios","🕐 Horários"]].map(([k,lbl])=>{
+                    const on = mgrForm.perms?.[k] !== false;
+                    return (
+                      <button key={k} onClick={()=>setMgrForm({...mgrForm,perms:{...mgrForm.perms,[k]:!on}})}
+                        style={{padding:"10px",borderRadius:10,border:`1px solid ${on?"var(--green)":"var(--border)"}`,background:on?"var(--green-bg)":"transparent",color:on?"var(--green)":"var(--text3)",cursor:"pointer",fontFamily:"'DM Sans',sans-serif",fontSize:12,textAlign:"left"}}>
+                        {on?"✓":"○"} {lbl}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+              <div>
+                <label style={S.label}>Outros restaurantes com acesso</label>
+                <div style={{display:"flex",flexDirection:"column",gap:6}}>
+                  {restaurants.filter(r=>r.id!==selRestaurant).map(r=>{
+                    const sel = mgrForm.restaurantIds?.includes(r.id);
+                    return (
+                      <button key={r.id} onClick={()=>setMgrForm({...mgrForm,restaurantIds:sel?mgrForm.restaurantIds.filter(x=>x!==r.id):[...(mgrForm.restaurantIds??[]),r.id]})}
+                        style={{padding:"10px 14px",borderRadius:10,border:`1px solid ${sel?ac:"var(--border)"}`,background:sel?"var(--ac-bg)":"transparent",color:sel?"var(--ac-text)":"var(--text3)",cursor:"pointer",fontFamily:"'DM Sans',sans-serif",fontSize:13,textAlign:"left"}}>
+                        {sel?"✓":"○"} {r.name}
+                      </button>
+                    );
+                  })}
+                  {restaurants.filter(r=>r.id!==selRestaurant).length===0 && <p style={{color:"var(--text3)",fontSize:12}}>Nenhum outro restaurante cadastrado.</p>}
+                </div>
+              </div>
+              <div style={{borderTop:"1px solid var(--border)",paddingTop:12}}>
+                <button onClick={()=>setMgrForm({...mgrForm,isDP:!mgrForm.isDP})}
+                  style={{width:"100%",padding:"12px 14px",borderRadius:10,border:`1px solid ${mgrForm.isDP?"var(--blue)":"var(--border)"}`,background:mgrForm.isDP?"var(--blue-bg)":"transparent",color:mgrForm.isDP?"var(--blue)":"var(--text3)",cursor:"pointer",fontFamily:"'DM Sans',sans-serif",fontSize:13,textAlign:"left",display:"flex",alignItems:"center",gap:10}}>
+                  <span style={{fontSize:18}}>📬</span>
+                  <div>
+                    <div style={{fontWeight:700}}>{mgrForm.isDP?"✓ É gestor do DP":"○ Não é gestor do DP"}</div>
+                    <div style={{fontSize:11,opacity:0.7,marginTop:2}}>Recebe notificações de horários e mensagens do Fale com DP</div>
+                  </div>
+                </button>
+              </div>
+              <button onClick={saveMgr} style={S.btnPrimary}>{editMgrId?"Salvar":"Criar Gestor"}</button>
+            </div>
+          </Modal>
+        )}
       </div>
     );
   }
@@ -4186,25 +4347,32 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }
         {/* GESTORES */}
         {tab === "managers" && (
           <div>
-            <button onClick={()=>{setEditMgrId(null);setMgrForm({name:"",cpf:"",pin:"",restaurantIds:[],perms:{tips:true,schedule:true},isDP:false});setShowMgrModal(true);}} style={{...S.btnPrimary,marginBottom:20}}>+ Novo Gestor</button>
-            {managers.length === 0 && <p style={{color:"var(--text3)",textAlign:"center"}}>Nenhum gestor cadastrado.</p>}
+            <div style={{...S.card,background:"var(--bg2)",marginBottom:20,display:"flex",alignItems:"center",gap:12}}>
+              <span style={{fontSize:20}}>ℹ️</span>
+              <p style={{color:"var(--text3)",fontSize:13,margin:0}}>Visão global de todos os gestores. Para criar ou editar gestores, acesse o restaurante correspondente → aba <strong>Gestores</strong>.</p>
+            </div>
+            {managers.length === 0 && <p style={{color:"var(--text3)",textAlign:"center"}}>Nenhum gestor cadastrado. Crie gestores dentro de cada restaurante.</p>}
             {managers.map(m=>(
               <div key={m.id} style={{...S.card,marginBottom:10}}>
                 <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
-                  <div>
-                    <div style={{color:"var(--text)",fontWeight:600,fontSize:15}}>{m.name}</div>
-                    <div style={{color:"var(--text3)",fontSize:12}}>CPF: {m.cpf||"—"}</div>
-                    <div style={{marginTop:6,display:"flex",gap:6,flexWrap:"wrap"}}>
-      {[["tips","Gorjetas"],["schedule","Escala"],["roles","Cargos"],["employees","Equipe"],["comunicados","Comuns."],["faq","FAQ"],["dp","DP"],["horarios","Horários"]].map(([k,lbl])=><PermBadge key={k} label={lbl} on={m.perms?.[k]!==false}/>)}{m.isDP&&<span style={{background:"#3b82f622",color:"#3b82f6",borderRadius:6,padding:"2px 10px",fontSize:11,fontWeight:700}}>📬 DP</span>}
+                  <div style={{flex:1}}>
+                    <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:2}}>
+                      <span style={{color:"var(--text)",fontWeight:700,fontSize:15}}>{m.name}</span>
+                      {m.isDP && <span style={{background:"var(--blue-bg)",color:"var(--blue)",borderRadius:6,padding:"2px 8px",fontSize:11,fontWeight:700}}>📬 DP</span>}
                     </div>
-                    <div style={{marginTop:6,display:"flex",gap:4,flexWrap:"wrap"}}>
-                      {(m.restaurantIds??[]).map(rid=>{const r=restaurants.find(x=>x.id===rid);return r?<span key={rid} style={{background:"var(--bg4)",color:"var(--text2)",borderRadius:6,padding:"2px 8px",fontSize:11}}>{r.name}</span>:null;})}
-                      {(!m.restaurantIds||m.restaurantIds.length===0)&&<span style={{color:"var(--text3)",fontSize:12}}>Sem restaurantes</span>}
+                    <div style={{color:"var(--text3)",fontSize:12,marginBottom:8}}>CPF: {m.cpf||"—"}</div>
+                    <div style={{display:"flex",gap:4,flexWrap:"wrap"}}>
+                      {(m.restaurantIds??[]).map(rid=>{
+                        const r=restaurants.find(x=>x.id===rid);
+                        return r ? (
+                          <button key={rid} onClick={()=>setSelRestaurant(rid)}
+                            style={{background:"var(--ac-bg)",color:"var(--ac-text)",borderRadius:6,padding:"3px 10px",fontSize:12,fontWeight:600,border:"none",cursor:"pointer",fontFamily:"'DM Sans',sans-serif"}}>
+                            {r.name} →
+                          </button>
+                        ) : null;
+                      })}
+                      {(!m.restaurantIds||m.restaurantIds.length===0)&&<span style={{color:"var(--text3)",fontSize:12}}>Sem restaurantes atribuídos</span>}
                     </div>
-                  </div>
-                  <div style={{display:"flex",gap:8}}>
-                    <button onClick={()=>{setEditMgrId(m.id);setMgrForm({name:m.name,cpf:m.cpf??"",pin:m.pin??"",restaurantIds:m.restaurantIds??[],perms:m.perms??{tips:true,schedule:true},isDP:m.isDP??false});setShowMgrModal(true);}} style={{...S.btnSecondary,fontSize:12}}>Editar</button>
-                    <button onClick={()=>onUpdate("managers",managers.filter(x=>x.id!==m.id))} style={{background:"none",border:"1px solid #e74c3c33",borderRadius:8,color:"var(--red)",cursor:"pointer",fontSize:12,padding:"6px 12px",fontFamily:"'DM Mono',monospace"}}>✕</button>
                   </div>
                 </div>
               </div>
