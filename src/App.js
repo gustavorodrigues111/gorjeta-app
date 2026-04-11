@@ -3211,18 +3211,31 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
   return (
     <div style={{ fontFamily:"'DM Sans',sans-serif" }}>
       {/* Restaurant sub-header */}
-      <div style={{ background:"var(--bg2)", borderBottom:"1px solid var(--border)", padding:"10px 20px", display:"flex", justifyContent:"space-between", alignItems:"center" }}>
-        <div>
-          <span style={{ color:"var(--text)", fontWeight:700, fontSize:15 }}>{restaurant.name}</span>
-          {restaurant.cnpj && <span style={{ color:"var(--text3)", fontSize:12, marginLeft:10 }}>{restaurant.cnpj}</span>}
+      <div style={{ background:"var(--bg2)", borderBottom:"1px solid var(--border)", padding:"10px 16px", display:"flex", justifyContent:"space-between", alignItems:"center", gap:8 }}>
+        <div style={{display:"flex",alignItems:"center",gap:8,minWidth:0}}>
+          <div style={{minWidth:0}}>
+            <span style={{ color:"var(--text)", fontWeight:700, fontSize:14 }}>{restaurant.name}</span>
+            {restaurant.cnpj && <span style={{ color:"var(--text3)", fontSize:11, marginLeft:8 }}>{restaurant.cnpj}</span>}
+          </div>
         </div>
-        {(canTips || isOwner) && <button onClick={() => setTab("config")} style={{ ...S.btnSecondary, fontSize:12 }}>⚙️ Config</button>}
+        {(canTips || isOwner) && (
+          <button onClick={() => setTab("config")}
+            style={{ ...S.btnSecondary, fontSize:12, flexShrink:0, display:"flex", alignItems:"center", gap:4,
+              background: tab==="config" ? "var(--ac-bg)" : undefined,
+              borderColor: tab==="config" ? ac : undefined,
+              color: tab==="config" ? "var(--ac-text)" : undefined }}>
+            ⚙️ Configurações
+          </button>
+        )}
       </div>
 
-      {/* Tabs */}
-      <div style={{ display:"flex", borderBottom:"1px solid var(--border)", background:"var(--header-bg)", overflowX:"auto" }}>
+      {/* Tabs com scroll suave */}
+      <div style={{ display:"flex", borderBottom:"1px solid var(--border)", background:"var(--header-bg)", overflowX:"auto", scrollbarWidth:"none", WebkitOverflowScrolling:"touch" }}>
         {TABS.map(([id, lbl]) => (
-          <button key={id} onClick={() => setTab(id)} style={{ padding:"11px 16px", background:"none", border:"none", borderBottom:`2px solid ${tab===id?ac:"transparent"}`, color:tab===id?ac:"var(--text3)", cursor:"pointer", fontSize:13, fontFamily:"'DM Sans',sans-serif", fontWeight:tab===id?700:500, whiteSpace:"nowrap" }}>{lbl}</button>
+          <button key={id} onClick={() => setTab(id)}
+            style={{ padding:"11px 16px", background:"none", border:"none", borderBottom:`2px solid ${tab===id?ac:"transparent"}`, color:tab===id?ac:"var(--text3)", cursor:"pointer", fontSize:13, fontFamily:"'DM Sans',sans-serif", fontWeight:tab===id?700:500, whiteSpace:"nowrap", flexShrink:0 }}>
+            {lbl}
+          </button>
         ))}
       </div>
 
@@ -3290,9 +3303,52 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
             .slice(0,3);
           const CATS = { sugestao:"💡", elogio:"👏", reclamacao:"⚠️", denuncia:"🚨" };
 
+          // — Resumo do dia —
+          const todayTips = monthTips.filter(t => t.date === todayStr);
+          const gorjetaHoje = todayTips.length > 0 ? todayTips[0].poolTotal : null;
+          const escalaHoje = schedules?.[rid]?.[mk] ?? {};
+          const trabalhando = restEmps.filter(e => {
+            const status = (escalaHoje[e.id] ?? {})[todayStr];
+            return !status || status === "C"; // sem marcação ou compensação = trabalhando
+          }).length;
+
           return (
             <div>
-              {/* Gorjetas */}
+              {/* Resumo do dia — só no mês atual */}
+              {isCurrentMonth && (
+                <div style={{...S.card, marginBottom:14, background:"var(--ac-bg)", border:"1px solid var(--ac)22"}}>
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
+                    <span style={{color:"var(--ac-text)",fontWeight:700,fontSize:13}}>📅 Hoje — {new Date().toLocaleDateString("pt-BR",{weekday:"long",day:"numeric",month:"long"})}</span>
+                  </div>
+                  <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8}}>
+                    <div style={{background:"var(--card-bg)",borderRadius:10,padding:"12px 10px",textAlign:"center"}}>
+                      <div style={{fontSize:20,marginBottom:4}}>👥</div>
+                      <div style={{color:"var(--text)",fontWeight:700,fontSize:18}}>{trabalhando}</div>
+                      <div style={{color:"var(--text3)",fontSize:10,marginTop:2}}>trabalhando</div>
+                    </div>
+                    <div style={{background:"var(--card-bg)",borderRadius:10,padding:"12px 10px",textAlign:"center"}}>
+                      <div style={{fontSize:20,marginBottom:4}}>💸</div>
+                      <div style={{color: gorjetaHoje!==null?"var(--green)":"var(--text3)", fontWeight:700,fontSize:gorjetaHoje!==null?15:13}}>
+                        {gorjetaHoje !== null ? fmt(gorjetaHoje) : "—"}
+                      </div>
+                      <div style={{color:"var(--text3)",fontSize:10,marginTop:2}}>gorjeta lançada</div>
+                    </div>
+                    <div style={{background:"var(--card-bg)",borderRadius:10,padding:"12px 10px",textAlign:"center"}}>
+                      <div style={{fontSize:20,marginBottom:4}}>{diasSemLancamento>0?"⚠️":"✅"}</div>
+                      <div style={{color:diasSemLancamento>0?"#f59e0b":"var(--green)",fontWeight:700,fontSize:15}}>
+                        {diasSemLancamento>0 ? `${diasSemLancamento}d` : "Em dia"}
+                      </div>
+                      <div style={{color:"var(--text3)",fontSize:10,marginTop:2}}>pendência gorjeta</div>
+                    </div>
+                  </div>
+                  {gorjetaHoje === null && isCurrentMonth && (
+                    <button onClick={()=>setTab("tips")}
+                      style={{...S.btnPrimary, width:"100%", marginTop:10, padding:"10px", fontSize:13}}>
+                      💸 Lançar gorjeta de hoje
+                    </button>
+                  )}
+                </div>
+              )}
               <div style={{...S.card, marginBottom:14}}>
                 <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
                   <span style={{color:ac,fontWeight:700,fontSize:13}}>💸 Gorjetas — {monthLabel(year,month)}</span>
@@ -3997,7 +4053,36 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                 if(ok){ const f={...data?.faq}; delete f[rid]; onUpdate("faq",f); onUpdate("_toast","🗑️ FAQ enviado para a lixeira"); }
               }} style={{...S.btnSecondary,fontSize:12,color:"var(--red)",borderColor:"var(--red)44"}}>🗑️ Resetar FAQ</button>
             </div>}
-            <FaqManagerTab restaurantId={rid} faq={data?.faq ?? {}} onUpdate={onUpdate} />
+
+            {/* Prévia das FAQs automáticas */}
+            <div style={{padding:"16px 16px 0"}}>
+              <div style={{padding:"12px 14px",borderRadius:10,background:"var(--ac-bg)",border:"1px solid var(--ac)33",marginBottom:16}}>
+                <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:6}}>
+                  <span style={{fontSize:14}}>📐</span>
+                  <span style={{color:"var(--ac-text)",fontWeight:700,fontSize:13}}>FAQs automáticas do sistema</span>
+                </div>
+                <p style={{color:"var(--text2)",fontSize:12,margin:"0 0 8px",lineHeight:1.6}}>
+                  O AppTip gera automaticamente as seguintes perguntas para seus empregados, baseadas nas regras do restaurante. Elas aparecem na seção "Regras do sistema" do FAQ do empregado e se atualizam sozinhas.
+                </p>
+                <div style={{display:"flex",flexDirection:"column",gap:4}}>
+                  {[
+                    "💸 Como é calculada a minha gorjeta?",
+                    restaurant?.splitType==="area" ? "🏢 Como funciona a divisão por área e pontos?" : "📊 Como funciona a tabela de pontos?",
+                    "📅 Como funciona a escala e por que ela importa?",
+                    "📄 Como acesso meus recibos de gorjeta?",
+                    "💬 Para que serve o Fale com DP?",
+                    "📢 Como funcionam os comunicados?",
+                    "🔐 O que é o PIN e como trocar?",
+                  ].map((q,i) => (
+                    <div key={i} style={{fontSize:12,color:"var(--text2)",padding:"5px 8px",borderRadius:6,background:"var(--card-bg)",border:"1px solid var(--ac)22"}}>
+                      {q}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            <FaqManagerTab restaurantId={rid} faq={data?.faq ?? {}} onUpdate={onUpdate} restaurant={restaurant} />
           </div>
         )}
 
@@ -4110,9 +4195,10 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
               </div>
             )}
             <div style={{...S.card,marginBottom:20}}>
-              <p style={{color:ac,fontSize:14,fontWeight:700,margin:"0 0 8px"}}>Retenção Fiscal</p>
-              <p style={{color:"var(--text3)",fontSize:12,marginBottom:14}}>Percentual retido do pool total antes da distribuição.</p>
-              <div style={{display:"flex",gap:10}}>
+              <p style={{color:ac,fontSize:14,fontWeight:700,margin:"0 0 4px"}}>Retenção Fiscal sobre Gorjeta</p>
+              <p style={{color:"var(--text3)",fontSize:12,marginBottom:12}}>Conforme a Lei 13.419/2017, a gorjeta é rendimento do trabalhador sujeito a encargos. A alíquota depende do regime tributário do estabelecimento.</p>
+
+              <div style={{display:"flex",gap:10,marginBottom:14}}>
                 {[[0.33,"33%"],[0.20,"20%"]].map(([rate,lbl])=>{
                   const sel = (restaurant.taxRate ?? TAX) === rate;
                   return (
@@ -4125,6 +4211,23 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                   );
                 })}
               </div>
+
+              {/* Explicação das alíquotas */}
+              <div style={{display:"flex",flexDirection:"column",gap:8}}>
+                <div style={{padding:"12px 14px",borderRadius:10,background:(restaurant.taxRate??TAX)===0.33?"var(--ac-bg)":"var(--bg2)",border:`1px solid ${(restaurant.taxRate??TAX)===0.33?"var(--ac)33":"var(--border)"}`}}>
+                  <div style={{fontWeight:700,fontSize:13,color:"var(--text)",marginBottom:4}}>33% — Lucro Real ou Lucro Presumido</div>
+                  <div style={{fontSize:12,color:"var(--text3)",lineHeight:1.6}}>
+                    Aplica-se a empresas tributadas pelo Lucro Real ou Presumido. Incide INSS patronal (20%) + FGTS (8%) + RAT/terceiros (~5%). Base: art. 457 CLT e Lei 13.419/2017.
+                  </div>
+                </div>
+                <div style={{padding:"12px 14px",borderRadius:10,background:(restaurant.taxRate??TAX)===0.20?"var(--ac-bg)":"var(--bg2)",border:`1px solid ${(restaurant.taxRate??TAX)===0.20?"var(--ac)33":"var(--border)"}`}}>
+                  <div style={{fontWeight:700,fontSize:13,color:"var(--text)",marginBottom:4}}>20% — Simples Nacional</div>
+                  <div style={{fontSize:12,color:"var(--text3)",lineHeight:1.6}}>
+                    Aplica-se a MEI, ME e EPP optantes pelo Simples Nacional. A gorjeta integra a folha de pagamento com encargos simplificados. Base: LC 123/2006 e Resolução CGSN 140/2018.
+                  </div>
+                </div>
+              </div>
+              <p style={{color:"var(--text3)",fontSize:11,marginTop:10,marginBottom:0,fontStyle:"italic"}}>⚠️ Esta configuração não substitui orientação contábil. Consulte seu contador para confirmar a alíquota correta.</p>
             </div>
             {/* Fault Penalty */}
             <div style={{...S.card,marginBottom:20}}>
@@ -5732,7 +5835,6 @@ function ManagerPortal({ manager, data, onUpdate, onBack, toggleTheme, theme }) 
   const { restaurants, employees, roles, tips, splits, schedules } = data;
   const myRestaurants = restaurants.filter(r => manager.restaurantIds?.includes(r.id));
   const [selId, setSelId] = useState(() => {
-    // Restaura o restaurante selecionado do localStorage, ou seleciona automaticamente se só tiver um
     const saved = localStorage.getItem("apptip_selrest");
     if (myRestaurants.length === 1) return myRestaurants[0].id;
     if (saved && myRestaurants.find(r => r.id === saved)) return saved;
@@ -5740,7 +5842,6 @@ function ManagerPortal({ manager, data, onUpdate, onBack, toggleTheme, theme }) 
   });
   const ac = "var(--ac)";
 
-  // Persiste o restaurante selecionado
   useEffect(() => {
     if (selId) localStorage.setItem("apptip_selrest", selId);
     else localStorage.removeItem("apptip_selrest");
@@ -5748,64 +5849,107 @@ function ManagerPortal({ manager, data, onUpdate, onBack, toggleTheme, theme }) 
 
   const selRest = myRestaurants.find(r => r.id === selId);
 
+  // Métricas rápidas por restaurante para o card de seleção
+  function getRestMetrics(r) {
+    const rid = r.id;
+    const empAtivos = employees.filter(e => e.restaurantId === rid && !e.inactive).length;
+    const now = new Date();
+    const mk = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,"0")}`;
+    const monthTips = tips.filter(t => t.restaurantId === rid && t.monthKey === mk);
+    const diasComGorjeta = [...new Set(monthTips.map(t => t.date))].length;
+    const dpNaoLidas = (data?.dpMessages??[]).filter(m => m.restaurantId === rid && !m.read).length;
+    const commsPendentes = (data?.communications??[]).filter(c =>
+      c.restaurantId === rid &&
+      employees.filter(e => e.restaurantId === rid).some(e => !(data?.commAcks??{})[`${c.id}_${e.id}`])
+    ).length;
+    return { empAtivos, diasComGorjeta, dpNaoLidas, commsPendentes };
+  }
+
   return (
     <div style={{ minHeight:"100vh", background:"var(--bg)", fontFamily:"'DM Sans',sans-serif" }}>
-      <div style={{ background:"var(--header-bg)", borderBottom:"1px solid var(--border)", padding:"14px 20px", display:"flex", justifyContent:"space-between", alignItems:"center", boxShadow:"0 1px 4px rgba(0,0,0,0.04)" }}>
-        <div style={{ display:"flex", alignItems:"center", gap:8 }}>
-          <span style={{fontSize:18}}>📊</span>
-          <span style={{color:"var(--text)",fontWeight:800,fontSize:16}}>Gestor</span>
-          <span style={{color:"var(--text3)",fontSize:12}}>· {manager.name}</span>
+
+      {/* Header melhorado */}
+      <div style={{ background:"var(--header-bg)", borderBottom:"1px solid var(--border)", padding:"12px 20px", display:"flex", justifyContent:"space-between", alignItems:"center", boxShadow:"0 1px 4px rgba(0,0,0,0.04)" }}>
+        <div style={{ display:"flex", alignItems:"center", gap:10 }}>
+          {selId && myRestaurants.length > 1 && (
+            <button onClick={()=>setSelId(null)}
+              style={{ background:"none", border:"1px solid var(--border)", borderRadius:8, padding:"5px 10px", cursor:"pointer", color:"var(--text3)", fontSize:12, display:"flex", alignItems:"center", gap:4 }}>
+              ‹ Trocar
+            </button>
+          )}
+          <div>
+            <div style={{ display:"flex", alignItems:"center", gap:6 }}>
+              <span style={{fontSize:16}}>📊</span>
+              <span style={{color:"var(--text)",fontWeight:800,fontSize:15}}>
+                {selRest ? selRest.name : "Gestor"}
+              </span>
+            </div>
+            <div style={{color:"var(--text3)",fontSize:11,marginTop:1}}>{manager.name}</div>
+          </div>
         </div>
-        <div style={{display:"flex",gap:8,alignItems:"center"}}>
-          <button onClick={toggleTheme} style={{background:"none",border:"1px solid var(--border)",borderRadius:20,padding:"6px 10px",cursor:"pointer",fontSize:16,color:"var(--text2)"}}>
+        <div style={{display:"flex",gap:6,alignItems:"center"}}>
+          <button onClick={toggleTheme} style={{background:"none",border:"1px solid var(--border)",borderRadius:20,padding:"6px 10px",cursor:"pointer",fontSize:14,color:"var(--text2)"}}>
             {theme==="dark"?"☀️":"🌙"}
           </button>
           <a href="/guia-gestor" target="_blank" rel="noreferrer"
-            style={{...S.btnSecondary,fontSize:12,textDecoration:"none",display:"flex",alignItems:"center",gap:4}}>
+            style={{...S.btnSecondary,fontSize:12,textDecoration:"none",display:"flex",alignItems:"center",gap:4,padding:"6px 12px"}}>
             ❓ Ajuda
           </a>
           <button onClick={onBack} style={{...S.btnSecondary,fontSize:12}}>Sair</button>
         </div>
       </div>
 
-      {/* Restaurant picker if multiple */}
+      {/* Seleção de restaurante */}
       {!selId && (
-        <div style={{padding:"40px 20px",maxWidth:480,margin:"0 auto"}}>
-          <p style={{color:"var(--text3)",fontSize:13,marginBottom:20,textAlign:"center"}}>Selecione o restaurante</p>
-          {myRestaurants.length === 0 && (
+        <div style={{padding:"32px 20px",maxWidth:520,margin:"0 auto"}}>
+          {myRestaurants.length === 0 ? (
             <div style={{textAlign:"center",padding:"60px 24px"}}>
               <div style={{fontSize:48,marginBottom:16}}>🏢</div>
               <h3 style={{color:"var(--text)",fontSize:18,fontWeight:700,margin:"0 0 8px"}}>Nenhum restaurante atribuído</h3>
               <p style={{color:"var(--text3)",fontSize:14,lineHeight:1.6}}>Seu acesso ainda não foi configurado.<br/>Entre em contato com o administrador do AppTip.</p>
             </div>
+          ) : (
+            <>
+              <h2 style={{color:"var(--text)",fontSize:18,fontWeight:800,margin:"0 0 6px"}}>Seus restaurantes</h2>
+              <p style={{color:"var(--text3)",fontSize:13,margin:"0 0 20px"}}>Selecione para entrar</p>
+              {myRestaurants.map(r => {
+                const inad = r.financeiro?.status === "inadimplente";
+                const m = getRestMetrics(r);
+                return (
+                  <button key={r.id} onClick={()=>setSelId(r.id)}
+                    style={{width:"100%",cursor:"pointer",textAlign:"left",display:"block",marginBottom:12,
+                      background: inad ? "var(--red-bg)" : "var(--card-bg)",
+                      border: `1px solid ${inad?"var(--red)44":"var(--border)"}`,
+                      borderRadius:14, padding:"16px 18px",
+                      boxShadow:"0 2px 8px rgba(0,0,0,0.04)", transition:"box-shadow 0.15s"}}>
+                    <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:10}}>
+                      <div>
+                        <div style={{color:"var(--text)",fontWeight:700,fontSize:16}}>{r.name}</div>
+                        {r.address && <div style={{color:"var(--text3)",fontSize:12,marginTop:2}}>{r.address}</div>}
+                      </div>
+                      {inad
+                        ? <span style={{color:"var(--red)",fontSize:12,fontWeight:700,background:"var(--red-bg)",padding:"3px 10px",borderRadius:20,border:"1px solid var(--red)33"}}>🔒 Suspenso</span>
+                        : <span style={{color:"var(--text3)",fontSize:18}}>›</span>
+                      }
+                    </div>
+                    {!inad && (
+                      <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+                        <span style={{fontSize:12,color:"var(--text3)",background:"var(--bg2)",padding:"3px 10px",borderRadius:20}}>👥 {m.empAtivos} ativos</span>
+                        <span style={{fontSize:12,color:"var(--text3)",background:"var(--bg2)",padding:"3px 10px",borderRadius:20}}>💸 {m.diasComGorjeta}d lançados</span>
+                        {m.dpNaoLidas > 0 && <span style={{fontSize:12,color:"#3b82f6",background:"#eff6ff",padding:"3px 10px",borderRadius:20}}>💬 {m.dpNaoLidas} nova{m.dpNaoLidas>1?"s":""}</span>}
+                        {m.commsPendentes > 0 && <span style={{fontSize:12,color:"#f59e0b",background:"#fffbeb",padding:"3px 10px",borderRadius:20}}>📢 {m.commsPendentes} pendente{m.commsPendentes>1?"s":""}</span>}
+                      </div>
+                    )}
+                  </button>
+                );
+              })}
+            </>
           )}
-          {myRestaurants.map(r=>{
-            const inad = r.financeiro?.status === "inadimplente";
-            return (
-              <button key={r.id} onClick={()=>setSelId(r.id)}
-                style={{...S.card,width:"100%",cursor:"pointer",textAlign:"left",display:"block",marginBottom:10,border:`1px solid ${inad?"var(--red)44":"var(--border)"}`,background:inad?"var(--red-bg)":"var(--card-bg)",opacity:inad?0.8:1}}>
-                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:4}}>
-                  <div style={{color:"var(--text)",fontWeight:600,fontSize:15}}>{r.name}</div>
-                  {inad && <span style={{color:"var(--red)",fontSize:12,fontWeight:700}}>🔒 Suspenso</span>}
-                </div>
-                {r.address&&<div style={{color:"var(--text3)",fontSize:12,marginBottom:6}}>{r.address}</div>}
-                <div style={{display:"flex",gap:6}}>
-                  {[["tips","Gorjetas"],["schedule","Escala"],["comunicados","Comuns."],["faq","FAQ"],["dp","DP"]].map(([k,lbl])=><PermBadge key={k} label={lbl} on={manager.perms?.[k]!==false}/>)}
-                </div>
-              </button>
-            );
-          })}
         </div>
       )}
 
       {selId && selRest && (
         <div>
-          {myRestaurants.length > 1 && (
-            <div style={{padding:"10px 16px",background:"var(--bg5)",borderBottom:"1px solid var(--border)"}}>
-              <button onClick={()=>setSelId(null)} style={{...S.btnSecondary,fontSize:12,padding:"4px 12px"}}>← Trocar restaurante</button>
-            </div>
-          )}
-
           {/* Bloqueia restaurante inadimplente */}
           {selRest.financeiro?.status === "inadimplente" ? (
             <div style={{minHeight:"60vh",display:"flex",alignItems:"center",justifyContent:"center",padding:32}}>
@@ -5814,9 +5958,6 @@ function ManagerPortal({ manager, data, onUpdate, onBack, toggleTheme, theme }) 
                 <h2 style={{color:"var(--text)",fontSize:22,fontWeight:800,margin:"0 0 12px"}}>Acesso suspenso</h2>
                 <p style={{color:"var(--text3)",fontSize:15,lineHeight:1.6,margin:"0 0 20px"}}>
                   O acesso ao <strong>{selRest.name}</strong> está temporariamente suspenso por pendência financeira.
-                </p>
-                <p style={{color:"var(--text3)",fontSize:13,lineHeight:1.6}}>
-                  Entre em contato com o administrador do AppTip para regularizar a situação.
                 </p>
                 <div style={{marginTop:24,padding:"14px 18px",borderRadius:12,background:"var(--bg2)",border:"1px solid var(--border)",fontSize:13,color:"var(--text3)"}}>
                   📱 WhatsApp: <strong style={{color:"var(--text)"}}>+55 11 98549-9821</strong>
@@ -5829,7 +5970,13 @@ function ManagerPortal({ manager, data, onUpdate, onBack, toggleTheme, theme }) 
               </div>
             </div>
           ) : (
-            <RestaurantPanel restaurant={selRest} restaurants={restaurants} employees={employees} roles={roles} tips={tips} splits={splits} schedules={schedules} onUpdate={onUpdate} perms={{...(manager.perms ?? {tips:true,schedule:true}), isDP: manager.isDP ?? false}} isOwner={false} data={data} currentUser={manager}/>
+            <RestaurantPanel
+              restaurant={selRest} restaurants={restaurants} employees={employees}
+              roles={roles} tips={tips} splits={splits} schedules={schedules}
+              onUpdate={onUpdate}
+              perms={{...(manager.perms ?? {tips:true,schedule:true}), isDP: manager.isDP ?? false}}
+              isOwner={false} data={data} currentUser={manager}
+            />
           )}
         </div>
       )}
