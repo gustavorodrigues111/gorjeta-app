@@ -4081,518 +4081,301 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }
         {/* Financeiro */}
         {restTab === "financeiro" && (() => {
           const fin = rest?.financeiro ?? {};
-          const plano = getPlano(rest);
-          const tipoCobranca = rest?.tipoCobranca ?? "mensal";
-          const empAtivos = employees.filter(e=>e.restaurantId===selRestaurant&&!e.inactive).length;
 
-          // Cálculo do valor
-          const isEnterprise = rest?.planoId === "p999";
-          const isOrcamento  = rest?.planoId === "pOrc";
-          const empMax = isEnterprise ? (rest?.empMaxCustom ?? 51) : (isOrcamento ? (rest?.empMaxCustom ?? 101) : plano.empMax);
-          let valorBase = tipoCobranca === "anual" ? plano.anual : plano.mensal;
-          let valorAdicionais = 0;
-          if (isEnterprise) { valorBase = 0; valorAdicionais = empMax * 7.99; }
-          const valorTotal = isOrcamento ? null : (valorBase ?? 0) + valorAdicionais;
+          // ─── Helpers ────────────────────────────────────────────────
+          const fmt = (d) => d ? new Date(d+"T12:00:00").toLocaleDateString("pt-BR") : "—";
+          const addDays = (d, n) => { const r = new Date(d+"T12:00:00"); r.setDate(r.getDate()+n); return r.toISOString().slice(0,10); };
+          const addYear = (d) => { const r = new Date(d+"T12:00:00"); r.setFullYear(r.getFullYear()+1); return r.toISOString().slice(0,10); };
 
-          // Trial e ciclo
-          const trialInicio = fin.trialInicio ?? rest?.createdAt?.slice(0,10) ?? today();
-          const trialFim = fin.trialFim ?? (() => {
-            const d = new Date(trialInicio+"T12:00:00"); d.setDate(d.getDate()+7);
-            return d.toISOString().slice(0,10);
+          // ─── Plano e valor ──────────────────────────────────────────
+          const plano        = getPlano(rest);
+          const tipo         = rest?.tipoCobranca ?? "mensal";
+          const isEnt        = rest?.planoId === "p999";
+          const isOrc        = rest?.planoId === "pOrc";
+          const empMax       = isEnt ? (rest?.empMaxCustom ?? 51) : isOrc ? (rest?.empMaxCustom ?? 101) : plano.empMax;
+          const empAtivos    = employees.filter(e=>e.restaurantId===selRestaurant&&!e.inactive).length;
+
+          // Valor mensal base
+          const valorMensal = (() => {
+            if (isOrc) return null;
+            if (isEnt) return empMax * 7.99 * (tipo === "anual" ? 0.9 : 1);
+            return tipo === "anual" ? plano.anual : plano.mensal;
           })();
-          const hoje = today();
-          const diasTrialRestantes = Math.ceil((new Date(trialFim+"T12:00:00")-new Date())/(1000*60*60*24));
-          const emTrial = !fin.cicloInicio && diasTrialRestantes > 0;
-          const trialVencido = !fin.cicloInicio && diasTrialRestantes <= 0;
 
-          // Ciclo ativo
-          const cicloInicio = fin.cicloInicio ?? null;
-          const cicloFim = fin.cicloFim ?? null;
-          const diasParaVencer = cicloFim ? Math.ceil((new Date(cicloFim+"T12:00:00")-new Date())/(1000*60*60*24)) : null;
-          const cicloVencido = cicloFim && cicloFim < hoje;
-          const alertaVencimento = diasParaVencer !== null && diasParaVencer <= 7 && diasParaVencer > 0;
+          // ─── Ciclo ─────────────────────────────────────────────────
+          // fonte única de verdade: fin.cicloInicio e fin.cicloFim
+          const cicloIni  = fin.cicloInicio ?? null;
+          const cicloFim  = fin.cicloFim ?? null;
+          const trialIni  = fin.trialInicio ?? null;
+          const trialFim  = fin.trialFim ?? null;
+          const hoje      = today();
 
-          // Status efetivo
-          const statusFin = fin.status ?? "ativo";
-          const statusConfig = {
-            ativo:        { label:"✅ Ativo", color:"var(--green)", bg:"var(--green-bg)" },
-            inadimplente: { label:"🔴 Inadimplente — acesso bloqueado", color:"var(--red)", bg:"var(--red-bg)" },
-          };
-          const sc = statusConfig[statusFin] ?? statusConfig.ativo;
+          const emTrial       = trialIni && !cicloIni && trialFim >= hoje;
+          const trialVencido  = trialIni && !cicloIni && trialFim < hoje;
+          const cicloAtivo    = cicloIni && cicloFim && cicloFim >= hoje;
+          const cicloVencido  = cicloIni && cicloFim && cicloFim < hoje;
+
+          const diasCiclo  = cicloFim ? Math.ceil((new Date(cicloFim+"T12:00:00")-new Date())/(1000*60*60*24)) : null;
+          const diasTrial  = trialFim ? Math.ceil((new Date(trialFim+"T12:00:00")-new Date())/(1000*60*60*24)) : null;
+          const alertaVenc = cicloAtivo && diasCiclo !== null && diasCiclo <= 7;
+
+          const inadimplente = fin.status === "inadimplente";
+
+          // ─── Próximo ciclo a cobrar ─────────────────────────────────
+          // começa no dia seguinte ao fim do ciclo atual (ou trial)
+          const proxIni = (() => {
+            if (cicloFim) return addDays(cicloFim, 1);
+            if (trialFim) return addDays(trialFim, 1);
+            return hoje;
+          })();
+          const proxFim = tipo === "anual" ? addDays(addYear(proxIni), -1) : addDays(proxIni, 29);
+          const proxLabel = `${fmt(proxIni)} a ${fmt(proxFim)}`;
+
+          // ─── Helpers de persistência ────────────────────────────────
+          function saveFin(update) {
+            onUpdate("restaurants", restaurants.map(r => r.id===selRestaurant ? {...r, financeiro:{...fin,...update}} : r));
+          }
+
+          function confirmar(cob) {
+            const ini  = hoje;
+            const fim  = tipo === "anual" ? addDays(addYear(ini), -1) : addDays(ini, 29);
+            const nIni = addDays(fim, 1);
+            const nFim = tipo === "anual" ? addDays(addYear(nIni), -1) : addDays(nIni, 29);
+            const updCobs = (fin.cobrancas??[]).map(x => x.id===cob.id ? {...x, status:"pago", pagoEm:new Date().toISOString()} : x);
+            const novoPag = { id:Date.now().toString(), data:ini, valor:cob.valor, forma:cob.forma, periodoLabel:`${fmt(ini)} a ${fmt(fim)}`, registradoEm:new Date().toISOString() };
+            const proxCob = { id:(Date.now()+1).toString(), periodoLabel:`${fmt(nIni)} a ${fmt(nFim)}`, periodoInicio:nIni, periodoFim:nFim, venc:nFim, valor:valorMensal??cob.valor, forma:cob.forma??"PIX", chave:cob.chave??PIX_PADRAO, criadaEm:new Date().toISOString(), status:"pendente", autoGerada:true };
+            saveFin({ cobrancas:[...updCobs, proxCob], pagamentos:[novoPag,...(fin.pagamentos??[])], status:"ativo", cicloInicio:ini, cicloFim:fim });
+            onUpdate("_toast", `✅ Pago! Ciclo ${fmt(ini)} a ${fmt(fim)}`);
+          }
 
           const pagamentos = fin.pagamentos ?? [];
-
-          function saveFinanceiro(update) {
-            const updated = restaurants.map(r => r.id===selRestaurant ? {...r, financeiro:{...fin,...update}} : r);
-            onUpdate("restaurants", updated);
-          }
-
-          // Ao confirmar pagamento — calcula próximo ciclo e gera próxima cobrança
-          // Helper para formatar data br
-          const fmtBr = (d) => d ? new Date(d+"T12:00:00").toLocaleDateString("pt-BR") : "—";
-
-          function confirmarPagamento(cob) {
-            const dataPag = today();
-            const cicloIni = dataPag;
-            const cicloEnd = (() => {
-              const d = new Date(dataPag+"T12:00:00");
-              if (tipoCobranca === "anual") d.setFullYear(d.getFullYear()+1);
-              else d.setDate(d.getDate()+30);
-              // Subtrai 1 dia para o fim do ciclo (ex: 11/04 a 10/05)
-              d.setDate(d.getDate()-1);
-              return d.toISOString().slice(0,10);
-            })();
-
-            // Próximo ciclo começa no dia seguinte ao fim deste
-            const proximoIni = (() => {
-              const d = new Date(cicloEnd+"T12:00:00");
-              d.setDate(d.getDate()+1);
-              return d.toISOString().slice(0,10);
-            })();
-            const proximoEnd = (() => {
-              const d = new Date(proximoIni+"T12:00:00");
-              if (tipoCobranca === "anual") d.setFullYear(d.getFullYear()+1);
-              else d.setDate(d.getDate()+30);
-              d.setDate(d.getDate()-1);
-              return d.toISOString().slice(0,10);
-            })();
-
-            const periodoAtualLabel = `${fmtBr(dataPag)} a ${fmtBr(cicloEnd)}`;
-            const proximoPeriodoLabel = `${fmtBr(proximoIni)} a ${fmtBr(proximoEnd)}`;
-
-            const proximaCob = {
-              id: Date.now().toString(),
-              periodo: proximoIni.slice(0,7),
-              periodoLabel: proximoPeriodoLabel,
-              periodoInicio: proximoIni,
-              periodoFim: proximoEnd,
-              venc: proximoEnd,
-              valor: valorTotal ?? cob.valor,
-              forma: cob.forma ?? "PIX",
-              chave: cob.chave ?? PIX_PADRAO,
-              criadaEm: new Date().toISOString(),
-              status: "pendente",
-              autoGerada: true,
-            };
-
-            const updatedCobs = (fin.cobrancas??[]).map(x=>x.id===cob.id?{...x,status:"pago",pagoEm:new Date().toISOString()}:x);
-            const novoPag = {
-              id:(Date.now()+1).toString(),
-              data:dataPag,
-              valor:cob.valor,
-              forma:cob.forma,
-              obs:`Período: ${periodoAtualLabel}`,
-              registradoEm:new Date().toISOString()
-            };
-
-            saveFinanceiro({
-              cobrancas: [...updatedCobs, proximaCob],
-              pagamentos: [novoPag,...pagamentos],
-              status: "ativo",
-              cicloInicio: dataPag,
-              cicloFim: cicloEnd,
-              proximoVencimento: cicloEnd,
-            });
-            onUpdate("_toast", `✅ Pago! Ciclo ${fmtBr(dataPag)} a ${fmtBr(cicloEnd)}`);
-          }
+          const cobrancasAbertas = (fin.cobrancas??[]).filter(c=>c.status==="pendente"||c.status==="aguardando_confirmacao");
 
           return (
             <div style={{padding:"24px",maxWidth:700,margin:"0 auto"}}>
 
-              {/* Status do ciclo */}
-              <div style={{...S.card,marginBottom:20,border:`1px solid ${
+              {/* ── 1. STATUS DO CICLO ── */}
+              <div style={{...S.card, marginBottom:20, border:`1px solid ${
+                inadimplente?"var(--red)44":
                 trialVencido||cicloVencido?"var(--red)44":
-                emTrial?"#f59e0b44":
-                alertaVencimento?"#f59e0b44":
-                "var(--green)44"
-              }`,background:
+                emTrial||alertaVenc?"#f59e0b44":"var(--green)44"
+              }`, background:
+                inadimplente?"var(--red-bg)":
                 trialVencido||cicloVencido?"var(--red-bg)":
-                emTrial?"#fffbeb":
-                alertaVencimento?"#fffbeb":
-                "var(--green-bg)"
+                emTrial||alertaVenc?"#fffbeb":"var(--green-bg)"
               }}>
                 <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",flexWrap:"wrap",gap:12}}>
                   <div>
-                    {emTrial && (
-                      <>
-                        <div style={{color:"#92400e",fontWeight:700,fontSize:16,marginBottom:4}}>🎯 Em período de teste</div>
-                        <div style={{color:"#92400e",fontSize:13}}>
-                          {diasTrialRestantes > 0
-                            ? `${diasTrialRestantes} dia${diasTrialRestantes>1?"s":""} restante${diasTrialRestantes>1?"s":""} — trial até ${new Date(trialFim+"T12:00:00").toLocaleDateString("pt-BR")}`
-                            : "Trial encerrando hoje"}
-                        </div>
-                        <div style={{color:"#a16207",fontSize:12,marginTop:4}}>Envie a 1ª cobrança para ativar o ciclo pago</div>
-                      </>
-                    )}
-                    {trialVencido && (
-                      <>
-                        <div style={{color:"var(--red)",fontWeight:700,fontSize:16,marginBottom:4}}>⏰ Trial encerrado</div>
-                        <div style={{color:"var(--red)",fontSize:13}}>Período de teste expirou. Gere a 1ª cobrança para reativar.</div>
-                      </>
-                    )}
-                    {cicloInicio && !cicloVencido && (
-                      <>
-                        <div style={{color:alertaVencimento?"#92400e":"var(--green)",fontWeight:700,fontSize:16,marginBottom:4}}>
-                          {alertaVencimento?`⚡ Vence em ${diasParaVencer} dia${diasParaVencer>1?"s":""}!`:"✅ Ciclo ativo"}
-                        </div>
-                        <div style={{color:"var(--text2)",fontSize:13}}>
-                          Início: {new Date(cicloInicio+"T12:00:00").toLocaleDateString("pt-BR")} · Fim: <strong>{new Date(cicloFim+"T12:00:00").toLocaleDateString("pt-BR")}</strong>
-                        </div>
-                        {alertaVencimento && <div style={{color:"#a16207",fontSize:12,marginTop:4}}>Envie a cobrança agora para garantir continuidade do serviço</div>}
-                      </>
-                    )}
-                    {cicloVencido && (
-                      <>
-                        <div style={{color:"var(--red)",fontWeight:700,fontSize:16,marginBottom:4}}>🔴 Ciclo vencido</div>
-                        <div style={{color:"var(--red)",fontSize:13}}>Venceu em {new Date(cicloFim+"T12:00:00").toLocaleDateString("pt-BR")} · {Math.abs(diasParaVencer)} dias sem pagamento</div>
-                      </>
-                    )}
-                    {fin.obs && <div style={{color:"var(--text3)",fontSize:12,marginTop:6}}>📝 {fin.obs}</div>}
+                    {inadimplente && <div style={{color:"var(--red)",fontWeight:700,fontSize:16,marginBottom:4}}>🔴 Inadimplente — acesso bloqueado</div>}
+                    {!inadimplente && emTrial && <>
+                      <div style={{color:"#92400e",fontWeight:700,fontSize:16,marginBottom:4}}>🎯 Período de teste</div>
+                      <div style={{color:"#92400e",fontSize:13}}>{diasTrial} dia{diasTrial!==1?"s":""} restante{diasTrial!==1?"s":""} — até {fmt(trialFim)}</div>
+                    </>}
+                    {!inadimplente && trialVencido && <>
+                      <div style={{color:"var(--red)",fontWeight:700,fontSize:16,marginBottom:4}}>⏰ Trial encerrado</div>
+                      <div style={{color:"var(--red)",fontSize:13}}>Gere a 1ª cobrança para ativar o acesso pago.</div>
+                    </>}
+                    {!inadimplente && cicloAtivo && <>
+                      <div style={{color:alertaVenc?"#92400e":"var(--green)",fontWeight:700,fontSize:16,marginBottom:4}}>
+                        {alertaVenc?`⚡ Vence em ${diasCiclo} dia${diasCiclo!==1?"s":""}!`:"✅ Ciclo ativo"}
+                      </div>
+                      <div style={{color:"var(--text2)",fontSize:13}}>
+                        {fmt(cicloIni)} a {fmt(cicloFim)}
+                        {alertaVenc && <span style={{color:"#a16207",marginLeft:8,fontSize:12}}>— envie a cobrança logo!</span>}
+                      </div>
+                    </>}
+                    {!inadimplente && cicloVencido && <>
+                      <div style={{color:"var(--red)",fontWeight:700,fontSize:16,marginBottom:4}}>🔴 Ciclo vencido</div>
+                      <div style={{color:"var(--red)",fontSize:13}}>Venceu em {fmt(cicloFim)} — {Math.abs(diasCiclo)} dias sem renovação</div>
+                    </>}
+                    {!cicloIni && !trialIni && <div style={{color:"var(--text3)",fontWeight:600,fontSize:14}}>⚙️ Sem ciclo iniciado</div>}
                   </div>
                   <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
-                    {statusFin !== "ativo" && (
-                      <button onClick={()=>saveFinanceiro({status:"ativo"})}
-                        style={{padding:"8px 16px",borderRadius:8,border:"1px solid var(--green)44",background:"var(--green-bg)",color:"var(--green)",cursor:"pointer",fontFamily:"'DM Sans',sans-serif",fontSize:13,fontWeight:700}}>
-                        ✅ Liberar acesso
-                      </button>
-                    )}
-                    {statusFin === "ativo" && cicloInicio && (
-                      <button onClick={()=>saveFinanceiro({status:"inadimplente"})}
-                        style={{padding:"8px 16px",borderRadius:8,border:"1px solid var(--red)33",background:"transparent",color:"var(--red)",cursor:"pointer",fontFamily:"'DM Sans',sans-serif",fontSize:13,fontWeight:600}}>
-                        🔴 Marcar inadimplente
-                      </button>
-                    )}
+                    {inadimplente && <button onClick={()=>saveFin({status:"ativo"})} style={{padding:"8px 16px",borderRadius:8,border:"1px solid var(--green)44",background:"var(--green-bg)",color:"var(--green)",cursor:"pointer",fontFamily:"'DM Sans',sans-serif",fontSize:13,fontWeight:700}}>✅ Liberar acesso</button>}
+                    {!inadimplente && cicloIni && <button onClick={()=>{if(!window.confirm("Marcar como inadimplente e bloquear acesso?"))return; saveFin({status:"inadimplente"});}} style={{padding:"8px 16px",borderRadius:8,border:"1px solid var(--red)33",background:"transparent",color:"var(--red)",cursor:"pointer",fontFamily:"'DM Sans',sans-serif",fontSize:13,fontWeight:600}}>🔴 Inadimplente</button>}
                   </div>
                 </div>
               </div>
 
-              {/* Botão iniciar trial */}
-              {!fin.trialInicio && !cicloInicio && (
+              {/* Iniciar trial */}
+              {!trialIni && !cicloIni && (
                 <div style={{...S.card,marginBottom:20,textAlign:"center",padding:28}}>
                   <div style={{fontSize:32,marginBottom:12}}>🎯</div>
                   <h4 style={{color:"var(--text)",fontWeight:700,fontSize:15,margin:"0 0 8px"}}>Iniciar período de teste</h4>
-                  <p style={{color:"var(--text3)",fontSize:13,margin:"0 0 16px"}}>7 dias gratuitos para o cliente experimentar o sistema</p>
+                  <p style={{color:"var(--text3)",fontSize:13,margin:"0 0 16px"}}>7 dias gratuitos — a 1ª cobrança vence no último dia do trial</p>
                   <button onClick={()=>{
-                    const d = new Date(); d.setDate(d.getDate()+7);
-                    const trialFimDate = d.toISOString().slice(0,10);
-                    // Gera cobrança automática com vencimento no último dia do trial
-                    const [ano,mes] = today().split("-");
-                    const mesesNome = ["Janeiro","Fevereiro","Março","Abril","Maio","Junho","Julho","Agosto","Setembro","Outubro","Novembro","Dezembro"];
-                    const periodoLabel = `${mesesNome[parseInt(mes)-1]}/${ano} (Trial)`;
-                    const cobTrial = {
-                      id: Date.now().toString(),
-                      periodo: today().slice(0,7),
-                      periodoLabel,
-                      venc: trialFimDate,
-                      valor: valorTotal ?? 0,
-                      forma: "PIX",
-                      chave: PIX_PADRAO,
-                      criadaEm: new Date().toISOString(),
-                      status: "pendente",
-                      isTrial: true,
-                    };
-                    saveFinanceiro({
-                      trialInicio: today(),
-                      trialFim: trialFimDate,
-                      status: "ativo",
-                      cobrancas: [...(fin.cobrancas??[]), cobTrial],
-                    });
-                    onUpdate("_toast","🎯 Trial iniciado! Cobrança gerada com vencimento em "+d.toLocaleDateString("pt-BR"));
-                  }} style={{...S.btnPrimary,width:"auto",padding:"10px 28px"}}>
-                    Iniciar trial agora
-                  </button>
+                    const fim7 = addDays(hoje, 6);
+                    const cob = { id:Date.now().toString(), periodoLabel:`Trial — ${fmt(hoje)} a ${fmt(fim7)}`, periodoInicio:hoje, periodoFim:fim7, venc:fim7, valor:valorMensal??0, forma:"PIX", chave:PIX_PADRAO, criadaEm:new Date().toISOString(), status:"pendente", isTrial:true };
+                    saveFin({ trialInicio:hoje, trialFim:fim7, status:"ativo", cobrancas:[...(fin.cobrancas??[]), cob] });
+                    onUpdate("_toast","🎯 Trial iniciado até "+fmt(fim7));
+                  }} style={{...S.btnPrimary,width:"auto",padding:"10px 28px"}}>Iniciar trial</button>
                 </div>
               )}
 
-              {/* Plano e cobrança — editável aqui */}
+              {/* ── 2. PLANO ── */}
               <div style={{...S.card,marginBottom:20}}>
-                <h4 style={{color:"var(--text)",fontWeight:700,fontSize:14,margin:"0 0 16px"}}>📦 Plano contratado</h4>
-                <div style={{display:"flex",flexDirection:"column",gap:8,marginBottom:14}}>
+                <h4 style={{color:"var(--text)",fontWeight:700,fontSize:14,margin:"0 0 14px"}}>📦 Plano contratado</h4>
+                <div style={{display:"flex",flexDirection:"column",gap:6,marginBottom:14}}>
                   {PLANOS.map(p=>{
-                    const sel = (rest?.planoId??"p10") === p.id;
+                    const sel = (rest?.planoId??"p10")===p.id;
+                    const precos = {p10:"R$97/mês · R$87,30 anual", p20:"R$187/mês · R$168,30 anual", p50:"R$397/mês · R$357,30 anual", p999:"R$7,99/emp./mês · 10% desc. anual", pOrc:"Sob orçamento"};
                     return (
-                      <button key={p.id} onClick={()=>{
-                        const updated = restaurants.map(r=>r.id===selRestaurant?{...r,planoId:p.id}:r);
-                        onUpdate("restaurants",updated);
-                      }}
+                      <button key={p.id} onClick={()=>onUpdate("restaurants",restaurants.map(r=>r.id===selRestaurant?{...r,planoId:p.id}:r))}
                         style={{padding:"10px 14px",borderRadius:10,border:`1px solid ${sel?ac:"var(--border)"}`,background:sel?"var(--ac-bg)":"transparent",cursor:"pointer",fontFamily:"'DM Sans',sans-serif",textAlign:"left",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-                        <span style={{color:sel?"var(--ac-text)":"var(--text2)",fontWeight:sel?700:400}}>
-                          {sel?"✓":"○"} {p.label}
-                          {p.id==="p10"&&" — até 10 emp."}
-                          {p.id==="p20"&&" — até 20 emp."}
-                          {p.id==="p50"&&" — até 50 emp."}
-                          {p.id==="p999"&&" — 51 a 100 emp."}
-                          {p.id==="pOrc"&&" — acima de 100 emp."}
-                        </span>
-                        {p.id==="p10"&&<span style={{color:"var(--text3)",fontSize:12}}>R$97/mês · R$87,30/mês anual</span>}
-                        {p.id==="p20"&&<span style={{color:"var(--text3)",fontSize:12}}>R$187/mês · R$168,30/mês anual</span>}
-                        {p.id==="p50"&&<span style={{color:"var(--text3)",fontSize:12}}>R$397/mês · R$357,30/mês anual</span>}
-                        {p.id==="p999"&&<span style={{color:"var(--text3)",fontSize:12}}>R$7,99/emp./mês</span>}
-                        {p.id==="pOrc"&&<span style={{color:"var(--text3)",fontSize:12}}>On Demand</span>}
+                        <span style={{color:sel?"var(--ac-text)":"var(--text2)",fontWeight:sel?700:400}}>{sel?"✓":"○"} {p.label} {p.id==="p10"?"(até 10)":p.id==="p20"?"(até 20)":p.id==="p50"?"(até 50)":p.id==="p999"?"(51–100)":"(+100)"}</span>
+                        <span style={{color:"var(--text3)",fontSize:11}}>{precos[p.id]}</span>
                       </button>
                     );
                   })}
                 </div>
 
-                <label style={S.label}>Tipo de cobrança</label>
-                <div style={{display:"flex",gap:8,marginBottom:14}}>
+                <div style={{display:"flex",gap:8,marginBottom:12}}>
                   {[["mensal","Mensal"],["anual","Anual (−10%)"]].map(([v,l])=>{
-                    const sel = (rest?.tipoCobranca??"mensal")===v;
-                    return (
-                      <button key={v} onClick={()=>{
-                        const updated = restaurants.map(r=>r.id===selRestaurant?{...r,tipoCobranca:v}:r);
-                        onUpdate("restaurants",updated);
-                      }}
-                        style={{flex:1,padding:"10px",borderRadius:10,border:`1px solid ${sel?"var(--green)":"var(--border)"}`,background:sel?"var(--green-bg)":"transparent",color:sel?"var(--green)":"var(--text3)",cursor:"pointer",fontFamily:"'DM Sans',sans-serif",fontSize:13,fontWeight:sel?700:400}}>
-                        {sel?"✓":""} {l}
-                      </button>
-                    );
+                    const sel=(rest?.tipoCobranca??"mensal")===v;
+                    return <button key={v} onClick={()=>onUpdate("restaurants",restaurants.map(r=>r.id===selRestaurant?{...r,tipoCobranca:v}:r))}
+                      style={{flex:1,padding:"10px",borderRadius:10,border:`1px solid ${sel?"var(--green)":"var(--border)"}`,background:sel?"var(--green-bg)":"transparent",color:sel?"var(--green)":"var(--text3)",cursor:"pointer",fontFamily:"'DM Sans',sans-serif",fontSize:13,fontWeight:sel?700:400}}>
+                      {sel?"✓":""} {l}
+                    </button>;
                   })}
                 </div>
 
-                {isEnterprise && (
-                  <div style={{display:"flex",alignItems:"center",gap:10}}>
-                    <label style={{...S.label,marginBottom:0}}>Empregados contratados (51–100):</label>
-                    <input type="number" min="51" max="100" defaultValue={rest?.empMaxCustom??51}
-                      onBlur={e=>{
-                        const v = Math.min(100, Math.max(51, parseInt(e.target.value)||51));
-                        const updated=restaurants.map(r=>r.id===selRestaurant?{...r,empMaxCustom:v}:r);
-                        onUpdate("restaurants",updated);
-                      }}
-                      style={{...S.input,width:80,textAlign:"center",fontFamily:"'DM Mono',monospace"}}/>
-                    <span style={{color:"var(--text3)",fontSize:12}}>empregados</span>
-                  </div>
-                )}
-                {isOrcamento && (
-                  <div style={{display:"flex",alignItems:"center",gap:10}}>
-                    <label style={{...S.label,marginBottom:0}}>Empregados contratados (acima de 100):</label>
-                    <input type="number" min="101" defaultValue={rest?.empMaxCustom??101}
-                      onBlur={e=>{
-                        const v = Math.max(101, parseInt(e.target.value)||101);
-                        const updated=restaurants.map(r=>r.id===selRestaurant?{...r,empMaxCustom:v}:r);
-                        onUpdate("restaurants",updated);
-                      }}
-                      style={{...S.input,width:90,textAlign:"center",fontFamily:"'DM Mono',monospace"}}/>
-                    <span style={{color:"var(--text3)",fontSize:12}}>empregados</span>
-                  </div>
-                )}
-              </div>
+                {isEnt && <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:8}}>
+                  <label style={{...S.label,marginBottom:0}}>Empregados contratados (51–100):</label>
+                  <input type="number" min="51" max="100" defaultValue={rest?.empMaxCustom??51}
+                    onBlur={e=>{const v=Math.min(100,Math.max(51,parseInt(e.target.value)||51));onUpdate("restaurants",restaurants.map(r=>r.id===selRestaurant?{...r,empMaxCustom:v}:r));}}
+                    style={{...S.input,width:80,textAlign:"center",fontFamily:"'DM Mono',monospace"}}/>
+                </div>}
+                {isOrc && <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:8}}>
+                  <label style={{...S.label,marginBottom:0}}>Empregados (+100):</label>
+                  <input type="number" min="101" defaultValue={rest?.empMaxCustom??101}
+                    onBlur={e=>{const v=Math.max(101,parseInt(e.target.value)||101);onUpdate("restaurants",restaurants.map(r=>r.id===selRestaurant?{...r,empMaxCustom:v}:r));}}
+                    style={{...S.input,width:90,textAlign:"center",fontFamily:"'DM Mono',monospace"}}/>
+                </div>}
 
-              <div style={{...S.card,marginBottom:20,background:"var(--ac-bg)",border:"1px solid var(--ac)33"}}>
-                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:10}}>
+                {/* Valor calculado */}
+                <div style={{padding:"14px",borderRadius:12,background:"var(--ac-bg)",border:"1px solid var(--ac)33",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
                   <div>
-                    <div style={{color:"var(--text3)",fontSize:11,fontWeight:600,textTransform:"uppercase",letterSpacing:0.5,marginBottom:4}}>Valor a cobrar</div>
-                    {isOrcamento ? (
-                      <div>
-                        <div style={{color:"var(--ac-text)",fontWeight:800,fontSize:18,fontFamily:"'DM Sans',sans-serif"}}>On Demand</div>
-                        <div style={{color:"var(--text3)",fontSize:12,marginTop:4}}>Acima de 100 empregados — entre em contato para definir valor</div>
-                      </div>
-                    ) : (
-                      <div>
-                        <div style={{color:"var(--ac-text)",fontWeight:800,fontSize:22,fontFamily:"'DM Mono',monospace"}}>
-                          R$ {valorTotal?.toLocaleString("pt-BR",{minimumFractionDigits:2})}
-                          <span style={{color:"var(--text3)",fontSize:13,fontWeight:400}}>/mês</span>
+                    <div style={{color:"var(--text3)",fontSize:11,fontWeight:600,marginBottom:4}}>VALOR A COBRAR</div>
+                    {isOrc
+                      ? <div style={{color:"var(--ac-text)",fontWeight:800,fontSize:18}}>Sob orçamento</div>
+                      : <div style={{color:"var(--ac-text)",fontWeight:800,fontSize:22,fontFamily:"'DM Mono',monospace"}}>
+                          R$ {valorMensal?.toLocaleString("pt-BR",{minimumFractionDigits:2})}<span style={{color:"var(--text3)",fontSize:13,fontWeight:400}}>/mês</span>
                         </div>
-                        {isEnterprise && (
-                          <div style={{color:"var(--text3)",fontSize:12,marginTop:4}}>
-                            {empMax} emp. × R$7,99/emp.
-                          </div>
-                        )}
-                      </div>
-                    )}
+                    }
+                    {isEnt && <div style={{color:"var(--text3)",fontSize:11,marginTop:2}}>{empMax} emp. × R$7,99{tipo==="anual"?" × 0,9 (−10%)":" "}</div>}
                   </div>
-                  <div style={{color:"var(--text3)",fontSize:13}}>
-                    {empAtivos}/{isOrcamento ? "∞" : empMax} empregados ativos
-                  </div>
+                  <div style={{color:"var(--text3)",fontSize:13}}>{empAtivos}/{isOrc?"∞":empMax} ativos</div>
                 </div>
               </div>
+
+              {/* ── 3. GERAR COBRANÇA ── */}
               <div style={{...S.card,marginBottom:20}}>
                 <h4 style={{color:"var(--text)",fontWeight:700,fontSize:14,margin:"0 0 4px"}}>📲 Gerar cobrança</h4>
-                <p style={{color:"var(--text3)",fontSize:12,margin:"0 0 16px"}}>Envia a fatura via WhatsApp para o contato financeiro do restaurante</p>
+                <p style={{color:"var(--text3)",fontSize:12,margin:"0 0 14px"}}>Envia a fatura via WhatsApp para o contato financeiro</p>
 
-                {!rest?.whatsappFin && (
-                  <div style={{padding:"10px 14px",borderRadius:10,background:"var(--red-bg)",border:"1px solid var(--red)33",marginBottom:12}}>
-                    <p style={{color:"var(--red)",fontSize:12,margin:0}}>⚠️ WhatsApp financeiro não cadastrado. Edite o restaurante para adicionar.</p>
+                {!rest?.whatsappFin && <div style={{padding:"10px 14px",borderRadius:10,background:"var(--red-bg)",border:"1px solid var(--red)33",marginBottom:12}}>
+                  <p style={{color:"var(--red)",fontSize:12,margin:0}}>⚠️ WhatsApp financeiro não cadastrado. Edite o restaurante.</p>
+                </div>}
+
+                {/* Próximo ciclo pré-calculado */}
+                <div style={{background:"var(--bg2)",borderRadius:12,padding:"16px",marginBottom:14,border:"1px solid var(--border)"}}>
+                  <div style={{color:"var(--text3)",fontSize:11,fontWeight:700,textTransform:"uppercase",letterSpacing:0.5,marginBottom:10}}>Próximo ciclo</div>
+                  <div style={{padding:"10px 14px",borderRadius:10,background:"var(--card-bg)",border:"1px solid var(--border)",marginBottom:12}}>
+                    <div style={{color:"var(--text)",fontWeight:700,fontSize:15,fontFamily:"'DM Mono',monospace"}}>{fmt(proxIni)} a {fmt(proxFim)}</div>
+                    <div style={{color:"var(--text3)",fontSize:12,marginTop:2}}>{tipo==="anual"?"Ciclo anual":"Ciclo 30 dias"} · Vencimento: {fmt(proxFim)}</div>
                   </div>
-                )}
-
-                {/* Próximo ciclo calculado automaticamente */}
-                {(()=>{
-                  const fmtBrLocal = (d) => d ? new Date(d+"T12:00:00").toLocaleDateString("pt-BR") : "—";
-
-                  // Próximo ciclo começa no dia seguinte ao fim do ciclo atual
-                  const proximoIni = (() => {
-                    if (cicloFim) {
-                      const d = new Date(cicloFim+"T12:00:00"); d.setDate(d.getDate()+1);
-                      return d.toISOString().slice(0,10);
-                    }
-                    if (trialFim) {
-                      const d = new Date(trialFim+"T12:00:00"); d.setDate(d.getDate()+1);
-                      return d.toISOString().slice(0,10);
-                    }
-                    return today();
-                  })();
-
-                  const proximoFim = (() => {
-                    const d = new Date(proximoIni+"T12:00:00");
-                    if (tipoCobranca === "anual") d.setFullYear(d.getFullYear()+1);
-                    else d.setDate(d.getDate()+30);
-                    d.setDate(d.getDate()-1);
-                    return d.toISOString().slice(0,10);
-                  })();
-
-                  const proximoVenc = proximoFim;
-                  const proximoPeriodo = proximoIni.slice(0,7);
-                  const proximoPeriodoLabel = `${fmtBrLocal(proximoIni)} a ${fmtBrLocal(proximoFim)}`;
-                  const valorSugerido = cobValor ? parseFloat(cobValor) : (valorTotal ?? 0);
-
-                  return (
+                  <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:10}}>
                     <div>
-                      {/* Card do próximo ciclo */}
-                      <div style={{background:"var(--bg2)",borderRadius:12,padding:"16px",marginBottom:16,border:"1px solid var(--border)"}}>
-                        <div style={{color:"var(--text3)",fontSize:11,fontWeight:700,textTransform:"uppercase",letterSpacing:0.5,marginBottom:12}}>Próxima cobrança</div>
-
-                        {/* Período calculado */}
-                        <div style={{padding:"10px 14px",borderRadius:10,background:"var(--card-bg)",border:"1px solid var(--border)",marginBottom:12}}>
-                          <div style={{color:"var(--text3)",fontSize:11,marginBottom:4}}>Período</div>
-                          <div style={{color:"var(--text)",fontWeight:700,fontSize:14,fontFamily:"'DM Mono',monospace"}}>
-                            {fmtBrLocal(proximoIni)} a {fmtBrLocal(proximoFim)}
-                          </div>
-                          <div style={{color:"var(--text3)",fontSize:11,marginTop:2}}>
-                            {tipoCobranca==="anual"?"Ciclo anual":"Ciclo mensal (30 dias)"} · Vencimento: {fmtBrLocal(proximoVenc)}
-                          </div>
-                        </div>
-
-                        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:12}}>
-                          <div>
-                            <div style={{color:"var(--text3)",fontSize:11,marginBottom:4}}>Início do ciclo</div>
-                            <input type="date" value={cobPeriodo||proximoIni}
-                              onChange={e=>setCobPeriodo(e.target.value)}
-                              style={{...S.input,fontFamily:"'DM Mono',monospace",fontSize:13}}/>
-                          </div>
-                          <div>
-                            <div style={{color:"var(--text3)",fontSize:11,marginBottom:4}}>Vencimento</div>
-                            <input type="date" value={cobVenc||proximoVenc}
-                              onChange={e=>setCobVenc(e.target.value)}
-                              style={{...S.input,fontFamily:"'DM Mono',monospace",fontSize:13}}/>
-                          </div>
-                          <div style={{gridColumn:"1/-1"}}>
-                            <div style={{color:"var(--text3)",fontSize:11,marginBottom:4}}>Valor (R$)</div>
-                            <input type="number"
-                              value={cobValor || valorSugerido?.toFixed(2)}
-                              onChange={e=>setCobValor(e.target.value)}
-                              style={{...S.input,fontFamily:"'DM Mono',monospace",fontSize:18,fontWeight:700,color:"var(--ac-text)"}}/>
-                            {valorTotal && <p style={{color:"var(--text3)",fontSize:11,marginTop:4,marginBottom:0}}>Plano {plano.label} — R${valorTotal.toFixed(2)}/mês</p>}
-                          </div>
-                        </div>
-
-                        {/* Forma de pagamento */}
-                        <div style={{color:"var(--text3)",fontSize:11,marginBottom:8}}>Forma de pagamento</div>
-                        <div style={{display:"flex",gap:8,marginBottom:12}}>
-                          {[["pix","PIX"],["link","Link de pagamento"]].map(([v,l])=>(
-                            <button key={v} onClick={()=>{ setCobForma(v); if(v==="pix") setCobChave(PIX_PADRAO); else setCobChave(""); }}
-                              style={{flex:1,padding:"10px",borderRadius:10,border:`2px solid ${cobForma===v?ac:"var(--border)"}`,background:cobForma===v?"var(--ac-bg)":"transparent",color:cobForma===v?"var(--ac-text)":"var(--text3)",cursor:"pointer",fontFamily:"'DM Sans',sans-serif",fontSize:13,fontWeight:cobForma===v?700:400}}>
-                              {l}
-                            </button>
-                          ))}
-                        </div>
-                        {cobForma==="pix" ? (
-                          <div>
-                            <input value={cobChave} onChange={e=>setCobChave(e.target.value)} placeholder="Chave PIX" style={S.input}/>
-                            <p style={{color:"var(--text3)",fontSize:11,marginTop:4,marginBottom:0}}>
-                              Padrão: <strong>{PIX_PADRAO}</strong> — {PIX_NOME}
-                              {cobChave!==PIX_PADRAO&&<button onClick={()=>setCobChave(PIX_PADRAO)} style={{background:"none",border:"none",color:ac,cursor:"pointer",fontSize:11,marginLeft:8,padding:0,textDecoration:"underline"}}>Restaurar</button>}
-                            </p>
-                          </div>
-                        ) : (
-                          <input value={cobLink} onChange={e=>setCobLink(e.target.value)} placeholder="Cole o link de pagamento" style={S.input}/>
-                        )}
-                      </div>
-
-                      {/* Preview resumido */}
-                      <div style={{background:"#f0fdf4",borderRadius:10,padding:"12px 14px",marginBottom:14,border:"1px solid #86efac"}}>
-                        <div style={{color:"#166534",fontSize:11,fontWeight:700,marginBottom:6}}>📱 Mensagem que será enviada</div>
-                        <div style={{color:"#166534",fontSize:13,lineHeight:1.6}}>
-                          Ola, <strong>{rest?.name}</strong>! Segue o link da sua fatura AppTip referente ao período <strong>{fmtBrLocal(cobPeriodo||proximoIni)} a {fmtBrLocal(cobVenc||proximoFim)}</strong>: apptip.app/fatura/(link gerado)
-                        </div>
-                      </div>
-
-                      <button onClick={()=>{
-                        if (!rest?.whatsappFin) { alert("Cadastre o WhatsApp financeiro primeiro."); return; }
-                        const valor = parseFloat(cobValor) || valorSugerido;
-                        if (!valor) { alert("Verifique o valor da cobrança."); return; }
-                        if (cobForma==="link" && !cobLink.trim()) { alert("Cole o link de pagamento."); return; }
-                        const periodo = cobPeriodo || proximoIni;
-                        const venc = cobVenc || proximoVenc;
-                        const periodoFimCalc = cobVenc || proximoFim;
-                        const [a,m] = periodo.split("-");
-                        const periodoLabel = `${fmtBrLocal(periodo)} a ${fmtBrLocal(periodoFimCalc)}`;
-                        const chave = cobForma==="pix"?(cobChave||PIX_PADRAO):cobLink;
-                        const cob = { id:Date.now().toString(), periodo, periodoLabel, venc, valor, forma:cobForma==="pix"?"PIX":"Link", chave, criadaEm:new Date().toISOString(), status:"pendente" };
-                        saveFinanceiro({ cobrancas:[...(fin.cobrancas??[]).filter(c=>!(c.autoGerada&&c.status==="pendente")), cob] });
-                        const faturaUrl = `https://apptip.app/fatura/${cob.id}`;
-                        const msg = `Ola, *${rest?.name}*!\n\nSegue o link da sua fatura *AppTip* referente a *${periodoLabel}*:\n\n${faturaUrl}\n\nQualquer duvida estamos a disposicao!\n*Equipe AppTip*`;
-                        const numero = rest.whatsappFin.replace(/\D/g,"");
-                        const urlWpp = `https://wa.me/55${numero}?text=${encodeURIComponent(msg)}`;
-                        setTimeout(()=>{ window.location.href = urlWpp; }, 300);
-                        setCobValor(""); setCobVenc(""); setCobLink(""); setCobPeriodo("");
-                        onUpdate("_toast","📲 Cobrança enviada!");
-                      }} disabled={!rest?.whatsappFin}
-                        style={{...S.btnPrimary,opacity:rest?.whatsappFin?1:0.5,cursor:rest?.whatsappFin?"pointer":"not-allowed"}}>
-                        📲 Enviar cobrança via WhatsApp
-                      </button>
+                      <div style={{color:"var(--text3)",fontSize:11,marginBottom:4}}>Início (editável)</div>
+                      <input type="date" value={cobPeriodo||proxIni} onChange={e=>setCobPeriodo(e.target.value)} style={{...S.input,fontSize:13}}/>
                     </div>
-                  );
-                })()}
+                    <div>
+                      <div style={{color:"var(--text3)",fontSize:11,marginBottom:4}}>Vencimento (editável)</div>
+                      <input type="date" value={cobVenc||proxFim} onChange={e=>setCobVenc(e.target.value)} style={{...S.input,fontSize:13}}/>
+                    </div>
+                    <div style={{gridColumn:"1/-1"}}>
+                      <div style={{color:"var(--text3)",fontSize:11,marginBottom:4}}>Valor (R$)</div>
+                      <input type="number" value={cobValor||(valorMensal?.toFixed(2)??"0")} onChange={e=>setCobValor(e.target.value)}
+                        style={{...S.input,fontSize:18,fontWeight:700,color:"var(--ac-text)",fontFamily:"'DM Mono',monospace"}}/>
+                    </div>
+                  </div>
+                  <div style={{color:"var(--text3)",fontSize:11,marginBottom:8}}>Forma de pagamento</div>
+                  <div style={{display:"flex",gap:8,marginBottom:10}}>
+                    {[["pix","PIX"],["link","Link"]].map(([v,l])=>(
+                      <button key={v} onClick={()=>{setCobForma(v);if(v==="pix")setCobChave(PIX_PADRAO);else setCobChave("");}}
+                        style={{flex:1,padding:"9px",borderRadius:10,border:`2px solid ${cobForma===v?ac:"var(--border)"}`,background:cobForma===v?"var(--ac-bg)":"transparent",color:cobForma===v?"var(--ac-text)":"var(--text3)",cursor:"pointer",fontFamily:"'DM Sans',sans-serif",fontSize:13,fontWeight:cobForma===v?700:400}}>
+                        {l}
+                      </button>
+                    ))}
+                  </div>
+                  {cobForma==="pix"
+                    ? <div><input value={cobChave} onChange={e=>setCobChave(e.target.value)} placeholder="Chave PIX" style={S.input}/>
+                        <p style={{color:"var(--text3)",fontSize:11,marginTop:4,marginBottom:0}}>Padrão: <strong>{PIX_PADRAO}</strong> — {PIX_NOME}
+                          {cobChave!==PIX_PADRAO&&<button onClick={()=>setCobChave(PIX_PADRAO)} style={{background:"none",border:"none",color:ac,cursor:"pointer",fontSize:11,marginLeft:8,padding:0,textDecoration:"underline"}}>Restaurar</button>}
+                        </p></div>
+                    : <input value={cobLink} onChange={e=>setCobLink(e.target.value)} placeholder="Cole o link de pagamento" style={S.input}/>
+                  }
+                </div>
+
+                {/* Preview */}
+                <div style={{background:"#f0fdf4",borderRadius:10,padding:"10px 14px",marginBottom:12,border:"1px solid #86efac"}}>
+                  <div style={{color:"#166534",fontSize:11,fontWeight:700,marginBottom:4}}>📱 Mensagem que será enviada</div>
+                  <div style={{color:"#166534",fontSize:13,lineHeight:1.6}}>
+                    Ola, <strong>{rest?.name}</strong>! Segue o link da sua fatura AppTip referente ao período <strong>{fmt(cobPeriodo||proxIni)} a {fmt(cobVenc||proxFim)}</strong>: apptip.app/fatura/(link)
+                  </div>
+                </div>
+
+                <button onClick={()=>{
+                  if(!rest?.whatsappFin){alert("Cadastre o WhatsApp financeiro primeiro.");return;}
+                  const valor=parseFloat(cobValor)||valorMensal;
+                  if(!valor){alert("Verifique o valor.");return;}
+                  if(cobForma==="link"&&!cobLink.trim()){alert("Cole o link de pagamento.");return;}
+                  const ini=cobPeriodo||proxIni;
+                  const fim=cobVenc||proxFim;
+                  const pLabel=`${fmt(ini)} a ${fmt(fim)}`;
+                  const chave=cobForma==="pix"?(cobChave||PIX_PADRAO):cobLink;
+                  const cob={id:Date.now().toString(),periodoLabel:pLabel,periodoInicio:ini,periodoFim:fim,venc:fim,valor,forma:cobForma==="pix"?"PIX":"Link",chave,criadaEm:new Date().toISOString(),status:"pendente"};
+                  saveFin({cobrancas:[...(fin.cobrancas??[]).filter(c=>!(c.autoGerada&&c.status==="pendente")),cob]});
+                  const faturaUrl=`https://apptip.app/fatura/${cob.id}`;
+                  const msg=`Ola, *${rest?.name}*!\n\nSegue o link da sua fatura *AppTip* referente ao periodo *${pLabel}*:\n\n${faturaUrl}\n\nQualquer duvida estamos a disposicao!\n*Equipe AppTip*`;
+                  const numero=rest.whatsappFin.replace(/\D/g,"");
+                  setTimeout(()=>{window.location.href=`https://wa.me/55${numero}?text=${encodeURIComponent(msg)}`;},300);
+                  setCobValor("");setCobVenc("");setCobLink("");setCobPeriodo("");
+                  onUpdate("_toast","📲 Cobrança enviada!");
+                }} disabled={!rest?.whatsappFin}
+                  style={{...S.btnPrimary,opacity:rest?.whatsappFin?1:0.5,cursor:rest?.whatsappFin?"pointer":"not-allowed"}}>
+                  📲 Enviar cobrança via WhatsApp
+                </button>
               </div>
 
-              {/* Cobranças pendentes */}
-              {(fin.cobrancas??[]).filter(c=>c.status==="pendente"||c.status==="aguardando_confirmacao").length > 0 && (
+              {/* ── 4. COBRANÇAS EM ABERTO ── */}
+              {cobrancasAbertas.length > 0 && (
                 <div style={{...S.card,marginBottom:20,border:"1px solid #f59e0b33",background:"#fffbeb"}}>
                   <h4 style={{color:"#92400e",fontWeight:700,fontSize:14,margin:"0 0 12px"}}>⏳ Cobranças em aberto</h4>
                   <div style={{display:"flex",flexDirection:"column",gap:8}}>
-                    {(fin.cobrancas??[]).filter(c=>c.status==="pendente"||c.status==="aguardando_confirmacao").map(c=>(
+                    {cobrancasAbertas.map(c=>(
                       <div key={c.id} style={{padding:"12px 14px",borderRadius:10,background:"#fff",border:`1px solid ${c.status==="aguardando_confirmacao"?"#86efac":"#fde68a"}`}}>
                         <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:8}}>
                           <div>
                             <div style={{color:"var(--text)",fontWeight:700,fontSize:14,marginBottom:2}}>
-                              R$ {c.valor?.toLocaleString("pt-BR",{minimumFractionDigits:2})} — {c.periodoLabel}
+                              R$ {c.valor?.toLocaleString("pt-BR",{minimumFractionDigits:2})}
                             </div>
-                            <div style={{color:"var(--text3)",fontSize:12,marginBottom:6}}>
-                              {c.forma} · {c.venc?`Venc. ${new Date(c.venc+"T12:00:00").toLocaleDateString("pt-BR")}`:""} · Enviada em {new Date(c.criadaEm).toLocaleDateString("pt-BR")}
+                            <div style={{color:"var(--text3)",fontSize:12,marginBottom:4}}>
+                              {c.periodoLabel} · {c.forma} · Venc. {fmt(c.venc)}
                             </div>
                             {c.status==="aguardando_confirmacao" && (
                               <div style={{color:"#166534",fontSize:12,fontWeight:600,background:"#f0fdf4",padding:"4px 10px",borderRadius:6,display:"inline-block"}}>
-                                ✅ Cliente informou que pagou em {c.clienteConfirmouEm?new Date(c.clienteConfirmouEm).toLocaleDateString("pt-BR"):"—"} — aguarda sua confirmação
+                                ✅ Cliente informou pagamento em {fmt(c.clienteConfirmouEm?.slice(0,10))} — aguarda sua confirmação
                               </div>
                             )}
                           </div>
                           <div style={{display:"flex",gap:6,flexShrink:0}}>
-                            {c.status==="aguardando_confirmacao" && (
-                              <button onClick={()=>confirmarPagamento(c)}
-                                style={{padding:"7px 14px",borderRadius:8,border:"1px solid var(--green)44",background:"var(--green-bg)",color:"var(--green)",cursor:"pointer",fontFamily:"'DM Sans',sans-serif",fontSize:13,fontWeight:700}}>
-                                ✅ Confirmar
-                              </button>
-                            )}
-                            {c.status==="aguardando_confirmacao" && (
-                              <button onClick={()=>{
-                                if(!window.confirm("Negar pagamento e marcar como inadimplente?")) return;
-                                saveFinanceiro({
-                                  cobrancas:(fin.cobrancas??[]).map(x=>x.id===c.id?{...x,status:"pendente",clienteConfirmou:false}:x),
-                                  status:"inadimplente"
-                                });
-                                onUpdate("_toast","🔴 Marcado como inadimplente.");
-                              }} style={{padding:"7px 12px",borderRadius:8,border:"1px solid var(--red)33",background:"transparent",color:"var(--red)",cursor:"pointer",fontFamily:"'DM Sans',sans-serif",fontSize:12}}>
-                                ✕ Negar
-                              </button>
-                            )}
+                            {c.status==="aguardando_confirmacao" && <>
+                              <button onClick={()=>confirmar(c)} style={{padding:"7px 14px",borderRadius:8,border:"1px solid var(--green)44",background:"var(--green-bg)",color:"var(--green)",cursor:"pointer",fontFamily:"'DM Sans',sans-serif",fontSize:13,fontWeight:700}}>✅ Confirmar</button>
+                              <button onClick={()=>{if(!window.confirm("Negar e marcar inadimplente?"))return;saveFin({cobrancas:(fin.cobrancas??[]).map(x=>x.id===c.id?{...x,status:"pendente",clienteConfirmou:false}:x),status:"inadimplente"});onUpdate("_toast","🔴 Inadimplente.");}} style={{padding:"7px 10px",borderRadius:8,border:"1px solid var(--red)33",background:"transparent",color:"var(--red)",cursor:"pointer",fontFamily:"'DM Sans',sans-serif",fontSize:12}}>✕ Negar</button>
+                            </>}
                             {c.status==="pendente" && (
-                              <button onClick={()=>{
-                                if(!window.confirm("Cancelar esta cobrança?")) return;
-                                saveFinanceiro({cobrancas:(fin.cobrancas??[]).map(x=>x.id===c.id?{...x,status:"cancelada"}:x)});
-                              }} style={{padding:"7px 12px",borderRadius:8,border:"1px solid var(--border)",background:"transparent",color:"var(--text3)",cursor:"pointer",fontFamily:"'DM Sans',sans-serif",fontSize:12}}>
-                                ✕ Cancelar
-                              </button>
+                              <button onClick={()=>{if(!window.confirm("Cancelar esta cobrança?"))return;saveFin({cobrancas:(fin.cobrancas??[]).map(x=>x.id===c.id?{...x,status:"cancelada"}:x)});}} style={{padding:"7px 10px",borderRadius:8,border:"1px solid var(--border)",background:"transparent",color:"var(--text3)",cursor:"pointer",fontFamily:"'DM Sans',sans-serif",fontSize:12}}>✕ Cancelar</button>
                             )}
                           </div>
                         </div>
@@ -4602,26 +4385,26 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }
                 </div>
               )}
 
-              {/* Histórico de pagamentos confirmados */}
+              {/* ── 5. HISTÓRICO ── */}
               <div style={{...S.card}}>
-                <h4 style={{color:"var(--text)",fontWeight:700,fontSize:14,margin:"0 0 16px"}}>📋 Histórico de pagamentos</h4>
-                {pagamentos.length === 0 && (
-                  <p style={{color:"var(--text3)",fontSize:13,textAlign:"center",padding:"20px 0"}}>Nenhum pagamento confirmado ainda.</p>
-                )}
+                <h4 style={{color:"var(--text)",fontWeight:700,fontSize:14,margin:"0 0 14px"}}>📋 Histórico de pagamentos</h4>
+                {pagamentos.length === 0 && <p style={{color:"var(--text3)",fontSize:13,textAlign:"center",padding:"20px 0"}}>Nenhum pagamento confirmado ainda.</p>}
                 <div style={{display:"flex",flexDirection:"column",gap:8}}>
-                  {pagamentos.slice(0,12).map(p=>(
+                  {pagamentos.map(p=>(
                     <div key={p.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"12px 14px",borderRadius:10,background:"var(--bg2)"}}>
                       <div>
                         <div style={{color:"var(--text)",fontWeight:700,fontSize:14,fontFamily:"'DM Mono',monospace",marginBottom:2}}>
                           R$ {p.valor?.toLocaleString("pt-BR",{minimumFractionDigits:2})}
                         </div>
                         <div style={{color:"var(--text3)",fontSize:12}}>
-                          {p.data ? new Date(p.data+"T12:00:00").toLocaleDateString("pt-BR") : "—"} · {p.forma?.toUpperCase()} · {p.obs||""}
+                          {fmt(p.data)} · {p.forma?.toUpperCase()} · {p.periodoLabel || p.obs || ""}
                         </div>
-                        <div style={{color:"var(--green)",fontSize:11,marginTop:2,fontWeight:600}}>
-                          ✅ Confirmado pelo Admin
-                        </div>
+                        <div style={{color:"var(--green)",fontSize:11,marginTop:2,fontWeight:600}}>✅ Confirmado pelo Admin</div>
                       </div>
+                      <button onClick={()=>{if(!window.confirm("Cancelar este pagamento? O ciclo será revertido."))return;saveFin({pagamentos:pagamentos.filter(x=>x.id!==p.id),cicloInicio:null,cicloFim:null,status:"ativo"});onUpdate("_toast","↩ Pagamento cancelado.");}}
+                        style={{background:"none",border:"1px solid var(--red)33",borderRadius:8,color:"var(--red)",cursor:"pointer",fontSize:12,padding:"5px 10px",fontFamily:"'DM Sans',sans-serif"}}>
+                        Cancelar
+                      </button>
                     </div>
                   ))}
                 </div>
