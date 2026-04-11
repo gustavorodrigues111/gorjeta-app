@@ -413,7 +413,7 @@ function ExportModal({ onClose, employees, roles, tips, restaurant }) {
 // COMUNICADOS TAB (employee view)
 //
 function ComunicadosTab({ empId, restaurantId, communications, commAcks, onUpdate }) {
-  const myComms = communications.filter(c => c.restaurantId === restaurantId)
+  const myComms = communications.filter(c => c.restaurantId === restaurantId && !c.autoSchedule)
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   const pending = myComms.filter(c => !commAcks?.[c.id]?.[empId]);
   const done    = myComms.filter(c =>  commAcks?.[c.id]?.[empId]);
@@ -545,25 +545,31 @@ function FaleDpTab({ empId, emp, restaurantId, dpMessages, onUpdate }) {
 // COMUNICADOS MANAGER TAB (manager/super view)
 //
 function ComunicadosManagerTab({ restaurantId, communications, commAcks, employees, onUpdate, currentManagerName }) {
-  const myComms = communications.filter(c => c.restaurantId === restaurantId)
+  const myComms = communications.filter(c => c.restaurantId === restaurantId && !c.autoSchedule)
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   const restEmps = employees.filter(e => e.restaurantId === restaurantId && !(e.inactive && e.inactiveFrom && e.inactiveFrom <= today()));
   const [showNew, setShowNew] = useState(false);
   const [title, setTitle] = useState("");
   const [body, setBody]   = useState("");
   const [selComm, setSelComm] = useState(null);
-  const [targetType, setTargetType] = useState("all");
-  const [targetValue, setTargetValue] = useState("");
+  const [selAreas, setSelAreas] = useState([]);
+  const [selEmps, setSelEmps] = useState([]);
   const ac = "#f5c842";
+
+  // target logic: "all" | "areas:[Bar,Cozinha]" | "emps:[id1,id2]"
+  function toggleArea(a) { setSelAreas(p => p.includes(a) ? p.filter(x=>x!==a) : [...p,a]); setSelEmps([]); }
+  function toggleEmp(id) { setSelEmps(p => p.includes(id) ? p.filter(x=>x!==id) : [...p,id]); setSelAreas([]); }
+  function selectAll() { setSelAreas([]); setSelEmps([]); }
+  const isAll = selAreas.length===0 && selEmps.length===0;
 
   function publish() {
     if (!title.trim() || !body.trim()) return;
-    if (targetType==="area" && !targetValue) { alert("Selecione uma área."); return; }
-    if (targetType==="emp" && !targetValue) { alert("Selecione um empregado."); return; }
-    const target = targetType==="all" ? "all" : targetType==="area" ? `area:${targetValue}` : `emp:${targetValue}`;
+    let target = "all";
+    if (selAreas.length > 0) target = `areas:${selAreas.join(",")}`;
+    else if (selEmps.length > 0) target = `emps:${selEmps.join(",")}`;
     const c = { id: Date.now().toString(), restaurantId, title: title.trim(), body: body.trim(), createdAt: new Date().toISOString(), createdBy: currentManagerName, target };
     onUpdate("communications", [...communications, c]);
-    setTitle(""); setBody(""); setTargetType("all"); setTargetValue(""); setShowNew(false);
+    setTitle(""); setBody(""); setSelAreas([]); setSelEmps([]); setShowNew(false);
   }
 
   function remove(id) {
@@ -580,7 +586,8 @@ function ComunicadosManagerTab({ restaurantId, communications, commAcks, employe
         <button onClick={() => setSelComm(null)} style={{ ...S.btnSecondary, marginBottom: 16 }}>← Voltar</button>
         <div style={{ ...S.card, marginBottom: 16 }}>
           <div style={{ color: "var(--text)", fontWeight: 700, fontSize: 16, marginBottom: 4 }}>{c.title}</div>
-          <div style={{ color: "var(--text3)", fontSize: 12, marginBottom: 12 }}>Publicado em {new Date(c.createdAt).toLocaleString("pt-BR")} por {c.createdBy}</div>
+          <div style={{ color: "var(--text3)", fontSize: 12, marginBottom: 4 }}>Publicado em {new Date(c.createdAt).toLocaleString("pt-BR")} por {c.createdBy}</div>
+          <div style={{fontSize:11,color:"var(--text3)",marginBottom:12}}>→ {!c.target||c.target==="all"?"Todos":c.target.startsWith("emps:")?`${c.target.replace("emps:","").split(",").length} empregado(s)`:c.target.startsWith("areas:")?`Áreas: ${c.target.replace("areas:","").replace(/,/g,", ")}`:c.target.startsWith("emp:")?employees.find(e=>e.id===c.target.replace("emp:",""))?.name?.split(" ")[0]??"":`Área ${c.target.replace("area:","")`}</div>
           <div style={{ color: "var(--text2)", fontSize: 13, lineHeight: 1.6, whiteSpace: "pre-wrap", marginBottom: 12 }}>{c.body}</div>
         </div>
         {(() => {
@@ -595,6 +602,8 @@ function ComunicadosManagerTab({ restaurantId, communications, commAcks, employe
             return true; // simplified, will show all for area (ack table)
           }) : targetEmps;
           const targetLabel = !c.target || c.target==="all" ? "Todos os empregados"
+            : c.target.startsWith("emps:") ? `Empregados: ${c.target.replace("emps:","").split(",").map(id=>employees.find(e=>e.id===id)?.name?.split(" ")[0]??"").join(", ")}`
+            : c.target.startsWith("areas:") ? `Áreas: ${c.target.replace("areas:","").replace(/,/g,", ")}`
             : c.target.startsWith("emp:") ? `Empregado: ${employees.find(e=>e.id===c.target.replace("emp:",""))?.name??""}`
             : `Área: ${c.target.replace("area:","")}`;
           return (
@@ -633,26 +642,42 @@ function ComunicadosManagerTab({ restaurantId, communications, commAcks, employe
       </button>
       {showNew && (
         <div style={{ ...S.card, marginBottom: 20 }}>
-          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+            {/* Destinatários */}
             <div>
-              <label style={S.label}>Destinatário</label>
-              <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
-                {[["all","👥 Todos"],["area","🏷️ Área"],["emp","👤 Empregado"]].map(([v,l])=>(
-                  <button key={v} onClick={()=>{setTargetType(v);setTargetValue("");}} style={{padding:"6px 14px",borderRadius:8,border:`1px solid ${targetType===v?"#f5c842":"var(--border)"}`,background:targetType===v?"#f5c84222":"transparent",color:targetType===v?"#f5c842":"var(--text3)",cursor:"pointer",fontFamily:"DM Mono,monospace",fontSize:12}}>{l}</button>
-                ))}
+              <label style={S.label}>Destinatários</label>
+              {/* Todos button */}
+              <div style={{marginBottom:8}}>
+                <button onClick={selectAll} style={{padding:"5px 14px",borderRadius:20,border:`1px solid ${isAll?"#f5c842":"var(--border)"}`,background:isAll?"#f5c84222":"transparent",color:isAll?"#f5c842":"var(--text3)",cursor:"pointer",fontFamily:"DM Mono,monospace",fontSize:12,fontWeight:isAll?700:400}}>
+                  👥 Todos
+                </button>
               </div>
-              {targetType==="area" && (
-                <select value={targetValue} onChange={e=>setTargetValue(e.target.value)} style={{...S.input,marginTop:8}}>
-                  <option value="">Selecionar área…</option>
-                  {AREAS.map(a=><option key={a} value={a}>{a}</option>)}
-                </select>
-              )}
-              {targetType==="emp" && (
-                <select value={targetValue} onChange={e=>setTargetValue(e.target.value)} style={{...S.input,marginTop:8}}>
-                  <option value="">Selecionar empregado…</option>
-                  {restEmps.sort((a,b)=>a.name.localeCompare(b.name)).map(e=><option key={e.id} value={e.id}>{e.name}</option>)}
-                </select>
-              )}
+              {/* Areas */}
+              <div style={{marginBottom:6}}>
+                <div style={{color:"var(--text3)",fontSize:10,marginBottom:4}}>ÁREAS</div>
+                <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+                  {AREAS.map(a=>{
+                    const on = selAreas.includes(a);
+                    return <button key={a} onClick={()=>toggleArea(a)} style={{padding:"4px 12px",borderRadius:20,border:`1px solid ${on?AREA_COLORS[a]??"#555":"var(--border)"}`,background:on?(AREA_COLORS[a]??"#555")+"22":"transparent",color:on?AREA_COLORS[a]??"var(--text)":"var(--text3)",cursor:"pointer",fontFamily:"DM Mono,monospace",fontSize:12,fontWeight:on?700:400}}>{a}</button>;
+                  })}
+                </div>
+              </div>
+              {/* Employees */}
+              <div>
+                <div style={{color:"var(--text3)",fontSize:10,marginBottom:4}}>EMPREGADOS ESPECÍFICOS</div>
+                <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+                  {restEmps.sort((a,b)=>a.name.localeCompare(b.name)).map(e=>{
+                    const on = selEmps.includes(e.id);
+                    return <button key={e.id} onClick={()=>toggleEmp(e.id)} style={{padding:"4px 12px",borderRadius:20,border:`1px solid ${on?"#10b981":"var(--border)"}`,background:on?"#10b98122":"transparent",color:on?"#10b981":"var(--text3)",cursor:"pointer",fontFamily:"DM Mono,monospace",fontSize:12,fontWeight:on?700:400}}>{e.name.split(" ")[0]}</button>;
+                  })}
+                </div>
+              </div>
+              {/* Summary */}
+              <div style={{marginTop:8,fontSize:11,color:"var(--text3)"}}>
+                {isAll ? "→ Enviando para todos os empregados"
+                  : selAreas.length>0 ? `→ Áreas: ${selAreas.join(", ")}`
+                  : `→ ${selEmps.length} empregado(s) selecionado(s)`}
+              </div>
             </div>
             <div><label style={S.label}>Título</label><input value={title} onChange={e => setTitle(e.target.value)} placeholder="Título do comunicado" style={S.input} /></div>
             <div><label style={S.label}>Conteúdo</label><textarea value={body} onChange={e => setBody(e.target.value)} rows={5} placeholder="Texto do comunicado…" style={{ ...S.input, resize: "vertical" }} /></div>
@@ -970,7 +995,7 @@ function WorkScheduleManagerTab({ restaurantId, employees, workSchedules, notifi
     // Notify all DP managers
     const dpMgrs = managers.filter(m => m.isDP && (m.restaurantIds ?? []).includes(restaurantId));
     if (dpMgrs.length > 0) {
-      const body = `📋 Horário alterado\n\nEmpregado: ${selEmp?.name}\nAlterado por: ${currentManagerName}\nVigência a partir de: ${fmtDate(validFrom)}\n\nNovo horário:\n${Object.entries(editDays).filter(([,d])=>d?.in&&d?.out).sort((a,b)=>parseInt(a[0])-parseInt(b[0])).map(([i,d])=>`${WEEK_DAYS_LABEL[i]}: ${d.in} – ${d.out} (intervalo ${d.break??0}min)`).join("\n")}`;
+      const body = `📋 Horário alterado\n\nEmpregado: ${selEmp?.name}\nAlterado por: ${currentManagerName}\nVigência a partir de: ${fmtDate(validFrom)}\n\nNovo horário:\n${[0,1,2,3,4,5,6].map(i=>{const d=editDays[i];return d?.in&&d?.out?`${WEEK_DAYS_LABEL[i]}: ${d.in} – ${d.out} (intervalo ${d.break??0}min)`:`${WEEK_DAYS_LABEL[i]}: Folga`;}).join("\n")}`;
       const notif = {
         id: `${Date.now()}-notif-${Math.random().toString(36).slice(2,5)}`,
         restaurantId,
@@ -984,7 +1009,7 @@ function WorkScheduleManagerTab({ restaurantId, employees, workSchedules, notifi
     }
 
     // Create comunicado only for this employee so they give ciência to new schedule
-    const schedBody = `Seu horário de trabalho foi atualizado por ${currentManagerName}.\nVigência a partir de: ${fmtDate(validFrom)}\n\nNovo horário:\n${Object.entries(editDays).filter(([,d])=>d?.in&&d?.out).sort((a,b)=>parseInt(a[0])-parseInt(b[0])).map(([i,d])=>`${WEEK_DAYS_LABEL[i]}: ${d.in} – ${d.out} (intervalo ${d.break??0}min)`).join("\n")}`;
+    const schedBody = `Seu horário de trabalho foi atualizado por ${currentManagerName}.\nVigência a partir de: ${fmtDate(validFrom)}\n\nNovo horário:\n${[0,1,2,3,4,5,6].map(i=>{const d=editDays[i];return d?.in&&d?.out?`${WEEK_DAYS_LABEL[i]}: ${d.in} – ${d.out} (intervalo ${d.break??0}min)`:`${WEEK_DAYS_LABEL[i]}: Folga`;}).join("\n")}`;
     const commForEmp = {
       id: `${Date.now()}-comm-${Math.random().toString(36).slice(2,5)}`,
       restaurantId,
@@ -993,6 +1018,7 @@ function WorkScheduleManagerTab({ restaurantId, employees, workSchedules, notifi
       createdAt: new Date().toISOString(),
       createdBy: currentManagerName,
       target: `emp:${selEmpId}`,
+      autoSchedule: true,
     };
     onUpdate("communications", [...(communications ?? []), commForEmp]);
 
@@ -1810,6 +1836,17 @@ function EmployeePortal({ employees, roles, tips, schedules, restaurants, commun
   const myComms = emp ? communications.filter(c => {
     if (c.restaurantId !== emp.restaurantId) return false;
     if (!c.target || c.target === "all") return true;
+    // New multi-select format
+    if (c.target.startsWith("emps:")) {
+      const ids = c.target.replace("emps:","").split(",");
+      return ids.includes(empId);
+    }
+    if (c.target.startsWith("areas:")) {
+      const areas = c.target.replace("areas:","").split(",");
+      const empRole = roles?.find(r => r.id === emp.roleId);
+      return empRole && areas.includes(empRole.area);
+    }
+    // Legacy single format
     if (c.target.startsWith("emp:")) return c.target === `emp:${empId}`;
     if (c.target.startsWith("area:")) {
       const empRole = roles?.find(r => r.id === emp.roleId);
