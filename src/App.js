@@ -567,31 +567,31 @@ Exemplo (gorjeta R$${fmtR(EX)}, ${totalPontos}pt no total):
       id:"__escala__",
       tabKey: "escala",
       q:"📅 Como funciona a escala e por que ela importa?",
-      a:"A escala define em quais dias você trabalhou. Ela é fundamental porque:\n\n• Você só recebe gorjeta nos dias em que está na escala\n• Dias marcados como Falta (F) ou Atestado (A) têm tratamento diferente\n• Dias de folga não geram gorjeta\n\nQuem define a escala é o gestor. Se notar algum erro, fale com o gestor o quanto antes — erros na escala afetam seu recebimento.",
+      a:"A escala registra sua presença em cada dia e define diretamente se você recebe gorjeta.\n\nVocê recebe gorjeta quando:\n✅ Trabalhando normalmente\n✅ Compensação de banco de horas (C)\n\nVocê NÃO recebe gorjeta quando:\n❌ Folga\n❌ Falta injustificada (F) — além de não receber, pode haver uma penalidade descontada da gorjeta do mês, caso o restaurante tenha essa regra ativa\n❌ Falta justificada (FJ)\n❌ Atestado médico (A)\n❌ Férias (V)\n\nSe notar algum erro na sua escala, avise o gestor o quanto antes — erros afetam diretamente o valor que você recebe.",
     },
     {
       id:"__recibos__",
       tabKey: "recibos",
       q:"📄 Como acesso meus recibos de gorjeta?",
-      a:"Na aba Recibos do aplicativo você encontra todos os seus recibos mensais.\n\nO gestor faz o upload dos recibos assim que são gerados. Caso algum não apareça, fale com o gestor para que ele faça o upload.",
+      a:"Na aba Recibos do aplicativo você encontra todos os seus recibos. O gestor faz o upload e ficam disponíveis aqui para você.\n\nOs recibos podem incluir:\n• Gorjeta mensal\n• Adiantamento salarial\n• Pagamento de férias\n• Décimo terceiro salário\n• Outros pagamentos\n\nSe algum recibo não aparecer, fale com o gestor.",
     },
     {
       id:"__dp__",
       tabKey: "dp",
       q:"💬 Para que serve o Fale com DP?",
-      a:"O canal Fale com DP é direto com o departamento pessoal. Use para:\n\n• Dúvidas trabalhistas (férias, horas extras, INSS...)\n• Atestados médicos e ausências\n• Solicitações de documentos\n• Qualquer questão formal com o RH\n\nVocê pode enviar de forma anônima se preferir. O gestor do DP responde diretamente pelo aplicativo.",
+      a:"Canal direto entre você e o departamento pessoal do restaurante. Use para:\n\n• Dúvidas trabalhistas (férias, horas extras, INSS, FGTS...)\n• Entrega de atestados e justificativas de falta\n• Solicitação de documentos (holerite, declaração de vínculo...)\n• Sugestões e elogios\n• Denúncias — você pode enviar de forma totalmente anônima\n\nO gestor responsável pelo DP responde diretamente pelo aplicativo.",
     },
     {
       id:"__comunicados__",
       tabKey: "comunicados",
       q:"📢 Como funcionam os comunicados?",
-      a:"Os comunicados são avisos enviados pelo gestor para a equipe.\n\nQuando chegar um comunicado novo:\n• Você recebe uma notificação na aba Comunicados\n• Leia e confirme clicando em \"Li e entendi\"\n• O gestor vê quem leu e quem não leu\n\nÉ importante confirmar — comunicados podem ter informações importantes sobre o funcionamento do restaurante.",
+      a:"Avisos enviados pelo gestor para a equipe ou grupos específicos.\n\nQuando chegar um comunicado novo:\n• Você recebe uma notificação\n• Leia o comunicado completo\n• Confirme clicando em \"Li e entendi\"\n\nO gestor acompanha quem confirmou. É importante confirmar — comunicados podem conter informações sobre escalas, regras e avisos importantes do restaurante.",
     },
     {
       id:"__pin__",
       tabKey: null,
       q:"🔐 O que é o PIN e como trocar?",
-      a:"O PIN é sua senha de acesso — um código de 4 a 6 dígitos.\n\nPara fazer login use:\n• Seu ID de empregado (ex: LBZ0005) ou CPF\n• Seu PIN\n\nPara trocar, acesse Configurações no aplicativo. Nunca compartilhe seu PIN. Em caso de esquecimento, fale com o gestor.",
+      a:"O PIN é sua senha de acesso ao AppTip — um código de 4 dígitos numéricos.\n\nPara fazer login use:\n• Seu ID de empregado (ex: LBZ0005) ou CPF\n• Seu PIN de 4 dígitos\n\nNo primeiro acesso o sistema pedirá que você crie um PIN pessoal.\n\nPara trocar o PIN depois: solicite ao seu gestor que faça o reset. Após o reset, você deverá criar um novo PIN no próximo acesso.\n\nNunca compartilhe seu PIN com ninguém.",
     },
   ].filter(item => {
     if (item.tabKey && (rest?.tabsConfig?.[item.tabKey]===false || rest?.tabsGestor?.[item.tabKey]===false)) return false;
@@ -751,7 +751,36 @@ function ComunicadosManagerTab({ restaurantId, communications, commAcks, employe
   const [selComm, setSelComm] = useState(null);
   const [selAreas, setSelAreas] = useState([]);
   const [selEmps, setSelEmps] = useState([]);
+  const [aiInput, setAiInput] = useState("");
+  const [aiLoading, setAiLoading] = useState(false);
+  const [aiError, setAiError] = useState("");
   const ac = "var(--ac)";
+
+  async function handleAiSuggest() {
+    if (!aiInput.trim()) return;
+    setAiLoading(true); setAiError("");
+    try {
+      const prompt = `Você é um assistente especializado em comunicação interna de restaurantes. O gestor quer enviar um comunicado para sua equipe. Baseado na descrição informal abaixo, redija um comunicado profissional, claro e direto para os empregados de um restaurante.
+
+Descrição do gestor: "${aiInput.trim()}"
+
+Responda APENAS com um JSON válido no formato:
+{"titulo": "título claro e objetivo", "corpo": "texto completo do comunicado, claro e profissional"}
+
+Sem markdown, sem explicações, apenas o JSON.`;
+      const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_KEY}`, {
+        method:"POST", headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({contents:[{parts:[{text:prompt}]}]})
+      });
+      const data = await res.json();
+      const text = data?.candidates?.[0]?.content?.parts?.[0]?.text ?? "";
+      const result = JSON.parse(text.replace(/```json|```/g,"").trim());
+      setTitle(result.titulo); setBody(result.corpo); setAiInput("");
+    } catch(e) {
+      setAiError("Não foi possível gerar sugestão. Tente novamente.");
+    }
+    setAiLoading(false);
+  }
 
   // target logic: "all" | "areas:[Bar,Cozinha]" | "emps:[id1,id2]"
   function toggleArea(a) { setSelAreas(p => p.includes(a) ? p.filter(x=>x!==a) : [...p,a]); setSelEmps([]); }
@@ -834,7 +863,7 @@ function ComunicadosManagerTab({ restaurantId, communications, commAcks, employe
 
   return (
     <div>
-      <button onClick={() => setShowNew(!showNew)} style={{ ...S.btnPrimary, marginBottom: 16 }}>
+      <button onClick={() => { setShowNew(!showNew); setAiInput(""); setAiError(""); }} style={{ ...S.btnPrimary, marginBottom: 16 }}>
         {showNew ? "Cancelar" : "+ Novo Comunicado"}
       </button>
       {showNew && (
@@ -875,6 +904,23 @@ function ComunicadosManagerTab({ restaurantId, communications, commAcks, employe
                   : selAreas.length>0 ? `→ Áreas: ${selAreas.join(", ")}`
                   : `→ ${selEmps.length} empregado(s) selecionado(s)`}
               </div>
+            </div>
+            {/* Assistente IA */}
+            <div style={{padding:"12px 14px",borderRadius:10,background:"var(--ac-bg)",border:"1px solid var(--ac)33"}}>
+              <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:6}}>
+                <span style={{fontSize:14}}>✨</span>
+                <span style={{color:"var(--ac-text)",fontWeight:700,fontSize:13}}>Assistente IA — Gemini</span>
+              </div>
+              <p style={{color:"var(--text3)",fontSize:12,margin:"0 0 8px"}}>Descreva informalmente o que quer comunicar. A IA redige o título e o texto de forma profissional.</p>
+              <textarea value={aiInput} onChange={e=>setAiInput(e.target.value)}
+                placeholder='Ex: "lembrar a equipe que a escala de fim de semana mudou, sábado agora começa às 11h"'
+                rows={2} style={{...S.input,resize:"vertical",marginBottom:8,fontSize:13}}/>
+              {aiError && <p style={{color:"var(--red)",fontSize:12,margin:"0 0 8px"}}>{aiError}</p>}
+              <button onClick={handleAiSuggest} disabled={!aiInput.trim()||aiLoading}
+                style={{...S.btnPrimary,width:"auto",padding:"7px 18px",fontSize:13,opacity:(!aiInput.trim()||aiLoading)?0.6:1}}>
+                {aiLoading?"✨ Gerando...":"✨ Sugerir com IA"}
+              </button>
+              {title && <p style={{color:"var(--text3)",fontSize:11,marginTop:8,marginBottom:0}}>↓ Sugestão gerada abaixo — edite à vontade antes de publicar</p>}
             </div>
             <div><label style={S.label}>Título</label><input value={title} onChange={e => setTitle(e.target.value)} placeholder="Título do comunicado" style={S.input} /></div>
             <div><label style={S.label}>Conteúdo</label><textarea value={body} onChange={e => setBody(e.target.value)} rows={5} placeholder="Texto do comunicado…" style={{ ...S.input, resize: "vertical" }} /></div>
@@ -4102,11 +4148,11 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                     return `Sistema: Pontos Global\nTodos que trabalharam dividem a gorjeta proporcionalmente aos pontos do cargo.\n\nTabela de cargos:\n${linhas}${restRolesSem.length>0?"\n\nSem gorjeta: "+restRolesSem.map(r=>r.name).join(", "):""}`;
                   })(),
                 },
-                { id:"__escala__", tabKey:null, q:"📅 Como funciona a escala e por que ela importa?", a:"A escala define em quais dias o empregado trabalhou. Apenas empregados na escala do dia recebem gorjeta daquele dia.\n\n• Falta injustificada (F) → não recebe gorjeta\n• Atestado (A) / Falta justificada (FJ) → tratamento diferente\n• Férias (V) → não recebe gorjeta\n\nErros na escala afetam diretamente o recebimento." },
-                { id:"__recibos__", tabKey:"recibos", q:"📄 Como acesso meus recibos de gorjeta?", a:"Na aba Recibos do aplicativo o empregado encontra todos os recibos mensais. O gestor faz upload dos PDFs e o empregado acessa direto pelo app, sem envio individual." },
-                { id:"__dp__", tabKey:"dp", q:"💬 Para que serve o Fale com DP?", a:"Canal direto entre empregados e o departamento pessoal. Use para:\n• Dúvidas trabalhistas (férias, horas extras, INSS...)\n• Atestados e ausências\n• Solicitações de documentos\n\nEmpregados podem enviar anonimamente. O gestor do DP responde pelo app." },
+                { id:"__escala__", tabKey:null, q:"📅 Como funciona a escala e por que ela importa?", a:"A escala registra a presença em cada dia e define quem recebe gorjeta.\n\nRecebe gorjeta: trabalhando normalmente ou compensação (C).\nNÃO recebe: folga, falta injustificada (F) + possível penalidade, falta justificada (FJ), atestado (A), férias (V)." },
+                { id:"__recibos__", tabKey:"recibos", q:"📄 Como acesso meus recibos?", a:"Na aba Recibos do aplicativo o empregado encontra todos os recibos. Pode incluir gorjeta, adiantamento, férias, 13º e outros pagamentos. O gestor faz upload dos PDFs." },
+                { id:"__dp__", tabKey:"dp", q:"💬 Para que serve o Fale com DP?", a:"Canal direto com o DP. Use para: dúvidas trabalhistas, atestados, documentos, sugestões, elogios e denúncias anônimas. O gestor do DP responde pelo app." },
                 { id:"__comunicados__", tabKey:"comunicados", q:"📢 Como funcionam os comunicados?", a:"Avisos enviados pelo gestor para a equipe. O empregado recebe notificação, lê e confirma com \"Li e entendi\". O gestor acompanha quem confirmou." },
-                { id:"__pin__", tabKey:null, q:"🔐 O que é o PIN e como trocar?", a:"O PIN é a senha de acesso — código de 4 a 6 dígitos. Para login, use o ID de empregado (ex: LBZ0005) ou CPF + PIN. Para trocar, acesse Configurações no app." },
+                { id:"__pin__", tabKey:null, q:"🔐 O que é o PIN e como trocar?", a:"O PIN é a senha de 4 dígitos numéricos. Para login: ID de empregado (ex: LBZ0005) ou CPF + PIN. Para trocar o PIN, solicite ao gestor que faça o reset." },
               ];
 
               // Estado local simulado via dataset (sem useState fora de componente)
@@ -4257,7 +4303,13 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                         </div>
                         <button disabled={!adminOk} onClick={()=>{
                           if(!adminOk) return;
-                          const updated = restaurants.map(r=>r.id===rid?{...r,tabsGestor:{...(r.tabsGestor??{}),[key]:!gestorOn}}:r);
+                          const novoValor = !gestorOn;
+                          // Mapa de aba → FAQ automática relacionada
+                          const tabFaqMap = { recibos:"__recibos__", dp:"__dp__", comunicados:"__comunicados__" };
+                          const faqId = tabFaqMap[key];
+                          const curFaqAuto = restaurant.tabsGestor?.faqAuto ?? {};
+                          const novoFaqAuto = faqId ? { ...curFaqAuto, [faqId]: novoValor } : curFaqAuto;
+                          const updated = restaurants.map(r=>r.id===rid?{...r,tabsGestor:{...(r.tabsGestor??{}),[key]:novoValor,faqAuto:novoFaqAuto}}:r);
                           onUpdate("restaurants",updated);
                         }} style={{padding:"5px 14px",borderRadius:20,border:"none",background:!adminOk?"var(--border)":isOn?"var(--green)":"var(--border)",color:!adminOk?"#999":isOn?"#fff":"#555",fontWeight:700,cursor:adminOk?"pointer":"not-allowed",fontFamily:"'DM Mono',monospace",fontSize:12}}>
                           {isOn?"Visível":"Oculta"}
