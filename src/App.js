@@ -3902,6 +3902,14 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }
   const trashCount = (trash.restaurants?.length??0) + (trash.managers?.length??0) + (trash.employees?.length??0);
   const [restTab, setRestTab] = useState("operacional");
   const [filtroFinanceiro, setFiltroFinanceiro] = useState("todos");
+  const PIX_PADRAO = "11985499821";
+  const PIX_NOME   = "Gustavo Rodrigues da Silva";
+  const [cobForma, setCobForma]   = useState("pix");
+  const [cobChave, setCobChave]   = useState(PIX_PADRAO);
+  const [cobLink,  setCobLink]    = useState("");
+  const [cobValor, setCobValor]   = useState("");
+  const [cobPeriodo, setCobPeriodo] = useState(`${new Date().getFullYear()}-${String(new Date().getMonth()+1).padStart(2,"0")}`);
+  const [cobVenc,  setCobVenc]    = useState("");
 
   // Soft delete helpers
   function softDelete(type, item) {
@@ -4249,71 +4257,118 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }
                     <p style={{color:"var(--red)",fontSize:12,margin:0}}>⚠️ WhatsApp financeiro não cadastrado. Edite o restaurante para adicionar.</p>
                   </div>
                 )}
-                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:10}}>
+                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:12}}>
                   <div>
                     <label style={S.label}>Período de referência</label>
-                    <input type="month" id="cob-periodo" defaultValue={`${new Date().getFullYear()}-${String(new Date().getMonth()+1).padStart(2,"0")}`} style={S.input}/>
+                    <input type="month" value={cobPeriodo} onChange={e=>setCobPeriodo(e.target.value)} style={S.input}/>
                   </div>
                   <div>
                     <label style={S.label}>Vencimento</label>
-                    <input type="date" id="cob-venc" style={S.input}/>
+                    <input type="date" value={cobVenc} onChange={e=>setCobVenc(e.target.value)} style={S.input}/>
                   </div>
-                  <div>
+                  <div style={{gridColumn:"1/-1"}}>
                     <label style={S.label}>Valor (R$)</label>
-                    <input type="number" id="cob-valor" defaultValue={valorTotal?.toFixed(2)??""} placeholder={valorTotal?.toFixed(2)??"0,00"} style={S.input}/>
-                  </div>
-                  <div>
-                    <label style={S.label}>Forma de pagamento</label>
-                    <select id="cob-forma" style={S.input}>
-                      <option value="PIX">PIX</option>
-                      <option value="Boleto">Boleto</option>
-                      <option value="Cartão">Cartão</option>
-                      <option value="Transferência">Transferência</option>
-                    </select>
+                    <input type="number" value={cobValor} onChange={e=>setCobValor(e.target.value)}
+                      placeholder={valorTotal?.toFixed(2)??"0,00"} style={S.input}/>
                   </div>
                 </div>
-                <div style={{marginBottom:10}}>
-                  <label style={S.label}>Chave/dados de pagamento</label>
-                  <input id="cob-chave" placeholder="Ex: 11985499821 (PIX) ou dados do boleto" style={S.input}/>
+
+                {/* Forma de pagamento */}
+                <div style={{marginBottom:12}}>
+                  <label style={S.label}>Forma de pagamento</label>
+                  <div style={{display:"flex",gap:8,marginBottom:12}}>
+                    {[["pix","💠 PIX"],["link","🔗 Link de pagamento"]].map(([v,l])=>(
+                      <button key={v} onClick={()=>{
+                        setCobForma(v);
+                        if(v==="pix") setCobChave(PIX_PADRAO);
+                        else setCobChave("");
+                      }}
+                        style={{flex:1,padding:"12px",borderRadius:10,border:`2px solid ${cobForma===v?ac:"var(--border)"}`,background:cobForma===v?"var(--ac-bg)":"transparent",color:cobForma===v?"var(--ac-text)":"var(--text3)",cursor:"pointer",fontFamily:"'DM Sans',sans-serif",fontSize:14,fontWeight:cobForma===v?700:400}}>
+                        {l}
+                      </button>
+                    ))}
+                  </div>
+
+                  {/* Campo dinâmico por forma */}
+                  {cobForma === "pix" && (
+                    <div style={{padding:"14px 16px",borderRadius:12,background:"var(--bg2)",border:"1px solid var(--border)"}}>
+                      <label style={{...S.label,marginBottom:6}}>Chave PIX</label>
+                      <input value={cobChave} onChange={e=>setCobChave(e.target.value)}
+                        placeholder="Celular, CPF, email ou chave aleatória"
+                        style={S.input}/>
+                      <p style={{color:"var(--text3)",fontSize:11,marginTop:6,marginBottom:0}}>
+                        💠 Chave padrão: <strong>{PIX_PADRAO}</strong> — {PIX_NOME}
+                        {cobChave !== PIX_PADRAO && (
+                          <button onClick={()=>setCobChave(PIX_PADRAO)}
+                            style={{background:"none",border:"none",color:ac,cursor:"pointer",fontFamily:"'DM Sans',sans-serif",fontSize:11,marginLeft:8,padding:0,textDecoration:"underline"}}>
+                            Restaurar padrão
+                          </button>
+                        )}
+                      </p>
+                    </div>
+                  )}
+
+                  {cobForma === "link" && (
+                    <div style={{padding:"14px 16px",borderRadius:12,background:"var(--bg2)",border:"1px solid var(--border)"}}>
+                      <label style={{...S.label,marginBottom:6}}>Link de pagamento</label>
+                      <input value={cobLink} onChange={e=>setCobLink(e.target.value)}
+                        placeholder="Cole aqui o link do Asaas, Stripe, PagSeguro, etc."
+                        style={S.input}/>
+                      <p style={{color:"var(--text3)",fontSize:11,marginTop:6,marginBottom:0}}>O link será enviado diretamente na mensagem ao cliente</p>
+                    </div>
+                  )}
                 </div>
-                <div style={{marginBottom:14}}>
-                  <label style={S.label}>Link de pagamento (opcional)</label>
-                  <input id="cob-link" placeholder="Cole aqui o link do Asaas, Stripe, PagSeguro, etc." style={S.input}/>
-                  <p style={{color:"var(--text3)",fontSize:11,marginTop:3}}>O link será incluído na mensagem enviada ao cliente</p>
-                </div>
+
+                {/* Preview da mensagem */}
+                {(cobValor || valorTotal) && (
+                  <div style={{padding:"14px 16px",borderRadius:12,background:"#e7ffd9",border:"1px solid #b2dfb2",marginBottom:14}}>
+                    <p style={{color:"#4a7a4a",fontSize:11,fontWeight:700,margin:"0 0 8px",textTransform:"uppercase",letterSpacing:0.5}}>📱 Preview da mensagem</p>
+                    {(()=>{
+                      const [ano,mes] = cobPeriodo.split("-");
+                      const mesesNome = ["Janeiro","Fevereiro","Março","Abril","Maio","Junho","Julho","Agosto","Setembro","Outubro","Novembro","Dezembro"];
+                      const periodoLabel = `${mesesNome[parseInt(mes)-1]}/${ano}`;
+                      const vencLabel = cobVenc ? new Date(cobVenc+"T12:00:00").toLocaleDateString("pt-BR") : "";
+                      const v = parseFloat(cobValor) || valorTotal || 0;
+                      return (
+                        <div style={{fontFamily:"'DM Sans',sans-serif",fontSize:13,color:"#1a1a1a",lineHeight:1.7,whiteSpace:"pre-wrap"}}>
+{`🍽️ *Olá, ${rest?.name}!*
+
+Segue sua fatura *AppTip* referente a *${periodoLabel}*.
+
+━━━━━━━━━━━━━━━━━━
+📦 *Plano:* ${plano.label}${isEnterprise?` • ${empMax} empregados`:""}
+💰 *Valor:* R$ ${v.toLocaleString("pt-BR",{minimumFractionDigits:2})}${vencLabel?`\n📅 *Vencimento:* ${vencLabel}`:""}
+━━━━━━━━━━━━━━━━━━
+${cobForma==="pix"?`💠 *Pagamento via PIX*\nChave: *${cobChave||PIX_PADRAO}*\nFavorecido: ${PIX_NOME}`:`🔗 *Link de pagamento:*\n${cobLink||"(link será adicionado)"}`}
+
+Qualquer dúvida estamos à disposição! 😊
+*Equipe AppTip* 🍽️`}
+                        </div>
+                      );
+                    })()}
+                  </div>
+                )}
+
                 <button onClick={()=>{
                   if (!rest?.whatsappFin) { alert("Cadastre o WhatsApp financeiro primeiro."); return; }
-                  const periodo = document.getElementById("cob-periodo")?.value;
-                  const venc    = document.getElementById("cob-venc")?.value;
-                  const valor   = parseFloat(document.getElementById("cob-valor")?.value);
-                  const forma   = document.getElementById("cob-forma")?.value;
-                  const chave   = document.getElementById("cob-chave")?.value;
-                  const link    = document.getElementById("cob-link")?.value;
-                  if (!periodo || !valor) { alert("Preencha o período e o valor."); return; }
-                  const [ano, mes] = periodo.split("-");
+                  const valor = parseFloat(cobValor) || valorTotal;
+                  if (!cobPeriodo || !valor) { alert("Preencha o período e o valor."); return; }
+                  if (cobForma === "link" && !cobLink.trim()) { alert("Cole o link de pagamento."); return; }
+                  const [ano,mes] = cobPeriodo.split("-");
                   const mesesNome = ["Janeiro","Fevereiro","Março","Abril","Maio","Junho","Julho","Agosto","Setembro","Outubro","Novembro","Dezembro"];
                   const periodoLabel = `${mesesNome[parseInt(mes)-1]}/${ano}`;
-                  const vencLabel = venc ? new Date(venc+"T12:00:00").toLocaleDateString("pt-BR") : "";
-                  const msg = [
-                    `Olá! Segue a cobrança *AppTip* referente a *${periodoLabel}* 🍽️`,
-                    ``,
-                    `🏢 *Restaurante:* ${rest?.name}`,
-                    `📦 *Plano:* ${plano.label}${isEnterprise?` (${empMax} emp.)`:""}`,
-                    `💰 *Valor:* R$ ${valor.toLocaleString("pt-BR",{minimumFractionDigits:2})}`,
-                    vencLabel ? `📅 *Vencimento:* ${vencLabel}` : "",
-                    `💳 *Pagamento:* ${forma}${chave?` — ${chave}`:""}`,
-                    link ? `\n🔗 *Link de pagamento:*\n${link}` : "",
-                    ``,
-                    `Qualquer dúvida, estamos à disposição! 😊`,
-                  ].filter(Boolean).join("\n");
-                  const cob = { id:Date.now().toString(), periodo, periodoLabel, venc, valor, forma, chave, link, criadaEm:new Date().toISOString(), status:"pendente" };
+                  const vencLabel = cobVenc ? new Date(cobVenc+"T12:00:00").toLocaleDateString("pt-BR") : "";
+                  const chaveUsada = cobForma==="pix" ? (cobChave||PIX_PADRAO) : cobLink;
+                  const msg = `🍽️ *Olá, ${rest?.name}!*\n\nSegue sua fatura *AppTip* referente a *${periodoLabel}*.\n\n━━━━━━━━━━━━━━━━━━\n📦 *Plano:* ${plano.label}${isEnterprise?` • ${empMax} empregados`:""}\n💰 *Valor:* R$ ${valor.toLocaleString("pt-BR",{minimumFractionDigits:2})}${vencLabel?`\n📅 *Vencimento:* ${vencLabel}`:""}\n━━━━━━━━━━━━━━━━━━\n${cobForma==="pix"?`💠 *Pagamento via PIX*\nChave: *${chaveUsada}*\nFavorecido: ${PIX_NOME}`:`🔗 *Link de pagamento:*\n${chaveUsada}`}\n\nQualquer dúvida estamos à disposição! 😊\n*Equipe AppTip* 🍽️`;
+                  const cob = { id:Date.now().toString(), periodo:cobPeriodo, periodoLabel, venc:cobVenc, valor, forma:cobForma==="pix"?"PIX":"Link", chave:chaveUsada, criadaEm:new Date().toISOString(), status:"pendente" };
                   saveFinanceiro({ cobrancas:[...(fin.cobrancas??[]), cob] });
                   const numero = rest.whatsappFin.replace(/\D/g,"");
                   window.open(`https://wa.me/55${numero}?text=${encodeURIComponent(msg)}`, "_blank");
+                  setCobValor(""); setCobVenc(""); setCobLink("");
                   onUpdate("_toast","📲 Cobrança gerada!");
                 }} disabled={!rest?.whatsappFin}
                   style={{...S.btnPrimary,opacity:rest?.whatsappFin?1:0.5,cursor:rest?.whatsappFin?"pointer":"not-allowed"}}>
-                  📲 Gerar e enviar cobrança
+                  📲 Gerar e enviar cobrança via WhatsApp
                 </button>
               </div>
 
