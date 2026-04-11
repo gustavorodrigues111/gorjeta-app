@@ -1823,7 +1823,12 @@ function EmployeePortal({ employees, roles, tips, schedules, restaurants, commun
   const [cpf, setCpf] = useState("");
   const [pin, setPin] = useState("");
   const [err, setErr] = useState("");
-  const [empId, setEmpId] = useState(null);
+  const [empId, setEmpId] = useState(() => localStorage.getItem("apptip_empid") || null);
+
+  useEffect(() => {
+    if (empId) localStorage.setItem("apptip_empid", empId);
+    else localStorage.removeItem("apptip_empid");
+  }, [empId]);
   const now = new Date();
   const [year, setYear] = useState(now.getFullYear());
   const [month, setMonth] = useState(now.getMonth());
@@ -2445,11 +2450,10 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
       const byArea = {}; AREAS.forEach(a=>{byArea[a]=[];}); activeEmps.forEach(emp=>{if(emp.area)byArea[emp.area].push(emp);});
       AREAS.forEach(area => { const emps=byArea[area],tp=emps.reduce((a,e)=>a+e.points,0); if(!tp)return; const ap=toDistribute*(tSplit[area]/100); emps.forEach(emp=>{const g=total*(tSplit[area]/100)*(emp.points/tp),tx=totalTaxAmt*(tSplit[area]/100)*(emp.points/tp);newTips.push({id:`${Date.now()}-${emp.id}-${Math.random().toString(36).slice(2,6)}`,restaurantId:rid,employeeId:emp.id,date,monthKey:tKey,poolTotal:total,areaPool:ap,area,myShare:g,myTax:tx,myNet:g-tx,note:noteVal,taxRate});}); });
     }
-    onUpdate("tips", [...tips, ...newTips]);
+    // Remove existing tips for this date before adding new ones (supports re-launch)
+    const tipsWithoutDate = tips.filter(t => !(t.restaurantId === rid && t.date === date));
+    onUpdate("tips", [...tipsWithoutDate, ...newTips]);
     return newTips.length;
-  }
-
-  function calcTip() {
     const total = parseFloat(tipTotal);
     if (!total || isNaN(total) || total <= 0) return 0;
     const td = new Date(tipDate + "T12:00:00");
@@ -3833,12 +3837,29 @@ export default function App() {
 
   // URL-based routing
   const isAdm = window.location.pathname.startsWith("/adm");
-  const [view, setView] = useState(isAdm ? "login" : "employee");
+  const [view, setView] = useState(() => {
+    const role = localStorage.getItem("apptip_role");
+    if (!isAdm) return "employee";
+    if (role === "super") return "super";
+    if (role === "manager") return "manager";
+    return "login";
+  });
   const [loaded, setLoaded] = useState(false);
   const [toast, setToast] = useState("");
-  const [currentUser, setCurrentUser] = useState(null);
-  // eslint-disable-next-line no-unused-vars
-  const [userRole, setUserRole] = useState(null);
+  const [currentUser, setCurrentUser] = useState(() => {
+    try { const s = localStorage.getItem("apptip_user"); return s ? JSON.parse(s) : null; } catch { return null; }
+  });
+  const [userRole, setUserRole] = useState(() => localStorage.getItem("apptip_role") || null);
+
+  // Persist session
+  useEffect(() => {
+    if (currentUser) localStorage.setItem("apptip_user", JSON.stringify(currentUser));
+    else localStorage.removeItem("apptip_user");
+  }, [currentUser]);
+  useEffect(() => {
+    if (userRole) localStorage.setItem("apptip_role", userRole);
+    else localStorage.removeItem("apptip_role");
+  }, [userRole]);
 
   const [superManagers, setSuperManagers] = useState([]);
   const [managers,      setManagers]      = useState([]);
