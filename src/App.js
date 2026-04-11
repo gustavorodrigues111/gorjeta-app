@@ -594,7 +594,12 @@ Exemplo (gorjeta R$${fmtR(EX)}, ${totalPontos}pt no total):
       a:"O PIN é sua senha de acesso ao AppTip — um código de 4 dígitos numéricos.\n\nPara fazer login use:\n• Seu ID de empregado (ex: LBZ0005) ou CPF\n• Seu PIN de 4 dígitos\n\nNo primeiro acesso o sistema pedirá que você crie um PIN pessoal.\n\nPara trocar o PIN depois: solicite ao seu gestor que faça o reset. Após o reset, você deverá criar um novo PIN no próximo acesso.\n\nNunca compartilhe seu PIN com ninguém.",
     },
   ].filter(item => {
-    if (item.tabKey && (rest?.tabsConfig?.[item.tabKey]===false || rest?.tabsGestor?.[item.tabKey]===false)) return false;
+    // Verifica se a aba está autorizada pelo admin E ativa pelo gestor
+    if (item.tabKey) {
+      if (rest?.tabsConfig?.[item.tabKey] === false) return false;
+      if (rest?.tabsGestor?.[item.tabKey] === false) return false;
+    }
+    // Verifica toggle individual da FAQ automática
     if (rest?.tabsGestor?.faqAuto?.[item.id] === false) return false;
     return true;
   });
@@ -4267,7 +4272,16 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                       <div key={key} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"10px 14px",background:"var(--bg1)",borderRadius:10,border:`1px solid ${isOn?"#10b98133":"var(--border)"}`}}>
                         <span style={{color:isOn?"var(--text)":"var(--text3)",fontSize:13,fontWeight:isOn?600:400}}>{label}</span>
                         <button onClick={()=>{
-                          const updated = restaurants.map(r=>r.id===rid?{...r,tabsConfig:{...(r.tabsConfig??{}),[key]:!isOn}}:r);
+                          const novoValor = !isOn;
+                          // Sincroniza FAQ automática relacionada quando admin desativa
+                          const tabFaqMap = { recibos:"__recibos__", dp:"__dp__", comunicados:"__comunicados__" };
+                          const faqId = tabFaqMap[key];
+                          const curFaqAuto = restaurant.tabsGestor?.faqAuto ?? {};
+                          const novoFaqAuto = faqId ? { ...curFaqAuto, [faqId]: novoValor } : curFaqAuto;
+                          const updated = restaurants.map(r=>r.id===rid?{...r,
+                            tabsConfig:{...(r.tabsConfig??{}),[key]:novoValor},
+                            tabsGestor:{...(r.tabsGestor??{}),faqAuto:novoFaqAuto}
+                          }:r);
                           onUpdate("restaurants",updated);
                         }} style={{padding:"5px 14px",borderRadius:20,border:"none",background:isOn?"var(--green)":"var(--border)",color:isOn?"#fff":"#555",fontWeight:700,cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:12}}>
                           {isOn?"Autorizada":"Bloqueada"}
