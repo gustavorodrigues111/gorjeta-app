@@ -2811,13 +2811,24 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
 
                     {/* Day rows */}
                     {allDays.map(date => {
-                      const row = tipRows.find(r=>r.date===date) ?? {date,total:"",note:""};
+                      // Get the already-launched poolTotal for this date
+                      const launchedTips = myTips.filter(t=>t.date===date&&t.monthKey===tKey);
+                      const launchedPoolTotal = launchedTips.length > 0 ? launchedTips[0].poolTotal : null;
+                      const launchedNote = launchedTips.length > 0 ? (launchedTips[0].note ?? "") : "";
+
+                      const row = tipRows.find(r=>r.date===date) ?? {
+                        date,
+                        total: launchedPoolTotal != null ? String(launchedPoolTotal) : "",
+                        note: launchedNote
+                      };
                       const val = parseFloat(row.total);
                       const hasVal = val > 0 && !isNaN(val);
                       const launched = launchedDates.has(date);
                       const activeEmps = getActiveEmps(date);
                       const weekday = new Date(date+"T12:00:00").toLocaleDateString("pt-BR",{weekday:"short"});
                       const isWeekend = [0,6].includes(new Date(date+"T12:00:00").getDay());
+                      // Check if value was edited vs original launched value
+                      const isEdited = launched && launchedPoolTotal != null && val !== launchedPoolTotal;
 
                       return (
                         <div key={date} style={{marginBottom:8,borderRadius:10,border:`1px solid ${launched?"#10b98133":hasVal?"#f5c84233":"#1a1a1a"}`,background:launched?"#0a1a0a":hasVal?"#1a1a0a":"#111",overflow:"hidden"}}>
@@ -2834,8 +2845,12 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                                 const newRows = tipRows.filter(r=>r.date!==date);
                                 setTipRows([...newRows, {...row, total:e.target.value}]);
                               }}
-                              placeholder={launched?"Já lançado":"R$ 0,00"}
-                              style={{...S.input,fontSize:13,padding:"6px 8px",background:launched?"#0d1a0d":"#1a1a1a",color:launched?"#10b981":"#fff"}}
+                              placeholder="R$ 0,00"
+                              style={{...S.input,fontSize:13,padding:"6px 8px",
+                                background:launched?(isEdited?"#1a1200":"#0d1a0d"):"#1a1a1a",
+                                color:launched?(isEdited?"#f59e0b":"#10b981"):"#fff",
+                                borderColor:launched?(isEdited?"#f59e0b44":"#10b98133"):"transparent"
+                              }}
                             />
                             <input
                               value={row.note}
@@ -2854,7 +2869,15 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                                 Lançar
                               </button>
                             )}
-                            {launched && <span style={{color:"#10b981",fontSize:11,whiteSpace:"nowrap"}}>✓ Lançado</span>}
+                            {launched && !isEdited && <span style={{color:"#10b981",fontSize:11,whiteSpace:"nowrap"}}>✓</span>}
+                            {launched && isEdited && (
+                              <button onClick={()=>{
+                                const n = calcTipForDate(date, val, row.note);
+                                if(n>0) onUpdate("_toast",`🔄 ${fmtDate(date)}: relançado para ${n} empregados`);
+                              }} style={{padding:"6px 10px",borderRadius:8,border:"none",background:"#f59e0b",color:"#111",fontWeight:700,cursor:"pointer",fontFamily:"DM Mono,monospace",fontSize:11,whiteSpace:"nowrap"}}>
+                                Relançar
+                              </button>
+                            )}
                           </div>
 
                           {/* Rateio preview */}
@@ -3031,12 +3054,39 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                   const { jsPDF } = window.jspdf;
                   const doc = new jsPDF({ orientation:"landscape", unit:"mm", format:"a4" });
                   const daysInMonth = new Date(year, month+1, 0).getDate();
-                  const STATUS_SHORT = {off:"F",comp:"C",vac:"Fér",faultj:"FJ",faultu:"FI"};
-                  const STATUS_COLORS = {off:[231,76,60],comp:[59,130,246],vac:[139,92,246],faultj:[245,158,11],faultu:[239,68,68]};
+                  const STATUS_SHORT = {off:"F",comp:"C",vac:"FÉR",faultj:"FJ",faultu:"FI"};
+                  // Colors: work=green, off=red, comp=blue, vac=purple, faultj=orange, faultu=dark red
+                  const STATUS_COLORS = {
+                    work: [39,174,96],
+                    off:  [231,76,60],
+                    comp: [59,130,246],
+                    vac:  [139,92,246],
+                    faultj:[245,158,11],
+                    faultu:[180,30,30],
+                  };
 
                   doc.setFontSize(11);
                   doc.setTextColor(30,30,30);
                   doc.text(`Escala — ${schedArea} — ${monthLabel(year,month)} — ${restaurant.name}`, 14, 12);
+
+                  // Legend
+                  const legend = [
+                    ["T  Trabalho", STATUS_COLORS.work],
+                    ["F  Folga", STATUS_COLORS.off],
+                    ["C  Compensação", STATUS_COLORS.comp],
+                    ["FÉR  Férias", STATUS_COLORS.vac],
+                    ["FJ  Falta Just.", STATUS_COLORS.faultj],
+                    ["FI  Falta Injust.", STATUS_COLORS.faultu],
+                  ];
+                  let lx = 14;
+                  legend.forEach(([lbl, col]) => {
+                    doc.setFillColor(...col);
+                    doc.rect(lx, 15, 3, 3, "F");
+                    doc.setFontSize(6);
+                    doc.setTextColor(30,30,30);
+                    doc.text(lbl, lx+4, 17.5);
+                    lx += 38;
+                  });
 
                   // Build head row: name + days + T
                   const head = [["Empregado", ...Array.from({length:daysInMonth},(_,i)=>String(i+1)), "T"]];
@@ -3049,7 +3099,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                     const dayCells = Array.from({length:daysInMonth},(_,i)=>{
                       const k = `${year}-${String(month+1).padStart(2,"0")}-${String(i+1).padStart(2,"0")}`;
                       const s = dayMap[k];
-                      if(!s) { workDays++; return ""; }
+                      if(!s) { workDays++; return "T"; }
                       return STATUS_SHORT[s] ?? "";
                     });
                     return [`${emp.name}\n${role?.name??""}`, ...dayCells, String(workDays)];
@@ -3057,10 +3107,10 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
 
                   doc.autoTable({
                     head, body,
-                    startY: 16,
-                    styles: { fontSize: 6, cellPadding: 1.5, halign:"center", textColor:[30,30,30], lineColor:[200,200,200], lineWidth:0.1 },
+                    startY: 21,
+                    styles: { fontSize: 6, cellPadding: 1.2, halign:"center", textColor:[255,255,255], lineColor:[180,180,180], lineWidth:0.1 },
                     headStyles: { fillColor:[40,40,40], textColor:[220,220,220], fontStyle:"bold", fontSize:6 },
-                    columnStyles: { 0: { halign:"left", cellWidth:30, fontSize:7 } },
+                    columnStyles: { 0: { halign:"left", cellWidth:30, fontSize:6.5, textColor:[30,30,30] } },
                     didDrawCell: (data) => {
                       if(data.section==="body" && data.column.index > 0 && data.column.index <= daysInMonth) {
                         const dayIdx = data.column.index - 1;
@@ -3068,14 +3118,26 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                         if(!emp) return;
                         const k = `${year}-${String(month+1).padStart(2,"0")}-${String(dayIdx+1).padStart(2,"0")}`;
                         const s = schedules?.[rid]?.[mk]?.[emp.id]?.[k];
-                        if(s && STATUS_COLORS[s]) {
-                          const {x,y,width,height} = data.cell;
-                          doc.setFillColor(...STATUS_COLORS[s]);
+                        const {x,y,width,height} = data.cell;
+                        // Work day (no status) = green
+                        const color = !s ? STATUS_COLORS.work : STATUS_COLORS[s];
+                        const label = !s ? "T" : (STATUS_SHORT[s] ?? "");
+                        if(color) {
+                          doc.setFillColor(...color);
                           doc.rect(x,y,width,height,"F");
                           doc.setTextColor(255,255,255);
                           doc.setFontSize(5);
-                          doc.text(STATUS_SHORT[s], x+width/2, y+height/2+1, {align:"center"});
+                          doc.text(label, x+width/2, y+height/2+1.2, {align:"center"});
                         }
+                      }
+                      // Last column (T = work days count) - style it
+                      if(data.section==="body" && data.column.index === daysInMonth+1) {
+                        const {x,y,width,height} = data.cell;
+                        doc.setFillColor(40,40,40);
+                        doc.rect(x,y,width,height,"F");
+                        doc.setTextColor(245,200,66);
+                        doc.setFontSize(6);
+                        doc.text(data.cell.text[0]??""  , x+width/2, y+height/2+1.2, {align:"center"});
                       }
                     },
                     theme: "grid",
