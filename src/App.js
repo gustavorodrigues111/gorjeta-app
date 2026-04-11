@@ -2600,7 +2600,6 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
     canDp     && ["dp",           "💬 Fale com DP"],
     (perms.horarios !== false || isSuperManager) && ["horarios", "🕐 Horários"],
     (canTips || isSuperManager) && ["recibos", "📄 Recibos"],
-    (canTips || isSuperManager) && ["config", "⚙️ Config"],
   ].filter(Boolean);
 
   const [tab, setTab] = useState(isDP ? "notificacoes" : (perms.tips ? "dashboard" : "schedule"));
