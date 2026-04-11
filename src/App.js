@@ -1920,7 +1920,7 @@ function EmployeePortal({ employees, roles, tips, schedules, restaurants, commun
   const loginIsBlocked = loginBlockedUntil && new Date() < loginBlockedUntil;
 
   useEffect(() => {
-    if (!loginIsBlocked) return;
+    if (!loginBlockedUntil) return;
     const t = setInterval(() => { if (new Date() >= loginBlockedUntil) { setLoginBlockedUntil(null); setErr(""); clearInterval(t); } }, 1000);
     return () => clearInterval(t);
   }, [loginBlockedUntil]);
@@ -4181,7 +4181,7 @@ function LoginScreen({ superManagers, managers, onLoginSuper, onLoginManager, on
 
   // Contador regressivo
   useEffect(() => {
-    if (!isBlocked) return;
+    if (!blockedUntil) return;
     const t = setInterval(() => {
       if (new Date() >= blockedUntil) { setBlockedUntil(null); setErr(""); clearInterval(t); }
       else setErr(`Muitas tentativas. Aguarde ${Math.ceil((blockedUntil-new Date())/1000)}s.`);
@@ -4326,6 +4326,7 @@ export default function App() {
   const [noTipDays,     setNoTipDays]     = useState({});
 
   useEffect(() => {
+    const savedId = currentUserId; // captura no mount, não precisa ser dependência
     (async () => {
       const vals = await Promise.all(Object.values(K).map(load));
       const keys = Object.keys(K);
@@ -4333,13 +4334,13 @@ export default function App() {
       const loaded_data = {};
       keys.forEach((k, i) => { if (k !== "receipts" && vals[i]) { map[k]?.(vals[i]); loaded_data[k] = vals[i]; } });
       // Restaurar currentUser por ID (nunca armazenamos o objeto completo)
-      if (currentUserId) {
+      if (savedId) {
         const role = localStorage.getItem("apptip_role");
         if (role === "super") {
-          const u = (loaded_data.superManagers ?? []).find(s => s.id === currentUserId);
+          const u = (loaded_data.superManagers ?? []).find(s => s.id === savedId);
           if (u) setCurrentUser(u); else { localStorage.removeItem("apptip_userid"); localStorage.removeItem("apptip_role"); }
         } else if (role === "manager") {
-          const u = (loaded_data.managers ?? []).find(m => m.id === currentUserId);
+          const u = (loaded_data.managers ?? []).find(m => m.id === savedId);
           if (u) setCurrentUser(u); else { localStorage.removeItem("apptip_userid"); localStorage.removeItem("apptip_role"); }
         }
       }
@@ -4348,7 +4349,7 @@ export default function App() {
       if (recs.length) setReceipts(recs);
       setLoaded(true);
     })();
-  }, []);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const data = { superManagers, managers, restaurants, employees, roles, tips, splits, schedules, communications, commAcks, faq, dpMessages, receipts, workSchedules, notifications, noTipDays };
 
