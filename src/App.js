@@ -4520,7 +4520,13 @@ Qualquer duvida estamos a disposicao! 😊
                   const cob = { id:Date.now().toString(), periodo:cobPeriodo, periodoLabel, venc:cobVenc, valor, forma:cobForma==="pix"?"PIX":"Link", chave:chaveUsada, criadaEm:new Date().toISOString(), status:"pendente" };
                   saveFinanceiro({ cobrancas:[...(fin.cobrancas??[]), cob] });
                   const numero = rest.whatsappFin.replace(/\D/g,"");
-                  window.open(`https://wa.me/55${numero}?text=${encodeURIComponent(msg)}`, "_blank");
+                  // Usar encodeURIComponent mas preservar emojis via escape correto
+                  const msgEncoded = msg.split('').map(c => {
+                    const code = c.codePointAt(0);
+                    if (code > 127) return encodeURIComponent(c);
+                    return c;
+                  }).join('').replace(/ /g, '%20').replace(/\n/g, '%0A').replace(/\*/g, '*');
+                  window.open(`https://wa.me/55${numero}?text=${msgEncoded}`, "_blank");
                   setCobValor(""); setCobVenc(""); setCobLink("");
                   onUpdate("_toast","📲 Cobrança gerada!");
                 }} disabled={!rest?.whatsappFin}
