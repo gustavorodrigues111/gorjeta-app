@@ -2123,16 +2123,61 @@ function RoleSpreadsheet({ restRoles, rid, roles, onUpdate }) {
   );
 }
 
-//
+
+// ─── EmpRowLine definido FORA do EmployeeSpreadsheet para evitar re-mount ───
+const EMP_COLS = "2fr 1.2fr 100px 80px 1.5fr 100px auto";
+const empInS2 = { background:"var(--bg1)", border:"1px solid var(--border)", borderRadius:6, color:"var(--text)", fontFamily:"DM Mono,monospace", fontSize:12, padding:"6px 8px", outline:"none", width:"100%", boxSizing:"border-box" };
+
+function EmpRowLine({ emp, isNew, row, restRoles, isSaved, isSuperManager, onChange, onSave, onToggleInactive, onDelete, onAdd }) {
+  const ac = "#f5c842";
+  const isInactive = !isNew && emp?.inactive && emp?.inactiveFrom <= today();
+  return (
+    <div style={{display:"grid",gridTemplateColumns:EMP_COLS,gap:6,padding:"6px 8px",marginBottom:4,
+      background:isNew?"#0d1a0d":isInactive?"#1a1a2a":"var(--card-bg)",borderRadius:10,
+      border:`1px solid ${isSaved?"#10b98166":isNew?"#10b98144":isInactive?"#8b5cf644":"var(--border)"}`,
+      alignItems:"center",opacity:isInactive?0.75:1}}>
+      <input value={row.name||""} onChange={ev=>onChange("name",ev.target.value)} placeholder="Nome completo" style={empInS2}/>
+      <input value={row.cpf||""} onChange={ev=>onChange("cpf",ev.target.value)} placeholder="000.000.000-00" style={empInS2} inputMode="numeric"/>
+      <input type="date" value={row.admission||""} onChange={ev=>onChange("admission",ev.target.value)} style={empInS2}/>
+      <input type="password" value={row.pin||""} onChange={ev=>onChange("pin",ev.target.value)} maxLength={6} placeholder="••••" style={empInS2}/>
+      <select value={row.roleId||""} onChange={ev=>onChange("roleId",ev.target.value)} style={{...empInS2,cursor:"pointer"}}>
+        <option value="">Selecionar…</option>
+        {AREAS.map(a=>(
+          <optgroup key={a} label={a}>
+            {restRoles.filter(r=>r.area===a&&!r.inactive).map(r=><option key={r.id} value={r.id}>{r.name} ({r.points}pt)</option>)}
+          </optgroup>
+        ))}
+      </select>
+      {isNew
+        ? <div style={{fontSize:10,color:"var(--text3)"}}>Auto</div>
+        : <input type="date" value={row.inactiveFrom||""} onChange={ev=>onChange("inactiveFrom",ev.target.value)} style={empInS2}/>
+      }
+      <div style={{display:"flex",gap:4}}>
+        {isNew
+          ? <button onClick={onAdd} style={{padding:"6px 12px",borderRadius:8,border:"none",background:"#10b981",color:"#fff",fontWeight:700,cursor:"pointer",fontFamily:"DM Mono,monospace",fontSize:12,whiteSpace:"nowrap"}}>+ Add</button>
+          : <>
+              <button onClick={onSave} style={{padding:"4px 10px",borderRadius:6,border:"none",background:isSaved?"#10b981":ac,color:"#111",fontWeight:700,cursor:"pointer",fontFamily:"DM Mono,monospace",fontSize:11}}>{isSaved?"✓":"Salvar"}</button>
+              <button onClick={onToggleInactive} title={isInactive?"Reativar":"Inativar"}
+                style={{padding:"4px 8px",borderRadius:6,border:`1px solid ${isInactive?"#10b98144":"#f59e0b44"}`,background:"transparent",color:isInactive?"#10b981":"#f59e0b",cursor:"pointer",fontSize:11,fontFamily:"DM Mono,monospace"}}>
+                {isInactive?"↑":"↓"}
+              </button>
+              {isSuperManager && isInactive && (
+                <button onClick={onDelete} title="Excluir permanentemente"
+                  style={{padding:"4px 8px",borderRadius:6,border:"1px solid #e74c3c44",background:"transparent",color:"#e74c3c",cursor:"pointer",fontSize:11,fontFamily:"DM Mono,monospace"}}>✕</button>
+              )}
+            </>
+        }
+      </div>
+    </div>
+  );
+}
+
 function EmployeeSpreadsheet({ restEmps, restRoles, rid, employees, onUpdate, restCode: restCode_, isSuperManager }) {
-  const blank = () => ({ id: null, name: "", cpf: "", admission: today(), pin: "", roleId: "", restaurantId: rid });
+  const blank = () => ({ name:"", cpf:"", admission:today(), pin:"", roleId:"", restaurantId:rid });
   const [newRow, setNewRow] = useState(blank());
   const [editRows, setEditRows] = useState({});
   const [saved, setSaved] = useState({});
   const [showInactive, setShowInactive] = useState(false);
-  const ac = "#f5c842";
-
-  const inS = { background: "var(--bg1)", border: "1px solid var(--border)", borderRadius: 6, color: "var(--text)", fontFamily: "DM Mono,monospace", fontSize: 12, padding: "6px 8px", outline: "none", width: "100%", boxSizing: "border-box" };
 
   const sorted = [...restEmps].sort((a,b) => {
     const rA = restRoles.find(r=>r.id===a.roleId);
@@ -2143,21 +2188,21 @@ function EmployeeSpreadsheet({ restEmps, restRoles, rid, employees, onUpdate, re
   const inactiveEmps = sorted.filter(e => e.inactive && e.inactiveFrom && e.inactiveFrom <= today());
   const list = showInactive ? inactiveEmps : activeEmps;
 
-  function getRow(e) {
-    return editRows[e.id] ?? { name:e.name, cpf:e.cpf??"", admission:e.admission??"", pin:e.pin??"", roleId:e.roleId??"", inactiveFrom:e.inactiveFrom??"" };
-  }
-  function setRow(id, field, val) {
-    setEditRows(prev => ({ ...prev, [id]: { ...(prev[id] ?? { name:"",cpf:"",admission:"",pin:"",roleId:"",inactiveFrom:"" }), [field]: val } }));
+  function getRow(emp) {
+    return { name:emp.name||"", cpf:emp.cpf||"", admission:emp.admission||"", pin:emp.pin||"", roleId:emp.roleId||"", inactiveFrom:emp.inactiveFrom||"", ...(editRows[emp.id]??{}) };
   }
 
-  function saveEmp(e) {
-    // Read directly from editRows state to avoid stale closure
+  function setField(id, field, val) {
+    setEditRows(prev => ({ ...prev, [id]: { ...(prev[id]??{}), [field]: val } }));
+  }
+
+  function saveEmp(emp) {
     setEditRows(prev => {
-      const row = prev[e.id] ?? { name:e.name, cpf:e.cpf??"", admission:e.admission??"", pin:e.pin??"", roleId:e.roleId??"", inactiveFrom:e.inactiveFrom??"" };
+      const row = { name:emp.name||"", cpf:emp.cpf||"", admission:emp.admission||"", pin:emp.pin||"", roleId:emp.roleId||"", inactiveFrom:emp.inactiveFrom||"", ...(prev[emp.id]??{}) };
       if (!row.name.trim()) return prev;
-      onUpdate("employees", employees.map(x => x.id===e.id ? {...e, name:row.name.trim(), cpf:row.cpf, admission:row.admission, pin:row.pin, roleId:row.roleId, inactiveFrom:row.inactiveFrom} : x));
-      setSaved(p=>({...p,[e.id]:true}));
-      setTimeout(()=>setSaved(p=>({...p,[e.id]:false})),1500);
+      onUpdate("employees", employees.map(x => x.id===emp.id ? {...emp, name:row.name.trim(), cpf:row.cpf, admission:row.admission, pin:row.pin, roleId:row.roleId, inactiveFrom:row.inactiveFrom} : x));
+      setSaved(p=>({...p,[emp.id]:true}));
+      setTimeout(()=>setSaved(p=>({...p,[emp.id]:false})),1500);
       return prev;
     });
   }
@@ -2172,73 +2217,18 @@ function EmployeeSpreadsheet({ restEmps, restRoles, rid, employees, onUpdate, re
     setNewRow(blank());
   }
 
-  function toggleInactive(e) {
-    const row = getRow(e);
-    onUpdate("employees", employees.map(x => x.id===e.id ? {...e, inactive:!e.inactive, inactiveFrom:row.inactiveFrom||today()} : x));
+  function toggleInactive(emp) {
+    const row = getRow(emp);
+    onUpdate("employees", employees.map(x => x.id===emp.id ? {...emp, inactive:!emp.inactive, inactiveFrom:row.inactiveFrom||today()} : x));
   }
 
-  function deleteEmp(e) {
-    if (!window.confirm(`Excluir permanentemente "${e.name}"? Esta ação não pode ser desfeita.`)) return;
-    onUpdate("employees", employees.filter(x => x.id !== e.id));
-  }
-
-  // Grid: Nome | CPF | Admissão | PIN | Cargo | Inativar desde | Ações
-  const cols = "2fr 1.2fr 100px 80px 1.5fr 100px auto";
-
-  const HeaderRow = () => (
-    <div style={{display:"grid",gridTemplateColumns:cols,gap:6,padding:"4px 8px",marginBottom:4}}>
-      {["Nome","CPF","Admissão","PIN","Cargo","Inativo desde",""].map(h=>(
-        <div key={h} style={{color:"var(--text3)",fontSize:10,fontWeight:700}}>{h}</div>
-      ))}
-    </div>
-  );
-
-  function renderEmpRow(e, isNew) {
-    const row = isNew ? newRow : getRow(e);
-    const isSaved = !isNew && saved[e?.id];
-    const isInactive = !isNew && e?.inactive && e?.inactiveFrom <= today();
-    const onChg = isNew
-      ? (f,v) => setNewRow(p=>({...p,[f]:v}))
-      : (f,v) => setEditRows(prev => ({ ...prev, [e.id]: { ...(prev[e.id] ?? getRow(e)), [f]: v } }));
-    return (
-      <div style={{display:"grid",gridTemplateColumns:cols,gap:6,padding:"6px 8px",marginBottom:4,background:isNew?"#0d1a0d":isInactive?"#1a1a2a":"var(--card-bg)",borderRadius:10,border:`1px solid ${isSaved?"#10b98166":isNew?"#10b98144":isInactive?"#8b5cf644":"var(--border)"}`,alignItems:"center",opacity:isInactive?0.75:1}}>
-        <input value={row.name} onChange={ev=>onChg("name",ev.target.value)} placeholder="Nome completo" style={inS}/>
-        <input value={row.cpf} onChange={ev=>onChg("cpf",ev.target.value)} placeholder="000.000.000-00" style={inS} inputMode="numeric"/>
-        <input type="date" value={row.admission} onChange={ev=>onChg("admission",ev.target.value)} style={inS}/>
-        <input type="password" value={row.pin} onChange={ev=>onChg("pin",ev.target.value)} maxLength={6} placeholder="••••" style={inS}/>
-        <select value={row.roleId} onChange={ev=>onChg("roleId",ev.target.value)} style={{...inS,cursor:"pointer"}}>
-          <option value="">Selecionar…</option>
-          {AREAS.map(a=>(
-            <optgroup key={a} label={a}>
-              {restRoles.filter(r=>r.area===a&&!r.inactive).map(r=><option key={r.id} value={r.id}>{r.name} ({r.points}pt)</option>)}
-            </optgroup>
-          ))}
-        </select>
-        {isNew
-          ? <div style={{fontSize:10,color:"var(--text3)"}}>Auto</div>
-          : <input type="date" value={row.inactiveFrom??""} onChange={ev=>onChg("inactiveFrom",ev.target.value)} style={inS}/>
-        }
-        <div style={{display:"flex",gap:4}}>
-          {isNew
-            ? <button onClick={saveNew} style={{padding:"6px 12px",borderRadius:8,border:"none",background:"#10b981",color:"#fff",fontWeight:700,cursor:"pointer",fontFamily:"DM Mono,monospace",fontSize:12,whiteSpace:"nowrap"}}>+ Add</button>
-            : <>
-                <button onClick={()=>saveEmp(e)} style={{padding:"4px 10px",borderRadius:6,border:"none",background:isSaved?"#10b981":ac,color:"#111",fontWeight:700,cursor:"pointer",fontFamily:"DM Mono,monospace",fontSize:11}}>{isSaved?"✓":"Salvar"}</button>
-                <button onClick={()=>toggleInactive(e)} title={isInactive?"Reativar":"Inativar"} style={{padding:"4px 8px",borderRadius:6,border:`1px solid ${isInactive?"#10b98144":"#f59e0b44"}`,background:"transparent",color:isInactive?"#10b981":"#f59e0b",cursor:"pointer",fontSize:11,fontFamily:"DM Mono,monospace"}}>
-                  {isInactive?"↑":"↓"}
-                </button>
-                {isSuperManager && isInactive && (
-                  <button onClick={()=>deleteEmp(e)} title="Excluir permanentemente" style={{padding:"4px 8px",borderRadius:6,border:"1px solid #e74c3c44",background:"transparent",color:"#e74c3c",cursor:"pointer",fontSize:11,fontFamily:"DM Mono,monospace"}}>✕</button>
-                )}
-              </>
-          }
-        </div>
-      </div>
-    );
+  function deleteEmp(emp) {
+    if (!window.confirm(`Excluir permanentemente "${emp.name}"? Esta ação não pode ser desfeita.`)) return;
+    onUpdate("employees", employees.filter(x => x.id !== emp.id));
   }
 
   return (
     <div style={{fontFamily:"DM Mono,monospace"}}>
-      {/* Toggle active/inactive */}
       <div style={{display:"flex",gap:8,marginBottom:16}}>
         <button onClick={()=>setShowInactive(false)} style={{flex:1,padding:"8px",borderRadius:10,border:`1px solid ${!showInactive?"#10b981":"var(--border)"}`,background:!showInactive?"#10b98122":"transparent",color:!showInactive?"#10b981":"var(--text3)",cursor:"pointer",fontFamily:"DM Mono,monospace",fontSize:13}}>
           Ativos ({activeEmps.length})
@@ -2247,19 +2237,31 @@ function EmployeeSpreadsheet({ restEmps, restRoles, rid, employees, onUpdate, re
           Inativos ({inactiveEmps.length}){isSuperManager && inactiveEmps.length>0 && " · clique ✕ p/ excluir"}
         </button>
       </div>
-
-      <HeaderRow />
-
-      {/* New row (only when showing active) */}
-      {!showInactive && renderEmpRow(null, true)}
-
-      {list.length === 0 && <p style={{color:"var(--text3)",textAlign:"center",marginTop:16}}>Nenhum empregado {showInactive?"inativo":"ativo"}.</p>}
-      {list.map(e => {
-        const role = restRoles.find(r=>r.id===e.roleId);
+      <div style={{display:"grid",gridTemplateColumns:EMP_COLS,gap:6,padding:"4px 8px",marginBottom:4}}>
+        {["Nome","CPF","Admissão","PIN","Cargo","Inativo desde",""].map(h=>(
+          <div key={h} style={{color:"var(--text3)",fontSize:10,fontWeight:700}}>{h}</div>
+        ))}
+      </div>
+      {!showInactive && (
+        <EmpRowLine isNew emp={null} row={newRow} restRoles={restRoles}
+          isSaved={false} isSuperManager={isSuperManager}
+          onChange={(f,v)=>setNewRow(p=>({...p,[f]:v}))}
+          onAdd={saveNew} onSave={null} onToggleInactive={null} onDelete={null}/>
+      )}
+      {list.length===0 && <p style={{color:"var(--text3)",textAlign:"center",marginTop:16}}>Nenhum empregado {showInactive?"inativo":"ativo"}.</p>}
+      {list.map(emp => {
+        const role = restRoles.find(r=>r.id===emp.roleId);
+        const row = getRow(emp);
         return (
-          <div key={e.id}>
-            {role && <div style={{color:AREA_COLORS[role.area]??"#555",fontSize:10,fontWeight:700,padding:"6px 8px 2px"}}>{role.area} · {e.empCode}</div>}
-            {renderEmpRow(e, false)}
+          <div key={emp.id}>
+            {role && <div style={{color:AREA_COLORS[role.area]??"#555",fontSize:10,fontWeight:700,padding:"6px 8px 2px"}}>{role.area} · {emp.empCode}</div>}
+            <EmpRowLine isNew={false} emp={emp} row={row} restRoles={restRoles}
+              isSaved={saved[emp.id]} isSuperManager={isSuperManager}
+              onChange={(f,v)=>setField(emp.id,f,v)}
+              onSave={()=>saveEmp(emp)}
+              onToggleInactive={()=>toggleInactive(emp)}
+              onDelete={()=>deleteEmp(emp)}
+              onAdd={null}/>
           </div>
         );
       })}
@@ -2267,9 +2269,7 @@ function EmployeeSpreadsheet({ restEmps, restRoles, rid, employees, onUpdate, re
   );
 }
 
-
 function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, splits, schedules, onUpdate, perms, isSuperManager, data }) {
-  const [tab, setTab] = useState(perms.tips ? "dashboard" : "schedule");
   const now = new Date();
   const [year, setYear] = useState(now.getFullYear());
   const [month, setMonth] = useState(now.getMonth());
@@ -2557,8 +2557,11 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
   const canFaq   = perms.faq   !== false || isSuperManager;
   const canDp    = perms.dp    !== false || isSuperManager;
 
+  const dpUnread = ((data?.notifications??[]).filter(n=>n.restaurantId===rid&&!n.read).length + (data?.dpMessages??[]).filter(m=>m.restaurantId===rid&&!m.read).length);
+
   const TABS = [
     canTips   && ["dashboard",    "📊 Dashboard"],
+    isDP      && ["notificacoes", `📬 Caixa de Entrada${dpUnread>0?` (${dpUnread})`:""}`],
     canTips   && ["tips",         "💸 Gorjetas"],
     (canTips || isSuperManager) && ["employees", "👥 Equipe"],
     isSuperManager && ["roles",   "🏷️ Cargos"],
@@ -2567,10 +2570,11 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
     canFaq    && ["faq",          "❓ FAQ"],
     canDp     && ["dp",           "💬 Fale com DP"],
     (perms.horarios !== false || isSuperManager) && ["horarios", "🕐 Horários"],
-    isDP      && ["notificacoes", `📬 Notificações${((data?.notifications??[]).filter(n=>n.restaurantId===rid&&!n.read).length+(data?.dpMessages??[]).filter(m=>m.restaurantId===rid&&!m.read).length)>0?" ●":"" }`],
     (canTips || isSuperManager) && ["recibos", "📄 Recibos"],
     (canTips || isSuperManager) && ["config", "⚙️ Config"],
   ].filter(Boolean);
+
+  const [tab, setTab] = useState(isDP ? "notificacoes" : (perms.tips ? "dashboard" : "schedule"));
 
   return (
     <div style={{ fontFamily: "DM Mono,monospace" }}>
