@@ -3819,7 +3819,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
 //
 function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }) {
   const { owners, managers, restaurants, employees, roles, tips, splits, schedules, noTipDays } = data;
-  const [tab, setTab] = useState("restaurants");
+  const [tab, setTab] = useState("dashboard");
   const [selRestaurant, setSelRestaurantState] = useState(() => {
     const saved = localStorage.getItem("apptip_selrest");
     if (saved && restaurants.find(r => r.id === saved)) return saved;
@@ -3875,8 +3875,17 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }
   ];
   function getPlano(r) { return PLANOS.find(p=>p.id===(r.planoId??"p10")) ?? PLANOS[0]; }
 
+  const notifications = data?.notifications ?? [];
+  const unreadNotifs = notifications.filter(n => !n.read && n.targetRole === "admin").length;
+
   const ac = "var(--ac)";
-  const TABS = [["restaurants","🏢 Restaurantes"],["managers","👔 Gestores"],["owners","⭐ Admins AppTip"]];
+  const TABS = [
+    ["dashboard", "📊 Dashboard"],
+    ["restaurants","🏢 Restaurantes"],
+    ["managers","👔 Gestores"],
+    ["owners","⭐ Admins AppTip"],
+    ["inbox", `📬 Caixa${unreadNotifs > 0 ? ` (${unreadNotifs})` : ""}`],
+  ];
 
   if (selRestaurant) {
     const rest = restaurants.find(r => r.id === selRestaurant);
@@ -3914,6 +3923,180 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }
       </div>
 
       <div style={{ padding:"20px 24px", maxWidth:1100, margin:"0 auto" }}>
+
+        {/* DASHBOARD */}
+        {tab === "dashboard" && (() => {
+          const totalRests = restaurants.length;
+          const totalEmps = employees.filter(e=>!e.inactive).length;
+          const totalMgrs = managers.length;
+          const receitaMensal = restaurants.reduce((sum, r) => {
+            const p = getPlano(r);
+            return sum + (p.mensal ?? 0);
+          }, 0);
+
+          const today_ = today();
+          const thisMonth = today_.slice(0,7);
+
+          return (
+            <div>
+              {/* Métricas */}
+              <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(180px,1fr))",gap:16,marginBottom:28}}>
+                {[
+                  { label:"Restaurantes", value:totalRests, icon:"🏢", color:"var(--blue)" },
+                  { label:"Empregados ativos", value:totalEmps, icon:"👥", color:"var(--green)" },
+                  { label:"Gestores", value:totalMgrs, icon:"👔", color:"#8b5cf6" },
+                  { label:"Receita mensal est.", value:`R$${receitaMensal.toLocaleString("pt-BR")}`, icon:"💰", color:"var(--ac)" },
+                ].map(m=>(
+                  <div key={m.label} style={{...S.card,display:"flex",alignItems:"center",gap:14}}>
+                    <div style={{fontSize:28,width:48,height:48,borderRadius:12,background:m.color+"15",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>{m.icon}</div>
+                    <div>
+                      <div style={{color:"var(--text3)",fontSize:11,fontWeight:600,textTransform:"uppercase",letterSpacing:0.5,marginBottom:2}}>{m.label}</div>
+                      <div style={{color:"var(--text)",fontSize:22,fontWeight:800,fontFamily:"'DM Mono',monospace"}}>{m.value}</div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              {/* Status dos restaurantes */}
+              <div style={{...S.card,marginBottom:20}}>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}}>
+                  <h3 style={{color:"var(--text)",fontSize:15,fontWeight:700,margin:0}}>Status dos clientes</h3>
+                  <span style={{color:"var(--text3)",fontSize:12}}>{thisMonth}</span>
+                </div>
+                {restaurants.length === 0 && <p style={{color:"var(--text3)",fontSize:13,textAlign:"center"}}>Nenhum restaurante cadastrado.</p>}
+                <div style={{display:"flex",flexDirection:"column",gap:10}}>
+                  {restaurants.map(r => {
+                    const plano = getPlano(r);
+                    const empAtivos = employees.filter(e=>e.restaurantId===r.id&&!e.inactive).length;
+                    const pct = Math.min(100, Math.round((empAtivos/plano.empMax)*100));
+                    const temGorjetaMes = tips.some(t=>t.restaurantId===r.id&&t.monthKey===thisMonth);
+                    const ultimaGorjeta = tips.filter(t=>t.restaurantId===r.id).sort((a,b)=>b.date?.localeCompare(a.date??"")??"").at(0);
+                    const diasSemGorjeta = ultimaGorjeta?.date
+                      ? Math.floor((new Date()-new Date(ultimaGorjeta.date+"T12:00:00"))/(1000*60*60*24))
+                      : 999;
+
+                    // Semáforo
+                    let semaforo = "verde";
+                    let semaforoMsg = "Ativo";
+                    if (pct >= 100) { semaforo = "vermelho"; semaforoMsg = "Limite atingido"; }
+                    else if (!temGorjetaMes) { semaforo = "amarelo"; semaforoMsg = "Sem gorjeta este mês"; }
+                    else if (pct >= 80) { semaforo = "amarelo"; semaforoMsg = "Próximo do limite"; }
+
+                    const semColor = semaforo === "verde" ? "var(--green)" : semaforo === "amarelo" ? "#f59e0b" : "var(--red)";
+
+                    return (
+                      <div key={r.id} style={{display:"flex",alignItems:"center",gap:14,padding:"12px 16px",borderRadius:12,background:"var(--bg2)",border:"1px solid var(--border)",cursor:"pointer"}}
+                        onClick={()=>setSelRestaurant(r.id)}>
+                        {/* Semáforo */}
+                        <div style={{width:10,height:10,borderRadius:"50%",background:semColor,flexShrink:0,boxShadow:`0 0 6px ${semColor}`}}/>
+                        {/* Info */}
+                        <div style={{flex:1,minWidth:0}}>
+                          <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:3}}>
+                            <span style={{color:"var(--text)",fontWeight:700,fontSize:14}}>{r.name}</span>
+                            <span style={{background:"var(--ac-bg)",color:"var(--ac-text)",borderRadius:6,padding:"1px 8px",fontSize:11,fontWeight:700}}>{plano.label}</span>
+                          </div>
+                          <div style={{display:"flex",gap:12,fontSize:12,color:"var(--text3)"}}>
+                            <span>{empAtivos}/{plano.empMax} emp.</span>
+                            <span style={{color:semColor,fontWeight:600}}>{semaforoMsg}</span>
+                            {ultimaGorjeta && <span>Última gorjeta: {diasSemGorjeta}d atrás</span>}
+                          </div>
+                        </div>
+                        {/* Barra de uso */}
+                        <div style={{width:80,flexShrink:0}}>
+                          <div style={{background:"var(--border)",borderRadius:4,height:6,overflow:"hidden"}}>
+                            <div style={{width:`${pct}%`,height:"100%",background:semColor,borderRadius:4,transition:"width 0.3s"}}/>
+                          </div>
+                          <div style={{textAlign:"right",fontSize:10,color:"var(--text3)",marginTop:2}}>{pct}%</div>
+                        </div>
+                        <span style={{color:"var(--text3)",fontSize:16}}>›</span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Notificações recentes */}
+              {unreadNotifs > 0 && (
+                <div style={{...S.card,border:"1px solid var(--ac)33",background:"var(--ac-bg)"}}>
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
+                    <span style={{color:"var(--ac-text)",fontWeight:700,fontSize:14}}>📬 {unreadNotifs} mensagem{unreadNotifs>1?"ns":""} não lida{unreadNotifs>1?"s":""}</span>
+                    <button onClick={()=>setTab("inbox")} style={{...S.btnSecondary,fontSize:12,padding:"4px 12px"}}>Ver caixa →</button>
+                  </div>
+                  {notifications.filter(n=>!n.read&&n.targetRole==="admin").slice(0,3).map(n=>(
+                    <div key={n.id} style={{padding:"8px 0",borderBottom:"1px solid var(--border)",fontSize:13,color:"var(--text2)"}}>
+                      {n.body}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          );
+        })()}
+
+        {/* CAIXA */}
+        {tab === "inbox" && (() => {
+          const adminNotifs = [...notifications].filter(n => n.targetRole === "admin" || n.type === "upgrade_request")
+            .sort((a,b) => b.date?.localeCompare(a.date??""));
+
+          return (
+            <div>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}}>
+                <h3 style={{color:"var(--text)",fontSize:16,fontWeight:700,margin:0}}>📬 Caixa de entrada</h3>
+                {adminNotifs.some(n=>!n.read) && (
+                  <button onClick={()=>{
+                    const updated = notifications.map(n => n.targetRole==="admin"||n.type==="upgrade_request" ? {...n,read:true} : n);
+                    onUpdate("notifications", updated);
+                  }} style={{...S.btnSecondary,fontSize:12,padding:"6px 14px"}}>Marcar todas como lidas</button>
+                )}
+              </div>
+
+              {adminNotifs.length === 0 && (
+                <div style={{...S.card,textAlign:"center",padding:40}}>
+                  <div style={{fontSize:36,marginBottom:12}}>📭</div>
+                  <p style={{color:"var(--text3)",fontSize:14}}>Nenhuma mensagem ainda.</p>
+                </div>
+              )}
+
+              <div style={{display:"flex",flexDirection:"column",gap:10}}>
+                {adminNotifs.map(n => {
+                  const isUpgrade = n.type === "upgrade_request";
+                  const rest = restaurants.find(r=>r.id===n.restaurantId);
+                  return (
+                    <div key={n.id} style={{...S.card,border:`1px solid ${n.read?"var(--border)":isUpgrade?"var(--ac)44":"var(--blue)33"}`,background:n.read?"var(--card-bg)":isUpgrade?"var(--ac-bg)":"var(--blue-bg)"}}>
+                      <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:12}}>
+                        <div style={{flex:1}}>
+                          <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:6}}>
+                            <span style={{fontSize:16}}>{isUpgrade?"📦":"💬"}</span>
+                            <span style={{color:"var(--text)",fontWeight:700,fontSize:14}}>
+                              {isUpgrade?"Solicitação de upgrade":"Mensagem"}
+                            </span>
+                            {!n.read && <span style={{background:isUpgrade?ac:"var(--blue)",color:"#fff",borderRadius:20,padding:"1px 8px",fontSize:10,fontWeight:700}}>Novo</span>}
+                            {rest && <span style={{color:"var(--text3)",fontSize:12}}>· {rest.name}</span>}
+                          </div>
+                          <p style={{color:"var(--text2)",fontSize:13,margin:"0 0 8px",lineHeight:1.5}}>{n.body}</p>
+                          <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
+                            <span style={{color:"var(--text3)",fontSize:11}}>{n.date ? new Date(n.date).toLocaleString("pt-BR") : ""}</span>
+                            {isUpgrade && (
+                              <button onClick={()=>setSelRestaurant(n.restaurantId)} style={{padding:"4px 12px",borderRadius:8,border:`1px solid ${ac}`,background:"transparent",color:"var(--ac-text)",cursor:"pointer",fontFamily:"'DM Sans',sans-serif",fontSize:12,fontWeight:600}}>
+                                Abrir restaurante →
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                        {!n.read && (
+                          <button onClick={()=>{
+                            const updated = notifications.map(x => x.id===n.id ? {...x,read:true} : x);
+                            onUpdate("notifications", updated);
+                          }} style={{background:"none",border:"none",color:"var(--text3)",cursor:"pointer",fontSize:18,flexShrink:0,padding:4}}>✓</button>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          );
+        })()}
 
         {/* RESTAURANTES */}
         {tab === "restaurants" && (
