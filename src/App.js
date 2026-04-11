@@ -657,7 +657,7 @@ function ComunicadosManagerTab({ restaurantId, communications, commAcks, employe
                 {restEmps.map(e => {
                   const ackDate = commAcks?.[c.id]?.[e.id];
                   return (
-                    <div key={e.id} style={{ display: "grid", gridTemplateColumns: "2fr 1fr 1fr", gap: 6, padding: "6px 0", borderBottom: "1px solid #1a1a1a" }}>
+                    <div key={e.id} style={{ display: "grid", gridTemplateColumns: "2fr 1fr 1fr", gap: 6, padding: "6px 0", borderBottom: "1px solid var(--border)" }}>
                       <div style={{ color: "var(--text)", fontSize: 13 }}>{e.name}</div>
                       <div style={{ color: "var(--text3)", fontSize: 11 }}>{fmtDate(c.createdAt?.slice(0,10))}</div>
                       <div style={{ color: ackDate ? "var(--green)" : "var(--red)", fontSize: 11 }}>{ackDate ? new Date(ackDate).toLocaleDateString("pt-BR") : "Pendente"}</div>
@@ -1128,7 +1128,7 @@ function WorkScheduleManagerTab({ restaurantId, employees, workSchedules, notifi
               </div>
             )}
             {[...empSchedules].reverse().slice(1).map(s => (
-              <div key={s.id} style={{padding:"6px 12px",borderBottom:"1px solid #1a1a1a",fontSize:12,display:"flex",alignItems:"center",gap:10,background:selectedSchedIds.has(s.id)?"#1a0a0a":"transparent"}}>
+              <div key={s.id} style={{padding:"6px 12px",borderBottom:"1px solid var(--border)",fontSize:12,display:"flex",alignItems:"center",gap:10,background:selectedSchedIds.has(s.id)?"var(--red-bg)":"transparent"}}>
                 {isSuperManager && (
                   <input type="checkbox" checked={selectedSchedIds.has(s.id)}
                     onChange={e=>{
@@ -2253,7 +2253,7 @@ function EmployeePortal({ employees, roles, tips, schedules, restaurants, commun
                                   <td key={d} style={{
                                     textAlign:"center",padding:"3px 1px",
                                     background:isToday?"var(--ac)11":status?color+"22":(isWe?"#1a1a0a":"transparent"),
-                                    borderRight:"1px solid #1a1a1a",
+                                    borderRight:"1px solid var(--border)",
                                     width:22,outline:isToday?`1px solid ${ac}44`:undefined
                                   }}>
                                     <span style={{color:color,fontSize:status?8:9,fontWeight:status?700:300}}>{label}</span>
@@ -2400,7 +2400,7 @@ function RoleSpreadsheet({ restRoles, rid, roles, onUpdate }) {
       </div>
 
       {/* Nova linha */}
-      <div style={{ display:"grid", gridTemplateColumns:ROLE_COLS, gap:6, marginBottom:16, background:"#0d1a0d", borderRadius:10, padding:"6px 8px", border:"1px solid #10b98144", alignItems:"center" }}>
+      <div style={{ display:"grid", gridTemplateColumns:ROLE_COLS, gap:6, marginBottom:16, background:"#f0fdf4", borderRadius:10, padding:"6px 8px", border:"1px solid #10b98144", alignItems:"center" }}>
         <input value={newRow.name} onChange={e => setNewRow(p => ({ ...p, name: e.target.value }))} placeholder="Nome do cargo…" style={inStyle} />
         <input type="number" min="0.5" step="0.5" value={newRow.noTip ? 0 : newRow.points} disabled={newRow.noTip} onChange={e => setNewRow(p => ({ ...p, points: e.target.value }))} style={{...inStyle, opacity: newRow.noTip ? 0.4 : 1, textAlign:"center"}} />
         <div style={{display:"flex",alignItems:"center",gap:6}}>
@@ -2434,7 +2434,7 @@ function RoleSpreadsheet({ restRoles, rid, roles, onUpdate }) {
       {/* Inativos */}
       {inactiveList.length > 0 && (
         <div style={{marginTop:8}}>
-          <div style={{color:"var(--text3)",fontSize:11,fontWeight:700,padding:"6px 8px 4px",borderBottom:"1px solid #33333344",marginBottom:4,letterSpacing:1}}>
+          <div style={{color:"var(--text3)",fontSize:11,fontWeight:700,padding:"6px 8px 4px",borderBottom:"1px solid var(--border)",marginBottom:4,letterSpacing:1}}>
             INATIVOS · {inactiveList.length}
           </div>
           {inactiveList.map(renderRow)}
@@ -2455,7 +2455,7 @@ function EmpRowLine({ emp, isNew, row, restRoles, isSaved, isSuperManager, onCha
   const isInactive = !isNew && emp?.inactive && emp?.inactiveFrom <= today();
   return (
     <div style={{display:"grid",gridTemplateColumns:EMP_COLS,gap:6,padding:"6px 8px",marginBottom:4,
-      background:isNew?"#0d1a0d":isInactive?"#1a1a2a":"var(--card-bg)",borderRadius:10,
+      background:isNew?"#f0fdf4":isInactive?"#1a1a2a":"var(--card-bg)",borderRadius:10,
       border:`1px solid ${isSaved?"#10b98166":isNew?"#10b98144":isInactive?"#8b5cf644":"var(--border)"}`,
       alignItems:"center",opacity:isInactive?0.75:1}}>
 
@@ -3008,18 +3008,18 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
 
               {/* Pendências */}
               {alerts.length > 0 ? (
-                <div style={{...S.card,marginBottom:14,border:"1px solid #f59e0b33",background:"#1a1400"}}>
-                  <span style={{color:"#f59e0b",fontWeight:700,fontSize:13,display:"block",marginBottom:10}}>⚡ Pendências</span>
+                <div style={{...S.card,marginBottom:14,border:"1px solid var(--red)33",background:"#fef2f2"}}>
+                  <span style={{color:"var(--red)",fontWeight:700,fontSize:13,display:"block",marginBottom:10}}>⚡ Pendências</span>
                   {alerts.map((a,i)=>(
-                    <div key={i} onClick={()=>setTab(a.tab)} style={{display:"flex",alignItems:"center",gap:10,padding:"8px 10px",borderRadius:8,cursor:"pointer",marginBottom:4,background:"var(--bg1)",border:`1px solid ${a.color}22`}}>
+                    <div key={i} onClick={()=>setTab(a.tab)} style={{display:"flex",alignItems:"center",gap:10,padding:"8px 10px",borderRadius:8,cursor:"pointer",marginBottom:4,background:"#fff",border:`1px solid ${a.color}33`}}>
                       <span style={{fontSize:15}}>{a.icon}</span>
-                      <span style={{color:"var(--text2)",fontSize:12,flex:1}}>{a.msg}</span>
-                      <span style={{color:a.color,fontSize:11}}>→</span>
+                      <span style={{color:"var(--text2)",fontSize:13,flex:1}}>{a.msg}</span>
+                      <span style={{color:a.color,fontSize:12,fontWeight:700}}>→</span>
                     </div>
                   ))}
                 </div>
               ) : (
-                <div style={{...S.card,marginBottom:14,border:"1px solid #10b98133",background:"#0a1a0a",textAlign:"center",padding:"14px"}}>
+                <div style={{...S.card,marginBottom:14,border:"1px solid var(--green)33",background:"#f0fdf4",textAlign:"center",padding:"14px"}}>
                   <span style={{fontSize:22}}>✅</span>
                   <p style={{color:"var(--green)",fontSize:13,margin:"4px 0 0",fontWeight:600}}>Tudo em dia!</p>
                   <p style={{color:"var(--text3)",fontSize:11,margin:"2px 0 0"}}>Nenhuma pendência para {monthLabel(year,month)}</p>
@@ -3163,9 +3163,9 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                       const isWeekend = [0,6].includes(new Date(date+"T12:00:00").getDay());
 
                       let bg = "#111", border = "#1e1e1e";
-                      if      (isNoTip)               { bg = "#0f0d1f"; border = "#6366f166"; }
+                      if      (isNoTip)               { bg = "#f5f0ff"; border = "#6366f133"; }
                       else if (isLaunched && !isDirty) { bg = "#0a1a0a"; border = "#10b98133"; }
-                      else if (isDirty)                { bg = "#1a1200"; border = "#f59e0b55"; }
+                      else if (isDirty)                { bg = "#fffbeb"; border = "#f59e0b44"; }
                       else if (hasVal)                 { bg = "#1a1a0a"; border = "var(--ac)33"; }
 
                       return (
@@ -3185,8 +3185,8 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                             onChange={e=>{ const nr=tipRows.filter(r=>r.date!==date); setTipRows([...nr,{...row,total:e.target.value}]); }}
                             placeholder="0,00"
                             style={{...S.input, fontSize:13, padding:"6px 8px",
-                              background:  isNoTip?"#1a1535"  : isDirty?"#221500" : isLaunched?"#0d1a0d" : "var(--bg3)",
-                              color:       isNoTip?"#3a3360"  : isDirty?"#f59e0b" : isLaunched?"var(--green)" : "#fff",
+                              background:  isNoTip?"#f5f0ff"  : isDirty?"#fef9e7" : isLaunched?"#f0fdf4" : "var(--bg3)",
+                              color:       isNoTip?"#6366f1"  : isDirty?"#f59e0b" : isLaunched?"var(--green)" : "#fff",
                               borderColor: isNoTip?"transparent": isDirty?"#f59e0b44": isLaunched?"#10b98133": "transparent",
                               cursor:      isNoTip?"not-allowed" : "text",
                             }}
@@ -3199,8 +3199,8 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                             onChange={e=>{ const nr=tipRows.filter(r=>r.date!==date); setTipRows([...nr,{...row,note:e.target.value}]); }}
                             placeholder={isNoTip ? "—" : "Observação"}
                             style={{...S.input, fontSize:12, padding:"6px 8px",
-                              background: isNoTip?"#1a1535":"var(--input-bg)",
-                              color:      isNoTip?"#3a3360":"var(--text)",
+                              background: isNoTip?"#f5f0ff":"var(--input-bg)",
+                              color:      isNoTip?"#6366f1":"var(--text)",
                               cursor:     isNoTip?"not-allowed":"text",
                             }}
                           />
@@ -3585,8 +3585,8 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                           );
                         }
                         rows.push(
-                          <tr key={emp.id} style={{background:ei%2===0?"#111":"var(--bg2)"}}>
-                            <td style={{position:"sticky",left:0,background:ei%2===0?"#111":"var(--bg2)",zIndex:1,padding:"5px 10px",borderRight:"1px solid var(--border)",minWidth:130}}>
+                          <tr key={emp.id} style={{background:ei%2===0?"var(--bg1)":"var(--bg2)"}}>
+                            <td style={{position:"sticky",left:0,background:ei%2===0?"var(--bg1)":"var(--bg2)",zIndex:1,padding:"5px 10px",borderRight:"1px solid var(--border)",minWidth:130}}>
                               <div style={{color:"var(--text)",fontSize:11,fontWeight:600}}>{emp.name}</div>
                               <div style={{color:"var(--text3)",fontSize:9}}>{role?.name}</div>
                             </td>
@@ -3600,7 +3600,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                               const isWe = wd===0||wd===6;
                               return (
                                 <td key={d} onClick={()=>cycleStatus(emp.id, date)}
-                                  style={{textAlign:"center",padding:"3px 2px",cursor:"pointer",background:status?color+"33":(isWe?"#1a1a0a":"transparent"),borderRight:"1px solid #1a1a1a",width:30}}>
+                                  style={{textAlign:"center",padding:"3px 2px",cursor:"pointer",background:status?color+"22":(isWe?"var(--bg3)":"transparent"),borderRight:"1px solid var(--border)",width:30}}>
                                   <span style={{color:color,fontSize:status?9:11,fontWeight:status?700:400}}>{label}</span>
                                 </td>
                               );
@@ -3728,7 +3728,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                 })}
                 <div style={{display:"flex",alignItems:"center",gap:10}}>
                   <div style={{minWidth:80}}><AreaBadge area="Produção"/></div>
-                  <div style={{...S.input,width:70,textAlign:"center",color:"var(--text3)",background:"var(--bg5)",border:"1px solid #1a1a1a"}}>4%</div>
+                  <div style={{...S.input,width:70,textAlign:"center",color:"var(--text3)",background:"var(--bg5)",border:"1px solid var(--border)"}}>4%</div>
                   <span style={{color:"var(--text3)",fontSize:12}}>fixo (regra Produção)</span>
                 </div>
               </div>
@@ -4255,9 +4255,14 @@ function UnifiedLogin({ superManagers, managers, employees, onLoginSuper, onLogi
       const mgr = managers.find(m => m.cpf?.replace(/\D/g,"") === cleanCpf && (String(m.pin) === cleanPin || (empByCpf && String(empByCpf.pin) === cleanPin)));
       if (mgr) found.push({ label:"Gestor", icon:"📊", action:()=>{ setChoices(null); onLoginManager(mgr); } });
 
-      // Empregado por CPF (aceita PIN do empregado OU PIN do gestor com mesmo CPF)
+      // Empregado por CPF (aceita PIN do empregado, do gestor OU do supergestor com mesmo CPF)
+      const superByCpf = superManagers.find(s => s.cpf?.replace(/\D/g,"") === cleanCpf);
       const mgrByCpf = managers.find(m => m.cpf?.replace(/\D/g,"") === cleanCpf);
-      const emp = employees.find(e => e.cpf?.replace(/\D/g,"") === cleanCpf && (String(e.pin) === cleanPin || (mgrByCpf && String(mgrByCpf.pin) === cleanPin)));
+      const emp = employees.find(e => e.cpf?.replace(/\D/g,"") === cleanCpf && (
+        String(e.pin) === cleanPin ||
+        (mgrByCpf && String(mgrByCpf.pin) === cleanPin) ||
+        (superByCpf && String(superByCpf.pin) === cleanPin)
+      ));
       if (emp && !(emp.inactive && emp.inactiveFrom && emp.inactiveFrom <= today())) {
         found.push({ label:"Empregado", icon:"👤", action:()=>{ setChoices(null); localStorage.setItem("apptip_empid", emp.id); onLoginEmployee(emp); } });
       }
@@ -4274,15 +4279,16 @@ function UnifiedLogin({ superManagers, managers, employees, onLoginSuper, onLogi
     }
 
     if (found.length === 1) {
-      // Só um papel — vai direto
       setErr(""); setAttempts(0); found[0].action(); return;
     }
 
     if (found.length > 1) {
-      // Múltiplos papéis — mostra escolha
-      const name = found[0].label === "Super Gestor"
-        ? superManagers.find(s=>s.cpf?.replace(/\D/g,"")=== credential.replace(/\D/g,""))?.name
-        : managers.find(m=>m.cpf?.replace(/\D/g,"")=== credential.replace(/\D/g,""))?.name ?? "Usuário";
+      const cleanCpfForName = credential.replace(/\D/g,"");
+      const name =
+        superManagers.find(s => s.cpf?.replace(/\D/g,"") === cleanCpfForName)?.name ??
+        managers.find(m => m.cpf?.replace(/\D/g,"") === cleanCpfForName)?.name ??
+        employees.find(e => e.cpf?.replace(/\D/g,"") === cleanCpfForName)?.name ??
+        "Usuário";
       setErr(""); setAttempts(0); setChoices({ name, options: found }); return;
     }
 
@@ -4554,7 +4560,7 @@ function Home({ onManager, onEmployee }) {
           {[["100%","Mobile first"],["LGPD","Conformidade"],["0","Taxa de adesão"]].map(([n,l])=>(
             <div key={l}>
               <div style={{fontSize:36,fontWeight:700,color:ac,marginBottom:4}}>{n}</div>
-              <div style={{color:"#777",fontSize:13}}>{l}</div>
+              <div style={{color:"var(--text3)",fontSize:13}}>{l}</div>
             </div>
           ))}
         </div>
@@ -4565,14 +4571,14 @@ function Home({ onManager, onEmployee }) {
         <div style={{maxWidth:960,margin:"0 auto"}}>
           <div style={{textAlign:"center",marginBottom:56}}>
             <h2 style={{fontSize:"clamp(24px,4vw,36px)",fontWeight:700,margin:"0 0 12px"}}>Tudo que sua equipe precisa</h2>
-            <p style={{color:"#777",fontSize:16}}>Um sistema completo, sem complicação</p>
+            <p style={{color:"var(--text3)",fontSize:16}}>Um sistema completo, sem complicação</p>
           </div>
           <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(280px,1fr))",gap:24}}>
             {FEATURES.map(f=>(
               <div key={f.title} style={{padding:"28px",borderRadius:16,border:"1px solid #f0f0f0",background:"var(--bg1)",boxShadow:"0 2px 12px rgba(0,0,0,0.04)"}}>
                 <div style={{fontSize:32,marginBottom:14}}>{f.icon}</div>
                 <h3 style={{fontSize:16,fontWeight:700,margin:"0 0 8px"}}>{f.title}</h3>
-                <p style={{color:"#777",fontSize:14,lineHeight:1.6,margin:0}}>{f.desc}</p>
+                <p style={{color:"var(--text3)",fontSize:14,lineHeight:1.6,margin:0}}>{f.desc}</p>
               </div>
             ))}
           </div>
@@ -4605,14 +4611,14 @@ function Home({ onManager, onEmployee }) {
         <div style={{maxWidth:960,margin:"0 auto"}}>
           <div style={{textAlign:"center",marginBottom:16}}>
             <h2 style={{fontSize:"clamp(24px,4vw,36px)",fontWeight:700,margin:"0 0 12px"}}>Planos e preços</h2>
-            <p style={{color:"#777",fontSize:16}}>Plano anual com <strong style={{color:ac}}>10% de desconto</strong>, pago em 12x</p>
+            <p style={{color:"var(--text3)",fontSize:16}}>Plano anual com <strong style={{color:ac}}>10% de desconto</strong>, pago em 12x</p>
           </div>
           <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(210px,1fr))",gap:20,marginTop:40}}>
             {PLANOS.map(p=>(
               <div key={p.nome} style={{borderRadius:16,border:p.destaque?`2px solid ${ac}`:"1px solid #f0f0f0",padding:"28px 24px",background:p.destaque?"var(--bg5)":"#fff",position:"relative",boxShadow:p.destaque?"0 8px 32px rgba(245,200,66,0.15)":"0 2px 12px rgba(0,0,0,0.04)"}}>
                 {p.destaque && <div style={{position:"absolute",top:-12,left:"50%",transform:"translateX(-50%)",background:ac,color:"#1c1710",fontSize:11,fontWeight:700,padding:"4px 14px",borderRadius:20,whiteSpace:"nowrap"}}>Mais popular</div>}
                 <div style={{color:p.destaque?"#fff":"#111",fontWeight:700,fontSize:18,marginBottom:4}}>{p.nome}</div>
-                <div style={{color:"#777",fontSize:13,marginBottom:20}}>{p.emp} empregados</div>
+                <div style={{color:"var(--text3)",fontSize:13,marginBottom:20}}>{p.emp} empregados</div>
                 {p.mensal ? (
                   <>
                     <div style={{marginBottom:4}}>
@@ -4639,13 +4645,13 @@ function Home({ onManager, onEmployee }) {
         <div style={{maxWidth:560,margin:"0 auto"}}>
           <div style={{textAlign:"center",marginBottom:40}}>
             <h2 style={{fontSize:"clamp(24px,4vw,36px)",fontWeight:700,margin:"0 0 12px"}}>Fale com a gente</h2>
-            <p style={{color:"#777",fontSize:16}}>Solicite uma demonstração gratuita ou tire suas dúvidas</p>
+            <p style={{color:"var(--text3)",fontSize:16}}>Solicite uma demonstração gratuita ou tire suas dúvidas</p>
           </div>
           {formSent ? (
             <div style={{textAlign:"center",padding:"48px",background:"var(--bg1)",borderRadius:16,border:"1px solid #f0f0f0"}}>
               <div style={{fontSize:48,marginBottom:16}}>✅</div>
               <h3 style={{fontSize:20,fontWeight:700,margin:"0 0 8px"}}>Mensagem enviada!</h3>
-              <p style={{color:"#777"}}>Entraremos em contato em breve.</p>
+              <p style={{color:"var(--text3)"}}>Entraremos em contato em breve.</p>
             </div>
           ) : (
             <div style={{background:"var(--bg1)",borderRadius:16,padding:"40px",border:"1px solid #f0f0f0",boxShadow:"0 4px 24px rgba(0,0,0,0.06)"}}>
