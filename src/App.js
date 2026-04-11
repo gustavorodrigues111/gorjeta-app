@@ -956,6 +956,7 @@ Sem markdown, sem explicações, apenas o JSON.`;
 // FAQ MANAGER TAB
 //
 const GEMINI_KEY = "AIzaSyDWG0fc3j7QfG-k5xLJo3xc3v_KNC_uo90";
+const GROQ_KEY = "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";
 
 async function geminiSuggestFaq(input) {
   const prompt = `Você é um assistente especializado em restaurantes. O gestor de um restaurante descreveu informalmente uma pergunta e resposta para o FAQ dos seus empregados. Sua tarefa é reformular isso de forma clara, profissional e empática, adequada para empregados de restaurante lerem no app.
@@ -3207,7 +3208,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
   const [aiSchedLoading, setAiSchedLoading] = useState(false);
   const [aiSchedError, setAiSchedError]     = useState("");
   const [aiSchedPreview, setAiSchedPreview] = useState(null);
-  const [aiSchedListening, setAiSchedListening] = useState(false);
+
   const [showExport, setShowExport]       = useState(false);
 
   const empSummary = restEmps.map(e => {
@@ -4174,24 +4175,28 @@ REGRAS:
 Responda SOMENTE com o JSON abaixo, sem texto adicional, sem markdown:
 {"resumo":"resumo curto do que foi feito","escala":{"ID_EMPREGADO":{"YYYY-MM-DD":"status"}}}`;
 
-                  const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_KEY}`, {
-                    method:"POST", headers:{"Content-Type":"application/json"},
+                  const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+                    method:"POST",
+                    headers:{"Content-Type":"application/json","Authorization":`Bearer ${GROQ_KEY}`},
                     body:JSON.stringify({
-                      contents:[{parts:[{text:prompt}]}],
-                      generationConfig:{ temperature:0.1, responseMimeType:"application/json" }
+                      model:"llama-3.3-70b-versatile",
+                      temperature:0.1,
+                      response_format:{type:"json_object"},
+                      messages:[
+                        {role:"system",content:"Você é um assistente especializado em escalas de restaurantes. Sempre responda APENAS com JSON válido, sem texto adicional."},
+                        {role:"user",content:prompt}
+                      ]
                     })
                   });
                   const data2 = await res.json();
-                  const raw = data2?.candidates?.[0]?.content?.parts?.[0]?.text ?? "";
-                  // Tenta extrair JSON mesmo se vier com markdown
-                  const clean = raw.replace(/```json|```/g,"").trim();
-                  const result = JSON.parse(clean);
+                  const raw = data2?.choices?.[0]?.message?.content ?? "";
+                  const result = JSON.parse(raw.replace(/```json|```/g,"").trim());
 
                   if (!result.escala) throw new Error("Sem escala no retorno");
                   setAiSchedPreview({ escala: result.escala, resumo: result.resumo ?? "Escala interpretada." });
                 } catch(e) {
                   console.error("AI sched error:", e);
-                  setAiSchedError("Não foi possível interpretar. Tente simplificar — fale um empregado por vez ou use vírgulas para separar.");
+                  setAiSchedError("Não foi possível interpretar. Reformule a instrução e tente novamente.");
                 }
                 setAiSchedLoading(false);
               }
@@ -4237,45 +4242,13 @@ Responda SOMENTE com o JSON abaixo, sem texto adicional, sem markdown:
                       </p>
 
                       {/* Campo de texto + microfone */}
-                      <div style={{position:"relative",marginBottom:8}}>
-                        <textarea
-                          value={aiSchedInput}
-                          onChange={e=>setAiSchedInput(e.target.value)}
-                          placeholder="Descreva as instruções da escala aqui... ou use o microfone 🎤"
-                          rows={4}
-                          style={{...S.input,resize:"vertical",fontSize:13,paddingRight:48}}
-                        />
-                        <button
-                          onClick={()=>{
-                            if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
-                              setAiSchedError("Seu navegador não suporta reconhecimento de voz. Use Chrome ou Safari.");
-                              return;
-                            }
-                            if (aiSchedListening) return;
-                            const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-                            const rec = new SR();
-                            rec.lang = "pt-BR";
-                            rec.continuous = false;
-                            rec.interimResults = false;
-                            rec.onstart = () => setAiSchedListening(true);
-                            rec.onend   = () => setAiSchedListening(false);
-                            rec.onerror = () => { setAiSchedListening(false); setAiSchedError("Não foi possível capturar o áudio. Tente novamente."); };
-                            rec.onresult = (ev) => {
-                              const t = Array.from(ev.results).map(r=>r[0].transcript).join(" ");
-                              setAiSchedInput(p => p ? p + " " + t : t);
-                            };
-                            rec.start();
-                          }}
-                          title={aiSchedListening ? "Ouvindo..." : "Clique para falar"}
-                          style={{position:"absolute",right:8,bottom:10,width:34,height:34,borderRadius:"50%",border:"none",
-                            background:aiSchedListening?"var(--red)":"var(--ac)",color:"#fff",cursor:"pointer",
-                            display:"flex",alignItems:"center",justifyContent:"center",fontSize:16,
-                            boxShadow:aiSchedListening?"0 0 0 4px #ef444433":undefined,
-                            transition:"box-shadow 0.2s"}}>
-                          {aiSchedListening ? "⏹" : "🎤"}
-                        </button>
-                      </div>
-                      {aiSchedListening && <p style={{color:"var(--red)",fontSize:12,margin:"0 0 8px",fontWeight:600}}>🔴 Ouvindo... fale agora</p>}
+                      <textarea
+                        value={aiSchedInput}
+                        onChange={e=>setAiSchedInput(e.target.value)}
+                        placeholder='Ex: "João folga toda segunda e quarta, Maria de férias do dia 5 ao 20, Pedro faltou hoje sem justificativa"'
+                        rows={4}
+                        style={{...S.input,resize:"vertical",fontSize:13,marginBottom:8}}
+                      />
                       {aiSchedError && <p style={{color:"var(--red)",fontSize:12,margin:"0 0 8px"}}>{aiSchedError}</p>}
 
                       {/* Preview */}
