@@ -3210,7 +3210,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
 
                       let bg = "#111", border = "#1e1e1e";
                       if      (isNoTip)               { bg = "#f5f0ff"; border = "#6366f133"; }
-                      else if (isLaunched && !isDirty) { bg = "#0a1a0a"; border = "#10b98133"; }
+                      else if (isLaunched && !isDirty) { bg = "#f0fdf4"; border = "#10b98133"; }
                       else if (isDirty)                { bg = "#fffbeb"; border = "#f59e0b44"; }
                       else if (hasVal)                 { bg = "#1a1a0a"; border = "var(--ac)33"; }
 
@@ -3219,7 +3219,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
 
                           {/* Data */}
                           <div style={{textAlign:"center"}}>
-                            <div style={{color:isWeekend?"#f59e0b":isNoTip?"#818cf8":"#aaa",fontSize:13,fontWeight:700}}>{parseInt(date.slice(-2))}</div>
+                            <div style={{color:isWeekend?"#f59e0b":isNoTip?"#818cf8":isLaunched?"var(--green)":"var(--text3)",fontSize:13,fontWeight:700}}>{parseInt(date.slice(-2))}</div>
                             <div style={{color:"var(--text3)",fontSize:9}}>{weekday}</div>
                           </div>
 
@@ -3231,9 +3231,9 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                             onChange={e=>{ const nr=tipRows.filter(r=>r.date!==date); setTipRows([...nr,{...row,total:e.target.value}]); }}
                             placeholder="0,00"
                             style={{...S.input, fontSize:13, padding:"6px 8px",
-                              background:  isNoTip?"#f5f0ff"  : isDirty?"#fef9e7" : isLaunched?"#f0fdf4" : "var(--bg3)",
-                              color:       isNoTip?"#6366f1"  : isDirty?"#f59e0b" : isLaunched?"var(--green)" : "#fff",
-                              borderColor: isNoTip?"transparent": isDirty?"#f59e0b44": isLaunched?"#10b98133": "transparent",
+                              background:  isNoTip?"#f5f0ff"  : isDirty?"#fef9e7" : isLaunched?"#e8faf0" : "var(--bg2)",
+                              color:       isNoTip?"#6366f1"  : isDirty?"#f59e0b" : isLaunched?"var(--green)" : "var(--text)",
+                              borderColor: isNoTip?"transparent": isDirty?"#f59e0b44": isLaunched?"#10b98133": "var(--border)",
                               cursor:      isNoTip?"not-allowed" : "text",
                             }}
                           />
@@ -4383,151 +4383,125 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }
               </div>
               <div style={{...S.card,marginBottom:20}}>
                 <h4 style={{color:"var(--text)",fontWeight:700,fontSize:14,margin:"0 0 4px"}}>📲 Gerar cobrança</h4>
-                <p style={{color:"var(--text3)",fontSize:12,margin:"0 0 12px"}}>Envia a cobrança via WhatsApp para o contato financeiro do restaurante</p>
-
-                {/* Cobrança auto-gerada pendente */}
-                {(()=>{
-                  const autoGerada = (fin.cobrancas??[]).find(c=>c.status==="pendente"&&c.autoGerada);
-                  if (!autoGerada) return null;
-                  return (
-                    <div style={{padding:"12px 14px",borderRadius:10,background:"var(--ac-bg)",border:`1px solid ${ac}33`,marginBottom:14}}>
-                      <div style={{color:"var(--ac-text)",fontSize:13,fontWeight:700,marginBottom:6}}>✨ Próxima cobrança pronta!</div>
-                      <div style={{color:"var(--text2)",fontSize:12,marginBottom:10}}>
-                        {autoGerada.periodoLabel} · R$ {autoGerada.valor?.toLocaleString("pt-BR",{minimumFractionDigits:2})} · Venc. {autoGerada.venc?new Date(autoGerada.venc+"T12:00:00").toLocaleDateString("pt-BR"):"—"}
-                      </div>
-                      <button onClick={()=>{
-                        setCobPeriodo(autoGerada.periodo??cobPeriodo);
-                        setCobVenc(autoGerada.venc??"");
-                        setCobValor(autoGerada.valor?.toFixed(2)??"");
-                        setCobForma(autoGerada.forma?.toLowerCase()==="pix"?"pix":"link");
-                        setCobChave(autoGerada.chave??PIX_PADRAO);
-                        // Remove flag autoGerada para não mostrar duplo
-                        saveFinanceiro({ cobrancas:(fin.cobrancas??[]).map(c=>c.id===autoGerada.id?{...c,autoGerada:false}:c) });
-                      }} style={{padding:"6px 14px",borderRadius:8,border:`1px solid ${ac}`,background:"transparent",color:"var(--ac-text)",cursor:"pointer",fontFamily:"'DM Sans',sans-serif",fontSize:12,fontWeight:700}}>
-                        Usar estes dados →
-                      </button>
-                    </div>
-                  );
-                })()}
+                <p style={{color:"var(--text3)",fontSize:12,margin:"0 0 16px"}}>Envia a fatura via WhatsApp para o contato financeiro do restaurante</p>
 
                 {!rest?.whatsappFin && (
                   <div style={{padding:"10px 14px",borderRadius:10,background:"var(--red-bg)",border:"1px solid var(--red)33",marginBottom:12}}>
                     <p style={{color:"var(--red)",fontSize:12,margin:0}}>⚠️ WhatsApp financeiro não cadastrado. Edite o restaurante para adicionar.</p>
                   </div>
                 )}
-                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:12}}>
-                  <div>
-                    <label style={S.label}>Período de referência</label>
-                    <input type="month" value={cobPeriodo} onChange={e=>setCobPeriodo(e.target.value)} style={S.input}/>
-                  </div>
-                  <div>
-                    <label style={S.label}>Vencimento</label>
-                    <input type="date" value={cobVenc} onChange={e=>setCobVenc(e.target.value)} style={S.input}/>
-                  </div>
-                  <div style={{gridColumn:"1/-1"}}>
-                    <label style={S.label}>Valor (R$)</label>
-                    <input type="number" value={cobValor} onChange={e=>setCobValor(e.target.value)}
-                      placeholder={valorTotal?.toFixed(2)??"0,00"} style={S.input}/>
-                  </div>
-                </div>
 
-                {/* Forma de pagamento */}
-                <div style={{marginBottom:12}}>
-                  <label style={S.label}>Forma de pagamento</label>
-                  <div style={{display:"flex",gap:8,marginBottom:12}}>
-                    {[["pix","💠 PIX"],["link","🔗 Link de pagamento"]].map(([v,l])=>(
-                      <button key={v} onClick={()=>{
-                        setCobForma(v);
-                        if(v==="pix") setCobChave(PIX_PADRAO);
-                        else setCobChave("");
-                      }}
-                        style={{flex:1,padding:"12px",borderRadius:10,border:`2px solid ${cobForma===v?ac:"var(--border)"}`,background:cobForma===v?"var(--ac-bg)":"transparent",color:cobForma===v?"var(--ac-text)":"var(--text3)",cursor:"pointer",fontFamily:"'DM Sans',sans-serif",fontSize:14,fontWeight:cobForma===v?700:400}}>
-                        {l}
-                      </button>
-                    ))}
-                  </div>
-
-                  {/* Campo dinâmico por forma */}
-                  {cobForma === "pix" && (
-                    <div style={{padding:"14px 16px",borderRadius:12,background:"var(--bg2)",border:"1px solid var(--border)"}}>
-                      <label style={{...S.label,marginBottom:6}}>Chave PIX</label>
-                      <input value={cobChave} onChange={e=>setCobChave(e.target.value)}
-                        placeholder="Celular, CPF, email ou chave aleatória"
-                        style={S.input}/>
-                      <p style={{color:"var(--text3)",fontSize:11,marginTop:6,marginBottom:0}}>
-                        💠 Chave padrão: <strong>{PIX_PADRAO}</strong> — {PIX_NOME}
-                        {cobChave !== PIX_PADRAO && (
-                          <button onClick={()=>setCobChave(PIX_PADRAO)}
-                            style={{background:"none",border:"none",color:ac,cursor:"pointer",fontFamily:"'DM Sans',sans-serif",fontSize:11,marginLeft:8,padding:0,textDecoration:"underline"}}>
-                            Restaurar padrão
-                          </button>
-                        )}
-                      </p>
-                    </div>
-                  )}
-
-                  {cobForma === "link" && (
-                    <div style={{padding:"14px 16px",borderRadius:12,background:"var(--bg2)",border:"1px solid var(--border)"}}>
-                      <label style={{...S.label,marginBottom:6}}>Link de pagamento</label>
-                      <input value={cobLink} onChange={e=>setCobLink(e.target.value)}
-                        placeholder="Cole aqui o link do Asaas, Stripe, PagSeguro, etc."
-                        style={S.input}/>
-                      <p style={{color:"var(--text3)",fontSize:11,marginTop:6,marginBottom:0}}>O link será enviado diretamente na mensagem ao cliente</p>
-                    </div>
-                  )}
-                </div>
-
-                {/* Preview da mensagem */}
-                {(cobValor || valorTotal) && (
-                  <div style={{padding:"14px 16px",borderRadius:12,background:"#e7ffd9",border:"1px solid #b2dfb2",marginBottom:14}}>
-                    <p style={{color:"#4a7a4a",fontSize:11,fontWeight:700,margin:"0 0 8px",textTransform:"uppercase",letterSpacing:0.5}}>📱 Preview da mensagem</p>
-                    {(()=>{
-                      const [ano,mes] = cobPeriodo.split("-");
-                      const mesesNome = ["Janeiro","Fevereiro","Março","Abril","Maio","Junho","Julho","Agosto","Setembro","Outubro","Novembro","Dezembro"];
-                      const periodoLabel = `${mesesNome[parseInt(mes)-1]}/${ano}`;
-                      const vencLabel = cobVenc ? new Date(cobVenc+"T12:00:00").toLocaleDateString("pt-BR") : "";
-                      const v = parseFloat(cobValor) || valorTotal || 0;
-                      return (
-                        <div style={{fontFamily:"'DM Sans',sans-serif",fontSize:13,color:"#1a1a1a",lineHeight:1.7,whiteSpace:"pre-wrap"}}>
-{`Ola, *${rest?.name}*!
-
-Segue o link da sua fatura *AppTip* referente a *${periodoLabel}*:
-
-https://apptip.app/fatura/(ID gerado ao enviar)
-
-Qualquer duvida estamos a disposicao!
-*Equipe AppTip*`}
-                        </div>
-                      );
-                    })()}
-                  </div>
-                )}
-
-                <button onClick={()=>{
-                  if (!rest?.whatsappFin) { alert("Cadastre o WhatsApp financeiro primeiro."); return; }
-                  const valor = parseFloat(cobValor) || valorTotal;
-                  if (!cobPeriodo || !valor) { alert("Preencha o período e o valor."); return; }
-                  if (cobForma === "link" && !cobLink.trim()) { alert("Cole o link de pagamento."); return; }
-                  const [ano,mes] = cobPeriodo.split("-");
+                {/* Próximo ciclo calculado automaticamente */}
+                {(()=>{
+                  // Calcula próximo período com base no ciclo atual
                   const mesesNome = ["Janeiro","Fevereiro","Março","Abril","Maio","Junho","Julho","Agosto","Setembro","Outubro","Novembro","Dezembro"];
-                  const periodoLabel = `${mesesNome[parseInt(mes)-1]}/${ano}`;
-                  const vencLabel = cobVenc ? new Date(cobVenc+"T12:00:00").toLocaleDateString("pt-BR") : "";
+
+                  // Vencimento do próximo ciclo
+                  const proximoVenc = (() => {
+                    if (cicloFim) {
+                      // Próximo vencimento = fim do ciclo atual (cliente paga antes de vencer)
+                      return cicloFim;
+                    }
+                    if (trialFim) return trialFim;
+                    // Sem ciclo — sugere 7 dias a partir de hoje
+                    const d = new Date(); d.setDate(d.getDate()+7);
+                    return d.toISOString().slice(0,10);
+                  })();
+
+                  // Período de referência = mês do próximo vencimento
+                  const proximoPeriodo = proximoVenc.slice(0,7);
+                  const [pAno, pMes] = proximoPeriodo.split("-");
+                  const proximoPeriodoLabel = `${mesesNome[parseInt(pMes)-1]}/${pAno}`;
+
+                  // Valor do plano atual
+                  const valorSugerido = cobValor ? parseFloat(cobValor) : (valorTotal ?? 0);
                   const chaveUsada = cobForma==="pix" ? (cobChave||PIX_PADRAO) : cobLink;
-                  const cob = { id:Date.now().toString(), periodo:cobPeriodo, periodoLabel, venc:cobVenc, valor, forma:cobForma==="pix"?"PIX":"Link", chave:chaveUsada, criadaEm:new Date().toISOString(), status:"pendente" };
-                  saveFinanceiro({ cobrancas:[...(fin.cobrancas??[]), cob] });
 
-                  const faturaUrl = `https://apptip.app/fatura/${cob.id}`;
-                  const msg = `Ola, *${rest?.name}*!\n\nSegue o link da sua fatura *AppTip* referente a *${periodoLabel}*:\n\n${faturaUrl}\n\nQualquer duvida estamos a disposicao!\n*Equipe AppTip*`;
-                  const numero = rest.whatsappFin.replace(/\D/g,"");
-                  const urlWpp = `https://wa.me/55${numero}?text=${encodeURIComponent(msg)}`;
+                  return (
+                    <div>
+                      {/* Card do próximo ciclo */}
+                      <div style={{background:"var(--bg2)",borderRadius:12,padding:"16px",marginBottom:16,border:"1px solid var(--border)"}}>
+                        <div style={{color:"var(--text3)",fontSize:11,fontWeight:700,textTransform:"uppercase",letterSpacing:0.5,marginBottom:12}}>Próxima cobrança</div>
+                        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:12}}>
+                          <div>
+                            <div style={{color:"var(--text3)",fontSize:11,marginBottom:4}}>Período</div>
+                            <input type="month" value={cobPeriodo||proximoPeriodo}
+                              onChange={e=>setCobPeriodo(e.target.value)}
+                              style={{...S.input,fontFamily:"'DM Mono',monospace",fontSize:14}}/>
+                          </div>
+                          <div>
+                            <div style={{color:"var(--text3)",fontSize:11,marginBottom:4}}>Vencimento</div>
+                            <input type="date" value={cobVenc||proximoVenc}
+                              onChange={e=>setCobVenc(e.target.value)}
+                              style={{...S.input,fontFamily:"'DM Mono',monospace",fontSize:14}}/>
+                          </div>
+                          <div style={{gridColumn:"1/-1"}}>
+                            <div style={{color:"var(--text3)",fontSize:11,marginBottom:4}}>Valor (R$)</div>
+                            <input type="number"
+                              value={cobValor || valorSugerido?.toFixed(2)}
+                              onChange={e=>setCobValor(e.target.value)}
+                              style={{...S.input,fontFamily:"'DM Mono',monospace",fontSize:18,fontWeight:700,color:"var(--ac-text)"}}/>
+                            {valorTotal && <p style={{color:"var(--text3)",fontSize:11,marginTop:4,marginBottom:0}}>Plano {plano.label} — R${valorTotal.toFixed(2)}/mês</p>}
+                          </div>
+                        </div>
 
-                  setTimeout(() => { window.location.href = urlWpp; }, 300);
-                  setCobValor(""); setCobVenc(""); setCobLink("");
-                  onUpdate("_toast","📲 Cobrança gerada! Abrindo WhatsApp...");
-                }} disabled={!rest?.whatsappFin}
-                  style={{...S.btnPrimary,opacity:rest?.whatsappFin?1:0.5,cursor:rest?.whatsappFin?"pointer":"not-allowed"}}>
-                  📲 Gerar e enviar cobrança via WhatsApp
-                </button>
+                        {/* Forma de pagamento */}
+                        <div style={{color:"var(--text3)",fontSize:11,marginBottom:8}}>Forma de pagamento</div>
+                        <div style={{display:"flex",gap:8,marginBottom:12}}>
+                          {[["pix","PIX"],["link","Link de pagamento"]].map(([v,l])=>(
+                            <button key={v} onClick={()=>{ setCobForma(v); if(v==="pix") setCobChave(PIX_PADRAO); else setCobChave(""); }}
+                              style={{flex:1,padding:"10px",borderRadius:10,border:`2px solid ${cobForma===v?ac:"var(--border)"}`,background:cobForma===v?"var(--ac-bg)":"transparent",color:cobForma===v?"var(--ac-text)":"var(--text3)",cursor:"pointer",fontFamily:"'DM Sans',sans-serif",fontSize:13,fontWeight:cobForma===v?700:400}}>
+                              {l}
+                            </button>
+                          ))}
+                        </div>
+                        {cobForma==="pix" ? (
+                          <div>
+                            <input value={cobChave} onChange={e=>setCobChave(e.target.value)} placeholder="Chave PIX" style={S.input}/>
+                            <p style={{color:"var(--text3)",fontSize:11,marginTop:4,marginBottom:0}}>
+                              Padrão: <strong>{PIX_PADRAO}</strong> — {PIX_NOME}
+                              {cobChave!==PIX_PADRAO&&<button onClick={()=>setCobChave(PIX_PADRAO)} style={{background:"none",border:"none",color:ac,cursor:"pointer",fontSize:11,marginLeft:8,padding:0,textDecoration:"underline"}}>Restaurar</button>}
+                            </p>
+                          </div>
+                        ) : (
+                          <input value={cobLink} onChange={e=>setCobLink(e.target.value)} placeholder="Cole o link de pagamento" style={S.input}/>
+                        )}
+                      </div>
+
+                      {/* Preview resumido */}
+                      <div style={{background:"#f0fdf4",borderRadius:10,padding:"12px 14px",marginBottom:14,border:"1px solid #86efac"}}>
+                        <div style={{color:"#166534",fontSize:11,fontWeight:700,marginBottom:6}}>📱 Mensagem que será enviada</div>
+                        <div style={{color:"#166534",fontSize:13,lineHeight:1.6}}>
+                          Ola, <strong>{rest?.name}</strong>! Segue o link da sua fatura AppTip referente a <strong>{(()=>{const [a,m]=(cobPeriodo||proximoPeriodo).split("-");return `${mesesNome[parseInt(m)-1]}/${a}`;})()}</strong>: apptip.app/fatura/(link gerado)
+                        </div>
+                      </div>
+
+                      <button onClick={()=>{
+                        if (!rest?.whatsappFin) { alert("Cadastre o WhatsApp financeiro primeiro."); return; }
+                        const valor = parseFloat(cobValor) || valorSugerido;
+                        if (!valor) { alert("Verifique o valor da cobrança."); return; }
+                        if (cobForma==="link" && !cobLink.trim()) { alert("Cole o link de pagamento."); return; }
+                        const periodo = cobPeriodo || proximoPeriodo;
+                        const venc = cobVenc || proximoVenc;
+                        const [a,m] = periodo.split("-");
+                        const periodoLabel = `${mesesNome[parseInt(m)-1]}/${a}`;
+                        const chave = cobForma==="pix"?(cobChave||PIX_PADRAO):cobLink;
+                        const cob = { id:Date.now().toString(), periodo, periodoLabel, venc, valor, forma:cobForma==="pix"?"PIX":"Link", chave, criadaEm:new Date().toISOString(), status:"pendente" };
+                        saveFinanceiro({ cobrancas:[...(fin.cobrancas??[]).filter(c=>!(c.autoGerada&&c.status==="pendente")), cob] });
+                        const faturaUrl = `https://apptip.app/fatura/${cob.id}`;
+                        const msg = `Ola, *${rest?.name}*!\n\nSegue o link da sua fatura *AppTip* referente a *${periodoLabel}*:\n\n${faturaUrl}\n\nQualquer duvida estamos a disposicao!\n*Equipe AppTip*`;
+                        const numero = rest.whatsappFin.replace(/\D/g,"");
+                        const urlWpp = `https://wa.me/55${numero}?text=${encodeURIComponent(msg)}`;
+                        setTimeout(()=>{ window.location.href = urlWpp; }, 300);
+                        setCobValor(""); setCobVenc(""); setCobLink(""); setCobPeriodo("");
+                        onUpdate("_toast","📲 Cobrança enviada!");
+                      }} disabled={!rest?.whatsappFin}
+                        style={{...S.btnPrimary,opacity:rest?.whatsappFin?1:0.5,cursor:rest?.whatsappFin?"pointer":"not-allowed"}}>
+                        📲 Enviar cobrança via WhatsApp
+                      </button>
+                    </div>
+                  );
+                })()}
               </div>
 
               {/* Cobranças pendentes */}
