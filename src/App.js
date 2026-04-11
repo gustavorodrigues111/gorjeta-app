@@ -3935,6 +3935,7 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }
   const ac = "var(--ac)";
   const TABS = [
     ["dashboard", "📊 Dashboard"],
+    ["financeiro_geral", "💰 Financeiro"],
     ["restaurants","🏢 Restaurantes"],
     ["managers","👔 Gestores"],
     ["owners","⭐ Admins AppTip"],
@@ -4501,6 +4502,136 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }
                     </div>
                   );
                 })}
+              </div>
+            </div>
+          );
+        })()}
+
+        {/* FINANCEIRO GERAL */}
+        {tab === "financeiro_geral" && (() => {
+          const hoje = today();
+          const rows = restaurants.map(r => {
+            const plano = getPlano(r);
+            const fin = r.financeiro ?? {};
+            const tipoCobranca = r.tipoCobranca ?? "mensal";
+            const empMax = r.planoId === "p999" ? (r.empMaxCustom ?? 50) : plano.empMax;
+            const valorBase = tipoCobranca === "anual" ? plano.anual : plano.mensal;
+            const valorAdicionais = r.planoId === "p999" && empMax > 50 ? (empMax - 50) * 7.99 : 0;
+            const valorTotal = valorBase ? valorBase + valorAdicionais : null;
+            const status = fin.status ?? "ativo";
+            const venc = fin.proximoVencimento;
+            const diasParaVencer = venc ? Math.ceil((new Date(venc+"T12:00:00") - new Date()) / (1000*60*60*24)) : null;
+            const ultimoPag = fin.pagamentos?.[0];
+            return { r, plano, fin, tipoCobranca, valorTotal, status, venc, diasParaVencer, ultimoPag };
+          });
+
+          const receitaTotal = rows.reduce((s, x) => s + (x.valorTotal ?? 0), 0);
+          const inadimplentes = rows.filter(x => x.status === "inadimplente").length;
+          const vencendo = rows.filter(x => x.status !== "inadimplente" && x.diasParaVencer !== null && x.diasParaVencer <= 7 && x.diasParaVencer >= 0).length;
+          const vencidos = rows.filter(x => x.status !== "inadimplente" && x.diasParaVencer !== null && x.diasParaVencer < 0).length;
+
+          const [filtro, setFiltro] = useState("todos");
+          const rowsFiltrados = rows.filter(x => {
+            if (filtro === "inadimplente") return x.status === "inadimplente";
+            if (filtro === "vencido") return x.status !== "inadimplente" && x.diasParaVencer !== null && x.diasParaVencer < 0;
+            if (filtro === "vencendo") return x.status !== "inadimplente" && x.diasParaVencer !== null && x.diasParaVencer >= 0 && x.diasParaVencer <= 7;
+            if (filtro === "emdia") return x.status === "ativo" && (x.diasParaVencer === null || x.diasParaVencer > 7);
+            return true;
+          });
+
+          return (
+            <div>
+              {/* Métricas */}
+              <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(160px,1fr))",gap:14,marginBottom:24}}>
+                {[
+                  { label:"Receita mensal", value:`R$${receitaTotal.toLocaleString("pt-BR",{minimumFractionDigits:2})}`, color:"var(--ac)", icon:"💰" },
+                  { label:"Em dia", value:rows.length - inadimplentes - vencidos - vencendo, color:"var(--green)", icon:"✅" },
+                  { label:"Vencendo em 7d", value:vencendo, color:"#f59e0b", icon:"⚡" },
+                  { label:"Vencidos", value:vencidos, color:"var(--red)", icon:"⏰" },
+                  { label:"Inadimplentes", value:inadimplentes, color:"var(--red)", icon:"🔴" },
+                ].map(m=>(
+                  <div key={m.label} style={{...S.card,display:"flex",alignItems:"center",gap:12}}>
+                    <span style={{fontSize:24}}>{m.icon}</span>
+                    <div>
+                      <div style={{color:"var(--text3)",fontSize:10,fontWeight:600,textTransform:"uppercase",letterSpacing:0.5}}>{m.label}</div>
+                      <div style={{color:m.color,fontSize:20,fontWeight:800,fontFamily:"'DM Mono',monospace"}}>{m.value}</div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              {/* Filtros */}
+              <div style={{display:"flex",gap:8,marginBottom:16,flexWrap:"wrap"}}>
+                {[
+                  ["todos","Todos"],
+                  ["emdia","✅ Em dia"],
+                  ["vencendo","⚡ Vencendo"],
+                  ["vencido","⏰ Vencidos"],
+                  ["inadimplente","🔴 Inadimplentes"],
+                ].map(([v,l])=>(
+                  <button key={v} onClick={()=>setFiltro(v)}
+                    style={{padding:"6px 16px",borderRadius:20,border:`1px solid ${filtro===v?ac:"var(--border)"}`,background:filtro===v?"var(--ac-bg)":"transparent",color:filtro===v?"var(--ac-text)":"var(--text3)",cursor:"pointer",fontFamily:"'DM Sans',sans-serif",fontSize:13,fontWeight:filtro===v?700:400}}>
+                    {l}
+                  </button>
+                ))}
+              </div>
+
+              {/* Tabela */}
+              <div style={{...S.card,padding:0,overflow:"hidden"}}>
+                {/* Header */}
+                <div style={{display:"grid",gridTemplateColumns:"2fr 1fr 1fr 1fr 1fr 1fr",gap:0,padding:"10px 16px",background:"var(--bg2)",borderBottom:"1px solid var(--border)"}}>
+                  {["Restaurante","Plano","Valor/mês","Último pag.","Próx. venc.","Status"].map(h=>(
+                    <div key={h} style={{color:"var(--text3)",fontSize:11,fontWeight:700,textTransform:"uppercase",letterSpacing:0.5}}>{h}</div>
+                  ))}
+                </div>
+
+                {rowsFiltrados.length === 0 && (
+                  <div style={{padding:"32px",textAlign:"center",color:"var(--text3)"}}>Nenhum restaurante neste filtro.</div>
+                )}
+
+                {rowsFiltrados.map(({r, plano, fin, valorTotal, status, venc, diasParaVencer, ultimoPag})=>{
+                  const isInad = status === "inadimplente";
+                  const isVencido = !isInad && diasParaVencer !== null && diasParaVencer < 0;
+                  const isVencendo = !isInad && diasParaVencer !== null && diasParaVencer >= 0 && diasParaVencer <= 7;
+
+                  const rowBg = isInad ? "var(--red-bg)" : isVencido ? "#fff8f0" : "transparent";
+                  const statusEl = isInad
+                    ? <span style={{color:"var(--red)",fontWeight:700,fontSize:12}}>🔴 Inadimplente</span>
+                    : isVencido
+                    ? <span style={{color:"var(--red)",fontWeight:600,fontSize:12}}>⏰ Vencido {Math.abs(diasParaVencer)}d</span>
+                    : isVencendo
+                    ? <span style={{color:"#f59e0b",fontWeight:600,fontSize:12}}>⚡ {diasParaVencer}d</span>
+                    : <span style={{color:"var(--green)",fontWeight:600,fontSize:12}}>✅ Em dia</span>;
+
+                  return (
+                    <div key={r.id} style={{display:"grid",gridTemplateColumns:"2fr 1fr 1fr 1fr 1fr 1fr",gap:0,padding:"12px 16px",borderBottom:"1px solid var(--border)",background:rowBg,alignItems:"center",cursor:"pointer"}}
+                      onClick={()=>{ setSelRestaurant(r.id); setRestTab("financeiro"); }}>
+                      <div>
+                        <div style={{color:"var(--text)",fontWeight:700,fontSize:14}}>{r.name}</div>
+                        <div style={{color:"var(--text3)",fontSize:11}}>{r.tipoCobranca==="anual"?"Anual":"Mensal"}</div>
+                      </div>
+                      <div style={{color:"var(--text2)",fontSize:13}}>{plano.label}</div>
+                      <div style={{color:"var(--text)",fontWeight:700,fontSize:13,fontFamily:"'DM Mono',monospace"}}>
+                        {valorTotal ? `R$${valorTotal.toLocaleString("pt-BR",{minimumFractionDigits:2})}` : "—"}
+                      </div>
+                      <div style={{color:"var(--text3)",fontSize:12}}>
+                        {ultimoPag ? new Date(ultimoPag.data+"T12:00:00").toLocaleDateString("pt-BR") : "—"}
+                      </div>
+                      <div style={{color:isVencido||isInad?"var(--red)":isVencendo?"#f59e0b":"var(--text3)",fontSize:12,fontWeight:isVencido||isVencendo||isInad?700:400}}>
+                        {venc ? new Date(venc+"T12:00:00").toLocaleDateString("pt-BR") : "—"}
+                      </div>
+                      <div style={{display:"flex",alignItems:"center",gap:8}}>
+                        {statusEl}
+                        <span style={{color:"var(--text3)",fontSize:14,marginLeft:"auto"}}>›</span>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* Resumo */}
+              <div style={{marginTop:12,color:"var(--text3)",fontSize:12,textAlign:"right"}}>
+                {rowsFiltrados.length} de {rows.length} restaurantes · Receita filtrada: R${rowsFiltrados.reduce((s,x)=>s+(x.valorTotal??0),0).toLocaleString("pt-BR",{minimumFractionDigits:2})}
               </div>
             </div>
           );
