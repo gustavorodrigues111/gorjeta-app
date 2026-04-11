@@ -4095,11 +4095,15 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }
           const empMax       = isEnt ? (rest?.empMaxCustom ?? 51) : isOrc ? (rest?.empMaxCustom ?? 101) : plano.empMax;
           const empAtivos    = employees.filter(e=>e.restaurantId===selRestaurant&&!e.inactive).length;
 
-          // Valor mensal base
+          // Valor da cobrança — mensal = valor do mês, anual = total do ano
           const valorMensal = (() => {
             if (isOrc) return null;
-            if (isEnt) return empMax * 7.99 * (tipo === "anual" ? 0.9 : 1);
-            return tipo === "anual" ? plano.anual : plano.mensal;
+            if (isEnt) {
+              const porEmp = empMax * 7.99;
+              return tipo === "anual" ? porEmp * 12 * 0.9 : porEmp;
+            }
+            if (tipo === "anual") return (plano.anual ?? 0) * 12;
+            return plano.mensal;
           })();
 
           // ─── Ciclo ─────────────────────────────────────────────────
@@ -4218,7 +4222,13 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }
                 <div style={{display:"flex",flexDirection:"column",gap:6,marginBottom:14}}>
                   {PLANOS.map(p=>{
                     const sel = (rest?.planoId??"p10")===p.id;
-                    const precos = {p10:"R$97/mês · R$87,30 anual", p20:"R$187/mês · R$168,30 anual", p50:"R$397/mês · R$357,30 anual", p999:"R$7,99/emp./mês · 10% desc. anual", pOrc:"Sob orçamento"};
+                    const precos = {
+                      p10:  "R$97/mês · R$1.047,60/ano (−10%)",
+                      p20:  "R$187/mês · R$2.019,60/ano (−10%)",
+                      p50:  "R$397/mês · R$4.287,60/ano (−10%)",
+                      p999: "R$7,99/emp./mês · 10% desc. no anual",
+                      pOrc: "Sob orçamento"
+                    };
                     return (
                       <button key={p.id} onClick={()=>onUpdate("restaurants",restaurants.map(r=>r.id===selRestaurant?{...r,planoId:p.id}:r))}
                         style={{padding:"10px 14px",borderRadius:10,border:`1px solid ${sel?ac:"var(--border)"}`,background:sel?"var(--ac-bg)":"transparent",cursor:"pointer",fontFamily:"'DM Sans',sans-serif",textAlign:"left",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
@@ -4259,10 +4269,17 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }
                     {isOrc
                       ? <div style={{color:"var(--ac-text)",fontWeight:800,fontSize:18}}>Sob orçamento</div>
                       : <div style={{color:"var(--ac-text)",fontWeight:800,fontSize:22,fontFamily:"'DM Mono',monospace"}}>
-                          R$ {valorMensal?.toLocaleString("pt-BR",{minimumFractionDigits:2})}<span style={{color:"var(--text3)",fontSize:13,fontWeight:400}}>/mês</span>
+                          R$ {valorMensal?.toLocaleString("pt-BR",{minimumFractionDigits:2})}
+                          <span style={{color:"var(--text3)",fontSize:13,fontWeight:400}}>
+                            {tipo==="anual"?"/ano (12x)":"/mês"}
+                          </span>
                         </div>
                     }
-                    {isEnt && <div style={{color:"var(--text3)",fontSize:11,marginTop:2}}>{empMax} emp. × R$7,99{tipo==="anual"?" × 0,9 (−10%)":" "}</div>}
+                    {isEnt && <div style={{color:"var(--text3)",fontSize:11,marginTop:2}}>
+                      {tipo==="anual"
+                        ? `${empMax} emp. × R$7,99 × 12 meses × 0,9 (−10%)`
+                        : `${empMax} emp. × R$7,99/mês`}
+                    </div>}
                   </div>
                   <div style={{color:"var(--text3)",fontSize:13}}>{empAtivos}/{isOrc?"∞":empMax} ativos</div>
                 </div>
