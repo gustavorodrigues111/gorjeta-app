@@ -478,21 +478,173 @@ function ComunicadosTab({ empId, restaurantId, communications, commAcks, onUpdat
 //
 // FAQ TAB (employee view)
 //
-function FaqTab({ restaurantId, faq }) {
-  const items = faq?.[restaurantId] ?? [];
-  const [open, setOpen] = useState(null);
-  if (items.length === 0) return <p style={{ color: "var(--text3)", textAlign: "center", fontSize: 14, marginTop: 20 }}>Nenhuma pergunta cadastrada ainda.</p>;
+function FaqTab({ restaurantId, faq, emp, roles, restaurants, splits }) {
+  const items = (faq?.[restaurantId] ?? []).filter(item => item.visible !== false);
+  const [openSys, setOpenSys] = useState(null);
+  const [openRest, setOpenRest] = useState(null);
+
+  const rest = restaurants?.find(r => r.id === restaurantId);
+  const empRole = roles?.find(r => r.id === emp?.roleId);
+  const restRolesComGorjeta = (roles ?? []).filter(r => r.restaurantId === restaurantId && !r.inactive && !r.noTip);
+  const restRolesSemGorjeta = (roles ?? []).filter(r => r.restaurantId === restaurantId && !r.inactive && r.noTip);
+  const taxRate = rest?.taxRate ?? 0.33;
+  const taxLabel = taxRate === 0.20 ? "20% (Simples Nacional)" : "33% (Lucro Real/Presumido)";
+  const splitType = rest?.splitType ?? "points";
+  const ac = "var(--ac)";
+
+  const now = new Date();
+  const mk = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,"0")}`;
+  const curSplit = splits?.[restaurantId]?.[mk] ?? { Bar:12, Cozinha:35, Salão:35, Limpeza:8, "Produção":10 };
+
+  const pontosCargo = parseFloat(empRole?.points) || 0;
+  const totalPontos = restRolesComGorjeta.reduce((s,r) => s+(parseFloat(r.points)||0), 0);
+  const empArea = emp?.area ?? empRole?.area ?? "—";
+  const cargosEmpArea = restRolesComGorjeta.filter(r => r.area === empArea);
+  const totalPtsArea = cargosEmpArea.reduce((s,r) => s+(parseFloat(r.points)||0), 0);
+  const pctArea = curSplit[empArea] ?? 0;
+  const EX = 1000;
+
+  function fmtR(n) { return n.toLocaleString("pt-BR",{minimumFractionDigits:2,maximumFractionDigits:2}); }
+
+  const FAQ_SISTEMA = [
+    {
+      id:"__gorjeta__",
+      q:"💸 Como é calculada a minha gorjeta?",
+      a:(() => {
+        if (!empRole) return "Cargo não identificado. Fale com o gestor.";
+        if (empRole.noTip) return `Seu cargo (${empRole.name}) não participa da distribuição de gorjetas.`;
+        const vpp = totalPontos > 0 ? EX/totalPontos : 0;
+        const bruto = vpp * pontosCargo;
+        const liq = bruto * (1-taxRate);
+        return `A gorjeta é distribuída entre todos que trabalharam no dia, conforme a escala e os pontos do cargo.
+
+📌 Seu cargo: ${empRole.name} — ${pontosCargo} ponto${pontosCargo!==1?"s":""}
+📌 Dedução: ${taxLabel}
+
+Passo a passo:
+1. Gestor lança o valor total do dia
+2. Sistema soma pontos de quem trabalhou
+3. Divide o total pelos pontos → valor por ponto
+4. Multiplica pelos seus pontos → bruto
+5. Deduz ${(taxRate*100).toFixed(0)}% → líquido
+
+Exemplo (gorjeta R$${fmtR(EX)}, ${totalPontos}pt no total):
+• Valor por ponto: R$${fmtR(vpp)}
+• Seus ${pontosCargo}pt → R$${fmtR(bruto)} bruto
+• Após ${(taxRate*100).toFixed(0)}% → R$${fmtR(liq)} líquido`;
+      })(),
+    },
+    {
+      id:"__sistema__",
+      q: splitType==="area" ? "🏢 Como funciona a divisão por área e pontos?" : "📊 Como funciona a tabela de pontos?",
+      a:(() => {
+        if (splitType==="area") {
+          const AREAS = ["Bar","Cozinha","Salão","Limpeza","Produção"];
+          const ativas = AREAS.filter(a => (curSplit[a]??0)>0);
+          const linhas = ativas.map(a => {
+            const pct = curSplit[a]??0;
+            const cargos = restRolesComGorjeta.filter(r=>r.area===a);
+            const pts = cargos.reduce((s,r)=>s+(parseFloat(r.points)||0),0);
+            const cs = cargos.length>0 ? cargos.map(r=>`   • ${r.name}: ${r.points}pt`).join("\n") : "   (sem cargos)";
+            return `${a} — ${pct}%\n${cs}\n   Total: ${pts}pt`;
+          }).join("\n\n");
+          const pool = EX*(pctArea/100);
+          const bruto = totalPtsArea>0 ? (pool/totalPtsArea)*pontosCargo : 0;
+          return `Sistema: Área + Pontos\nA gorjeta é dividida primeiro por área (%), depois por pontos internamente.\n\nDistribuição:\n${linhas}${restRolesSemGorjeta.length>0?"\n\nSem gorjeta: "+restRolesSemGorjeta.map(r=>r.name).join(", "):""}\n\nSua situação (área: ${empArea}):\n• ${empArea} recebe ${pctArea}% → R$${fmtR(pool)} (de R$${fmtR(EX)})\n• Você tem ${pontosCargo}pt de ${totalPtsArea}pt da área\n• Bruto: R$${fmtR(bruto)} → Líquido: R$${fmtR(bruto*(1-taxRate))}`;
+        } else {
+          const linhas = restRolesComGorjeta
+            .sort((a,b)=>(parseFloat(b.points)||0)-(parseFloat(a.points)||0))
+            .map(r=>{
+              const pct = totalPontos>0 ? ((parseFloat(r.points)||0)/totalPontos*100).toFixed(1):"0";
+              const d = r.id===empRole?.id?" ◄ você":"";
+              return `• ${r.name}: ${r.points}pt (${pct}%)${d}`;
+            }).join("\n");
+          return `Sistema: Pontos Global\nTodos que trabalharam no dia dividem a gorjeta proporcionalmente aos pontos do cargo.\n\nTabela de cargos:\n${linhas}${restRolesSemGorjeta.length>0?"\n\nSem gorjeta: "+restRolesSemGorjeta.map(r=>r.name).join(", "):""}\n\nTotal de pontos (todos presentes): ${totalPontos}pt\nQuanto maior a pontuação, maior a fatia da gorjeta.`;
+        }
+      })(),
+    },
+    {
+      id:"__escala__",
+      tabKey: "escala",
+      q:"📅 Como funciona a escala e por que ela importa?",
+      a:"A escala define em quais dias você trabalhou. Ela é fundamental porque:\n\n• Você só recebe gorjeta nos dias em que está na escala\n• Dias marcados como Falta (F) ou Atestado (A) têm tratamento diferente\n• Dias de folga não geram gorjeta\n\nQuem define a escala é o gestor. Se notar algum erro, fale com o gestor o quanto antes — erros na escala afetam seu recebimento.",
+    },
+    {
+      id:"__recibos__",
+      tabKey: "recibos",
+      q:"📄 Como acesso meus recibos de gorjeta?",
+      a:"Na aba Recibos do aplicativo você encontra todos os seus recibos mensais.\n\nO gestor faz o upload dos recibos assim que são gerados. Caso algum não apareça, fale com o gestor para que ele faça o upload.",
+    },
+    {
+      id:"__dp__",
+      tabKey: "dp",
+      q:"💬 Para que serve o Fale com DP?",
+      a:"O canal Fale com DP é direto com o departamento pessoal. Use para:\n\n• Dúvidas trabalhistas (férias, horas extras, INSS...)\n• Atestados médicos e ausências\n• Solicitações de documentos\n• Qualquer questão formal com o RH\n\nVocê pode enviar de forma anônima se preferir. O gestor do DP responde diretamente pelo aplicativo.",
+    },
+    {
+      id:"__comunicados__",
+      tabKey: "comunicados",
+      q:"📢 Como funcionam os comunicados?",
+      a:"Os comunicados são avisos enviados pelo gestor para a equipe.\n\nQuando chegar um comunicado novo:\n• Você recebe uma notificação na aba Comunicados\n• Leia e confirme clicando em \"Li e entendi\"\n• O gestor vê quem leu e quem não leu\n\nÉ importante confirmar — comunicados podem ter informações importantes sobre o funcionamento do restaurante.",
+    },
+    {
+      id:"__pin__",
+      tabKey: null,
+      q:"🔐 O que é o PIN e como trocar?",
+      a:"O PIN é sua senha de acesso — um código de 4 a 6 dígitos.\n\nPara fazer login use:\n• Seu ID de empregado (ex: LBZ0005) ou CPF\n• Seu PIN\n\nPara trocar, acesse Configurações no aplicativo. Nunca compartilhe seu PIN. Em caso de esquecimento, fale com o gestor.",
+    },
+  ].filter(item => !item.tabKey || (rest?.tabsConfig?.[item.tabKey] !== false && rest?.tabsGestor?.[item.tabKey] !== false));
+
   return (
-    <div>
-      {items.map((item, i) => (
-        <div key={item.id ?? i} style={{ background: "var(--card-bg)", borderRadius: 12, marginBottom: 8, border: "1px solid var(--border)", overflow: "hidden" }}>
-          <button onClick={() => setOpen(open === i ? null : i)} style={{ width: "100%", padding: "14px 16px", background: "none", border: "none", color: open === i ? "var(--ac)" : "#fff", textAlign: "left", cursor: "pointer", fontFamily: "'DM Mono',monospace", fontSize: 14, fontWeight: 600, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+    <div style={{paddingBottom:20}}>
+
+      <div style={{padding:"12px 16px 8px"}}>
+        <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:2}}>
+          <span style={{fontSize:14}}>📐</span>
+          <span style={{color:ac,fontSize:12,fontWeight:700,textTransform:"uppercase",letterSpacing:0.5}}>Regras do sistema</span>
+        </div>
+        <p style={{color:"var(--text3)",fontSize:11,margin:"0 0 8px"}}>Geradas automaticamente com as regras do seu restaurante</p>
+      </div>
+      {FAQ_SISTEMA.map((item,i) => (
+        <div key={item.id} style={{background:"var(--card-bg)",borderRadius:12,marginBottom:6,border:"1px solid var(--ac)22",overflow:"hidden",marginInline:8}}>
+          <button onClick={()=>setOpenSys(openSys===i?null:i)}
+            style={{width:"100%",padding:"12px 14px",background:openSys===i?"var(--ac-bg)":"transparent",border:"none",color:openSys===i?ac:"var(--text)",textAlign:"left",cursor:"pointer",fontFamily:"'DM Sans',sans-serif",fontSize:13,fontWeight:600,display:"flex",justifyContent:"space-between",alignItems:"center",gap:8}}>
             <span>{item.q}</span>
-            <span style={{ fontSize: 18, color: "var(--text3)" }}>{open === i ? "−" : "+"}</span>
+            <span style={{fontSize:16,color:"var(--text3)",flexShrink:0}}>{openSys===i?"−":"+"}</span>
           </button>
-          {open === i && <div style={{ padding: "0 16px 14px", color: "var(--text2)", fontSize: 13, lineHeight: 1.6, borderTop: "1px solid var(--border)", paddingTop: 12, whiteSpace: "pre-wrap" }}>{item.a}</div>}
+          {openSys===i && (
+            <div style={{padding:"10px 14px 14px",color:"var(--text2)",fontSize:12,lineHeight:1.75,borderTop:"1px solid var(--ac)22",whiteSpace:"pre-wrap",fontFamily:"'DM Mono',monospace"}}>
+              {item.a}
+              <div style={{marginTop:10,fontSize:10,color:"var(--text3)",fontStyle:"italic",fontFamily:"'DM Sans',sans-serif"}}>Atualizado automaticamente com as regras do restaurante.</div>
+            </div>
+          )}
         </div>
       ))}
+
+      <div style={{padding:"20px 16px 8px"}}>
+        <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:2}}>
+          <span style={{fontSize:14}}>🏢</span>
+          <span style={{color:"var(--text2)",fontSize:12,fontWeight:700,textTransform:"uppercase",letterSpacing:0.5}}>Sobre o restaurante</span>
+        </div>
+        <p style={{color:"var(--text3)",fontSize:11,margin:"0 0 8px"}}>Perguntas e respostas cadastradas pelo gestor</p>
+      </div>
+      {items.length===0
+        ? <p style={{color:"var(--text3)",textAlign:"center",fontSize:13,padding:"12px 0"}}>Nenhuma pergunta cadastrada pelo gestor ainda.</p>
+        : items.map((item,i) => (
+          <div key={item.id??i} style={{background:"var(--card-bg)",borderRadius:12,marginBottom:6,border:"1px solid var(--border)",overflow:"hidden",marginInline:8}}>
+            <button onClick={()=>setOpenRest(openRest===i?null:i)}
+              style={{width:"100%",padding:"12px 14px",background:"none",border:"none",color:openRest===i?ac:"var(--text)",textAlign:"left",cursor:"pointer",fontFamily:"'DM Sans',sans-serif",fontSize:13,fontWeight:600,display:"flex",justifyContent:"space-between",alignItems:"center",gap:8}}>
+              <span>{item.q}</span>
+              <span style={{fontSize:16,color:"var(--text3)",flexShrink:0}}>{openRest===i?"−":"+"}</span>
+            </button>
+            {openRest===i && (
+              <div style={{padding:"10px 14px 14px",color:"var(--text2)",fontSize:13,lineHeight:1.7,borderTop:"1px solid var(--border)",whiteSpace:"pre-wrap"}}>
+                {item.a}
+              </div>
+            )}
+          </div>
+        ))
+      }
     </div>
   );
 }
@@ -751,51 +903,156 @@ function ComunicadosManagerTab({ restaurantId, communications, commAcks, employe
 //
 // FAQ MANAGER TAB
 //
+const GEMINI_KEY = "AIzaSyDWG0fc3j7QfG-k5xLJo3xc3v_KNC_uo90";
+
+async function geminiSuggestFaq(input) {
+  const prompt = `Você é um assistente especializado em restaurantes. O gestor de um restaurante descreveu informalmente uma pergunta e resposta para o FAQ dos seus empregados. Sua tarefa é reformular isso de forma clara, profissional e empática, adequada para empregados de restaurante lerem no app.
+
+Descrição do gestor: "${input}"
+
+Responda APENAS com um JSON válido no formato:
+{"q": "pergunta clara e objetiva", "a": "resposta completa, clara e profissional"}
+
+Sem markdown, sem explicações, apenas o JSON.`;
+
+  const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_KEY}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] })
+  });
+  const data = await res.json();
+  const text = data?.candidates?.[0]?.content?.parts?.[0]?.text ?? "";
+  const clean = text.replace(/```json|```/g, "").trim();
+  return JSON.parse(clean);
+}
+
 function FaqManagerTab({ restaurantId, faq, onUpdate }) {
   const items = faq?.[restaurantId] ?? [];
   const [editIdx, setEditIdx] = useState(null);
   const [form, setForm] = useState({ q: "", a: "" });
+  const [aiInput, setAiInput] = useState("");
+  const [aiLoading, setAiLoading] = useState(false);
+  const [aiError, setAiError] = useState("");
   const ac = "var(--ac)";
 
   function saveItem() {
     if (!form.q.trim() || !form.a.trim()) return;
-    const newItem = { id: Date.now().toString(), q: form.q.trim(), a: form.a.trim() };
-    const newItems = editIdx === "new" ? [...items, newItem] : items.map((x, i) => i === editIdx ? newItem : x);
+    const newItem = {
+      id: editIdx === "new" ? Date.now().toString() : (items[editIdx]?.id ?? Date.now().toString()),
+      q: form.q.trim(),
+      a: form.a.trim(),
+      visible: editIdx === "new" ? true : (items[editIdx]?.visible ?? true),
+    };
+    const newItems = editIdx === "new"
+      ? [...items, newItem]
+      : items.map((x, i) => i === editIdx ? { ...x, ...newItem } : x);
     onUpdate("faq", { ...faq, [restaurantId]: newItems });
-    setEditIdx(null); setForm({ q: "", a: "" });
+    setEditIdx(null); setForm({ q: "", a: "" }); setAiInput(""); setAiError("");
   }
-  function removeItem(i) { onUpdate("faq", { ...faq, [restaurantId]: items.filter((_, idx) => idx !== i) }); }
+
+  function removeItem(i) {
+    onUpdate("faq", { ...faq, [restaurantId]: items.filter((_, idx) => idx !== i) });
+  }
+
+  function toggleVisible(i) {
+    const updated = items.map((x, idx) => idx === i ? { ...x, visible: x.visible === false ? true : false } : x);
+    onUpdate("faq", { ...faq, [restaurantId]: updated });
+  }
+
+  async function handleAiSuggest() {
+    if (!aiInput.trim()) return;
+    setAiLoading(true); setAiError("");
+    try {
+      const result = await geminiSuggestFaq(aiInput.trim());
+      setForm({ q: result.q, a: result.a });
+      setAiInput("");
+    } catch (e) {
+      setAiError("Não foi possível gerar sugestão. Tente novamente.");
+    }
+    setAiLoading(false);
+  }
+
+  const isEditing = editIdx !== null;
 
   return (
     <div>
-      <button onClick={() => { setEditIdx("new"); setForm({ q: "", a: "" }); }} style={{ ...S.btnPrimary, marginBottom: 16 }}>+ Nova Pergunta</button>
-      {(editIdx === "new" || editIdx !== null) && (
-        <div style={{ ...S.card, marginBottom: 16 }}>
+      <button onClick={() => { setEditIdx("new"); setForm({ q: "", a: "" }); setAiInput(""); setAiError(""); }}
+        style={{ ...S.btnPrimary, marginBottom: 16 }}>+ Nova Pergunta</button>
+
+      {isEditing && (
+        <div style={{ ...S.card, marginBottom: 16, border: "1px solid var(--ac)33" }}>
+          {/* Assistente IA */}
+          <div style={{ marginBottom: 14, padding: "12px 14px", borderRadius: 10, background: "var(--ac-bg)", border: "1px solid var(--ac)33" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 8 }}>
+              <span style={{ fontSize: 16 }}>✨</span>
+              <span style={{ color: "var(--ac-text)", fontWeight: 700, fontSize: 13 }}>Assistente IA — Gemini</span>
+            </div>
+            <p style={{ color: "var(--text3)", fontSize: 12, margin: "0 0 8px" }}>
+              Descreva informalmente a pergunta e resposta que quer criar. A IA redige de forma profissional.
+            </p>
+            <textarea
+              value={aiInput}
+              onChange={e => setAiInput(e.target.value)}
+              placeholder='Ex: "quando o empregado falta sem avisar ele perde a gorjeta do dia e precisa justificar para o gestor"'
+              rows={3}
+              style={{ ...S.input, resize: "vertical", marginBottom: 8, fontSize: 13 }}
+            />
+            {aiError && <p style={{ color: "var(--red)", fontSize: 12, margin: "0 0 8px" }}>{aiError}</p>}
+            <button onClick={handleAiSuggest} disabled={!aiInput.trim() || aiLoading}
+              style={{ ...S.btnPrimary, width: "auto", padding: "8px 20px", fontSize: 13, opacity: (!aiInput.trim() || aiLoading) ? 0.6 : 1 }}>
+              {aiLoading ? "✨ Gerando..." : "✨ Sugerir com IA"}
+            </button>
+            {form.q && <p style={{ color: "var(--text3)", fontSize: 11, marginTop: 8, marginBottom: 0 }}>↓ Sugestão gerada abaixo — edite à vontade antes de salvar</p>}
+          </div>
+
+          {/* Formulário */}
           <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-            <div><label style={S.label}>Pergunta</label><input value={form.q} onChange={e => setForm(p => ({...p, q: e.target.value}))} placeholder="Ex: Como funciona o rateio?" style={S.input} /></div>
-            <div><label style={S.label}>Resposta</label><textarea value={form.a} onChange={e => setForm(p => ({...p, a: e.target.value}))} rows={4} placeholder="Resposta detalhada…" style={{ ...S.input, resize: "vertical" }} /></div>
+            <div>
+              <label style={S.label}>Pergunta</label>
+              <input value={form.q} onChange={e => setForm(p => ({ ...p, q: e.target.value }))}
+                placeholder="Ex: Como funciona o rateio de gorjeta?" style={S.input} />
+            </div>
+            <div>
+              <label style={S.label}>Resposta</label>
+              <textarea value={form.a} onChange={e => setForm(p => ({ ...p, a: e.target.value }))}
+                rows={5} placeholder="Resposta detalhada…" style={{ ...S.input, resize: "vertical" }} />
+            </div>
             <div style={{ display: "flex", gap: 8 }}>
               <button onClick={saveItem} style={{ ...S.btnPrimary, flex: 1 }}>Salvar</button>
-              <button onClick={() => setEditIdx(null)} style={S.btnSecondary}>Cancelar</button>
+              <button onClick={() => { setEditIdx(null); setAiInput(""); setAiError(""); }} style={S.btnSecondary}>Cancelar</button>
             </div>
           </div>
         </div>
       )}
-      {items.length === 0 && <p style={{ color: "var(--text3)", textAlign: "center" }}>Nenhuma pergunta cadastrada.</p>}
-      {items.map((item, i) => (
-        <div key={item.id ?? i} style={{ ...S.card, marginBottom: 8 }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
-            <div style={{ flex: 1 }}>
-              <div style={{ color: ac, fontWeight: 600, fontSize: 14, marginBottom: 4 }}>{item.q}</div>
-              <div style={{ color: "var(--text3)", fontSize: 12 }}>{item.a.slice(0, 80)}{item.a.length > 80 ? "…" : ""}</div>
-            </div>
-            <div style={{ display: "flex", gap: 8, marginLeft: 8 }}>
-              <button onClick={() => { setEditIdx(i); setForm({ q: item.q, a: item.a }); }} style={{ ...S.btnSecondary, fontSize: 12 }}>Editar</button>
-              <button onClick={() => removeItem(i)} style={{ background: "none", border: "1px solid #e74c3c33", borderRadius: 8, color: "var(--red)", cursor: "pointer", fontSize: 12, padding: "6px 12px", fontFamily: "'DM Mono',monospace" }}>✕</button>
+
+      {items.length === 0 && !isEditing && (
+        <p style={{ color: "var(--text3)", textAlign: "center", padding: "20px 0" }}>Nenhuma pergunta cadastrada.</p>
+      )}
+
+      {items.map((item, i) => {
+        const isVisible = item.visible !== false;
+        return (
+          <div key={item.id ?? i} style={{ ...S.card, marginBottom: 8, opacity: isVisible ? 1 : 0.6, border: `1px solid ${isVisible ? "var(--border)" : "var(--border)"}` }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8 }}>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ color: isVisible ? ac : "var(--text3)", fontWeight: 600, fontSize: 14, marginBottom: 4 }}>{item.q}</div>
+                <div style={{ color: "var(--text3)", fontSize: 12 }}>{item.a.slice(0, 80)}{item.a.length > 80 ? "…" : ""}</div>
+              </div>
+              <div style={{ display: "flex", gap: 6, flexShrink: 0, alignItems: "center" }}>
+                {/* Toggle visibilidade */}
+                <button onClick={() => toggleVisible(i)}
+                  style={{ padding: "5px 12px", borderRadius: 20, border: "none", background: isVisible ? "var(--green)" : "var(--border)", color: isVisible ? "#fff" : "var(--text3)", fontWeight: 700, cursor: "pointer", fontFamily: "'DM Sans',sans-serif", fontSize: 11, whiteSpace: "nowrap" }}>
+                  {isVisible ? "👁 Exibindo" : "🚫 Oculto"}
+                </button>
+                <button onClick={() => { setEditIdx(i); setForm({ q: item.q, a: item.a }); setAiInput(""); setAiError(""); }}
+                  style={{ ...S.btnSecondary, fontSize: 12 }}>Editar</button>
+                <button onClick={() => removeItem(i)}
+                  style={{ background: "none", border: "1px solid #e74c3c33", borderRadius: 8, color: "var(--red)", cursor: "pointer", fontSize: 12, padding: "6px 10px", fontFamily: "'DM Mono',monospace" }}>✕</button>
+              </div>
             </div>
           </div>
-        </div>
-      ))}
+        );
+      })}
     </div>
   );
 }
@@ -1910,7 +2167,7 @@ function ReceibosEmployeeTab({ empId, restaurantId, receipts }) {
   );
 }
 
-function EmployeePortal({ employees, roles, tips, schedules, restaurants, communications, commAcks, faq, dpMessages, receipts, workSchedules, onBack, onUpdateEmployee, onUpdate, toggleTheme, theme }) {
+function EmployeePortal({ employees, roles, tips, schedules, splits, restaurants, communications, commAcks, faq, dpMessages, receipts, workSchedules, onBack, onUpdateEmployee, onUpdate, toggleTheme, theme }) {
   const [empId, setEmpId] = useState(() => localStorage.getItem("apptip_empid") || null);
 
   useEffect(() => {
@@ -1967,8 +2224,8 @@ function EmployeePortal({ employees, roles, tips, schedules, restaurants, commun
   const pendingComms = myComms.filter(c => !commAcks?.[c.id]?.[empId]);
   const hasPending = pendingComms.length > 0;
 
-  // Abas do empregado — respeita config do restaurante
-  const empTabVisible = (key) => restaurant?.tabsConfig?.[key] !== false;
+  // Abas do empregado — respeita config do admin E escolha do gestor
+  const empTabVisible = (key) => restaurant?.tabsConfig?.[key] !== false && restaurant?.tabsGestor?.[key] !== false;
   const TABS = [
     ["comunicados", "📢 Comunicados"],
     ["escala",      "📅 Escala"],
@@ -2293,7 +2550,7 @@ function EmployeePortal({ employees, roles, tips, schedules, restaurants, commun
         )}
 
         {tab === "faq" && (
-          <FaqTab restaurantId={emp?.restaurantId} faq={faq} />
+          <FaqTab restaurantId={emp?.restaurantId} faq={faq} emp={emp} roles={roles} restaurants={restaurants} splits={splits} />
         )}
 
         {tab === "dp" && (
@@ -2909,8 +3166,10 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
   const canSched = perms.schedule || isOwner;
   const isDP     = perms.isDP === true;
 
-  // Abas opcionais — seguem config do restaurante (supergestor também oculta se desativou)
-  const tabVisible = (key) => restaurant.tabsConfig?.[key] !== false;
+  // Abas opcionais — admin autoriza via tabsConfig, gestor escolhe via tabsGestor
+  const adminAutoriza = (key) => restaurant.tabsConfig?.[key] !== false;
+  const gestorAtivou  = (key) => restaurant.tabsGestor?.[key] !== false;
+  const tabVisible    = (key) => adminAutoriza(key) && (isOwner || gestorAtivou(key));
 
   const inboxUnread = ((data?.notifications??[]).filter(n=>n.restaurantId===rid&&!n.read).length + (data?.dpMessages??[]).filter(m=>m.restaurantId===rid&&!m.read).length);
 
@@ -3786,8 +4045,8 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
             {/* Abas opcionais — só supergestor */}
             {isOwner && (
               <div style={{...S.card,marginBottom:20}}>
-                <p style={{color:ac,fontSize:14,fontWeight:700,margin:"0 0 4px"}}>📋 Abas Visíveis</p>
-                <p style={{color:"var(--text3)",fontSize:12,marginBottom:14}}>Escolha quais abas aparecem para gestores e empregados deste restaurante.</p>
+                <p style={{color:ac,fontSize:14,fontWeight:700,margin:"0 0 4px"}}>📋 Abas autorizadas pelo Admin</p>
+                <p style={{color:"var(--text3)",fontSize:12,marginBottom:14}}>Define quais abas o restaurante pode usar. O gestor pode escolher quais exibir dentro das autorizadas.</p>
                 <div style={{display:"flex",flexDirection:"column",gap:10}}>
                   {[
                     ["roles",       "🏷️ Cargos"],
@@ -3806,7 +4065,43 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                           const updated = restaurants.map(r=>r.id===rid?{...r,tabsConfig:{...(r.tabsConfig??{}),[key]:!isOn}}:r);
                           onUpdate("restaurants",updated);
                         }} style={{padding:"5px 14px",borderRadius:20,border:"none",background:isOn?"var(--green)":"var(--border)",color:isOn?"#fff":"#555",fontWeight:700,cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:12}}>
-                          {isOn?"Ativa":"Inativa"}
+                          {isOn?"Autorizada":"Bloqueada"}
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            {/* Abas visíveis — gestor escolhe dentro das autorizadas */}
+            {!isOwner && (
+              <div style={{...S.card,marginBottom:20}}>
+                <p style={{color:ac,fontSize:14,fontWeight:700,margin:"0 0 4px"}}>📋 Abas visíveis</p>
+                <p style={{color:"var(--text3)",fontSize:12,marginBottom:14}}>Escolha quais abas aparecem para você e para os empregados. Só é possível ativar abas autorizadas pelo administrador.</p>
+                <div style={{display:"flex",flexDirection:"column",gap:10}}>
+                  {[
+                    ["horarios",    "🕐 Horários"],
+                    ["recibos",     "📄 Recibos"],
+                    ["faq",         "❓ FAQ"],
+                    ["comunicados", "📢 Comunicados"],
+                    ["dp",          "💬 Fale com DP"],
+                  ].map(([key, label]) => {
+                    const adminOk  = restaurant.tabsConfig?.[key] !== false;
+                    const gestorOn = restaurant.tabsGestor?.[key] !== false;
+                    const isOn     = adminOk && gestorOn;
+                    return (
+                      <div key={key} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"10px 14px",background:"var(--bg1)",borderRadius:10,border:`1px solid ${!adminOk?"var(--border)":isOn?"#10b98133":"var(--border)"}`,opacity:adminOk?1:0.5}}>
+                        <div>
+                          <span style={{color:isOn?"var(--text)":"var(--text3)",fontSize:13,fontWeight:isOn?600:400}}>{label}</span>
+                          {!adminOk && <span style={{color:"var(--text3)",fontSize:11,marginLeft:8}}>(não autorizado pelo admin)</span>}
+                        </div>
+                        <button disabled={!adminOk} onClick={()=>{
+                          if(!adminOk) return;
+                          const updated = restaurants.map(r=>r.id===rid?{...r,tabsGestor:{...(r.tabsGestor??{}),[key]:!gestorOn}}:r);
+                          onUpdate("restaurants",updated);
+                        }} style={{padding:"5px 14px",borderRadius:20,border:"none",background:!adminOk?"var(--border)":isOn?"var(--green)":"var(--border)",color:!adminOk?"#999":isOn?"#fff":"#555",fontWeight:700,cursor:adminOk?"pointer":"not-allowed",fontFamily:"'DM Mono',monospace",fontSize:12}}>
+                          {isOn?"Visível":"Oculta"}
                         </button>
                       </div>
                     );
@@ -7513,7 +7808,7 @@ export default function App() {
       {view === "setup" && <FirstSetup onDone={sm=>{handleUpdate("owners",[...owners,sm]);setCurrentUser(sm);setUserRole("super");setView("super");}} />}
       {view === "super" && <OwnerPortal data={data} onUpdate={handleUpdate} onBack={doLogout} currentUser={currentUser} toggleTheme={toggleTheme} theme={theme} />}
       {view === "manager" && <ManagerPortal manager={currentUser} data={data} onUpdate={handleUpdate} onBack={doLogout} toggleTheme={toggleTheme} theme={theme} />}
-      {view === "employee" && <EmployeePortal employees={employees} roles={roles} tips={tips} schedules={schedules} restaurants={restaurants} communications={communications} commAcks={commAcks} faq={faq} dpMessages={dpMessages} receipts={receipts} workSchedules={workSchedules} onBack={doLogout} onUpdateEmployee={emp=>{const next=employees.map(e=>e.id===emp.id?emp:e);handleUpdate("employees",next);}} onUpdate={handleUpdate} toggleTheme={toggleTheme} theme={theme} />}
+      {view === "employee" && <EmployeePortal employees={employees} roles={roles} tips={tips} schedules={schedules} splits={splits} restaurants={restaurants} communications={communications} commAcks={commAcks} faq={faq} dpMessages={dpMessages} receipts={receipts} workSchedules={workSchedules} onBack={doLogout} onUpdateEmployee={emp=>{const next=employees.map(e=>e.id===emp.id?emp:e);handleUpdate("employees",next);}} onUpdate={handleUpdate} toggleTheme={toggleTheme} theme={theme} />}
       {view === "fatura" && <FaturaPage faturaId={faturaId} restaurants={restaurants} onUpdate={handleUpdate} loaded={loaded} />}
       {view === "guia-gestor" && <GuiaGestor />}
       {view === "home" && <Home onLogin={()=>setView("login")} />}
