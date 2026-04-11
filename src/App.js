@@ -1968,8 +1968,17 @@ function EmployeePortal({ employees, roles, tips, schedules, restaurants, commun
   const pendingComms = myComms.filter(c => !commAcks?.[c.id]?.[empId]);
   const hasPending = pendingComms.length > 0;
 
-  // Force comunicados tab if there are pending
-  const TABS = [["comunicados","📢 Comunicados"],["escala","📅 Escala"],["extrato","💸 Gorjeta"],["horarios","🕐 Horários"],["recibos","📄 Recibos"],["faq","❓ FAQ"],["dp","💬 Fale com DP"]];
+  // Abas do empregado — respeita config do restaurante
+  const empTabVisible = (key) => restaurant?.tabsConfig?.[key] !== false;
+  const TABS = [
+    ["comunicados", "📢 Comunicados"],
+    ["escala",      "📅 Escala"],
+    ["extrato",     "💸 Gorjeta"],
+    empTabVisible("horarios") && ["horarios", "🕐 Horários"],
+    empTabVisible("recibos")  && ["recibos",  "📄 Recibos"],
+    empTabVisible("faq")      && ["faq",      "❓ FAQ"],
+    empTabVisible("dp")       && ["dp",       "💬 Fale com DP"],
+  ].filter(Boolean);
 
   function handleTabChange(id) {
     if (hasPending && id !== "comunicados") {
@@ -2069,11 +2078,11 @@ function EmployeePortal({ employees, roles, tips, schedules, restaurants, commun
     ["comunicados","📢","Avisos"],
     ["escala","📅","Escala"],
     ["extrato","💸","Gorjeta"],
-    ["horarios","🕐","Horários"],
-    ["recibos","📄","Recibos"],
-    ["faq","❓","FAQ"],
-    ["dp","💬","Fale DP"],
-  ];
+    empTabVisible("horarios") && ["horarios","🕐","Horários"],
+    empTabVisible("recibos")  && ["recibos","📄","Recibos"],
+    empTabVisible("faq")      && ["faq","❓","FAQ"],
+    empTabVisible("dp")       && ["dp","💬","Fale DP"],
+  ].filter(Boolean);
 
   return (
     <div style={{ minHeight: "100vh", background: bg, fontFamily: "DM Mono,monospace", paddingBottom: 76 }}>
