@@ -4426,9 +4426,10 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }
                               <button onClick={()=>confirmar(c)} style={{padding:"7px 14px",borderRadius:8,border:"1px solid var(--green)44",background:"var(--green-bg)",color:"var(--green)",cursor:"pointer",fontFamily:"'DM Sans',sans-serif",fontSize:13,fontWeight:700}}>✅ Confirmar</button>
                               <button onClick={()=>{if(!window.confirm("Negar e marcar inadimplente?"))return;saveFin({cobrancas:(fin.cobrancas??[]).map(x=>x.id===c.id?{...x,status:"pendente",clienteConfirmou:false}:x),status:"inadimplente"});onUpdate("_toast","🔴 Inadimplente.");}} style={{padding:"7px 10px",borderRadius:8,border:"1px solid var(--red)33",background:"transparent",color:"var(--red)",cursor:"pointer",fontFamily:"'DM Sans',sans-serif",fontSize:12}}>✕ Negar</button>
                             </>}
-                            {c.status==="pendente" && (
+                            {c.status==="pendente" && <>
+                              <button onClick={()=>{if(!window.confirm("Confirmar recebimento deste pagamento?"))return;confirmar(c);}} style={{padding:"7px 14px",borderRadius:8,border:"1px solid var(--green)44",background:"var(--green-bg)",color:"var(--green)",cursor:"pointer",fontFamily:"'DM Sans',sans-serif",fontSize:13,fontWeight:700}}>✅ Confirmar pago</button>
                               <button onClick={()=>{if(!window.confirm("Cancelar esta cobrança?"))return;saveFin({cobrancas:(fin.cobrancas??[]).map(x=>x.id===c.id?{...x,status:"cancelada"}:x)});}} style={{padding:"7px 10px",borderRadius:8,border:"1px solid var(--border)",background:"transparent",color:"var(--text3)",cursor:"pointer",fontFamily:"'DM Sans',sans-serif",fontSize:12}}>✕ Cancelar</button>
-                            )}
+                            </>;}
                           </div>
                         </div>
                       </div>
