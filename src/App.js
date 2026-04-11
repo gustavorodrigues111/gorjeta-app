@@ -1935,6 +1935,16 @@ function EmployeePortal({ employees, roles, tips, schedules, restaurants, commun
   const isFirstAccess = emp && (emp.mustChangePin || String(emp.pin) === empNumericPin || String(emp.pin) === String(emp.empCode));
   const needsCpf = emp && !emp.cpf;
 
+  // Verificação em tempo real — empregado inativado ou não encontrado → logout
+  useEffect(() => {
+    if (!empId) return;
+    if (!emp) { onBack(); return; } // empregado não existe mais
+    if (emp.inactive && emp.inactiveFrom && emp.inactiveFrom <= today()) {
+      alert("Seu acesso foi desativado. Entre em contato com o gestor.");
+      onBack();
+    }
+  }, [emp, empId]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const mk = monthKey(year, month);
   const myTips = tips.filter(t => t.employeeId === empId && t.monthKey === mk);
   const grossTotal = myTips.reduce((a, t) => a + (t.myShare ?? 0), 0);
@@ -3899,9 +3909,20 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }
   function restore(type, item) {
     const newTrash = { ...trash, [type]: (trash[type]??[]).filter(x=>x.id!==item.id) };
     onUpdate("trash", newTrash);
-    if (type === "restaurants") onUpdate("restaurants", [...restaurants, {...item, deletedAt:undefined, deletedBy:undefined}]);
-    if (type === "managers") onUpdate("managers", [...managers, {...item, deletedAt:undefined, deletedBy:undefined}]);
-    if (type === "employees") onUpdate("employees", [...(data?.employees??[]), {...item, deletedAt:undefined, deletedBy:undefined}]);
+    const clean = {...item};
+    delete clean.deletedAt; delete clean.deletedBy; delete clean._type; delete clean._icon;
+    if (type === "restaurants") {
+      const exists = restaurants.find(r=>r.id===item.id);
+      if (!exists) onUpdate("restaurants", [...restaurants, clean]);
+    }
+    if (type === "managers") {
+      const exists = managers.find(m=>m.id===item.id);
+      if (!exists) onUpdate("managers", [...managers, clean]);
+    }
+    if (type === "employees") {
+      const exists = (data?.employees??[]).find(e=>e.id===item.id);
+      if (!exists) onUpdate("employees", [...(data?.employees??[]), clean]);
+    }
     onUpdate("_toast", `✅ ${item.name} restaurado!`);
   }
   function hardDelete(type, item) {
@@ -4688,7 +4709,13 @@ function ManagerPortal({ manager, data, onUpdate, onBack, toggleTheme, theme }) 
       {!selId && (
         <div style={{padding:"40px 20px",maxWidth:480,margin:"0 auto"}}>
           <p style={{color:"var(--text3)",fontSize:13,marginBottom:20,textAlign:"center"}}>Selecione o restaurante</p>
-          {myRestaurants.length === 0 && <p style={{color:"var(--text3)",textAlign:"center"}}>Nenhum restaurante atribuído.</p>}
+          {myRestaurants.length === 0 && (
+            <div style={{textAlign:"center",padding:"60px 24px"}}>
+              <div style={{fontSize:48,marginBottom:16}}>🏢</div>
+              <h3 style={{color:"var(--text)",fontSize:18,fontWeight:700,margin:"0 0 8px"}}>Nenhum restaurante atribuído</h3>
+              <p style={{color:"var(--text3)",fontSize:14,lineHeight:1.6}}>Seu acesso ainda não foi configurado.<br/>Entre em contato com o administrador do AppTip.</p>
+            </div>
+          )}
           {myRestaurants.map(r=>(
             <button key={r.id} onClick={()=>setSelId(r.id)} style={{...S.card,width:"100%",cursor:"pointer",textAlign:"left",display:"block",marginBottom:10,border:"1px solid var(--border)"}}>
               <div style={{color:"var(--text)",fontWeight:600,fontSize:15}}>{r.name}</div>
@@ -4768,7 +4795,7 @@ function UnifiedLogin({ owners, managers, employees, onLoginOwner, onLoginManage
         (superByCpf && String(superByCpf.pin) === cleanPin)
       ));
       if (emp && !(emp.inactive && emp.inactiveFrom && emp.inactiveFrom <= today())) {
-        found.push({ label:"Empregado", icon:"👤", action:()=>{ setChoices(null); localStorage.setItem("apptip_empid", emp.id); onLoginEmployee(emp); } });
+        found.push({ label:"Empregado", icon:"👤", action:()=>{ setChoices(null); localStorage.setItem("apptip_empid", emp.id); localStorage.setItem("apptip_userid", emp.id); onLoginEmployee(emp); } });
       }
     } else {
       // Por ID — sempre empregado
@@ -4778,6 +4805,7 @@ function UnifiedLogin({ owners, managers, employees, onLoginOwner, onLoginManage
           setErr("Acesso desativado. Fale com o departamento pessoal."); return;
         }
         localStorage.setItem("apptip_empid", emp.id);
+        localStorage.setItem("apptip_userid", emp.id);
         setErr(""); setAttempts(0); onLoginEmployee(emp); return;
       }
     }
@@ -5239,7 +5267,7 @@ export default function App() {
   // Login unificado — uma única tela para todos
   const isSetupUrl = window.location.pathname.startsWith("/setup");
   const [view, setView] = useState(() => {
-    if (isSetupUrl) return "setup";
+    if (isSetupUrl) return "setup"; // protegido por senha de convite no FirstSetup
     const role = localStorage.getItem("apptip_role");
     if (role === "super") return "super";
     if (role === "manager") return "manager";
@@ -5291,16 +5319,19 @@ export default function App() {
       const loaded_data = {};
       keys.forEach((k, i) => { if (k !== "receipts" && vals[i]) { map[k]?.(vals[i]); loaded_data[k] = vals[i]; } });
 
-      // Migração automática: v4:superManagers → v4:owners
+      // Migração automática: v4:superManagers → v4:owners (executa só uma vez)
       if (!loaded_data.owners || loaded_data.owners.length === 0) {
-        const oldData = await load("v4:superManagers");
-        if (oldData && oldData.length > 0) {
-          console.log("Migrando superManagers → owners...", oldData.length, "registros");
-          // Primeiro owner vira master automaticamente
-          const migrated = oldData.map((o, i) => i === 0 ? {...o, isMaster: true} : o);
-          await save(K.owners, migrated);
-          setOwners(migrated);
-          loaded_data.owners = migrated;
+        const migrated = localStorage.getItem("apptip_migrated_owners");
+        if (!migrated) {
+          const oldData = await load("v4:superManagers");
+          if (oldData && oldData.length > 0) {
+            console.log("Migrando superManagers → owners...", oldData.length, "registros");
+            const migratedData = oldData.map((o, i) => i === 0 ? {...o, isMaster: true} : o);
+            await save(K.owners, migratedData);
+            setOwners(migratedData);
+            loaded_data.owners = migratedData;
+            localStorage.setItem("apptip_migrated_owners", "1");
+          }
         }
       }
 
@@ -5319,6 +5350,23 @@ export default function App() {
       }
       const recs = await loadReceipts();
       if (recs.length) setReceipts(recs);
+
+      // Limpeza automática da lixeira — itens com mais de 30 dias
+      if (loaded_data.trash) {
+        const cutoff = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+        const cleanTrash = {
+          restaurants: (loaded_data.trash.restaurants??[]).filter(x => x.deletedAt > cutoff),
+          managers:    (loaded_data.trash.managers??[]).filter(x => x.deletedAt > cutoff),
+          employees:   (loaded_data.trash.employees??[]).filter(x => x.deletedAt > cutoff),
+        };
+        const totalOriginal = (loaded_data.trash.restaurants?.length??0)+(loaded_data.trash.managers?.length??0)+(loaded_data.trash.employees?.length??0);
+        const totalClean = cleanTrash.restaurants.length+cleanTrash.managers.length+cleanTrash.employees.length;
+        if (totalClean < totalOriginal) {
+          await save(K.trash, cleanTrash);
+          setTrash(cleanTrash);
+        }
+      }
+
       setLoaded(true);
     })();
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
@@ -5355,6 +5403,7 @@ export default function App() {
     localStorage.removeItem("apptip_selrest");
     localStorage.removeItem("apptip_userid");
     localStorage.removeItem("apptip_role");
+    localStorage.removeItem("apptip_empid");
     setView("login");
   }
 
