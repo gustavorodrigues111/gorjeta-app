@@ -88,20 +88,21 @@ function makeEmpCode(restaurantCode, seq) {
 const K = {
   owners: "v4:owners",
   managers:      "v4:managers",
-  restaurants:   "v4:restaurants",  // added taxRate, enabledTabs
-  employees:     "v4:employees",    // added inactiveFrom, inactive
+  restaurants:   "v4:restaurants",
+  employees:     "v4:employees",
   roles:         "v4:roles",
   tips:          "v4:tips",
   splits:        "v4:splits",
   schedules:     "v4:schedules",
-  communications:"v4:communications", // [{id,restaurantId,title,body,createdAt,createdBy}]
-  commAcks:      "v4:commAcks",       // {commId: {empId: isoDate}}
-  faq:           "v4:faq",            // {restaurantId: [{id,q,a}]}
-  dpMessages:    "v4:dpMessages",     // [{id,restaurantId,empId|null,name|null,category,body,date,read}]
-  receipts:      "v4:receipts",       // [{id,restaurantId,empId,empName,month,type,dataUrl,uploadedAt}]
-  workSchedules: "v4:workSchedules",  // {restaurantId: {empId: [{id,days:{0-6:{in,out,break}},validFrom,createdBy,createdAt}]}}
-  notifications: "v4:notifications",  // [{id,restaurantId,type,body,date,read,targetRole:'dp'}]
-  noTipDays:    "v4:noTipDays",       // {restaurantId: [dateStr, ...]}
+  communications:"v4:communications",
+  commAcks:      "v4:commAcks",
+  faq:           "v4:faq",
+  dpMessages:    "v4:dpMessages",
+  receipts:      "v4:receipts",
+  workSchedules: "v4:workSchedules",
+  notifications: "v4:notifications",
+  noTipDays:     "v4:noTipDays",
+  trash:         "v4:trash",           // {restaurants:[], managers:[], employees:[]}
 };
 
 //
@@ -3862,7 +3863,14 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }
   }
   function saveOwner() {
     if (!ownerForm.name.trim()||!ownerForm.pin.trim()) return;
-    const s = { ...ownerForm, id: editOwnerId ?? Date.now().toString() };
+    // Primeiro admin cadastrado vira master automaticamente
+    const isMaster = ownerForm.isMaster ?? (owners.length === 0 && !editOwnerId);
+    const s = { ...ownerForm, isMaster, id: editOwnerId ?? Date.now().toString() };
+    // Não pode remover isMaster de um master via edição
+    if (editOwnerId) {
+      const existing = owners.find(x=>x.id===editOwnerId);
+      if (existing?.isMaster) s.isMaster = true; // preserva
+    }
     onUpdate("owners", editOwnerId ? owners.map(x=>x.id===editOwnerId?s:x) : [...owners,s]);
     setShowOwnerModal(false);
   }
@@ -3877,6 +3885,30 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }
 
   const notifications = data?.notifications ?? [];
   const unreadNotifs = notifications.filter(n => !n.read && n.targetRole === "admin").length;
+  const isMaster = currentUser?.isMaster === true;
+  const trash = data?.trash ?? { restaurants:[], managers:[], employees:[] };
+  const trashCount = (trash.restaurants?.length??0) + (trash.managers?.length??0) + (trash.employees?.length??0);
+
+  // Soft delete helpers
+  function softDelete(type, item) {
+    const entry = { ...item, deletedAt: new Date().toISOString(), deletedBy: currentUser?.name ?? "Admin" };
+    const newTrash = { ...trash, [type]: [...(trash[type]??[]), entry] };
+    onUpdate("trash", newTrash);
+  }
+  function restore(type, item) {
+    const newTrash = { ...trash, [type]: (trash[type]??[]).filter(x=>x.id!==item.id) };
+    onUpdate("trash", newTrash);
+    if (type === "restaurants") onUpdate("restaurants", [...restaurants, {...item, deletedAt:undefined, deletedBy:undefined}]);
+    if (type === "managers") onUpdate("managers", [...managers, {...item, deletedAt:undefined, deletedBy:undefined}]);
+    if (type === "employees") onUpdate("employees", [...(data?.employees??[]), {...item, deletedAt:undefined, deletedBy:undefined}]);
+    onUpdate("_toast", `✅ ${item.name} restaurado!`);
+  }
+  function hardDelete(type, item) {
+    if (!window.confirm(`Excluir permanentemente "${item.name}"? Esta ação não pode ser desfeita.`)) return;
+    const newTrash = { ...trash, [type]: (trash[type]??[]).filter(x=>x.id!==item.id) };
+    onUpdate("trash", newTrash);
+    onUpdate("_toast", `🗑️ ${item.name} excluído permanentemente.`);
+  }
 
   const ac = "var(--ac)";
   const TABS = [
@@ -3885,6 +3917,7 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }
     ["managers","👔 Gestores"],
     ["owners","⭐ Admins AppTip"],
     ["inbox", `📬 Caixa${unreadNotifs > 0 ? ` (${unreadNotifs})` : ""}`],
+    ...(isMaster ? [["trash", `🗑️ Lixeira${trashCount > 0 ? ` (${trashCount})` : ""}`]] : []),
   ];
 
   if (selRestaurant) {
@@ -3972,9 +4005,12 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }
                         if(!window.confirm(`Remover ${m.name} deste restaurante?`)) return;
                         const newIds = (m.restaurantIds??[]).filter(rid=>rid!==selRestaurant);
                         if(newIds.length === 0) {
+                          softDelete("managers", m);
                           onUpdate("managers", managers.filter(x=>x.id!==m.id));
+                          onUpdate("_toast", `🗑️ ${m.name} movido para a lixeira.`);
                         } else {
                           onUpdate("managers", managers.map(x=>x.id===m.id?{...x,restaurantIds:newIds}:x));
+                          onUpdate("_toast", `✅ ${m.name} removido deste restaurante.`);
                         }
                       }} style={{background:"none",border:"1px solid var(--red)33",borderRadius:8,color:"var(--red)",cursor:"pointer",fontSize:12,padding:"6px 12px",fontFamily:"'DM Sans',sans-serif"}}>Remover</button>
                     </div>
@@ -4317,25 +4353,11 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }
                       <button onClick={()=>setSelRestaurant(r.id)} style={{...S.btnSecondary,fontSize:12,color:ac,borderColor:ac}}>Abrir →</button>
                       <button onClick={()=>{setEditRestId(r.id);setRestForm({name:r.name,shortCode:r.shortCode??"",cnpj:r.cnpj??"",address:r.address??""});setShowRestModal(true);}} style={{...S.btnSecondary,fontSize:12}}>Editar</button>
                       <button onClick={()=>{
-                        if(!window.confirm(`Tem certeza que deseja EXCLUIR o restaurante "${r.name}"? Esta ação não pode ser desfeita.`)) return;
-                        const saveData = window.confirm("Deseja baixar os dados do restaurante (gorjetas e empregados) antes de excluir?");
-                        if(saveData) {
-                          // Export basic data as JSON text for safety
-                          const data = {
-                            restaurante: r,
-                            empregados: employees.filter(e=>e.restaurantId===r.id),
-                            gorjetas: tips.filter(t=>t.restaurantId===r.id),
-                            cargos: roles.filter(ro=>ro.restaurantId===r.id),
-                          };
-                          const blob = new Blob([JSON.stringify(data, null, 2)], {type:"application/json"});
-                          const url = URL.createObjectURL(blob);
-                          const a = document.createElement("a");
-                          a.href=url; a.download=`backup_${r.shortCode||r.id}_${today()}.json`; a.click();
-                          URL.revokeObjectURL(url);
-                        }
-                        onUpdate("restaurants",restaurants.filter(x=>x.id!==r.id));
-                        onUpdate("_toast","Restaurante excluído.");
-                      }} style={{background:"none",border:"1px solid #e74c3c33",borderRadius:8,color:"var(--red)",cursor:"pointer",fontSize:12,padding:"6px 12px",fontFamily:"'DM Mono',monospace"}}>✕</button>
+                        if(!window.confirm(`Mover "${r.name}" para a lixeira? Você poderá restaurar depois.`)) return;
+                        softDelete("restaurants", r);
+                        onUpdate("restaurants", restaurants.filter(x=>x.id!==r.id));
+                        onUpdate("_toast", `🗑️ ${r.name} movido para a lixeira.`);
+                      }} style={{background:"none",border:"1px solid var(--red)33",borderRadius:8,color:"var(--red)",cursor:"pointer",fontSize:12,padding:"6px 12px",fontFamily:"'DM Sans',sans-serif"}}>🗑️</button>
                     </div>
                   </div>
                 </div>
@@ -4385,20 +4407,102 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }
           <div>
             <button onClick={()=>{setEditOwnerId(null);setOwnerForm({name:"",cpf:"",pin:""});setShowOwnerModal(true);}} style={{...S.btnPrimary,marginBottom:20}}>+ Novo Admin AppTip</button>
             {owners.map(s=>(
-              <div key={s.id} style={{...S.card,marginBottom:10,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+              <div key={s.id} style={{...S.card,marginBottom:10,display:"flex",justifyContent:"space-between",alignItems:"center",border:s.isMaster?"1px solid var(--ac)44":"1px solid var(--border)"}}>
                 <div>
-                  <div style={{color:"var(--text)",fontWeight:600}}>{s.name}</div>
+                  <div style={{display:"flex",alignItems:"center",gap:8}}>
+                    <span style={{color:"var(--text)",fontWeight:700,fontSize:15}}>{s.name}</span>
+                    {s.isMaster && <span style={{background:"var(--ac-bg)",color:"var(--ac-text)",borderRadius:6,padding:"2px 8px",fontSize:11,fontWeight:700}}>👑 Master</span>}
+                    {s.id===currentUser?.id&&<span style={{color:"var(--text3)",fontSize:11}}>← você</span>}
+                  </div>
                   <div style={{color:"var(--text3)",fontSize:12}}>CPF: {s.cpf||"—"}</div>
-                  {s.id===currentUser?.id&&<span style={{color:ac,fontSize:11}}>← você</span>}
                 </div>
                 <div style={{display:"flex",gap:8}}>
-                  <button onClick={()=>{setEditOwnerId(s.id);setOwnerForm({name:s.name,cpf:s.cpf??"",pin:s.pin??""});setShowOwnerModal(true);}} style={{...S.btnSecondary,fontSize:12}}>Editar</button>
-                  {owners.length>1&&<button onClick={()=>onUpdate("owners",owners.filter(x=>x.id!==s.id))} style={{background:"none",border:"1px solid #e74c3c33",borderRadius:8,color:"var(--red)",cursor:"pointer",fontSize:12,padding:"6px 12px",fontFamily:"'DM Mono',monospace"}}>✕</button>}
+                  <button onClick={()=>{setEditOwnerId(s.id);setOwnerForm({name:s.name,cpf:s.cpf??"",pin:s.pin??"",isMaster:s.isMaster??false});setShowOwnerModal(true);}} style={{...S.btnSecondary,fontSize:12}}>Editar</button>
+                  {/* Master não pode ser excluído */}
+                  {!s.isMaster && owners.length>1 && isMaster && (
+                    <button onClick={()=>{
+                      if(!window.confirm(`Excluir admin "${s.name}"?`)) return;
+                      onUpdate("owners",owners.filter(x=>x.id!==s.id));
+                    }} style={{background:"none",border:"1px solid var(--red)33",borderRadius:8,color:"var(--red)",cursor:"pointer",fontSize:12,padding:"6px 12px",fontFamily:"'DM Sans',sans-serif"}}>✕</button>
+                  )}
+                  {s.isMaster && <span style={{color:"var(--text3)",fontSize:11,padding:"6px 8px"}}>🔒 Protegido</span>}
                 </div>
               </div>
             ))}
           </div>
         )}
+
+        {/* LIXEIRA — só master */}
+        {tab === "trash" && isMaster && (() => {
+          const allItems = [
+            ...(trash.restaurants??[]).map(x=>({...x,_type:"restaurants",_icon:"🏢"})),
+            ...(trash.managers??[]).map(x=>({...x,_type:"managers",_icon:"👔"})),
+            ...(trash.employees??[]).map(x=>({...x,_type:"employees",_icon:"👤"})),
+          ].sort((a,b)=>(b.deletedAt??"").localeCompare(a.deletedAt??""));
+
+          return (
+            <div>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}}>
+                <div>
+                  <h3 style={{color:"var(--text)",fontSize:16,fontWeight:700,margin:"0 0 4px"}}>🗑️ Lixeira</h3>
+                  <p style={{color:"var(--text3)",fontSize:13,margin:0}}>Itens excluídos. Só você (Master) pode ver e restaurar.</p>
+                </div>
+                {allItems.length > 0 && (
+                  <button onClick={()=>{
+                    if(!window.confirm("Esvaziar lixeira permanentemente? Esta ação não pode ser desfeita.")) return;
+                    onUpdate("trash", {restaurants:[],managers:[],employees:[]});
+                    onUpdate("_toast","🗑️ Lixeira esvaziada.");
+                  }} style={{padding:"8px 16px",borderRadius:10,border:"1px solid var(--red)33",background:"transparent",color:"var(--red)",cursor:"pointer",fontFamily:"'DM Sans',sans-serif",fontSize:13,fontWeight:600}}>
+                    Esvaziar tudo
+                  </button>
+                )}
+              </div>
+
+              {allItems.length === 0 && (
+                <div style={{...S.card,textAlign:"center",padding:48}}>
+                  <div style={{fontSize:36,marginBottom:12}}>✨</div>
+                  <p style={{color:"var(--text3)",fontSize:14}}>Lixeira vazia.</p>
+                </div>
+              )}
+
+              <div style={{display:"flex",flexDirection:"column",gap:10}}>
+                {allItems.map(item=>{
+                  const deletedDaysAgo = item.deletedAt ? Math.floor((new Date()-new Date(item.deletedAt))/(1000*60*60*24)) : 0;
+                  const daysLeft = 30 - deletedDaysAgo;
+                  return (
+                    <div key={item.id} style={{...S.card,opacity:0.85}}>
+                      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                        <div>
+                          <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:4}}>
+                            <span style={{fontSize:18}}>{item._icon}</span>
+                            <span style={{color:"var(--text)",fontWeight:700,fontSize:14,textDecoration:"line-through",opacity:0.7}}>{item.name}</span>
+                          </div>
+                          <div style={{color:"var(--text3)",fontSize:12}}>
+                            Excluído por {item.deletedBy} · {item.deletedAt ? new Date(item.deletedAt).toLocaleDateString("pt-BR") : "—"}
+                            {daysLeft > 0
+                              ? <span style={{color:daysLeft<7?"var(--red)":"var(--text3)",marginLeft:8}}>· {daysLeft}d até exclusão permanente</span>
+                              : <span style={{color:"var(--red)",marginLeft:8}}>· Pronto para exclusão</span>
+                            }
+                          </div>
+                        </div>
+                        <div style={{display:"flex",gap:8}}>
+                          <button onClick={()=>restore(item._type, item)}
+                            style={{padding:"7px 16px",borderRadius:8,border:"1px solid var(--green)44",background:"var(--green-bg)",color:"var(--green)",cursor:"pointer",fontFamily:"'DM Sans',sans-serif",fontSize:13,fontWeight:700}}>
+                            ↩ Restaurar
+                          </button>
+                          <button onClick={()=>hardDelete(item._type, item)}
+                            style={{padding:"7px 12px",borderRadius:8,border:"1px solid var(--red)33",background:"transparent",color:"var(--red)",cursor:"pointer",fontFamily:"'DM Sans',sans-serif",fontSize:12}}>
+                            🗑️
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          );
+        })()}
       </div>
 
       {/* Modals */}
@@ -4514,10 +4618,25 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }
 
       {showOwnerModal && (
         <Modal title={editOwnerId?"Editar Admin AppTip":"Novo Admin AppTip"} onClose={()=>setShowOwnerModal(false)}>
-          <div style={{display:"flex",flexDirection:"column",gap:10}}>
+          <div style={{display:"flex",flexDirection:"column",gap:12}}>
             <div><label style={S.label}>Nome completo</label><input value={ownerForm.name} onChange={e=>setOwnerForm({...ownerForm,name:e.target.value})} style={S.input}/></div>
             <div><label style={S.label}>CPF</label><input value={ownerForm.cpf} onChange={e=>setOwnerForm({...ownerForm,cpf:maskCpf(e.target.value)})} placeholder="000.000.000-00" style={S.input} inputMode="numeric"/></div>
             <div><label style={S.label}>PIN (4–6 dígitos)</label><input type="password" value={ownerForm.pin} onChange={e=>setOwnerForm({...ownerForm,pin:e.target.value})} maxLength={6} style={S.input}/></div>
+            {/* Só o master pode designar outro master */}
+            {isMaster && !owners.find(o=>o.id===editOwnerId)?.isMaster && (
+              <label style={{display:"flex",alignItems:"center",gap:10,cursor:"pointer",padding:"12px 14px",borderRadius:10,border:`1px solid ${ownerForm.isMaster?"var(--ac)":"var(--border)"}`,background:ownerForm.isMaster?"var(--ac-bg)":"transparent"}}>
+                <input type="checkbox" checked={!!ownerForm.isMaster} onChange={e=>setOwnerForm({...ownerForm,isMaster:e.target.checked})} style={{width:16,height:16,accentColor:ac}}/>
+                <div>
+                  <div style={{color:"var(--text)",fontWeight:600,fontSize:14}}>👑 Admin Master</div>
+                  <div style={{color:"var(--text3)",fontSize:12}}>Pode ver lixeira e não pode ser excluído</div>
+                </div>
+              </label>
+            )}
+            {owners.find(o=>o.id===editOwnerId)?.isMaster && (
+              <div style={{padding:"10px 14px",borderRadius:10,background:"var(--ac-bg)",border:"1px solid var(--ac)33"}}>
+                <span style={{color:"var(--ac-text)",fontSize:13,fontWeight:600}}>👑 Este admin é Master — proteção não pode ser removida</span>
+              </div>
+            )}
             <button onClick={saveOwner} style={S.btnPrimary}>{editOwnerId?"Salvar":"Criar"}</button>
           </div>
         </Modal>
@@ -5161,13 +5280,14 @@ export default function App() {
   const [workSchedules, setWorkSchedules] = useState({});
   const [notifications, setNotifications] = useState([]);
   const [noTipDays,     setNoTipDays]     = useState({});
+  const [trash,         setTrash]         = useState({ restaurants:[], managers:[], employees:[] });
 
   useEffect(() => {
     const savedId = currentUserId;
     (async () => {
       const vals = await Promise.all(Object.values(K).map(load));
       const keys = Object.keys(K);
-      const map = { owners:setOwners, managers:setManagers, restaurants:setRestaurants, employees:setEmployees, roles:setRoles, tips:setTips, splits:setSplits, schedules:setSchedules, communications:setCommunications, commAcks:setCommAcks, faq:setFaq, dpMessages:setDpMessages, workSchedules:setWorkSchedules, notifications:setNotifications, noTipDays:setNoTipDays };
+      const map = { owners:setOwners, managers:setManagers, restaurants:setRestaurants, employees:setEmployees, roles:setRoles, tips:setTips, splits:setSplits, schedules:setSchedules, communications:setCommunications, commAcks:setCommAcks, faq:setFaq, dpMessages:setDpMessages, workSchedules:setWorkSchedules, notifications:setNotifications, noTipDays:setNoTipDays, trash:setTrash };
       const loaded_data = {};
       keys.forEach((k, i) => { if (k !== "receipts" && vals[i]) { map[k]?.(vals[i]); loaded_data[k] = vals[i]; } });
 
@@ -5176,9 +5296,11 @@ export default function App() {
         const oldData = await load("v4:superManagers");
         if (oldData && oldData.length > 0) {
           console.log("Migrando superManagers → owners...", oldData.length, "registros");
-          await save(K.owners, oldData);
-          setOwners(oldData);
-          loaded_data.owners = oldData;
+          // Primeiro owner vira master automaticamente
+          const migrated = oldData.map((o, i) => i === 0 ? {...o, isMaster: true} : o);
+          await save(K.owners, migrated);
+          setOwners(migrated);
+          loaded_data.owners = migrated;
         }
       }
 
@@ -5201,7 +5323,7 @@ export default function App() {
     })();
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const data = { owners, managers, restaurants, employees, roles, tips, splits, schedules, communications, commAcks, faq, dpMessages, receipts, workSchedules, notifications, noTipDays };
+  const data = { owners, managers, restaurants, employees, roles, tips, splits, schedules, communications, commAcks, faq, dpMessages, receipts, workSchedules, notifications, noTipDays, trash };
 
   async function handleUpdate(field, value) {
     if (field === "_toast") { setToast(value); return; }
@@ -5219,8 +5341,8 @@ export default function App() {
       setToast("Recibos atualizados");
       return;
     }
-    const setters = { owners:setOwners, managers:setManagers, restaurants:setRestaurants, employees:setEmployees, roles:setRoles, tips:setTips, splits:setSplits, schedules:setSchedules, communications:setCommunications, commAcks:setCommAcks, faq:setFaq, dpMessages:setDpMessages, workSchedules:setWorkSchedules, notifications:setNotifications, noTipDays:setNoTipDays };
-    const keys    = { owners:K.owners, managers:K.managers, restaurants:K.restaurants, employees:K.employees, roles:K.roles, tips:K.tips, splits:K.splits, schedules:K.schedules, communications:K.communications, commAcks:K.commAcks, faq:K.faq, dpMessages:K.dpMessages, workSchedules:K.workSchedules, notifications:K.notifications, noTipDays:K.noTipDays };
+    const setters = { owners:setOwners, managers:setManagers, restaurants:setRestaurants, employees:setEmployees, roles:setRoles, tips:setTips, splits:setSplits, schedules:setSchedules, communications:setCommunications, commAcks:setCommAcks, faq:setFaq, dpMessages:setDpMessages, workSchedules:setWorkSchedules, notifications:setNotifications, noTipDays:setNoTipDays, trash:setTrash };
+    const keys    = { owners:K.owners, managers:K.managers, restaurants:K.restaurants, employees:K.employees, roles:K.roles, tips:K.tips, splits:K.splits, schedules:K.schedules, communications:K.communications, commAcks:K.commAcks, faq:K.faq, dpMessages:K.dpMessages, workSchedules:K.workSchedules, notifications:K.notifications, noTipDays:K.noTipDays, trash:K.trash };
     setters[field]?.(value);
     await save(keys[field], value);
     const labels = { owners:"Admins atualizados", managers:"Gestores atualizados", restaurants:"Restaurantes atualizados", employees:"Empregados atualizados", roles:"Cargos atualizados", tips:"Gorjetas atualizadas", splits:"Percentuais salvos", schedules:"Escala atualizada", communications:"Comunicados atualizados", commAcks:"Ciências atualizadas", faq:"FAQ atualizado", dpMessages:"Mensagem enviada", workSchedules:"Horários salvos", notifications:"Notificações atualizadas" };
