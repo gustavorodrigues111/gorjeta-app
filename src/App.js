@@ -2812,7 +2812,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                     {/* Day rows */}
                     {allDays.map(date => {
                       // Get the already-launched poolTotal for this date
-                      const launchedTips = myTips.filter(t=>t.date===date&&t.monthKey===tKey);
+                      const launchedTips = monthTips.filter(t=>t.date===date);
                       const launchedPoolTotal = launchedTips.length > 0 ? launchedTips[0].poolTotal : null;
                       const launchedNote = launchedTips.length > 0 ? (launchedTips[0].note ?? "") : "";
 
