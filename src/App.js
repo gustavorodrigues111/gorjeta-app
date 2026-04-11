@@ -4764,6 +4764,18 @@ export default function App() {
       const map = { owners:setOwners, managers:setManagers, restaurants:setRestaurants, employees:setEmployees, roles:setRoles, tips:setTips, splits:setSplits, schedules:setSchedules, communications:setCommunications, commAcks:setCommAcks, faq:setFaq, dpMessages:setDpMessages, workSchedules:setWorkSchedules, notifications:setNotifications, noTipDays:setNoTipDays };
       const loaded_data = {};
       keys.forEach((k, i) => { if (k !== "receipts" && vals[i]) { map[k]?.(vals[i]); loaded_data[k] = vals[i]; } });
+
+      // Migração automática: v4:superManagers → v4:owners
+      if (!loaded_data.owners || loaded_data.owners.length === 0) {
+        const oldData = await load("v4:superManagers");
+        if (oldData && oldData.length > 0) {
+          console.log("Migrando superManagers → owners...", oldData.length, "registros");
+          await save(K.owners, oldData);
+          setOwners(oldData);
+          loaded_data.owners = oldData;
+        }
+      }
+
       if (savedId) {
         const role = localStorage.getItem("apptip_role");
         if (role === "super") {
