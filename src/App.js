@@ -2145,21 +2145,107 @@ function EmployeePortal({ employees, roles, tips, schedules, restaurants, commun
                 const r = roles.find(r => r.id === e.roleId);
                 return r?.area === empArea && e.restaurantId === emp?.restaurantId &&
                   !(e.inactive && e.inactiveFrom && e.inactiveFrom <= today());
-              });
+              }).sort((a,b) => a.name.localeCompare(b.name));
+
+              const dim = new Date(year, month+1, 0).getDate();
+              const STATUS_COLORS = {
+                [DAY_OFF]:      "#e74c3c",
+                [DAY_COMP]:     "#3b82f6",
+                [DAY_VACATION]: "#8b5cf6",
+                [DAY_FAULT_J]:  "#f59e0b",
+                [DAY_FAULT_U]:  "#ef4444",
+              };
+              const STATUS_SHORT = {
+                [DAY_OFF]:"F",[DAY_COMP]:"C",[DAY_VACATION]:"Fér",
+                [DAY_FAULT_J]:"FJ",[DAY_FAULT_U]:"FI",
+              };
+              const LEGEND = [
+                ["#10b981","Trabalho"],["#e74c3c","Folga"],["#3b82f6","Comp."],
+                ["#8b5cf6","Férias"],["#f59e0b","F.Just."],["#ef4444","F.Injust."],
+              ];
+
               return (
                 <div>
-                  <p style={{color:"var(--text3)",fontSize:12,marginBottom:16}}>Escala da área <span style={{color:AREA_COLORS[empArea]??ac}}>{empArea}</span> — {monthLabel(year,month)}</p>
-                  {areaEmpsList.map(e => {
-                    const dm = schedules?.[emp?.restaurantId]?.[mk]?.[e.id] ?? {};
-                    return (
-                      <div key={e.id} style={{...S.card,marginBottom:16}}>
-                        <div style={{color: e.id===empId?ac:"#fff",fontWeight:600,marginBottom:8,fontSize:13}}>
-                          {e.name}{e.id===empId?" (você)":""}
-                        </div>
-                        <CalendarGrid year={year} month={month} dayMap={dm} readOnly />
+                  <p style={{color:"var(--text3)",fontSize:12,marginBottom:10}}>
+                    Área <span style={{color:AREA_COLORS[empArea]??ac,fontWeight:700}}>{empArea}</span> — {monthLabel(year,month)}
+                  </p>
+
+                  {/* Legenda */}
+                  <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:12}}>
+                    {LEGEND.map(([c,lbl])=>(
+                      <div key={lbl} style={{display:"flex",alignItems:"center",gap:3}}>
+                        <div style={{width:10,height:10,borderRadius:3,background:c+"33",border:`1px solid ${c}`,flexShrink:0}}/>
+                        <span style={{color:"var(--text3)",fontSize:9,fontFamily:"DM Mono,monospace"}}>{lbl}</span>
                       </div>
-                    );
-                  })}
+                    ))}
+                  </div>
+
+                  {/* Tabela com scroll horizontal */}
+                  <div style={{overflowX:"auto",WebkitOverflowScrolling:"touch",borderRadius:10,border:"1px solid var(--border)"}}>
+                    <table style={{borderCollapse:"collapse",fontFamily:"DM Mono,monospace",fontSize:10,minWidth:"100%"}}>
+                      <thead>
+                        <tr style={{background:"var(--bg1)"}}>
+                          <th style={{position:"sticky",left:0,background:"var(--bg1)",zIndex:2,padding:"6px 8px",textAlign:"left",color:"var(--text3)",fontSize:10,borderBottom:"1px solid var(--border)",whiteSpace:"nowrap",minWidth:90}}>
+                            Empregado
+                          </th>
+                          {Array.from({length:dim},(_,i)=>{
+                            const d = i+1;
+                            const date = `${year}-${String(month+1).padStart(2,"0")}-${String(d).padStart(2,"0")}`;
+                            const wd = new Date(date+"T12:00:00").getDay();
+                            const isWe = wd===0||wd===6;
+                            const isToday = date === today();
+                            return (
+                              <th key={d} style={{padding:"3px 1px",textAlign:"center",color:isToday?ac:isWe?"#f59e0b":"#444",fontSize:9,borderBottom:"1px solid var(--border)",minWidth:22,width:22,background:isToday?"#f5c84211":"transparent"}}>
+                                <div style={{fontWeight:isToday?700:400}}>{d}</div>
+                                <div style={{fontSize:7,opacity:0.7}}>{["D","S","T","Q","Q","S","S"][wd]}</div>
+                              </th>
+                            );
+                          })}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {areaEmpsList.map((e, ei) => {
+                          const isMe = e.id === empId;
+                          const dm = schedules?.[emp?.restaurantId]?.[mk]?.[e.id] ?? {};
+                          const role = roles.find(r=>r.id===e.roleId);
+                          return (
+                            <tr key={e.id} style={{background:isMe?"#1a1a0a":ei%2===0?"#111":"#141414"}}>
+                              <td style={{position:"sticky",left:0,background:isMe?"#1a1a0a":ei%2===0?"#111":"#141414",zIndex:1,padding:"5px 8px",borderRight:"1px solid var(--border)",minWidth:90}}>
+                                <div style={{color:isMe?ac:"var(--text)",fontSize:10,fontWeight:isMe?700:600,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",maxWidth:85}}>
+                                  {e.name.split(" ")[0]}{isMe?" ✦":""}
+                                </div>
+                                <div style={{color:"var(--text3)",fontSize:8,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",maxWidth:85}}>{role?.name}</div>
+                              </td>
+                              {Array.from({length:dim},(_,i)=>{
+                                const d = i+1;
+                                const date = `${year}-${String(month+1).padStart(2,"0")}-${String(d).padStart(2,"0")}`;
+                                const status = dm[date];
+                                const color = STATUS_COLORS[status] ?? "#10b981";
+                                const label = STATUS_SHORT[status] ?? "•";
+                                const wd = new Date(date+"T12:00:00").getDay();
+                                const isWe = wd===0||wd===6;
+                                const isToday = date === today();
+                                return (
+                                  <td key={d} style={{
+                                    textAlign:"center",padding:"3px 1px",
+                                    background:isToday?"#f5c84211":status?color+"22":(isWe?"#1a1a0a":"transparent"),
+                                    borderRight:"1px solid #1a1a1a",
+                                    width:22,outline:isToday?`1px solid ${ac}44`:undefined
+                                  }}>
+                                    <span style={{color:color,fontSize:status?8:9,fontWeight:status?700:300}}>{label}</span>
+                                  </td>
+                                );
+                              })}
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+
+                  <p style={{color:"var(--text3)",fontSize:10,marginTop:8,textAlign:"center"}}>
+                    ✦ você · role na coluna da esquerda
+                  </p>
                 </div>
               );
             })()}
