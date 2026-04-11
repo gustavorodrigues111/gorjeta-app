@@ -1,6 +1,7 @@
 // src/firebase.js
 import { initializeApp } from "firebase/app";
 import { getFirestore } from "firebase/firestore";
+import { initializeAppCheck, ReCaptchaV3Provider } from "firebase/app-check";
 
 const firebaseConfig = {
   apiKey: "AIzaSy88nij_cTJn9WFT0Wp9-xx8nO9FyvVdYx4",
@@ -12,4 +13,11 @@ const firebaseConfig = {
 };
 
 const app = initializeApp(firebaseConfig);
+
+// App Check — garante que só o domínio apptip.app acessa o Firebase
+initializeAppCheck(app, {
+  provider: new ReCaptchaV3Provider("6LclvLEsAAAAAGNmvN4j87YL0j6o_GS6lP5I73SV"),
+  isTokenAutoRefreshEnabled: true,
+});
+
 export const db = getFirestore(app);
