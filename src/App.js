@@ -2193,30 +2193,20 @@ function EmployeeSpreadsheet({ restEmps, restRoles, rid, employees, onUpdate, re
     </div>
   );
 
-  const EmpRow = ({ e, isNew }) => {
+  function renderEmpRow(e, isNew) {
     const row = isNew ? newRow : getRow(e);
     const isSaved = !isNew && saved[e?.id];
     const isInactive = !isNew && e?.inactive && e?.inactiveFrom <= today();
-    const onChange = isNew
+    const onChg = isNew
       ? (f,v) => setNewRow(p=>({...p,[f]:v}))
-      : (f,v) => setRow(e.id, f, v);
-
-    // Save role immediately on select change — avoids re-render losing state
-    const onRoleChange = isNew
-      ? (v) => setNewRow(p=>({...p,roleId:v}))
-      : (v) => {
-          const current = editRows[e.id] ?? { name:e.name, cpf:e.cpf??"", admission:e.admission??"", pin:e.pin??"", roleId:e.roleId??"", inactiveFrom:e.inactiveFrom??"" };
-          const updated = {...current, roleId:v};
-          setEditRows(prev=>({...prev,[e.id]:updated}));
-        };
-
+      : (f,v) => setEditRows(prev => ({ ...prev, [e.id]: { ...(prev[e.id] ?? getRow(e)), [f]: v } }));
     return (
       <div style={{display:"grid",gridTemplateColumns:cols,gap:6,padding:"6px 8px",marginBottom:4,background:isNew?"#0d1a0d":isInactive?"#1a1a2a":"var(--card-bg)",borderRadius:10,border:`1px solid ${isSaved?"#10b98166":isNew?"#10b98144":isInactive?"#8b5cf644":"var(--border)"}`,alignItems:"center",opacity:isInactive?0.75:1}}>
-        <input value={row.name} onChange={ev=>onChange("name",ev.target.value)} placeholder="Nome completo" style={inS}/>
-        <input value={row.cpf} onChange={ev=>onChange("cpf",ev.target.value)} placeholder="000.000.000-00" style={inS} inputMode="numeric"/>
-        <input type="date" value={row.admission} onChange={ev=>onChange("admission",ev.target.value)} style={inS}/>
-        <input type="password" value={row.pin} onChange={ev=>onChange("pin",ev.target.value)} maxLength={6} placeholder="••••" style={inS}/>
-        <select value={row.roleId} onChange={ev=>onRoleChange(ev.target.value)} style={{...inS,cursor:"pointer"}}>
+        <input value={row.name} onChange={ev=>onChg("name",ev.target.value)} placeholder="Nome completo" style={inS}/>
+        <input value={row.cpf} onChange={ev=>onChg("cpf",ev.target.value)} placeholder="000.000.000-00" style={inS} inputMode="numeric"/>
+        <input type="date" value={row.admission} onChange={ev=>onChg("admission",ev.target.value)} style={inS}/>
+        <input type="password" value={row.pin} onChange={ev=>onChg("pin",ev.target.value)} maxLength={6} placeholder="••••" style={inS}/>
+        <select value={row.roleId} onChange={ev=>onChg("roleId",ev.target.value)} style={{...inS,cursor:"pointer"}}>
           <option value="">Selecionar…</option>
           {AREAS.map(a=>(
             <optgroup key={a} label={a}>
@@ -2226,7 +2216,7 @@ function EmployeeSpreadsheet({ restEmps, restRoles, rid, employees, onUpdate, re
         </select>
         {isNew
           ? <div style={{fontSize:10,color:"var(--text3)"}}>Auto</div>
-          : <input type="date" value={row.inactiveFrom??""} onChange={ev=>onChange("inactiveFrom",ev.target.value)} style={inS}/>
+          : <input type="date" value={row.inactiveFrom??""} onChange={ev=>onChg("inactiveFrom",ev.target.value)} style={inS}/>
         }
         <div style={{display:"flex",gap:4}}>
           {isNew
@@ -2244,7 +2234,7 @@ function EmployeeSpreadsheet({ restEmps, restRoles, rid, employees, onUpdate, re
         </div>
       </div>
     );
-  };
+  }
 
   return (
     <div style={{fontFamily:"DM Mono,monospace"}}>
@@ -2261,7 +2251,7 @@ function EmployeeSpreadsheet({ restEmps, restRoles, rid, employees, onUpdate, re
       <HeaderRow />
 
       {/* New row (only when showing active) */}
-      {!showInactive && <EmpRow isNew e={null}/>}
+      {!showInactive && renderEmpRow(null, true)}
 
       {list.length === 0 && <p style={{color:"var(--text3)",textAlign:"center",marginTop:16}}>Nenhum empregado {showInactive?"inativo":"ativo"}.</p>}
       {list.map(e => {
@@ -2269,7 +2259,7 @@ function EmployeeSpreadsheet({ restEmps, restRoles, rid, employees, onUpdate, re
         return (
           <div key={e.id}>
             {role && <div style={{color:AREA_COLORS[role.area]??"#555",fontSize:10,fontWeight:700,padding:"6px 8px 2px"}}>{role.area} · {e.empCode}</div>}
-            <EmpRow e={e} isNew={false}/>
+            {renderEmpRow(e, false)}
           </div>
         );
       })}
@@ -3465,6 +3455,19 @@ function SuperManagerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, 
                 })}
               </div>
             </div>
+
+            <div style={{borderTop:"1px solid var(--border)",paddingTop:12}}>
+              <label style={S.label}>Departamento Pessoal (DP)</label>
+              <button onClick={()=>setMgrForm({...mgrForm,isDP:!mgrForm.isDP})}
+                style={{width:"100%",padding:"12px 14px",borderRadius:10,border:`1px solid ${mgrForm.isDP?"#3b82f6":"#2a2a2a"}`,background:mgrForm.isDP?"#3b82f622":"transparent",color:mgrForm.isDP?"#3b82f6":"#555",cursor:"pointer",fontFamily:"DM Mono,monospace",fontSize:13,textAlign:"left",display:"flex",alignItems:"center",gap:10}}>
+                <span style={{fontSize:18}}>📬</span>
+                <div>
+                  <div style={{fontWeight:700}}>{mgrForm.isDP?"✓ É gestor do DP":"○ Não é gestor do DP"}</div>
+                  <div style={{fontSize:11,opacity:0.7,marginTop:2}}>Recebe notificações de horários, mensagens do Fale com DP e avisos internos</div>
+                </div>
+              </button>
+            </div>
+
             <button onClick={saveMgr} style={S.btnPrimary}>{editMgrId?"Salvar":"Criar Gestor"}</button>
           </div>
         </Modal>
