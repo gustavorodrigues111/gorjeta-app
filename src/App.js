@@ -3847,7 +3847,7 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }
   // forms
   const [showRestModal, setShowRestModal]   = useState(false);
   const [editRestId, setEditRestId]         = useState(null);
-  const [restForm, setRestForm]             = useState({ name:"",shortCode:"",cnpj:"",address:"" });
+  const [restForm, setRestForm]             = useState({ name:"",shortCode:"",cnpj:"",address:"",whatsappFin:"",whatsappOp:"" });
   const [showMgrModal, setShowMgrModal]     = useState(false);
   const [editMgrId, setEditMgrId]           = useState(null);
   const [mgrForm, setMgrForm]               = useState({ name:"",cpf:"",pin:"",restaurantIds:[],perms:{tips:true,schedule:true},isDP:false });
@@ -4241,6 +4241,113 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }
                   </div>
                 </div>
               </div>
+              <div style={{...S.card,marginBottom:20}}>
+                <h4 style={{color:"var(--text)",fontWeight:700,fontSize:14,margin:"0 0 4px"}}>📲 Gerar cobrança</h4>
+                <p style={{color:"var(--text3)",fontSize:12,margin:"0 0 16px"}}>Envia a cobrança via WhatsApp para o contato financeiro do restaurante</p>
+                {!rest?.whatsappFin && (
+                  <div style={{padding:"10px 14px",borderRadius:10,background:"var(--red-bg)",border:"1px solid var(--red)33",marginBottom:12}}>
+                    <p style={{color:"var(--red)",fontSize:12,margin:0}}>⚠️ WhatsApp financeiro não cadastrado. Edite o restaurante para adicionar.</p>
+                  </div>
+                )}
+                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:10}}>
+                  <div>
+                    <label style={S.label}>Período de referência</label>
+                    <input type="month" id="cob-periodo" defaultValue={`${new Date().getFullYear()}-${String(new Date().getMonth()+1).padStart(2,"0")}`} style={S.input}/>
+                  </div>
+                  <div>
+                    <label style={S.label}>Vencimento</label>
+                    <input type="date" id="cob-venc" style={S.input}/>
+                  </div>
+                  <div>
+                    <label style={S.label}>Valor (R$)</label>
+                    <input type="number" id="cob-valor" defaultValue={valorTotal?.toFixed(2)??""} placeholder={valorTotal?.toFixed(2)??"0,00"} style={S.input}/>
+                  </div>
+                  <div>
+                    <label style={S.label}>Forma de pagamento</label>
+                    <select id="cob-forma" style={S.input}>
+                      <option value="PIX">PIX</option>
+                      <option value="Boleto">Boleto</option>
+                      <option value="Cartão">Cartão</option>
+                      <option value="Transferência">Transferência</option>
+                    </select>
+                  </div>
+                </div>
+                <div style={{marginBottom:10}}>
+                  <label style={S.label}>Chave/dados de pagamento</label>
+                  <input id="cob-chave" placeholder="Ex: 11985499821 (PIX) ou dados do boleto" style={S.input}/>
+                </div>
+                <div style={{marginBottom:14}}>
+                  <label style={S.label}>Link de pagamento (opcional)</label>
+                  <input id="cob-link" placeholder="Cole aqui o link do Asaas, Stripe, PagSeguro, etc." style={S.input}/>
+                  <p style={{color:"var(--text3)",fontSize:11,marginTop:3}}>O link será incluído na mensagem enviada ao cliente</p>
+                </div>
+                <button onClick={()=>{
+                  if (!rest?.whatsappFin) { alert("Cadastre o WhatsApp financeiro primeiro."); return; }
+                  const periodo = document.getElementById("cob-periodo")?.value;
+                  const venc    = document.getElementById("cob-venc")?.value;
+                  const valor   = parseFloat(document.getElementById("cob-valor")?.value);
+                  const forma   = document.getElementById("cob-forma")?.value;
+                  const chave   = document.getElementById("cob-chave")?.value;
+                  const link    = document.getElementById("cob-link")?.value;
+                  if (!periodo || !valor) { alert("Preencha o período e o valor."); return; }
+                  const [ano, mes] = periodo.split("-");
+                  const mesesNome = ["Janeiro","Fevereiro","Março","Abril","Maio","Junho","Julho","Agosto","Setembro","Outubro","Novembro","Dezembro"];
+                  const periodoLabel = `${mesesNome[parseInt(mes)-1]}/${ano}`;
+                  const vencLabel = venc ? new Date(venc+"T12:00:00").toLocaleDateString("pt-BR") : "";
+                  const msg = [
+                    `Olá! Segue a cobrança *AppTip* referente a *${periodoLabel}* 🍽️`,
+                    ``,
+                    `🏢 *Restaurante:* ${rest?.name}`,
+                    `📦 *Plano:* ${plano.label}${isEnterprise?` (${empMax} emp.)`:""}`,
+                    `💰 *Valor:* R$ ${valor.toLocaleString("pt-BR",{minimumFractionDigits:2})}`,
+                    vencLabel ? `📅 *Vencimento:* ${vencLabel}` : "",
+                    `💳 *Pagamento:* ${forma}${chave?` — ${chave}`:""}`,
+                    link ? `\n🔗 *Link de pagamento:*\n${link}` : "",
+                    ``,
+                    `Qualquer dúvida, estamos à disposição! 😊`,
+                  ].filter(Boolean).join("\n");
+                  const cob = { id:Date.now().toString(), periodo, periodoLabel, venc, valor, forma, chave, link, criadaEm:new Date().toISOString(), status:"pendente" };
+                  saveFinanceiro({ cobrancas:[...(fin.cobrancas??[]), cob] });
+                  const numero = rest.whatsappFin.replace(/\D/g,"");
+                  window.open(`https://wa.me/55${numero}?text=${encodeURIComponent(msg)}`, "_blank");
+                  onUpdate("_toast","📲 Cobrança gerada!");
+                }} disabled={!rest?.whatsappFin}
+                  style={{...S.btnPrimary,opacity:rest?.whatsappFin?1:0.5,cursor:rest?.whatsappFin?"pointer":"not-allowed"}}>
+                  📲 Gerar e enviar cobrança
+                </button>
+              </div>
+
+              {/* Cobranças pendentes */}
+              {(fin.cobrancas??[]).filter(c=>c.status==="pendente").length > 0 && (
+                <div style={{...S.card,marginBottom:20,border:"1px solid #f59e0b33",background:"#fffbeb"}}>
+                  <h4 style={{color:"#92400e",fontWeight:700,fontSize:14,margin:"0 0 12px"}}>⏳ Aguardando confirmação de pagamento</h4>
+                  <div style={{display:"flex",flexDirection:"column",gap:8}}>
+                    {(fin.cobrancas??[]).filter(c=>c.status==="pendente").map(c=>(
+                      <div key={c.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"12px 14px",borderRadius:10,background:"#fff",border:"1px solid #fde68a"}}>
+                        <div>
+                          <div style={{color:"var(--text)",fontWeight:700,fontSize:14}}>R$ {c.valor?.toLocaleString("pt-BR",{minimumFractionDigits:2})} — {c.periodoLabel}</div>
+                          <div style={{color:"var(--text3)",fontSize:12}}>{c.forma}{c.venc?` · Venc. ${new Date(c.venc+"T12:00:00").toLocaleDateString("pt-BR")}`:""} · Enviada em {new Date(c.criadaEm).toLocaleDateString("pt-BR")}</div>
+                        </div>
+                        <div style={{display:"flex",gap:8}}>
+                          <button onClick={()=>{
+                            const updated = (fin.cobrancas??[]).map(x=>x.id===c.id?{...x,status:"pago",pagoEm:new Date().toISOString()}:x);
+                            const novoPag = { id:Date.now().toString(), data:today(), valor:c.valor, forma:c.forma, obs:`Ref. ${c.periodoLabel}`, registradoEm:new Date().toISOString() };
+                            saveFinanceiro({ cobrancas:updated, pagamentos:[novoPag,...(fin.pagamentos??[])], status:"ativo", proximoVencimento:c.venc||fin.proximoVencimento });
+                            onUpdate("_toast","✅ Pagamento confirmado!");
+                          }} style={{padding:"7px 14px",borderRadius:8,border:"1px solid var(--green)44",background:"var(--green-bg)",color:"var(--green)",cursor:"pointer",fontFamily:"'DM Sans',sans-serif",fontSize:13,fontWeight:700}}>
+                            ✅ Confirmar pago
+                          </button>
+                          <button onClick={()=>{
+                            if(!window.confirm("Cancelar esta cobrança?")) return;
+                            saveFinanceiro({ cobrancas:(fin.cobrancas??[]).map(x=>x.id===c.id?{...x,status:"cancelada"}:x) });
+                          }} style={{padding:"7px 10px",borderRadius:8,border:"1px solid var(--border)",background:"transparent",color:"var(--text3)",cursor:"pointer",fontFamily:"'DM Sans',sans-serif",fontSize:12}}>✕</button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
               <div style={{...S.card,marginBottom:20}}>
                 <h4 style={{color:"var(--text)",fontWeight:700,fontSize:14,margin:"0 0 16px"}}>➕ Registrar pagamento</h4>
                 <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:10}}>
@@ -4708,7 +4815,7 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }
         {/* RESTAURANTES */}
         {tab === "restaurants" && (
           <div>
-            <button onClick={()=>{setEditRestId(null);setRestForm({name:"",cnpj:"",address:""});setShowRestModal(true);}} style={{...S.btnPrimary,marginBottom:20}}>+ Novo Restaurante</button>
+            <button onClick={()=>{setEditRestId(null);setRestForm({name:"",cnpj:"",address:"",whatsappFin:"",whatsappOp:""});setShowRestModal(true);}} style={{...S.btnPrimary,marginBottom:20}}>+ Novo Restaurante</button>
             {restaurants.length === 0 && <p style={{color:"var(--text3)",textAlign:"center"}}>Nenhum restaurante cadastrado.</p>}
             {/* Export geral */}
             {restaurants.length > 0 && (
@@ -4762,7 +4869,7 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }
                     <div style={{display:"flex",gap:8,flexWrap:"wrap",justifyContent:"flex-end"}}>
                       <button onClick={()=>setSelRestaurant(r.id)} style={{...S.btnSecondary,fontSize:12,color:ac,borderColor:ac}}>Abrir →</button>
                       <button onClick={()=>{setSelRestaurant(r.id);setRestTab("financeiro");}} style={{...S.btnSecondary,fontSize:12,color:"var(--green)",borderColor:"var(--green)"}}>💳</button>
-                      <button onClick={()=>{setEditRestId(r.id);setRestForm({name:r.name,shortCode:r.shortCode??"",cnpj:r.cnpj??"",address:r.address??""});setShowRestModal(true);}} style={{...S.btnSecondary,fontSize:12}}>Editar</button>
+                      <button onClick={()=>{setEditRestId(r.id);setRestForm({name:r.name,shortCode:r.shortCode??"",cnpj:r.cnpj??"",address:r.address??"",whatsappFin:r.whatsappFin??"",whatsappOp:r.whatsappOp??""});setShowRestModal(true);}} style={{...S.btnSecondary,fontSize:12}}>Editar</button>
                       <button onClick={()=>{
                         if(!window.confirm(`Mover "${r.name}" para a lixeira? Você poderá restaurar depois.`)) return;
                         softDelete("restaurants", r);
@@ -4930,9 +5037,24 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }
             </div>
             <div><label style={S.label}>CNPJ (opcional)</label><input value={restForm.cnpj} onChange={e=>setRestForm({...restForm,cnpj:e.target.value})} placeholder="00.000.000/0000-00" style={S.input}/></div>
             <div><label style={S.label}>Endereço (opcional)</label><input value={restForm.address} onChange={e=>setRestForm({...restForm,address:e.target.value})} style={S.input}/></div>
+            <div style={{borderTop:"1px solid var(--border)",paddingTop:10}}>
+              <p style={{color:"var(--text3)",fontSize:12,margin:"0 0 8px",fontWeight:600}}>📱 Contatos WhatsApp</p>
+              <div style={{display:"flex",flexDirection:"column",gap:8}}>
+                <div>
+                  <label style={S.label}>WhatsApp Financeiro <span style={{color:"var(--red)"}}>*</span></label>
+                  <input value={restForm.whatsappFin??""} onChange={e=>setRestForm({...restForm,whatsappFin:e.target.value})} placeholder="11987654321" inputMode="numeric" style={S.input}/>
+                  <p style={{color:"var(--text3)",fontSize:11,marginTop:3}}>Recebe cobranças e avisos de pagamento</p>
+                </div>
+                <div>
+                  <label style={S.label}>WhatsApp Operacional</label>
+                  <input value={restForm.whatsappOp??""} onChange={e=>setRestForm({...restForm,whatsappOp:e.target.value})} placeholder="11987654321" inputMode="numeric" style={S.input}/>
+                  <p style={{color:"var(--text3)",fontSize:11,marginTop:3}}>Recebe comunicados técnicos e suporte</p>
+                </div>
+              </div>
+            </div>
             {!editRestId && (
               <div style={{padding:"10px 14px",borderRadius:10,background:"var(--bg2)",border:"1px solid var(--border)"}}>
-                <p style={{color:"var(--text3)",fontSize:12,margin:0}}>💡 Plano e cobrança podem ser definidos na aba <strong>💳 Financeiro</strong> do restaurante após o cadastro.</p>
+                <p style={{color:"var(--text3)",fontSize:12,margin:0}}>💡 Plano e cobrança podem ser definidos na aba <strong>💳 Financeiro</strong> após o cadastro.</p>
               </div>
             )}
             <button onClick={saveRest} style={S.btnPrimary}>{editRestId?"Salvar":"Cadastrar"}</button>
@@ -5105,7 +5227,7 @@ function ManagerPortal({ manager, data, onUpdate, onBack, toggleTheme, theme }) 
 //
 // LOGIN
 //
-function UnifiedLogin({ owners, managers, employees, restaurants, onLoginOwner, onLoginManager, onLoginEmployee, onSetupFirst, toggleTheme, theme }) {
+function UnifiedLogin({ owners, managers, employees, restaurants, onLoginOwner, onLoginManager, onLoginEmployee, onSetupFirst, onGoHome, toggleTheme, theme }) {
   const [credential, setCredential] = useState("");
   const [pin, setPin] = useState("");
   const [err, setErr] = useState("");
@@ -5345,6 +5467,14 @@ function UnifiedLogin({ owners, managers, employees, restaurants, onLoginOwner, 
             </button>
           )}
         </div>
+
+        {/* Link para landing page */}
+        <div style={{textAlign:"center",marginTop:16,paddingTop:16,borderTop:"1px solid var(--border)"}}>
+          <button onClick={onGoHome}
+            style={{background:"none",border:"none",color:"var(--text3)",cursor:"pointer",fontFamily:"'DM Sans',sans-serif",fontSize:13,padding:0}}>
+            Ainda não usa o AppTip? <span style={{color:"var(--ac-text)",fontWeight:700}}>Conheça como funciona →</span>
+          </button>
+        </div>
       </div>
     </div>
   );
@@ -5410,101 +5540,105 @@ function FirstSetup({ onDone }) {
 //
 // HOME
 //
-function Home({ onManager, onEmployee }) {
-  const [formData, setFormData] = useState({ nome:"", email:"", restaurante:"", mensagem:"" });
+function Home({ onLogin }) {
+  const [formData, setFormData] = useState({ nome:"", email:"", restaurante:"", empregados:"", mensagem:"" });
   const [formSent, setFormSent] = useState(false);
   const [formSending, setFormSending] = useState(false);
-  const ac = "var(--ac)";
 
   async function sendForm() {
     if (!formData.nome.trim() || !formData.email.trim()) return;
     setFormSending(true);
-    // Envia via mailto (fallback simples sem backend)
     const subject = encodeURIComponent(`AppTip — Interesse de ${formData.restaurante || formData.nome}`);
-    const body = encodeURIComponent(`Nome: ${formData.nome}\nEmail: ${formData.email}\nRestaurante: ${formData.restaurante}\n\nMensagem:\n${formData.mensagem}`);
-    window.open(`mailto:contato@apptip.app?subject=${subject}&body=${body}`);
+    const body = encodeURIComponent(`Nome: ${formData.nome}\nEmail: ${formData.email}\nRestaurante: ${formData.restaurante}\nEmpregados: ${formData.empregados}\n\nMensagem:\n${formData.mensagem}`);
+    window.open(`https://wa.me/5511985499821?text=${body}`, "_blank");
     setTimeout(() => { setFormSent(true); setFormSending(false); }, 800);
   }
 
   const FEATURES = [
-    { icon:"💸", title:"Gorjetas transparentes", desc:"Distribuição automática e justa por área e pontos. Cada empregado vê exatamente o que recebeu." },
-    { icon:"📅", title:"Escala inteligente", desc:"Controle de folgas, faltas, férias e compensações. Integrado com o cálculo de gorjetas." },
-    { icon:"👥", title:"Gestão de equipe", desc:"Cadastro completo, cargos por área, horários contratuais e histórico de alterações." },
-    { icon:"📄", title:"Recibos digitais", desc:"Upload e distribuição de holerites direto para o empregado, com confirmação de leitura." },
-    { icon:"💬", title:"Fale com o DP", desc:"Canal direto e anônimo para sugestões, elogios e denúncias. Conformidade com a LGPD." },
-    { icon:"📱", title:"100% mobile", desc:"Interface otimizada para celular. Empregados acessam pelo próprio smartphone, sem app para instalar." },
+    { icon:"💸", title:"Gorjetas transparentes", desc:"Cálculo e distribuição automática por área e cargo. Cada empregado vê exatamente o que recebeu, sem dúvidas." },
+    { icon:"📅", title:"Escala inteligente", desc:"Controle de folgas, faltas, férias e compensações integrado ao cálculo de gorjetas." },
+    { icon:"👥", title:"Gestão de equipe", desc:"Cadastro completo, cargos, horários e acesso individual para cada empregado." },
+    { icon:"📄", title:"Recibos digitais", desc:"Holerites enviados direto para cada empregado, com confirmação de leitura." },
+    { icon:"💬", title:"Canal com o DP", desc:"Canal direto e anônimo para comunicação entre equipe e departamento pessoal." },
+    { icon:"📱", title:"100% no celular", desc:"Sem app para instalar. Acessa pelo navegador em qualquer smartphone." },
   ];
 
   const PLANOS = [
-    { nome:"Starter",      emp:"até 10",  mensal:97,   anual:87.30,  destaque:false },
-    { nome:"Básico",       emp:"até 20",  mensal:187,  anual:168.30, destaque:false },
-    { nome:"Profissional", emp:"até 50",  mensal:397,  anual:357.30, destaque:true  },
-    { nome:"Enterprise",   emp:"+50",     mensal:null, anual:null,   destaque:false },
+    { nome:"Starter",      emp:"até 10",    preco:"R$97",   sub:"por mês",        anual:"R$87,30/mês no anual", destaque:false, cta:"Começar agora" },
+    { nome:"Básico",       emp:"até 20",    preco:"R$187",  sub:"por mês",        anual:"R$168,30/mês no anual", destaque:false, cta:"Começar agora" },
+    { nome:"Profissional", emp:"até 50",    preco:"R$397",  sub:"por mês",        anual:"R$357,30/mês no anual", destaque:true,  cta:"Começar agora" },
+    { nome:"Enterprise",   emp:"51 a 100",  preco:"R$7,99", sub:"por empregado/mês", anual:"Pagamento mensal",  destaque:false, cta:"Falar com a gente" },
+    { nome:"On Demand",    emp:"+100",      preco:"Sob orçamento", sub:"",        anual:"Solução personalizada", destaque:false, cta:"Falar com a gente" },
   ];
 
+  const ac = "#d4a017";
+
   return (
-    <div style={{fontFamily:"'DM Mono',monospace",background:"var(--bg1)",color:"var(--text)",minHeight:"100vh"}}>
+    <div style={{fontFamily:"'DM Sans',sans-serif",background:"#faf8f4",color:"#2d2416",minHeight:"100vh"}}>
 
       {/* NAV */}
-      <nav style={{position:"sticky",top:0,zIndex:100,background:"rgba(255,255,255,0.95)",backdropFilter:"blur(10px)",borderBottom:"1px solid #f0f0f0",padding:"0 24px",display:"flex",justifyContent:"space-between",alignItems:"center",height:64}}>
+      <nav style={{position:"sticky",top:0,zIndex:100,background:"rgba(250,248,244,0.96)",backdropFilter:"blur(12px)",borderBottom:"1px solid #ede8df",padding:"0 24px",display:"flex",justifyContent:"space-between",alignItems:"center",height:64}}>
         <div style={{display:"flex",alignItems:"center",gap:8}}>
-          <span style={{fontSize:24}}>🍽️</span>
-          <span style={{fontWeight:700,fontSize:20,color:"var(--text)"}}>App<span style={{color:ac}}>Tip</span></span>
+          <span style={{fontSize:22}}>🍽️</span>
+          <span style={{fontWeight:800,fontSize:20,color:"#2d2416",letterSpacing:-0.5}}>App<span style={{color:ac}}>Tip</span></span>
         </div>
-        <div style={{display:"flex",gap:12,alignItems:"center"}}>
-          <a href="#funcionalidades" style={{color:"var(--text3)",fontSize:13,textDecoration:"none"}}>Funcionalidades</a>
-          <a href="#precos" style={{color:"var(--text3)",fontSize:13,textDecoration:"none"}}>Preços</a>
-          <a href="#contato" style={{color:"var(--text3)",fontSize:13,textDecoration:"none"}}>Contato</a>
-          <button onClick={onEmployee} style={{padding:"8px 16px",borderRadius:20,border:"1px solid #ddd",background:"transparent",color:"var(--text3)",cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:12}}>Área do Empregado</button>
-          <button onClick={onManager} style={{padding:"8px 20px",borderRadius:20,border:"none",background:ac,color:"#1c1710",fontWeight:700,cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:12}}>Acessar →</button>
+        <div style={{display:"flex",gap:16,alignItems:"center"}}>
+          <a href="#funcionalidades" style={{color:"#8c7a5e",fontSize:14,textDecoration:"none",fontWeight:500}}>Funcionalidades</a>
+          <a href="#precos" style={{color:"#8c7a5e",fontSize:14,textDecoration:"none",fontWeight:500}}>Preços</a>
+          <a href="#contato" style={{color:"#8c7a5e",fontSize:14,textDecoration:"none",fontWeight:500}}>Contato</a>
+          <button onClick={onLogin} style={{padding:"9px 22px",borderRadius:20,border:"none",background:ac,color:"#fff",fontWeight:700,cursor:"pointer",fontFamily:"'DM Sans',sans-serif",fontSize:14,letterSpacing:-0.3}}>Entrar →</button>
         </div>
       </nav>
 
       {/* HERO */}
-      <section style={{background:"linear-gradient(135deg,#0f0f0f 0%,#1a1a1a 100%)",padding:"100px 24px",textAlign:"center"}}>
-        <div style={{maxWidth:700,margin:"0 auto"}}>
-          <div style={{display:"inline-flex",alignItems:"center",gap:8,background:"var(--ac)22",border:"1px solid var(--ac)44",borderRadius:20,padding:"6px 16px",marginBottom:28}}>
-            <span style={{color:ac,fontSize:12,fontWeight:700}}>🚀 Novo — gestão completa para restaurantes</span>
+      <section style={{padding:"90px 24px 80px",textAlign:"center",background:"linear-gradient(180deg,#faf8f4 0%,#f5f0e8 100%)"}}>
+        <div style={{maxWidth:680,margin:"0 auto"}}>
+          <div style={{display:"inline-flex",alignItems:"center",gap:8,background:"#d4a01722",border:"1px solid #d4a01744",borderRadius:20,padding:"6px 16px",marginBottom:28}}>
+            <span style={{color:ac,fontSize:12,fontWeight:700,letterSpacing:0.3}}>✦ Gestão completa para restaurantes</span>
           </div>
-          <h1 style={{color:"var(--text)",fontSize:"clamp(32px,6vw,56px)",fontWeight:700,lineHeight:1.15,margin:"0 0 20px",letterSpacing:-1}}>
+          <h1 style={{fontSize:"clamp(34px,6vw,58px)",fontWeight:800,lineHeight:1.1,margin:"0 0 20px",letterSpacing:-1.5,color:"#1c1208"}}>
             Gorjetas distribuídas<br/><span style={{color:ac}}>com transparência total</span>
           </h1>
-          <p style={{color:"var(--text3)",fontSize:"clamp(14px,2vw,18px)",lineHeight:1.7,marginBottom:40,maxWidth:560,margin:"0 auto 40px"}}>
-            O AppTip automatiza o cálculo e distribuição de gorjetas, gestão de escala e comunicação com sua equipe — tudo num sistema simples, acessível pelo celular.
+          <p style={{color:"#8c7a5e",fontSize:"clamp(15px,2vw,18px)",lineHeight:1.7,marginBottom:40,maxWidth:520,margin:"0 auto 40px"}}>
+            O AppTip automatiza o cálculo e distribuição de gorjetas, controla escala e mantém sua equipe sempre informada — tudo pelo celular, sem app para instalar.
           </p>
           <div style={{display:"flex",gap:12,justifyContent:"center",flexWrap:"wrap"}}>
-            <a href="#contato" style={{padding:"16px 32px",borderRadius:12,background:ac,color:"#1c1710",fontWeight:700,fontSize:16,textDecoration:"none",display:"inline-block"}}>Solicitar demonstração</a>
-            <a href="#funcionalidades" style={{padding:"16px 32px",borderRadius:12,border:"1px solid var(--border)",color:"var(--text)",fontSize:16,textDecoration:"none",display:"inline-block"}}>Ver funcionalidades ↓</a>
+            <a href="#contato" style={{padding:"15px 32px",borderRadius:12,background:ac,color:"#fff",fontWeight:700,fontSize:16,textDecoration:"none",display:"inline-block",boxShadow:"0 4px 20px #d4a01744"}}>
+              Quero conhecer →
+            </a>
+            <a href="#funcionalidades" style={{padding:"15px 32px",borderRadius:12,border:"1px solid #ede8df",color:"#5c4a2e",fontSize:16,textDecoration:"none",display:"inline-block",background:"#fff",fontWeight:500}}>
+              Ver funcionalidades
+            </a>
           </div>
-          <p style={{color:"var(--text3)",fontSize:12,marginTop:24}}>Sem taxa de adesão · Cancele quando quiser · Suporte incluso</p>
+          <p style={{color:"#b0996e",fontSize:13,marginTop:24}}>Sem taxa de adesão · Suporte incluso · Cancele quando quiser</p>
         </div>
       </section>
 
       {/* STATS */}
-      <section style={{background:"#f9f9f9",padding:"48px 24px"}}>
-        <div style={{maxWidth:800,margin:"0 auto",display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:24,textAlign:"center"}}>
-          {[["100%","Mobile first"],["LGPD","Conformidade"],["0","Taxa de adesão"]].map(([n,l])=>(
+      <section style={{background:"#fff",padding:"48px 24px",borderTop:"1px solid #ede8df",borderBottom:"1px solid #ede8df"}}>
+        <div style={{maxWidth:700,margin:"0 auto",display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:24,textAlign:"center"}}>
+          {[["100%","Mobile first — sem app"],["LGPD","Conformidade total"],["0","Taxa de adesão"]].map(([n,l])=>(
             <div key={l}>
-              <div style={{fontSize:36,fontWeight:700,color:ac,marginBottom:4}}>{n}</div>
-              <div style={{color:"var(--text3)",fontSize:13}}>{l}</div>
+              <div style={{fontSize:32,fontWeight:800,color:ac,marginBottom:6,letterSpacing:-1,fontFamily:"'DM Mono',monospace"}}>{n}</div>
+              <div style={{color:"#8c7a5e",fontSize:13,fontWeight:500}}>{l}</div>
             </div>
           ))}
         </div>
       </section>
 
       {/* FUNCIONALIDADES */}
-      <section id="funcionalidades" style={{padding:"80px 24px",background:"var(--bg1)"}}>
+      <section id="funcionalidades" style={{padding:"80px 24px",background:"#faf8f4"}}>
         <div style={{maxWidth:960,margin:"0 auto"}}>
           <div style={{textAlign:"center",marginBottom:56}}>
-            <h2 style={{fontSize:"clamp(24px,4vw,36px)",fontWeight:700,margin:"0 0 12px"}}>Tudo que sua equipe precisa</h2>
-            <p style={{color:"var(--text3)",fontSize:16}}>Um sistema completo, sem complicação</p>
+            <h2 style={{fontSize:"clamp(24px,4vw,38px)",fontWeight:800,margin:"0 0 12px",letterSpacing:-0.8,color:"#1c1208"}}>Tudo que sua equipe precisa</h2>
+            <p style={{color:"#8c7a5e",fontSize:16}}>Um sistema completo, sem complicação</p>
           </div>
-          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(280px,1fr))",gap:24}}>
+          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(280px,1fr))",gap:20}}>
             {FEATURES.map(f=>(
-              <div key={f.title} style={{padding:"28px",borderRadius:16,border:"1px solid #f0f0f0",background:"var(--bg1)",boxShadow:"0 2px 12px rgba(0,0,0,0.04)"}}>
+              <div key={f.title} style={{padding:"28px",borderRadius:16,border:"1px solid #ede8df",background:"#fff",boxShadow:"0 2px 12px rgba(0,0,0,0.03)"}}>
                 <div style={{fontSize:32,marginBottom:14}}>{f.icon}</div>
-                <h3 style={{fontSize:16,fontWeight:700,margin:"0 0 8px"}}>{f.title}</h3>
-                <p style={{color:"var(--text3)",fontSize:14,lineHeight:1.6,margin:0}}>{f.desc}</p>
+                <h3 style={{fontSize:16,fontWeight:700,margin:"0 0 8px",color:"#1c1208"}}>{f.title}</h3>
+                <p style={{color:"#8c7a5e",fontSize:14,lineHeight:1.6,margin:0}}>{f.desc}</p>
               </div>
             ))}
           </div>
@@ -5512,20 +5646,20 @@ function Home({ onManager, onEmployee }) {
       </section>
 
       {/* COMO FUNCIONA */}
-      <section style={{padding:"80px 24px",background:"var(--bg5)"}}>
+      <section style={{padding:"80px 24px",background:"#f0ebe0"}}>
         <div style={{maxWidth:800,margin:"0 auto",textAlign:"center"}}>
-          <h2 style={{color:"var(--text)",fontSize:"clamp(24px,4vw,36px)",fontWeight:700,margin:"0 0 12px"}}>Como funciona</h2>
-          <p style={{color:"var(--text3)",fontSize:16,marginBottom:56}}>Em 3 passos simples</p>
+          <h2 style={{color:"#1c1208",fontSize:"clamp(24px,4vw,38px)",fontWeight:800,margin:"0 0 12px",letterSpacing:-0.8}}>Como funciona</h2>
+          <p style={{color:"#8c7a5e",fontSize:16,marginBottom:56}}>Em 3 passos simples</p>
           <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(200px,1fr))",gap:32}}>
             {[
-              ["1","Cadastre seu restaurante","Configure áreas, cargos e pontos de cada função em minutos"],
-              ["2","Adicione sua equipe","Cada empregado recebe um ID e acessa pelo celular"],
-              ["3","Lance as gorjetas","O sistema distribui automaticamente e todos veem sua parte"],
+              ["1","Você configura","Cadastra o restaurante, áreas, cargos e empregados em minutos"],
+              ["2","Lança as gorjetas","Informa o valor diário e o sistema distribui automaticamente por cargo"],
+              ["3","Equipe acompanha","Cada empregado vê seu extrato, escala e comunicados pelo celular"],
             ].map(([n,t,d])=>(
-              <div key={n} style={{textAlign:"center"}}>
-                <div style={{width:48,height:48,borderRadius:"50%",background:ac,color:"#1c1710",fontSize:20,fontWeight:700,display:"flex",alignItems:"center",justifyContent:"center",margin:"0 auto 16px"}}>{n}</div>
-                <h3 style={{color:"var(--text)",fontSize:15,fontWeight:700,margin:"0 0 8px"}}>{t}</h3>
-                <p style={{color:"var(--text3)",fontSize:13,lineHeight:1.6,margin:0}}>{d}</p>
+              <div key={n}>
+                <div style={{width:52,height:52,borderRadius:"50%",background:ac,color:"#fff",fontSize:22,fontWeight:800,display:"flex",alignItems:"center",justifyContent:"center",margin:"0 auto 16px",fontFamily:"'DM Mono',monospace"}}>{n}</div>
+                <h3 style={{color:"#1c1208",fontSize:16,fontWeight:700,margin:"0 0 8px"}}>{t}</h3>
+                <p style={{color:"#8c7a5e",fontSize:14,lineHeight:1.6,margin:0}}>{d}</p>
               </div>
             ))}
           </div>
@@ -5533,75 +5667,77 @@ function Home({ onManager, onEmployee }) {
       </section>
 
       {/* PREÇOS */}
-      <section id="precos" style={{padding:"80px 24px",background:"var(--bg1)"}}>
-        <div style={{maxWidth:960,margin:"0 auto"}}>
-          <div style={{textAlign:"center",marginBottom:16}}>
-            <h2 style={{fontSize:"clamp(24px,4vw,36px)",fontWeight:700,margin:"0 0 12px"}}>Planos e preços</h2>
-            <p style={{color:"var(--text3)",fontSize:16}}>Plano anual com <strong style={{color:ac}}>10% de desconto</strong>, pago em 12x</p>
+      <section id="precos" style={{padding:"80px 24px",background:"#faf8f4"}}>
+        <div style={{maxWidth:1000,margin:"0 auto"}}>
+          <div style={{textAlign:"center",marginBottom:48}}>
+            <h2 style={{fontSize:"clamp(24px,4vw,38px)",fontWeight:800,margin:"0 0 12px",letterSpacing:-0.8,color:"#1c1208"}}>Planos e preços</h2>
+            <p style={{color:"#8c7a5e",fontSize:16}}>Plano anual com <strong style={{color:ac}}>10% de desconto</strong></p>
           </div>
-          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(210px,1fr))",gap:20,marginTop:40}}>
+          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(180px,1fr))",gap:16}}>
             {PLANOS.map(p=>(
-              <div key={p.nome} style={{borderRadius:16,border:p.destaque?`2px solid ${ac}`:"1px solid #f0f0f0",padding:"28px 24px",background:p.destaque?"var(--bg5)":"#fff",position:"relative",boxShadow:p.destaque?"0 8px 32px rgba(245,200,66,0.15)":"0 2px 12px rgba(0,0,0,0.04)"}}>
-                {p.destaque && <div style={{position:"absolute",top:-12,left:"50%",transform:"translateX(-50%)",background:ac,color:"#1c1710",fontSize:11,fontWeight:700,padding:"4px 14px",borderRadius:20,whiteSpace:"nowrap"}}>Mais popular</div>}
-                <div style={{color:p.destaque?"#fff":"#111",fontWeight:700,fontSize:18,marginBottom:4}}>{p.nome}</div>
-                <div style={{color:"var(--text3)",fontSize:13,marginBottom:20}}>{p.emp} empregados</div>
-                {p.mensal ? (
-                  <>
-                    <div style={{marginBottom:4}}>
-                      <span style={{color:p.destaque?ac:"#111",fontSize:32,fontWeight:700}}>R${p.mensal}</span>
-                      <span style={{color:"var(--text3)",fontSize:13}}>/mês</span>
-                    </div>
-                    <div style={{color:"var(--text3)",fontSize:12,marginBottom:24}}>ou R${p.anual}/mês no anual</div>
-                  </>
-                ) : (
-                  <div style={{color:p.destaque?ac:"#111",fontSize:22,fontWeight:700,marginBottom:24}}>Sob consulta</div>
-                )}
-                <a href="#contato" style={{display:"block",textAlign:"center",padding:"12px",borderRadius:10,background:p.destaque?ac:"#f5f5f5",color:p.destaque?"#111":"#555",fontWeight:700,fontSize:14,textDecoration:"none"}}>
-                  {p.mensal?"Começar agora":"Falar com a gente"}
+              <div key={p.nome} style={{borderRadius:16,border:p.destaque?`2px solid ${ac}`:"1px solid #ede8df",padding:"24px 20px",background:p.destaque?"#1c1208":"#fff",position:"relative",boxShadow:p.destaque?"0 8px 32px #d4a01733":"0 2px 12px rgba(0,0,0,0.04)"}}>
+                {p.destaque && <div style={{position:"absolute",top:-12,left:"50%",transform:"translateX(-50%)",background:ac,color:"#fff",fontSize:11,fontWeight:700,padding:"4px 14px",borderRadius:20,whiteSpace:"nowrap"}}>Mais popular</div>}
+                <div style={{color:p.destaque?"#fff":"#1c1208",fontWeight:800,fontSize:17,marginBottom:4}}>{p.nome}</div>
+                <div style={{color:p.destaque?"#d4c4a0":"#8c7a5e",fontSize:13,marginBottom:20}}>{p.emp} empregados</div>
+                <div style={{marginBottom:4}}>
+                  <span style={{color:p.destaque?ac:"#1c1208",fontSize:p.preco.startsWith("R$7")?22:28,fontWeight:800,fontFamily:"'DM Mono',monospace"}}>{p.preco}</span>
+                  {p.sub && <span style={{color:p.destaque?"#d4c4a0":"#8c7a5e",fontSize:12}}> {p.sub}</span>}
+                </div>
+                <div style={{color:p.destaque?"#d4c4a0":"#8c7a5e",fontSize:12,marginBottom:24,minHeight:16}}>{p.anual}</div>
+                <a href="#contato" style={{display:"block",textAlign:"center",padding:"11px",borderRadius:10,background:p.destaque?ac:"#f5f0e8",color:p.destaque?"#fff":"#5c4a2e",fontWeight:700,fontSize:14,textDecoration:"none"}}>
+                  {p.cta}
                 </a>
               </div>
             ))}
           </div>
-          <p style={{textAlign:"center",color:"var(--text3)",fontSize:13,marginTop:24}}>Acima de 50 empregados: R$7,99 por empregado adicional/mês</p>
         </div>
       </section>
 
       {/* CONTATO */}
-      <section id="contato" style={{padding:"80px 24px",background:"#f9f9f9"}}>
-        <div style={{maxWidth:560,margin:"0 auto"}}>
+      <section id="contato" style={{padding:"80px 24px",background:"#f0ebe0"}}>
+        <div style={{maxWidth:540,margin:"0 auto"}}>
           <div style={{textAlign:"center",marginBottom:40}}>
-            <h2 style={{fontSize:"clamp(24px,4vw,36px)",fontWeight:700,margin:"0 0 12px"}}>Fale com a gente</h2>
-            <p style={{color:"var(--text3)",fontSize:16}}>Solicite uma demonstração gratuita ou tire suas dúvidas</p>
+            <h2 style={{fontSize:"clamp(24px,4vw,38px)",fontWeight:800,margin:"0 0 12px",letterSpacing:-0.8,color:"#1c1208"}}>Vamos conversar?</h2>
+            <p style={{color:"#8c7a5e",fontSize:16}}>Solicite uma demonstração gratuita ou tire suas dúvidas</p>
           </div>
           {formSent ? (
-            <div style={{textAlign:"center",padding:"48px",background:"var(--bg1)",borderRadius:16,border:"1px solid #f0f0f0"}}>
+            <div style={{textAlign:"center",padding:"48px",background:"#fff",borderRadius:16,border:"1px solid #ede8df"}}>
               <div style={{fontSize:48,marginBottom:16}}>✅</div>
-              <h3 style={{fontSize:20,fontWeight:700,margin:"0 0 8px"}}>Mensagem enviada!</h3>
-              <p style={{color:"var(--text3)"}}>Entraremos em contato em breve.</p>
+              <h3 style={{fontSize:20,fontWeight:700,margin:"0 0 8px",color:"#1c1208"}}>Mensagem enviada!</h3>
+              <p style={{color:"#8c7a5e"}}>Entraremos em contato em breve pelo WhatsApp.</p>
             </div>
           ) : (
-            <div style={{background:"var(--bg1)",borderRadius:16,padding:"40px",border:"1px solid #f0f0f0",boxShadow:"0 4px 24px rgba(0,0,0,0.06)"}}>
+            <div style={{background:"#fff",borderRadius:16,padding:"36px",border:"1px solid #ede8df",boxShadow:"0 4px 24px rgba(0,0,0,0.06)"}}>
               <div style={{display:"flex",flexDirection:"column",gap:14}}>
-                <div>
-                  <label style={{display:"block",fontSize:13,color:"var(--text3)",marginBottom:6,fontWeight:600}}>Nome *</label>
-                  <input value={formData.nome} onChange={e=>setFormData({...formData,nome:e.target.value})} placeholder="Seu nome" style={{width:"100%",padding:"12px 14px",borderRadius:10,border:"1px solid #e0e0e0",fontFamily:"'DM Mono',monospace",fontSize:14,outline:"none",boxSizing:"border-box"}}/>
+                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
+                  <div>
+                    <label style={{display:"block",fontSize:13,color:"#8c7a5e",marginBottom:6,fontWeight:600}}>Nome *</label>
+                    <input value={formData.nome} onChange={e=>setFormData({...formData,nome:e.target.value})} placeholder="Seu nome" style={{width:"100%",padding:"11px 14px",borderRadius:10,border:"1px solid #ede8df",fontFamily:"'DM Sans',sans-serif",fontSize:14,outline:"none",boxSizing:"border-box",background:"#faf8f4"}}/>
+                  </div>
+                  <div>
+                    <label style={{display:"block",fontSize:13,color:"#8c7a5e",marginBottom:6,fontWeight:600}}>Email *</label>
+                    <input value={formData.email} onChange={e=>setFormData({...formData,email:e.target.value})} type="email" placeholder="seu@email.com" style={{width:"100%",padding:"11px 14px",borderRadius:10,border:"1px solid #ede8df",fontFamily:"'DM Sans',sans-serif",fontSize:14,outline:"none",boxSizing:"border-box",background:"#faf8f4"}}/>
+                  </div>
+                </div>
+                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
+                  <div>
+                    <label style={{display:"block",fontSize:13,color:"#8c7a5e",marginBottom:6,fontWeight:600}}>Restaurante</label>
+                    <input value={formData.restaurante} onChange={e=>setFormData({...formData,restaurante:e.target.value})} placeholder="Nome do restaurante" style={{width:"100%",padding:"11px 14px",borderRadius:10,border:"1px solid #ede8df",fontFamily:"'DM Sans',sans-serif",fontSize:14,outline:"none",boxSizing:"border-box",background:"#faf8f4"}}/>
+                  </div>
+                  <div>
+                    <label style={{display:"block",fontSize:13,color:"#8c7a5e",marginBottom:6,fontWeight:600}}>Nº de empregados</label>
+                    <input value={formData.empregados} onChange={e=>setFormData({...formData,empregados:e.target.value})} placeholder="Ex: 15" type="number" style={{width:"100%",padding:"11px 14px",borderRadius:10,border:"1px solid #ede8df",fontFamily:"'DM Sans',sans-serif",fontSize:14,outline:"none",boxSizing:"border-box",background:"#faf8f4"}}/>
+                  </div>
                 </div>
                 <div>
-                  <label style={{display:"block",fontSize:13,color:"var(--text3)",marginBottom:6,fontWeight:600}}>Email *</label>
-                  <input value={formData.email} onChange={e=>setFormData({...formData,email:e.target.value})} type="email" placeholder="seu@email.com" style={{width:"100%",padding:"12px 14px",borderRadius:10,border:"1px solid #e0e0e0",fontFamily:"'DM Mono',monospace",fontSize:14,outline:"none",boxSizing:"border-box"}}/>
-                </div>
-                <div>
-                  <label style={{display:"block",fontSize:13,color:"var(--text3)",marginBottom:6,fontWeight:600}}>Nome do restaurante</label>
-                  <input value={formData.restaurante} onChange={e=>setFormData({...formData,restaurante:e.target.value})} placeholder="Ex: Restaurante do João" style={{width:"100%",padding:"12px 14px",borderRadius:10,border:"1px solid #e0e0e0",fontFamily:"'DM Mono',monospace",fontSize:14,outline:"none",boxSizing:"border-box"}}/>
-                </div>
-                <div>
-                  <label style={{display:"block",fontSize:13,color:"var(--text3)",marginBottom:6,fontWeight:600}}>Mensagem</label>
-                  <textarea value={formData.mensagem} onChange={e=>setFormData({...formData,mensagem:e.target.value})} placeholder="Conte um pouco sobre seu restaurante e o que precisa..." rows={4} style={{width:"100%",padding:"12px 14px",borderRadius:10,border:"1px solid #e0e0e0",fontFamily:"'DM Mono',monospace",fontSize:14,outline:"none",resize:"vertical",boxSizing:"border-box"}}/>
+                  <label style={{display:"block",fontSize:13,color:"#8c7a5e",marginBottom:6,fontWeight:600}}>Mensagem</label>
+                  <textarea value={formData.mensagem} onChange={e=>setFormData({...formData,mensagem:e.target.value})} placeholder="Conte um pouco sobre seu restaurante..." rows={3} style={{width:"100%",padding:"11px 14px",borderRadius:10,border:"1px solid #ede8df",fontFamily:"'DM Sans',sans-serif",fontSize:14,outline:"none",resize:"vertical",boxSizing:"border-box",background:"#faf8f4"}}/>
                 </div>
                 <button onClick={sendForm} disabled={!formData.nome.trim()||!formData.email.trim()||formSending}
-                  style={{padding:"14px",borderRadius:12,border:"none",background:(!formData.nome.trim()||!formData.email.trim())?"#e0e0e0":ac,color:(!formData.nome.trim()||!formData.email.trim())?"#999":"#111",fontWeight:700,fontSize:16,cursor:(!formData.nome.trim()||!formData.email.trim())?"not-allowed":"pointer",fontFamily:"'DM Mono',monospace"}}>
-                  {formSending?"Enviando...":"Enviar mensagem →"}
+                  style={{padding:"14px",borderRadius:12,border:"none",background:(!formData.nome.trim()||!formData.email.trim())?"#e8e0d0":ac,color:"#fff",fontWeight:700,fontSize:16,cursor:(!formData.nome.trim()||!formData.email.trim())?"not-allowed":"pointer",fontFamily:"'DM Sans',sans-serif",boxShadow:"0 4px 16px #d4a01744"}}>
+                  {formSending?"Enviando...":"Enviar pelo WhatsApp →"}
                 </button>
+                <p style={{color:"#b0996e",fontSize:12,textAlign:"center",margin:0}}>📱 Sua mensagem será enviada diretamente para nosso WhatsApp</p>
               </div>
             </div>
           )}
@@ -5609,22 +5745,22 @@ function Home({ onManager, onEmployee }) {
       </section>
 
       {/* FOOTER */}
-      <footer style={{background:"var(--bg5)",padding:"40px 24px",textAlign:"center"}}>
-        <div style={{marginBottom:16}}>
+      <footer style={{background:"#1c1208",padding:"48px 24px",textAlign:"center"}}>
+        <div style={{marginBottom:12}}>
           <span style={{fontSize:20}}>🍽️</span>
-          <span style={{fontWeight:700,fontSize:18,color:"var(--text)",marginLeft:8}}>App<span style={{color:ac}}>Tip</span></span>
+          <span style={{fontWeight:800,fontSize:18,color:"#fff",marginLeft:8,letterSpacing:-0.5}}>App<span style={{color:ac}}>Tip</span></span>
         </div>
-        <p style={{color:"var(--text3)",fontSize:13,marginBottom:20}}>Transparência e eficiência para equipes de restaurantes</p>
-        <div style={{display:"flex",gap:20,justifyContent:"center",flexWrap:"wrap",marginBottom:20}}>
-          <button onClick={onEmployee} style={{background:"none",border:"none",color:"var(--text3)",cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:13}}>Área do Empregado</button>
-          <button onClick={onManager} style={{background:"none",border:"none",color:"var(--text3)",cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:13}}>Área de Gestão</button>
-          <button onClick={()=>document.getElementById("apptip-privacy").style.display="flex"} style={{background:"none",border:"none",color:"var(--text3)",cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:13}}>Política de Privacidade</button>
+        <p style={{color:"#8c7a5e",fontSize:13,marginBottom:20}}>Transparência e eficiência para equipes de restaurantes</p>
+        <div style={{display:"flex",gap:20,justifyContent:"center",flexWrap:"wrap",marginBottom:24}}>
+          <button onClick={onLogin} style={{background:"none",border:"none",color:"#8c7a5e",cursor:"pointer",fontFamily:"'DM Sans',sans-serif",fontSize:13}}>Área de acesso</button>
+          <button onClick={()=>document.getElementById("apptip-privacy").style.display="flex"} style={{background:"none",border:"none",color:"#8c7a5e",cursor:"pointer",fontFamily:"'DM Sans',sans-serif",fontSize:13}}>Política de Privacidade</button>
         </div>
-        <p style={{color:"var(--bg4)",fontSize:12}}>© {new Date().getFullYear()} AppTip. Todos os direitos reservados.</p>
+        <p style={{color:"#4a3a2a",fontSize:12}}>© {new Date().getFullYear()} AppTip. Todos os direitos reservados.</p>
       </footer>
     </div>
   );
 }
+
 
 //
 // APP ROOT
@@ -5814,6 +5950,7 @@ export default function App() {
             setUserRole("employee");
             setView("employee");
           }}
+          onGoHome={()=>setView("home")}
           toggleTheme={toggleTheme} theme={theme}
         />
       )}
@@ -5822,7 +5959,7 @@ export default function App() {
       {view === "super" && <OwnerPortal data={data} onUpdate={handleUpdate} onBack={doLogout} currentUser={currentUser} toggleTheme={toggleTheme} theme={theme} />}
       {view === "manager" && <ManagerPortal manager={currentUser} data={data} onUpdate={handleUpdate} onBack={doLogout} toggleTheme={toggleTheme} theme={theme} />}
       {view === "employee" && <EmployeePortal employees={employees} roles={roles} tips={tips} schedules={schedules} restaurants={restaurants} communications={communications} commAcks={commAcks} faq={faq} dpMessages={dpMessages} receipts={receipts} workSchedules={workSchedules} onBack={doLogout} onUpdateEmployee={emp=>{const next=employees.map(e=>e.id===emp.id?emp:e);handleUpdate("employees",next);}} onUpdate={handleUpdate} toggleTheme={toggleTheme} theme={theme} />}
-      {view === "home" && <Home onManager={()=>setView("login")} onEmployee={()=>setView("login")} />}
+      {view === "home" && <Home onLogin={()=>setView("login")} />}
       <Toast msg={toast} onClose={()=>setToast("")} />
 
       {/* Modal Política de Privacidade */}
