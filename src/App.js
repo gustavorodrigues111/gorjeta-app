@@ -1,4 +1,4 @@
-// AppTip v4.6 — 2026-04-11e
+// AppTip v4.6 — 2026-04-11f
 import { useState, useEffect } from "react";
 import { db } from "./firebase";
 import { doc, getDoc, setDoc, deleteDoc, collection, getDocs } from "firebase/firestore";
@@ -4206,14 +4206,12 @@ Responda SOMENTE com o JSON abaixo, sem texto adicional, sem markdown:
               function confirmarEscala() {
                 if (!aiSchedPreview) return;
 
-                // Mapa de nome → id para fallback caso IA retorne nome em vez de id
                 const nomeParaId = {};
                 restEmps.forEach(e => {
                   nomeParaId[e.name.toLowerCase().trim()] = e.id;
                   nomeParaId[e.name.split(" ")[0].toLowerCase().trim()] = e.id;
                 });
 
-                // Monta o novo schedules do zero baseado no atual
                 const newRestSched = { ...(schedules?.[rid] ?? {}) };
                 const newMesSched  = { ...(newRestSched[mesKey] ?? {}) };
 
@@ -4227,14 +4225,19 @@ Responda SOMENTE com o JSON abaixo, sem texto adicional, sem markdown:
                   aplicados++;
                 });
 
-                console.log("confirmarEscala — mesKey:", mesKey, "rid:", rid, "aplicados:", aplicados, "preview:", aiSchedPreview.escala);
+                console.log("confirmarEscala — mesKey:", mesKey, "rid:", rid, "aplicados:", aplicados);
 
-                const newSched = { ...schedules, [rid]: { ...newRestSched, [mesKey]: newMesSched } };
-                onUpdate("schedules", newSched);
-                onUpdate("_toast", `✨ Escala atualizada! (${aplicados} empregado${aplicados!==1?"s":""} afetado${aplicados!==1?"s":""})`);
+                // Fecha o modal ANTES de salvar para não causar reset de estado
                 setShowAiSched(false);
                 setAiSchedPreview(null);
                 setAiSchedInput("");
+
+                // Salva depois de fechar
+                const newSched = { ...schedules, [rid]: { ...newRestSched, [mesKey]: newMesSched } };
+                setTimeout(() => {
+                  onUpdate("schedules", newSched);
+                  onUpdate("_toast", `✨ Escala atualizada! (${aplicados} empregado${aplicados!==1?"s":""} afetado${aplicados!==1?"s":""})`);
+                }, 50);
               }
 
               return (
@@ -7808,7 +7811,7 @@ export default function App() {
       {view === "home" && <Home onLogin={()=>setView("login")} />}
       <Toast msg={toast} onClose={()=>setToast("")} />
       {/* Rodapé de versão */}
-      <div style={{position:"fixed",bottom:8,right:12,fontSize:10,color:"var(--text3)",fontFamily:"'DM Mono',monospace",opacity:0.45,pointerEvents:"none",zIndex:100}}>v4.6e</div>
+      <div style={{position:"fixed",bottom:8,right:12,fontSize:10,color:"var(--text3)",fontFamily:"'DM Mono',monospace",opacity:0.45,pointerEvents:"none",zIndex:100}}>v4.6f</div>
 
       {/* Modal Política de Privacidade */}
       <div id="apptip-privacy" style={{display:"none",position:"fixed",inset:0,background:"rgba(0,0,0,0.5)",zIndex:9999,alignItems:"center",justifyContent:"center",padding:20}} onClick={e=>{if(e.target===e.currentTarget)e.currentTarget.style.display="none";}}>
