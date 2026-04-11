@@ -4426,7 +4426,7 @@ function UnifiedLogin({ owners, managers, employees, onLoginOwner, onLoginManage
               Entrar →
             </button>
 
-            {owners.length === 0 && (
+            {superManagers.length === 0 && false && ( // removido — admins criados pelo próprio painel
               <button onClick={onSetupFirst} style={{...S.btnSecondary,width:"100%",textAlign:"center"}}>
                 Criar primeiro Admin AppTip
               </button>
@@ -4451,8 +4451,18 @@ function UnifiedLogin({ owners, managers, employees, onLoginOwner, onLoginManage
 // FIRST SETUP
 //
 function FirstSetup({ onDone }) {
+  const INVITE = "apptip@2024"; // senha de convite — mude aqui se quiser
+  const [step, setStep] = useState("invite"); // "invite" | "form"
+  const [invite, setInvite] = useState("");
+  const [inviteErr, setInviteErr] = useState("");
   const [form, setForm] = useState({ name:"",cpf:"",pin:"",pin2:"" });
   const [err, setErr] = useState("");
+
+  function checkInvite() {
+    if (invite.trim() !== INVITE) { setInviteErr("Senha de convite incorreta."); return; }
+    setStep("form");
+  }
+
   function submit() {
     if (!form.name.trim()) { setErr("Informe o nome."); return; }
     if (!form.cpf.trim()) { setErr("Informe o CPF."); return; }
@@ -4460,22 +4470,35 @@ function FirstSetup({ onDone }) {
     if (form.pin !== form.pin2) { setErr("PINs não coincidem."); return; }
     onDone({ id: Date.now().toString(), name: form.name.trim(), cpf: form.cpf.trim(), pin: form.pin });
   }
+
   return (
-    <div style={{minHeight:"100vh",background:"var(--bg)",display:"flex",alignItems:"center",justifyContent:"center",fontFamily:"'DM Mono',monospace",padding:24}}>
-      <div style={{...S.card,maxWidth:360,width:"100%"}}>
-        <div style={{textAlign:"center",marginBottom:20}}>
-          <div style={{fontSize:40}}>🍽️</div>
-          <h2 style={{color:"var(--ac)",margin:"8px 0 4px"}}>Bem-vindo!</h2>
-          <p style={{color:"var(--text3)",fontSize:13}}>Cadastre o primeiro Admin AppTip para começar.</p>
+    <div style={{minHeight:"100vh",background:"var(--bg)",display:"flex",alignItems:"center",justifyContent:"center",fontFamily:"'DM Sans',sans-serif",padding:24}}>
+      <div style={{...S.card,maxWidth:360,width:"100%",boxShadow:"0 4px 24px rgba(0,0,0,0.08)"}}>
+        <div style={{textAlign:"center",marginBottom:24}}>
+          <div style={{fontSize:40,marginBottom:8}}>🍽️</div>
+          <h2 style={{color:"var(--text)",margin:"0 0 6px",fontSize:22,fontWeight:800}}>App<span style={{color:ac}}>Tip</span></h2>
+          <p style={{color:"var(--text3)",fontSize:13}}>{step==="invite"?"Digite a senha de convite para continuar":"Cadastro do primeiro Admin AppTip"}</p>
         </div>
-        <div style={{display:"flex",flexDirection:"column",gap:10}}>
-          <div><label style={S.label}>Nome completo</label><input value={form.name} onChange={e=>setForm({...form,name:e.target.value})} style={S.input}/></div>
-          <div><label style={S.label}>CPF</label><input value={form.cpf} onChange={e=>setForm({...form,cpf:maskCpf(e.target.value)})} placeholder="000.000.000-00" style={S.input} inputMode="numeric"/></div>
-          <div><label style={S.label}>PIN (4–6 dígitos)</label><input type="password" maxLength={6} value={form.pin} onChange={e=>setForm({...form,pin:e.target.value})} style={S.input}/></div>
-          <div><label style={S.label}>Confirmar PIN</label><input type="password" maxLength={6} value={form.pin2} onChange={e=>setForm({...form,pin2:e.target.value})} style={S.input} onKeyDown={e=>e.key==="Enter"&&submit()}/></div>
-          {err && <p style={{color:"var(--red)",fontSize:13,margin:0}}>{err}</p>}
-          <button onClick={submit} style={S.btnPrimary}>Criar e Entrar</button>
-        </div>
+
+        {step === "invite" ? (
+          <div style={{display:"flex",flexDirection:"column",gap:12}}>
+            <div>
+              <label style={S.label}>Senha de convite</label>
+              <input type="password" value={invite} onChange={e=>setInvite(e.target.value)} placeholder="••••••••" style={S.input} onKeyDown={e=>e.key==="Enter"&&checkInvite()}/>
+            </div>
+            {inviteErr && <div style={{background:"var(--red-bg)",border:"1px solid var(--red)33",borderRadius:8,padding:"8px 12px",color:"var(--red)",fontSize:13}}>{inviteErr}</div>}
+            <button onClick={checkInvite} style={S.btnPrimary}>Continuar →</button>
+          </div>
+        ) : (
+          <div style={{display:"flex",flexDirection:"column",gap:12}}>
+            <div><label style={S.label}>Nome completo</label><input value={form.name} onChange={e=>setForm({...form,name:e.target.value})} style={S.input}/></div>
+            <div><label style={S.label}>CPF</label><input value={form.cpf} onChange={e=>setForm({...form,cpf:maskCpf(e.target.value)})} placeholder="000.000.000-00" style={S.input} inputMode="numeric"/></div>
+            <div><label style={S.label}>PIN (4–6 dígitos)</label><input type="password" maxLength={6} value={form.pin} onChange={e=>setForm({...form,pin:e.target.value})} style={S.input}/></div>
+            <div><label style={S.label}>Confirmar PIN</label><input type="password" maxLength={6} value={form.pin2} onChange={e=>setForm({...form,pin2:e.target.value})} style={S.input} onKeyDown={e=>e.key==="Enter"&&submit()}/></div>
+            {err && <div style={{background:"var(--red-bg)",border:"1px solid var(--red)33",borderRadius:8,padding:"8px 12px",color:"var(--red)",fontSize:13}}>{err}</div>}
+            <button onClick={submit} style={S.btnPrimary}>Criar e Entrar →</button>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -4714,7 +4737,9 @@ export default function App() {
   function toggleTheme() { setTheme(t => t === "dark" ? "light" : "dark"); }
 
   // Login unificado — uma única tela para todos
+  const isSetupUrl = window.location.pathname.startsWith("/setup");
   const [view, setView] = useState(() => {
+    if (isSetupUrl) return "setup";
     const role = localStorage.getItem("apptip_role");
     if (role === "super") return "super";
     if (role === "manager") return "manager";
@@ -4845,11 +4870,11 @@ export default function App() {
           onLoginOwner={u=>{setCurrentUser(u);setUserRole("super");setView("super");}}
           onLoginManager={u=>{setCurrentUser(u);setUserRole("manager");setView("manager");}}
           onLoginEmployee={u=>{setUserRole("employee");setView("employee");}}
-          onSetupFirst={()=>setView("setup")}
           toggleTheme={toggleTheme} theme={theme}
         />
       )}
-      {view === "setup" && <FirstSetup onDone={sm=>{handleUpdate("owners",[sm]);setCurrentUser(sm);setUserRole("super");setView("super");}} />}
+      {/* Setup acessível apenas via /setup — protegido por senha de convite */}
+      {view === "setup" && <FirstSetup onDone={sm=>{handleUpdate("owners",[...owners,sm]);setCurrentUser(sm);setUserRole("super");setView("super");}} />}
       {view === "super" && <OwnerPortal data={data} onUpdate={handleUpdate} onBack={doLogout} currentUser={currentUser} toggleTheme={toggleTheme} theme={theme} />}
       {view === "manager" && <ManagerPortal manager={currentUser} data={data} onUpdate={handleUpdate} onBack={doLogout} toggleTheme={toggleTheme} theme={theme} />}
       {view === "employee" && <EmployeePortal employees={employees} roles={roles} tips={tips} schedules={schedules} restaurants={restaurants} communications={communications} commAcks={commAcks} faq={faq} dpMessages={dpMessages} receipts={receipts} workSchedules={workSchedules} onBack={doLogout} onUpdateEmployee={emp=>{const next=employees.map(e=>e.id===emp.id?emp:e);handleUpdate("employees",next);}} onUpdate={handleUpdate} toggleTheme={toggleTheme} theme={theme} />}
