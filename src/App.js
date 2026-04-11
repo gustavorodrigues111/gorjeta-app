@@ -2885,17 +2885,17 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
   const inboxUnread = ((data?.notifications??[]).filter(n=>n.restaurantId===rid&&!n.read).length + (data?.dpMessages??[]).filter(m=>m.restaurantId===rid&&!m.read).length);
 
   const TABS = [
-    canTips                                       && ["dashboard",   "📊 Dashboard"],
-    canTips                                       && ["tips",        "💸 Gorjetas"],
-    canSched                                      && ["schedule",    "📅 Escala"],
-    isSuperManager                                && ["roles",       "🏷️ Cargos"],
-    (canTips || isSuperManager)                   && ["employees",   "👥 Equipe"],
-    tabVisible("horarios")                        && ["horarios",    "🕐 Horários"],
-    tabVisible("recibos")                         && ["recibos",     "📄 Recibos"],
-    tabVisible("faq")                             && ["faq",         "❓ FAQ"],
-    tabVisible("comunicados")                     && ["comunicados", "📢 Comunicados"],
-    tabVisible("dp")                              && ["dp",          "💬 Fale com DP"],
-    (isSuperManager || isDP)                      && ["notificacoes",`📬 Caixa${inboxUnread>0?` (${inboxUnread})`:""}`],
+    canTips                                           && ["dashboard",   "📊 Dashboard"],
+    canTips                                           && ["tips",        "💸 Gorjetas"],
+    canSched                                          && ["schedule",    "📅 Escala"],
+    (isSuperManager || tabVisible("roles"))           && ["roles",       "🏷️ Cargos"],
+    (isSuperManager || canTips || tabVisible("employees")) && ["employees","👥 Equipe"],
+    tabVisible("horarios")                            && ["horarios",    "🕐 Horários"],
+    tabVisible("recibos")                             && ["recibos",     "📄 Recibos"],
+    tabVisible("faq")                                 && ["faq",         "❓ FAQ"],
+    tabVisible("comunicados")                         && ["comunicados", "📢 Comunicados"],
+    tabVisible("dp")                                  && ["dp",          "💬 Fale com DP"],
+    (isSuperManager || isDP)                          && ["notificacoes",`📬 Caixa${inboxUnread>0?` (${inboxUnread})`:""}`],
   ].filter(Boolean);
 
   const [tab, setTab] = useState(isSuperManager ? "dashboard" : isDP ? "notificacoes" : (perms.tips ? "dashboard" : "schedule"));
@@ -3679,6 +3679,8 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                 <p style={{color:"var(--text3)",fontSize:12,marginBottom:14}}>Escolha quais abas aparecem para gestores e empregados deste restaurante.</p>
                 <div style={{display:"flex",flexDirection:"column",gap:10}}>
                   {[
+                    ["roles",       "🏷️ Cargos"],
+                    ["employees",   "👥 Equipe"],
                     ["horarios",    "🕐 Horários"],
                     ["recibos",     "📄 Recibos"],
                     ["faq",         "❓ FAQ"],
