@@ -5861,8 +5861,8 @@ function Home({ onLogin }) {
     if (!formData.nome.trim() || !formData.email.trim()) return;
     setFormSending(true);
     const subject = encodeURIComponent(`AppTip — Interesse de ${formData.restaurante || formData.nome}`);
-    const body = encodeURIComponent(`Nome: ${formData.nome}\nEmail: ${formData.email}\nRestaurante: ${formData.restaurante}\nEmpregados: ${formData.empregados}\n\nMensagem:\n${formData.mensagem}`);
-    window.open(`https://wa.me/5511985499821?text=${body}`, "_blank");
+    const body = encodeURIComponent(`Nome: ${formData.nome}\nEmail: ${formData.email}\nRestaurante: ${formData.restaurante || "—"}\nNº empregados: ${formData.empregados || "—"}\n\nMensagem:\n${formData.mensagem}`);
+    window.location.href = `mailto:contato@apptip.app?subject=${subject}&body=${body}`;
     setTimeout(() => { setFormSent(true); setFormSending(false); }, 800);
   }
 
@@ -6031,11 +6031,28 @@ function Home({ onLogin }) {
             <h2 style={{fontSize:"clamp(24px,4vw,38px)",fontWeight:800,margin:"0 0 12px",letterSpacing:-0.8,color:"#1c1208"}}>Vamos conversar?</h2>
             <p style={{color:"#8c7a5e",fontSize:16}}>Solicite uma demonstração gratuita ou tire suas dúvidas</p>
           </div>
+
+          {/* Cards de contato */}
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:28}}>
+            <div style={{background:"#fff",borderRadius:14,padding:"20px",border:"1px solid #ede8df",textAlign:"center"}}>
+              <div style={{fontSize:28,marginBottom:8}}>📧</div>
+              <div style={{fontWeight:700,fontSize:14,color:"#1c1208",marginBottom:4}}>E-mail</div>
+              <a href="mailto:contato@apptip.app" style={{color:ac,fontSize:13,fontWeight:600,textDecoration:"none"}}>contato@apptip.app</a>
+              <div style={{color:"#b0996e",fontSize:11,marginTop:6}}>Para todos os contatos</div>
+            </div>
+            <div style={{background:"#fff",borderRadius:14,padding:"20px",border:"1px solid #ede8df",textAlign:"center"}}>
+              <div style={{fontSize:28,marginBottom:8}}>💬</div>
+              <div style={{fontWeight:700,fontSize:14,color:"#1c1208",marginBottom:4}}>WhatsApp</div>
+              <span style={{color:"#8c7a5e",fontSize:13}}>(11) 98549-9821</span>
+              <div style={{color:"#b0996e",fontSize:11,marginTop:6}}>Exclusivo para clientes</div>
+            </div>
+          </div>
+
           {formSent ? (
             <div style={{textAlign:"center",padding:"48px",background:"#fff",borderRadius:16,border:"1px solid #ede8df"}}>
               <div style={{fontSize:48,marginBottom:16}}>✅</div>
               <h3 style={{fontSize:20,fontWeight:700,margin:"0 0 8px",color:"#1c1208"}}>Mensagem enviada!</h3>
-              <p style={{color:"#8c7a5e"}}>Entraremos em contato em breve pelo WhatsApp.</p>
+              <p style={{color:"#8c7a5e"}}>Retornaremos pelo e-mail em breve. Obrigado pelo interesse!</p>
             </div>
           ) : (
             <div style={{background:"#fff",borderRadius:16,padding:"36px",border:"1px solid #ede8df",boxShadow:"0 4px 24px rgba(0,0,0,0.06)"}}>
@@ -6066,9 +6083,9 @@ function Home({ onLogin }) {
                 </div>
                 <button onClick={sendForm} disabled={!formData.nome.trim()||!formData.email.trim()||formSending}
                   style={{padding:"14px",borderRadius:12,border:"none",background:(!formData.nome.trim()||!formData.email.trim())?"#e8e0d0":ac,color:"#fff",fontWeight:700,fontSize:16,cursor:(!formData.nome.trim()||!formData.email.trim())?"not-allowed":"pointer",fontFamily:"'DM Sans',sans-serif",boxShadow:"0 4px 16px #d4a01744"}}>
-                  {formSending?"Enviando...":"Enviar pelo WhatsApp →"}
+                  {formSending?"Abrindo e-mail...":"Enviar por e-mail →"}
                 </button>
-                <p style={{color:"#b0996e",fontSize:12,textAlign:"center",margin:0}}>📱 Sua mensagem será enviada diretamente para nosso WhatsApp</p>
+                <p style={{color:"#b0996e",fontSize:12,textAlign:"center",margin:0}}>📧 Sua mensagem será aberta no seu app de e-mail para envio a <strong>contato@apptip.app</strong></p>
               </div>
             </div>
           )}
@@ -6082,8 +6099,9 @@ function Home({ onLogin }) {
           <span style={{fontWeight:800,fontSize:18,color:"#fff",marginLeft:8,letterSpacing:-0.5}}>App<span style={{color:ac}}>Tip</span></span>
         </div>
         <p style={{color:"#8c7a5e",fontSize:13,marginBottom:20}}>Transparência e eficiência para equipes de restaurantes</p>
-        <div style={{display:"flex",gap:20,justifyContent:"center",flexWrap:"wrap",marginBottom:24}}>
+        <div style={{display:"flex",gap:20,justifyContent:"center",flexWrap:"wrap",marginBottom:16}}>
           <button onClick={onLogin} style={{background:"none",border:"none",color:"#8c7a5e",cursor:"pointer",fontFamily:"'DM Sans',sans-serif",fontSize:13}}>Área de acesso</button>
+          <a href="mailto:contato@apptip.app" style={{color:"#8c7a5e",fontSize:13,textDecoration:"none"}}>contato@apptip.app</a>
           <button onClick={()=>document.getElementById("apptip-privacy").style.display="flex"} style={{background:"none",border:"none",color:"#8c7a5e",cursor:"pointer",fontFamily:"'DM Sans',sans-serif",fontSize:13}}>Política de Privacidade</button>
         </div>
         <p style={{color:"#4a3a2a",fontSize:12}}>© {new Date().getFullYear()} AppTip. Todos os direitos reservados.</p>
