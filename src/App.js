@@ -4935,7 +4935,7 @@ function ManagerPortal({ manager, data, onUpdate, onBack, toggleTheme, theme }) 
 //
 // LOGIN
 //
-function UnifiedLogin({ owners, managers, employees, onLoginOwner, onLoginManager, onLoginEmployee, onSetupFirst, toggleTheme, theme }) {
+function UnifiedLogin({ owners, managers, employees, restaurants, onLoginOwner, onLoginManager, onLoginEmployee, onSetupFirst, toggleTheme, theme }) {
   const [credential, setCredential] = useState("");
   const [pin, setPin] = useState("");
   const [err, setErr] = useState("");
@@ -5634,7 +5634,7 @@ export default function App() {
     <>
       {view === "login" && (
         <UnifiedLogin
-          owners={owners} managers={managers} employees={employees}
+          owners={owners} managers={managers} employees={employees} restaurants={restaurants}
           onLoginOwner={u=>{setCurrentUser(u);setUserRole("super");setView("super");}}
           onLoginManager={u=>{setCurrentUser(u);setUserRole("manager");setView("manager");}}
           onLoginEmployee={u=>{
