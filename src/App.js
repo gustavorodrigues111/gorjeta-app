@@ -4412,24 +4412,31 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }
                 {/* Próximo ciclo pré-calculado */}
                 <div style={{background:"var(--bg2)",borderRadius:12,padding:"16px",marginBottom:14,border:"1px solid var(--border)"}}>
                   <div style={{color:"var(--text3)",fontSize:11,fontWeight:700,textTransform:"uppercase",letterSpacing:0.5,marginBottom:10}}>Próximo ciclo</div>
-                  <div style={{padding:"12px 14px",borderRadius:10,background:"var(--card-bg)",border:"1px solid var(--border)",marginBottom:12}}>
-                    <div style={{color:"var(--text)",fontWeight:700,fontSize:15}}>{fmt(proxIni)} a {fmt(proxFim)}</div>
-                    <div style={{color:"var(--text3)",fontSize:12,marginTop:2}}>{tipo==="anual"?"Ciclo anual":"Ciclo 30 dias"} · Vencimento: {fmt(proxFim)}</div>
+
+                  {/* Datas calculadas — display principal */}
+                  <div style={{padding:"14px",borderRadius:10,background:"var(--card-bg)",border:"1px solid var(--border)",marginBottom:12}}>
+                    <div style={{color:"var(--text)",fontWeight:700,fontSize:16,marginBottom:4}}>{fmt(cobPeriodo||proxIni)} a {fmt(cobVenc||proxFim)}</div>
+                    <div style={{color:"var(--text3)",fontSize:12}}>{tipo==="anual"?"Ciclo anual":"Ciclo 30 dias"} · Venc. {fmt(cobVenc||proxFim)}</div>
+                    <div style={{display:"flex",gap:8,marginTop:10}}>
+                      <div style={{flex:1}}>
+                        <div style={{color:"var(--text3)",fontSize:10,marginBottom:3}}>Início</div>
+                        <input type="date" value={cobPeriodo||proxIni} onChange={e=>setCobPeriodo(e.target.value)}
+                          style={{...S.input,fontSize:12,padding:"6px 8px",width:"100%",boxSizing:"border-box"}}/>
+                      </div>
+                      <div style={{flex:1}}>
+                        <div style={{color:"var(--text3)",fontSize:10,marginBottom:3}}>Vencimento</div>
+                        <input type="date" value={cobVenc||proxFim} onChange={e=>setCobVenc(e.target.value)}
+                          style={{...S.input,fontSize:12,padding:"6px 8px",width:"100%",boxSizing:"border-box"}}/>
+                      </div>
+                    </div>
                   </div>
-                  <div style={{display:"flex",flexDirection:"column",gap:10,marginBottom:10}}>
-                    <div>
-                      <div style={{color:"var(--text3)",fontSize:11,marginBottom:4}}>Início (editável)</div>
-                      <input type="date" value={cobPeriodo||proxIni} onChange={e=>setCobPeriodo(e.target.value)} style={{...S.input,fontSize:13,width:"100%",boxSizing:"border-box"}}/>
-                    </div>
-                    <div>
-                      <div style={{color:"var(--text3)",fontSize:11,marginBottom:4}}>Vencimento (editável)</div>
-                      <input type="date" value={cobVenc||proxFim} onChange={e=>setCobVenc(e.target.value)} style={{...S.input,fontSize:13,width:"100%",boxSizing:"border-box"}}/>
-                    </div>
-                    <div>
-                      <div style={{color:"var(--text3)",fontSize:11,marginBottom:4}}>Valor (R$)</div>
-                      <input type="number" value={cobValor||(valorMensal?.toFixed(2)??"0")} onChange={e=>setCobValor(e.target.value)}
-                        style={{...S.input,fontSize:18,fontWeight:700,color:"var(--ac-text)",fontFamily:"'DM Mono',monospace",width:"100%",boxSizing:"border-box"}}/>
-                    </div>
+
+                  {/* Valor */}
+                  <div style={{marginBottom:12}}>
+                    <div style={{color:"var(--text3)",fontSize:11,marginBottom:4}}>Valor (R$)</div>
+                    <input type="number" value={cobValor||(valorMensal?.toFixed(2)??"0")} onChange={e=>setCobValor(e.target.value)}
+                      style={{...S.input,fontSize:20,fontWeight:700,color:"var(--ac-text)",fontFamily:"'DM Mono',monospace",width:"100%",boxSizing:"border-box"}}/>
+                    {valorMensal && <div style={{color:"var(--text3)",fontSize:11,marginTop:3}}>Plano {plano.label} — R${valorMensal.toFixed(2)}{tipo==="anual"?"/ano":"/mês"}</div>}
                   </div>
                   <div style={{color:"var(--text3)",fontSize:11,marginBottom:8}}>Forma de pagamento</div>
                   <div style={{display:"flex",gap:8,marginBottom:10}}>
