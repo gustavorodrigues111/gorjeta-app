@@ -4412,23 +4412,23 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }
                 {/* Próximo ciclo pré-calculado */}
                 <div style={{background:"var(--bg2)",borderRadius:12,padding:"16px",marginBottom:14,border:"1px solid var(--border)"}}>
                   <div style={{color:"var(--text3)",fontSize:11,fontWeight:700,textTransform:"uppercase",letterSpacing:0.5,marginBottom:10}}>Próximo ciclo</div>
-                  <div style={{padding:"10px 14px",borderRadius:10,background:"var(--card-bg)",border:"1px solid var(--border)",marginBottom:12}}>
-                    <div style={{color:"var(--text)",fontWeight:700,fontSize:15,fontFamily:"'DM Mono',monospace"}}>{fmt(proxIni)} a {fmt(proxFim)}</div>
+                  <div style={{padding:"12px 14px",borderRadius:10,background:"var(--card-bg)",border:"1px solid var(--border)",marginBottom:12}}>
+                    <div style={{color:"var(--text)",fontWeight:700,fontSize:15}}>{fmt(proxIni)} a {fmt(proxFim)}</div>
                     <div style={{color:"var(--text3)",fontSize:12,marginTop:2}}>{tipo==="anual"?"Ciclo anual":"Ciclo 30 dias"} · Vencimento: {fmt(proxFim)}</div>
                   </div>
-                  <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:10}}>
+                  <div style={{display:"flex",flexDirection:"column",gap:10,marginBottom:10}}>
                     <div>
                       <div style={{color:"var(--text3)",fontSize:11,marginBottom:4}}>Início (editável)</div>
-                      <input type="date" value={cobPeriodo||proxIni} onChange={e=>setCobPeriodo(e.target.value)} style={{...S.input,fontSize:13}}/>
+                      <input type="date" value={cobPeriodo||proxIni} onChange={e=>setCobPeriodo(e.target.value)} style={{...S.input,fontSize:13,width:"100%",boxSizing:"border-box"}}/>
                     </div>
                     <div>
                       <div style={{color:"var(--text3)",fontSize:11,marginBottom:4}}>Vencimento (editável)</div>
-                      <input type="date" value={cobVenc||proxFim} onChange={e=>setCobVenc(e.target.value)} style={{...S.input,fontSize:13}}/>
+                      <input type="date" value={cobVenc||proxFim} onChange={e=>setCobVenc(e.target.value)} style={{...S.input,fontSize:13,width:"100%",boxSizing:"border-box"}}/>
                     </div>
-                    <div style={{gridColumn:"1/-1"}}>
+                    <div>
                       <div style={{color:"var(--text3)",fontSize:11,marginBottom:4}}>Valor (R$)</div>
                       <input type="number" value={cobValor||(valorMensal?.toFixed(2)??"0")} onChange={e=>setCobValor(e.target.value)}
-                        style={{...S.input,fontSize:18,fontWeight:700,color:"var(--ac-text)",fontFamily:"'DM Mono',monospace"}}/>
+                        style={{...S.input,fontSize:18,fontWeight:700,color:"var(--ac-text)",fontFamily:"'DM Mono',monospace",width:"100%",boxSizing:"border-box"}}/>
                     </div>
                   </div>
                   <div style={{color:"var(--text3)",fontSize:11,marginBottom:8}}>Forma de pagamento</div>
