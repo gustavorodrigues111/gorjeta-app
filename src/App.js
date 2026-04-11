@@ -368,7 +368,7 @@ function ExportModal({ onClose, employees, roles, tips, restaurant }) {
       });
 
       doc.setFontSize(7); doc.setTextColor(150);
-      doc.text("* Valores brutos sem dedução fiscal. Documento gerado pelo Por Dentro.", 10, doc.lastAutoTable.finalY + 5);
+      doc.text("* Valores brutos sem dedução fiscal. Documento gerado pelo AppTip.", 10, doc.lastAutoTable.finalY + 5);
       doc.save(`gorjetas_${restaurant.name}_${dateFrom}_${dateTo}.pdf`);
       setStatus("done");
     } catch (e) { console.error(e); setStatus("error"); }
@@ -3808,7 +3808,7 @@ function Home({ onManager, onEmployee }) {
   return (
     <div style={{minHeight:"100vh",background:"var(--bg)",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",fontFamily:"DM Mono,monospace",padding:24}}>
       <div style={{fontSize:52,marginBottom:10}}>🍽️</div>
-      <h1 style={{color:"#f5c842",fontSize:32,fontWeight:700,margin:"0 0 6px",letterSpacing:-1}}>Por Dentro</h1>
+      <h1 style={{color:"#f5c842",fontSize:32,fontWeight:700,margin:"0 0 6px",letterSpacing:-1}}>AppTip</h1>
       <p style={{color:"var(--text3)",fontSize:13,marginBottom:48,textAlign:"center",lineHeight:1.6}}>Comunicação transparente e gestão simplificada<br/>para equipes de restaurantes e bares</p>
       <div style={{display:"flex",flexDirection:"column",gap:14,width:"100%",maxWidth:300}}>
         <button onClick={onManager} style={{...S.btnPrimary,padding:"18px",fontSize:16,display:"flex",alignItems:"center",justifyContent:"center",gap:10}}>📊 Área de Gestão</button>
