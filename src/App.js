@@ -3123,43 +3123,51 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                       const isWeekend = [0,6].includes(new Date(date+"T12:00:00").getDay());
 
                       // Cores do card
-                      let cardBorder = "#1a1a1a";
+                      let cardBorder = "#222";
                       let cardBg = "#111";
-                      if (isNoTip) { cardBorder = "#6366f155"; cardBg = "#0d0d1a"; }
-                      else if (isLaunched && !isDirty && !isCleared) { cardBorder = "#10b98133"; cardBg = "#0a1a0a"; }
-                      else if (isDirty) { cardBorder = "#f59e0b55"; cardBg = "#1a1200"; }
-                      else if (hasVal) { cardBorder = "#f5c84233"; cardBg = "#1a1a0a"; }
+                      if (isNoTip)                              { cardBorder = "#6366f166"; cardBg = "#13103a"; }
+                      else if (isLaunched && !isDirty)          { cardBorder = "#10b98133"; cardBg = "#0a1a0a"; }
+                      else if (isDirty)                         { cardBorder = "#f59e0b55"; cardBg = "#1a1200"; }
+                      else if (hasVal)                          { cardBorder = "#f5c84233"; cardBg = "#1a1a0a"; }
+
+                      const toggleNoTip = (checked) => {
+                        const days = data?.noTipDays?.[rid] ?? [];
+                        const updated = { ...(data?.noTipDays??{}), [rid]: checked ? [...days.filter(d=>d!==date), date] : days.filter(d=>d!==date) };
+                        onUpdate("noTipDays", updated);
+                        if (checked) setTipRows(prev=>prev.filter(r=>r.date!==date));
+                        onUpdate("_toast", checked ? `🚫 ${fmtDate(date)}: sem gorjeta` : `✅ ${fmtDate(date)}: disponível`);
+                      };
 
                       return (
-                        <div key={date} style={{marginBottom:6,borderRadius:10,border:`1px solid ${cardBorder}`,background:cardBg,overflow:"hidden"}}>
+                        <div key={date} style={{marginBottom:5,borderRadius:10,border:`1px solid ${cardBorder}`,background:cardBg,overflow:"hidden"}}>
                           <div style={{display:"grid",gridTemplateColumns:"44px 1fr 1fr auto",gap:8,padding:"7px 10px",alignItems:"center"}}>
 
                             {/* Data */}
                             <div style={{textAlign:"center"}}>
-                              <div style={{color:isWeekend?"#f59e0b":"#aaa",fontSize:13,fontWeight:700}}>{parseInt(date.slice(-2))}</div>
+                              <div style={{color:isWeekend?"#f59e0b":isNoTip?"#6366f1":"#aaa",fontSize:13,fontWeight:700}}>{parseInt(date.slice(-2))}</div>
                               <div style={{color:"var(--text3)",fontSize:9}}>{weekday}</div>
                             </div>
 
-                            {/* Valor */}
+                            {/* Valor — bloqueado se sem gorjeta */}
                             <input
                               type="number" min="0" step="0.01"
                               value={isNoTip ? "" : row.total}
-                              disabled={isNoTip}
+                              disabled={isNoTip || isLaunched}
                               onChange={e=>{ const nr=tipRows.filter(r=>r.date!==date); setTipRows([...nr,{...row,total:e.target.value}]); }}
-                              placeholder={isNoTip ? "—" : "R$ 0,00"}
+                              placeholder={isNoTip ? "bloqueado" : "R$ 0,00"}
                               style={{...S.input,fontSize:13,padding:"6px 8px",
-                                background: isNoTip?"transparent": isDirty?"#221500": isLaunched?"#0d1a0d":"#1a1a1a",
-                                color: isNoTip?"#555": isDirty?"#f59e0b": isLaunched?"#10b981":"#fff",
-                                borderColor: isNoTip?"transparent": isDirty?"#f59e0b44": isLaunched?"#10b98133":"transparent",
-                                opacity: isNoTip?0.4:1
+                                background: isNoTip?"#1a1535": isDirty?"#221500": isLaunched?"#0d1a0d":"#1a1a1a",
+                                color: isNoTip?"#4a4480": isDirty?"#f59e0b": isLaunched?"#10b981":"#fff",
+                                borderColor: isNoTip?"#6366f133": isDirty?"#f59e0b44": isLaunched?"#10b98133":"transparent",
+                                cursor: isNoTip?"not-allowed":"text",
                               }}
                             />
 
-                            {/* Observação OU badge sem gorjeta */}
+                            {/* Observação — substituída por label se sem gorjeta */}
                             {isNoTip ? (
-                              <div style={{display:"flex",alignItems:"center",gap:6}}>
-                                <span style={{fontSize:12}}>🚫</span>
-                                <span style={{color:"#818cf8",fontSize:12,fontWeight:600}}>Sem gorjeta</span>
+                              <div style={{display:"flex",alignItems:"center",gap:8,padding:"6px 8px",background:"#1a1535",borderRadius:8,border:"1px solid #6366f133"}}>
+                                <span style={{fontSize:15}}>🚫</span>
+                                <span style={{color:"#818cf8",fontSize:12,fontWeight:700}}>Sem gorjeta neste dia</span>
                               </div>
                             ) : (
                               <input
@@ -3173,20 +3181,14 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                             {/* Ações */}
                             <div style={{display:"flex",gap:6,alignItems:"center"}}>
 
-                              {/* Checkbox "Sem gorjeta" — sempre visível se não lançado */}
+                              {/* Checkbox sem gorjeta — só para dias não lançados */}
                               {!isLaunched && (
-                                <label style={{display:"flex",alignItems:"center",gap:4,cursor:"pointer",userSelect:"none",padding:"4px 8px",borderRadius:8,border:`1px solid ${isNoTip?"#6366f155":"#2a2a2a"}`,background:isNoTip?"#6366f111":"transparent"}} title={isNoTip?"Desmarcar sem gorjeta":"Marcar como dia sem gorjeta"}>
+                                <label style={{display:"flex",flexDirection:"column",alignItems:"center",gap:2,cursor:"pointer",userSelect:"none",padding:"6px 10px",borderRadius:8,border:`1px solid ${isNoTip?"#6366f1":"#333"}`,background:isNoTip?"#6366f122":"transparent",minWidth:54,textAlign:"center"}}>
                                   <input type="checkbox" checked={isNoTip}
-                                    onChange={e=>{
-                                      const days = data?.noTipDays?.[rid] ?? [];
-                                      const updated = { ...(data?.noTipDays??{}), [rid]: e.target.checked ? [...days.filter(d=>d!==date), date] : days.filter(d=>d!==date) };
-                                      onUpdate("noTipDays", updated);
-                                      if(e.target.checked) setTipRows(prev=>prev.filter(r=>r.date!==date));
-                                      onUpdate("_toast", e.target.checked ? `🚫 ${fmtDate(date)}: sem gorjeta` : `✅ ${fmtDate(date)}: disponível`);
-                                    }}
-                                    style={{width:14,height:14,cursor:"pointer",accentColor:"#6366f1",margin:0}}
+                                    onChange={e=>toggleNoTip(e.target.checked)}
+                                    style={{width:16,height:16,cursor:"pointer",accentColor:"#6366f1",margin:0}}
                                   />
-                                  <span style={{color:isNoTip?"#818cf8":"#555",fontSize:10,whiteSpace:"nowrap"}}>Sem gorj.</span>
+                                  <span style={{color:isNoTip?"#818cf8":"#555",fontSize:9,whiteSpace:"nowrap",marginTop:1}}>Sem gorj.</span>
                                 </label>
                               )}
 
