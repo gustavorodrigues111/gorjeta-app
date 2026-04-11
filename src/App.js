@@ -772,11 +772,11 @@ Responda APENAS com um JSON válido no formato:
 Sem markdown, sem explicações, apenas o JSON.`;
       const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_KEY}`, {
         method:"POST", headers:{"Content-Type":"application/json"},
-        body:JSON.stringify({contents:[{parts:[{text:prompt}]}]})
+        body:JSON.stringify({contents:[{parts:[{text:prompt}]}],generationConfig:{temperature:0.1,responseMimeType:"application/json"}})
       });
       const data = await res.json();
-      const text = data?.candidates?.[0]?.content?.parts?.[0]?.text ?? "";
-      const result = JSON.parse(text.replace(/```json|```/g,"").trim());
+      const raw = data?.candidates?.[0]?.content?.parts?.[0]?.text ?? "";
+      const result = JSON.parse(raw.replace(/```json|```/g,"").trim());
       setTitle(result.titulo); setBody(result.corpo); setAiInput("");
     } catch(e) {
       setAiError("Não foi possível gerar sugestão. Tente novamente.");
@@ -970,12 +970,11 @@ Sem markdown, sem explicações, apenas o JSON.`;
   const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_KEY}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] })
+    body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }], generationConfig:{temperature:0.1,responseMimeType:"application/json"} })
   });
   const data = await res.json();
-  const text = data?.candidates?.[0]?.content?.parts?.[0]?.text ?? "";
-  const clean = text.replace(/```json|```/g, "").trim();
-  return JSON.parse(clean);
+  const raw = data?.candidates?.[0]?.content?.parts?.[0]?.text ?? "";
+  return JSON.parse(raw.replace(/```json|```/g, "").trim());
 }
 
 function FaqManagerTab({ restaurantId, faq, onUpdate }) {
@@ -2672,11 +2671,11 @@ Responda APENAS com JSON válido:
 
       const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_KEY}`, {
         method:"POST", headers:{"Content-Type":"application/json"},
-        body:JSON.stringify({contents:[{parts:[{text:prompt}]}]})
+        body:JSON.stringify({contents:[{parts:[{text:prompt}]}],generationConfig:{temperature:0.1,responseMimeType:"application/json"}})
       });
       const data = await res.json();
-      const text = data?.candidates?.[0]?.content?.parts?.[0]?.text ?? "";
-      const result = JSON.parse(text.replace(/```json|```/g,"").trim());
+      const raw = data?.candidates?.[0]?.content?.parts?.[0]?.text ?? "";
+      const result = JSON.parse(raw.replace(/```json|```/g,"").trim());
       const novos = result.cargos.map(c => ({
         id: `role-${Date.now()}-${Math.random().toString(36).slice(2,6)}`,
         restaurantId: rid,
@@ -2945,11 +2944,11 @@ Responda APENAS com JSON válido:
 
       const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_KEY}`, {
         method:"POST", headers:{"Content-Type":"application/json"},
-        body:JSON.stringify({contents:[{parts:[{text:prompt}]}]})
+        body:JSON.stringify({contents:[{parts:[{text:prompt}]}],generationConfig:{temperature:0.1,responseMimeType:"application/json"}})
       });
       const data = await res.json();
-      const text = data?.candidates?.[0]?.content?.parts?.[0]?.text ?? "";
-      const result = JSON.parse(text.replace(/```json|```/g,"").trim());
+      const raw = data?.candidates?.[0]?.content?.parts?.[0]?.text ?? "";
+      const result = JSON.parse(raw.replace(/```json|```/g,"").trim());
 
       const restCode = restCode_ || "XXX";
       let seq = nextEmpSeq(employees, restCode);
