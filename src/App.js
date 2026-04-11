@@ -5285,8 +5285,9 @@ export default function App() {
   // Persist session
   useEffect(() => {
     if (currentUser) localStorage.setItem("apptip_userid", currentUser.id);
-    else localStorage.removeItem("apptip_userid");
-  }, [currentUser]);
+    else if (userRole !== "employee") localStorage.removeItem("apptip_userid");
+    // empregado: apptip_userid salvo diretamente no login via apptip_empid
+  }, [currentUser, userRole]);
   useEffect(() => {
     if (userRole) localStorage.setItem("apptip_role", userRole);
     else localStorage.removeItem("apptip_role");
@@ -5339,13 +5340,23 @@ export default function App() {
         const role = localStorage.getItem("apptip_role");
         if (role === "super") {
           const u = (loaded_data.owners ?? []).find(s => s.id === savedId);
-          if (u) setCurrentUser(u); else { localStorage.removeItem("apptip_userid"); localStorage.removeItem("apptip_role"); setView("login"); }
+          if (u) setCurrentUser(u);
+          else { localStorage.removeItem("apptip_userid"); localStorage.removeItem("apptip_role"); setView("login"); }
         } else if (role === "manager") {
           const u = (loaded_data.managers ?? []).find(m => m.id === savedId);
-          if (u) setCurrentUser(u); else { localStorage.removeItem("apptip_userid"); localStorage.removeItem("apptip_role"); setView("login"); }
+          if (u) setCurrentUser(u);
+          else { localStorage.removeItem("apptip_userid"); localStorage.removeItem("apptip_role"); setView("login"); }
         } else if (role === "employee") {
-          const u = (loaded_data.employees ?? []).find(e => e.id === savedId);
-          if (!u || (u.inactive && u.inactiveFrom && u.inactiveFrom <= today())) { localStorage.removeItem("apptip_userid"); localStorage.removeItem("apptip_role"); setView("login"); }
+          const empIdSaved = localStorage.getItem("apptip_empid") || savedId;
+          const u = (loaded_data.employees ?? []).find(e => e.id === empIdSaved);
+          if (!u || (u.inactive && u.inactiveFrom && u.inactiveFrom <= today())) {
+            // Sessão inválida — limpa tudo
+            localStorage.removeItem("apptip_userid");
+            localStorage.removeItem("apptip_role");
+            localStorage.removeItem("apptip_empid");
+            setView("login");
+          }
+          // sessão válida — view já está como "employee" pelo useState inicial
         }
       }
       const recs = await loadReceipts();
@@ -5421,7 +5432,13 @@ export default function App() {
           owners={owners} managers={managers} employees={employees}
           onLoginOwner={u=>{setCurrentUser(u);setUserRole("super");setView("super");}}
           onLoginManager={u=>{setCurrentUser(u);setUserRole("manager");setView("manager");}}
-          onLoginEmployee={u=>{setUserRole("employee");setView("employee");}}
+          onLoginEmployee={u=>{
+            localStorage.setItem("apptip_role", "employee");
+            localStorage.setItem("apptip_userid", u.id);
+            localStorage.setItem("apptip_empid", u.id);
+            setUserRole("employee");
+            setView("employee");
+          }}
           toggleTheme={toggleTheme} theme={theme}
         />
       )}
