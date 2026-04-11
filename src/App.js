@@ -412,9 +412,17 @@ function ExportModal({ onClose, employees, roles, tips, restaurant }) {
 //
 // COMUNICADOS TAB (employee view)
 //
-function ComunicadosTab({ empId, restaurantId, communications, commAcks, onUpdate }) {
-  const myComms = communications.filter(c => c.restaurantId === restaurantId && !c.autoSchedule)
-    .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+function ComunicadosTab({ empId, restaurantId, communications, commAcks, onUpdate, roles, emp }) {
+  const empRole = roles?.find(r => r.id === emp?.roleId);
+  const myComms = communications.filter(c => {
+    if (c.restaurantId !== restaurantId) return false;
+    if (!c.target || c.target === "all") return true;
+    if (c.target.startsWith("emps:")) return c.target.replace("emps:","").split(",").includes(empId);
+    if (c.target.startsWith("areas:")) return empRole && c.target.replace("areas:","").split(",").includes(empRole.area);
+    if (c.target === `emp:${empId}`) return true;
+    if (c.target.startsWith("area:") && empRole) return c.target === `area:${empRole.area}`;
+    return false;
+  }).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   const pending = myComms.filter(c => !commAcks?.[c.id]?.[empId]);
   const done    = myComms.filter(c =>  commAcks?.[c.id]?.[empId]);
   const [tab, setTab] = useState("pending");
@@ -1833,26 +1841,15 @@ function EmployeePortal({ employees, roles, tips, schedules, restaurants, commun
   const ac = "#f5c842"; const bg = "#0f0f0f";
 
   // Pending communications
+  const empRole = roles?.find(r => r.id === emp?.roleId);
   const myComms = emp ? communications.filter(c => {
     if (c.restaurantId !== emp.restaurantId) return false;
     if (!c.target || c.target === "all") return true;
-    // New multi-select format
-    if (c.target.startsWith("emps:")) {
-      const ids = c.target.replace("emps:","").split(",");
-      return ids.includes(empId);
-    }
-    if (c.target.startsWith("areas:")) {
-      const areas = c.target.replace("areas:","").split(",");
-      const empRole = roles?.find(r => r.id === emp.roleId);
-      return empRole && areas.includes(empRole.area);
-    }
-    // Legacy single format
-    if (c.target.startsWith("emp:")) return c.target === `emp:${empId}`;
-    if (c.target.startsWith("area:")) {
-      const empRole = roles?.find(r => r.id === emp.roleId);
-      return empRole && c.target === `area:${empRole.area}`;
-    }
-    return true;
+    if (c.target.startsWith("emps:")) return c.target.replace("emps:","").split(",").includes(empId);
+    if (c.target.startsWith("areas:")) return empRole && c.target.replace("areas:","").split(",").includes(empRole.area);
+    if (c.target === `emp:${empId}`) return true;
+    if (c.target.startsWith("area:") && empRole) return c.target === `area:${empRole.area}`;
+    return false;
   }) : [];
   const pendingComms = myComms.filter(c => !commAcks?.[c.id]?.[empId]);
   const hasPending = pendingComms.length > 0;
@@ -2098,7 +2095,7 @@ function EmployeePortal({ employees, roles, tips, schedules, restaurants, commun
         )}
 
         {tab === "comunicados" && (
-          <ComunicadosTab empId={empId} restaurantId={emp?.restaurantId} communications={communications} commAcks={commAcks} onUpdate={onUpdate} />
+          <ComunicadosTab empId={empId} restaurantId={emp?.restaurantId} communications={communications} commAcks={commAcks} onUpdate={onUpdate} roles={roles} emp={emp} />
         )}
 
         {tab === "faq" && (
