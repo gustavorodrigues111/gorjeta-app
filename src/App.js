@@ -4149,47 +4149,50 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                   const daysInMonth = new Date(year, month+1, 0).getDate();
                   const empList = areaEmps.map(e => {
                     const role = restRoles.find(r => r.id === e.roleId);
-                    return `- ${e.name} (id:${e.id}, cargo:${role?.name??"—"}, área:${role?.area??"—"})`;
+                    return `- "${e.name}" → id: ${e.id} (cargo: ${role?.name??"—"})`;
                   }).join("\n");
 
-                  const prompt = `Você é um assistente de gestão de escalas de restaurantes. O gestor deu as seguintes instruções para a escala de ${mesLabel}.
+                  const diaSemana1 = ["Domingo","Segunda","Terça","Quarta","Quinta","Sexta","Sábado"][new Date(`${year}-${String(month+1).padStart(2,"0")}-01T12:00:00`).getDay()];
 
-Empregados disponíveis:
+                  const prompt = `Você é um assistente de escalas de restaurante. Interprete a instrução abaixo e gere a escala.
+
+EMPREGADOS DO RESTAURANTE:
 ${empList}
 
-Mês: ${mesLabel} (${daysInMonth} dias, primeiro dia: ${["Domingo","Segunda","Terça","Quarta","Quinta","Sexta","Sábado"][new Date(`${year}-${String(month+1).padStart(2,"0")}-01T12:00:00`).getDay()]})
-Ano: ${year}
+MÊS: ${mesLabel} de ${year} — ${daysInMonth} dias. Dia 1 cai numa ${diaSemana1}.
 
-Instrução do gestor: "${aiSchedInput.trim()}"
+INSTRUÇÃO DO GESTOR:
+"${aiSchedInput.trim()}"
 
-Interprete livremente o que o gestor pediu e aplique na escala. Status possíveis:
-- "off" = folga
-- "comp" = compensação de banco de horas
-- "vac" = férias
-- "faultj" = falta justificada
-- "faultu" = falta injustificada
-- Dias sem status = trabalhando normalmente
+REGRAS:
+- Use EXATAMENTE os IDs fornecidos acima
+- Status: "off"=folga, "vac"=férias, "faultj"=falta justificada, "faultu"=falta injustificada, "comp"=compensação
+- Inclua APENAS dias com status especial. Dias normais de trabalho NÃO devem aparecer
+- Datas no formato YYYY-MM-DD usando o mês ${String(month+1).padStart(2,"0")} e ano ${year}
+- Se o gestor disser "toda segunda", calcule todas as segundas do mês
+- Se disser "hoje", use ${new Date().toISOString().slice(0,10)}
 
-Responda APENAS com JSON válido:
-{
-  "resumo": "descrição do que foi aplicado",
-  "escala": {
-    "id_do_empregado": {"YYYY-MM-DD": "status"}
-  }
-}
-
-Use os IDs exatos dos empregados fornecidos acima. Inclua apenas os dias com status não-padrão (folgas, férias, faltas). Dias de trabalho normal não precisam aparecer.`;
+Responda SOMENTE com o JSON abaixo, sem texto adicional, sem markdown:
+{"resumo":"resumo curto do que foi feito","escala":{"ID_EMPREGADO":{"YYYY-MM-DD":"status"}}}`;
 
                   const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_KEY}`, {
                     method:"POST", headers:{"Content-Type":"application/json"},
-                    body:JSON.stringify({contents:[{parts:[{text:prompt}]}]})
+                    body:JSON.stringify({
+                      contents:[{parts:[{text:prompt}]}],
+                      generationConfig:{ temperature:0.1, responseMimeType:"application/json" }
+                    })
                   });
                   const data2 = await res.json();
-                  const text = data2?.candidates?.[0]?.content?.parts?.[0]?.text ?? "";
-                  const result = JSON.parse(text.replace(/```json|```/g,"").trim());
-                  setAiSchedPreview({ escala: result.escala ?? {}, resumo: result.resumo });
+                  const raw = data2?.candidates?.[0]?.content?.parts?.[0]?.text ?? "";
+                  // Tenta extrair JSON mesmo se vier com markdown
+                  const clean = raw.replace(/```json|```/g,"").trim();
+                  const result = JSON.parse(clean);
+
+                  if (!result.escala) throw new Error("Sem escala no retorno");
+                  setAiSchedPreview({ escala: result.escala, resumo: result.resumo ?? "Escala interpretada." });
                 } catch(e) {
-                  setAiSchedError("Não foi possível interpretar. Tente reformular.");
+                  console.error("AI sched error:", e);
+                  setAiSchedError("Não foi possível interpretar. Tente simplificar — fale um empregado por vez ou use vírgulas para separar.");
                 }
                 setAiSchedLoading(false);
               }
