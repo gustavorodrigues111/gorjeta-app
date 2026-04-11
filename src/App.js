@@ -2930,6 +2930,25 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
 
   const [tab, setTab] = useState(isOwner ? "dashboard" : isDP ? "notificacoes" : (perms.tips ? "dashboard" : "schedule"));
 
+  // Reset de aba — só Admin AppTip (isOwner)
+  function resetTab(tabKey, tabLabel, getSnapshot) {
+    if (!isOwner) return;
+    if (!window.confirm(`Resetar "${tabLabel}"?\n\nOs dados ficam na lixeira por 7 dias e podem ser restaurados.`)) return;
+    const snapshot = getSnapshot();
+    const entry = {
+      id: Date.now().toString(),
+      restaurantId: rid,
+      restaurantName: restaurant.name,
+      tabKey,
+      tabLabel,
+      snapshot,
+      deletedAt: new Date().toISOString(),
+    };
+    const trash = data?.trash ?? { restaurants:[], managers:[], employees:[], tabData:[] };
+    onUpdate("trash", { ...trash, tabData: [...(trash.tabData??[]), entry] });
+    return true; // indica que pode prosseguir com o reset
+  }
+
   return (
     <div style={{ fontFamily:"'DM Sans',sans-serif" }}>
       {/* Restaurant sub-header */}
@@ -3132,7 +3151,11 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
           <div>
             {/* Export button inside tips tab */}
             {canTips && (
-              <div style={{display:"flex",justifyContent:"flex-end",marginBottom:12}}>
+              <div style={{display:"flex",justifyContent:"flex-end",gap:8,marginBottom:12}}>
+                {isOwner && <button onClick={()=>{
+                  const ok = resetTab("tips","Gorjetas",()=>({tips:tips.filter(t=>t.restaurantId===rid), splits:splits?.[rid]}));
+                  if(ok){ onUpdate("tips",tips.filter(t=>t.restaurantId!==rid)); onUpdate("_toast","🗑️ Gorjetas enviadas para a lixeira"); }
+                }} style={{...S.btnSecondary,fontSize:12,color:"var(--red)",borderColor:"var(--red)44"}}>🗑️ Resetar gorjetas</button>}
                 <button onClick={() => setShowExport(true)} style={{ ...S.btnSecondary, fontSize: 12, color: ac, borderColor: ac }}>📤 Exportar Gorjeta</button>
               </div>
             )}
@@ -3369,21 +3392,38 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
 
         {/* EQUIPE */}
         {tab === "employees" && (
-          <EmployeeSpreadsheet
-            restEmps={employees.filter(e => e.restaurantId === rid)}
-            restRoles={restRoles} rid={rid}
-            employees={employees} onUpdate={onUpdate} restCode={restaurant.shortCode}
-            isOwner={isOwner} restaurant={restaurant}
-            notifications={data?.notifications??[]}
-          />
+          <div>
+            {isOwner && <div style={{display:"flex",justifyContent:"flex-end",marginBottom:8,paddingRight:16,paddingTop:12}}>
+              <button onClick={()=>{
+                const emps = employees.filter(e=>e.restaurantId===rid);
+                const ok = resetTab("employees","Equipe",()=>({employees:emps}));
+                if(ok){ onUpdate("employees",employees.filter(e=>e.restaurantId!==rid)); onUpdate("_toast","🗑️ Equipe enviada para a lixeira"); }
+              }} style={{...S.btnSecondary,fontSize:12,color:"var(--red)",borderColor:"var(--red)44"}}>🗑️ Resetar equipe</button>
+            </div>}
+            <EmployeeSpreadsheet
+              restEmps={employees.filter(e => e.restaurantId === rid)}
+              restRoles={restRoles} rid={rid}
+              employees={employees} onUpdate={onUpdate} restCode={restaurant.shortCode}
+              isOwner={isOwner} restaurant={restaurant}
+              notifications={data?.notifications??[]}
+            />
+          </div>
         )}
 
         {/* CARGOS (super only) */}
         {tab === "roles" && (
-          <RoleSpreadsheet
-            restRoles={restRoles} rid={rid}
-            roles={roles} onUpdate={onUpdate}
-          />
+          <div>
+            {isOwner && <div style={{display:"flex",justifyContent:"flex-end",marginBottom:8,paddingRight:16,paddingTop:12}}>
+              <button onClick={()=>{
+                const ok = resetTab("roles","Cargos",()=>({roles:roles.filter(r=>r.restaurantId===rid)}));
+                if(ok){ onUpdate("roles",roles.filter(r=>r.restaurantId!==rid)); onUpdate("_toast","🗑️ Cargos enviados para a lixeira"); }
+              }} style={{...S.btnSecondary,fontSize:12,color:"var(--red)",borderColor:"var(--red)44"}}>🗑️ Resetar cargos</button>
+            </div>}
+            <RoleSpreadsheet
+              restRoles={restRoles} rid={rid}
+              roles={roles} onUpdate={onUpdate}
+            />
+          </div>
         )}
 
         {/* ESCALA */}
@@ -3392,6 +3432,10 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
             <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12,flexWrap:"wrap",gap:8}}>
               <div style={{flex:1}}><PillBar options={["Todos", ...AREAS]} value={schedArea} onChange={setSchedArea}/></div>
               <div style={{display:"flex",gap:8}}>
+                {isOwner && <button onClick={()=>{
+                  const ok = resetTab("schedule","Escala",()=>({schedules:schedules?.[rid]}));
+                  if(ok){ const s={...schedules}; delete s[rid]; onUpdate("schedules",s); onUpdate("_toast","🗑️ Escala enviada para a lixeira"); }
+                }} style={{...S.btnSecondary,fontSize:12,color:"var(--red)",borderColor:"var(--red)44"}}>🗑️ Resetar escala</button>}
                 <div style={{display:"flex",gap:4}}>
                   <button onClick={()=>{setYear(month===0?year-1:year);setMonth(month===0?11:month-1);}} style={{...S.btnSecondary,padding:"6px 10px",fontSize:13}}>‹</button>
                   <span style={{color:"var(--text2)",fontSize:12,padding:"6px 8px",background:"var(--card-bg)",borderRadius:8,whiteSpace:"nowrap"}}>{monthLabel(year,month)}</span>
@@ -3668,26 +3712,62 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
 
         {/* COMUNICADOS */}
         {tab === "comunicados" && (
-          <ComunicadosManagerTab
-            restaurantId={rid} communications={data?.communications ?? []}
-            commAcks={data?.commAcks ?? {}} employees={employees}
-            onUpdate={onUpdate} currentManagerName={currentUser?.name ?? "Gestor"}
-          />
+          <div>
+            {isOwner && <div style={{display:"flex",justifyContent:"flex-end",padding:"12px 16px 0"}}>
+              <button onClick={()=>{
+                const comms = (data?.communications??[]).filter(c=>c.restaurantId===rid);
+                const ok = resetTab("comunicados","Comunicados",()=>({communications:comms}));
+                if(ok){ onUpdate("communications",(data?.communications??[]).filter(c=>c.restaurantId!==rid)); onUpdate("_toast","🗑️ Comunicados enviados para a lixeira"); }
+              }} style={{...S.btnSecondary,fontSize:12,color:"var(--red)",borderColor:"var(--red)44"}}>🗑️ Resetar comunicados</button>
+            </div>}
+            <ComunicadosManagerTab
+              restaurantId={rid} communications={data?.communications ?? []}
+              commAcks={data?.commAcks ?? {}} employees={employees}
+              onUpdate={onUpdate} currentManagerName={currentUser?.name ?? "Gestor"}
+            />
+          </div>
         )}
 
         {/* FAQ */}
         {tab === "faq" && (
-          <FaqManagerTab restaurantId={rid} faq={data?.faq ?? {}} onUpdate={onUpdate} />
+          <div>
+            {isOwner && <div style={{display:"flex",justifyContent:"flex-end",padding:"12px 16px 0"}}>
+              <button onClick={()=>{
+                const faqRest = data?.faq?.[rid];
+                const ok = resetTab("faq","FAQ",()=>({faq:faqRest}));
+                if(ok){ const f={...data?.faq}; delete f[rid]; onUpdate("faq",f); onUpdate("_toast","🗑️ FAQ enviado para a lixeira"); }
+              }} style={{...S.btnSecondary,fontSize:12,color:"var(--red)",borderColor:"var(--red)44"}}>🗑️ Resetar FAQ</button>
+            </div>}
+            <FaqManagerTab restaurantId={rid} faq={data?.faq ?? {}} onUpdate={onUpdate} />
+          </div>
         )}
 
         {/* FALE COM DP */}
         {tab === "dp" && (
-          <DpManagerTab restaurantId={rid} dpMessages={data?.dpMessages ?? []} onUpdate={onUpdate} isOwner={isOwner} />
+          <div>
+            {isOwner && <div style={{display:"flex",justifyContent:"flex-end",padding:"12px 16px 0"}}>
+              <button onClick={()=>{
+                const msgs = (data?.dpMessages??[]).filter(m=>m.restaurantId===rid);
+                const ok = resetTab("dp","Fale com DP",()=>({dpMessages:msgs}));
+                if(ok){ onUpdate("dpMessages",(data?.dpMessages??[]).filter(m=>m.restaurantId!==rid)); onUpdate("_toast","🗑️ Mensagens DP enviadas para a lixeira"); }
+              }} style={{...S.btnSecondary,fontSize:12,color:"var(--red)",borderColor:"var(--red)44"}}>🗑️ Resetar Fale com DP</button>
+            </div>}
+            <DpManagerTab restaurantId={rid} dpMessages={data?.dpMessages ?? []} onUpdate={onUpdate} isOwner={isOwner} />
+          </div>
         )}
 
         {/* HORARIOS */}
         {tab === "horarios" && (
-          <WorkScheduleManagerTab restaurantId={rid} employees={employees} workSchedules={data?.workSchedules??{}} notifications={data?.notifications??[]} managers={data?.managers??[]} currentManagerName={currentUser?.name ?? (isOwner?"Admin AppTip":"Gestor")} onUpdate={onUpdate} communications={data?.communications??[]} isOwner={isOwner} />
+          <div>
+            {isOwner && <div style={{display:"flex",justifyContent:"flex-end",padding:"12px 16px 0"}}>
+              <button onClick={()=>{
+                const ws = data?.workSchedules?.[rid];
+                const ok = resetTab("horarios","Horários",()=>({workSchedules:ws}));
+                if(ok){ const w={...data?.workSchedules}; delete w[rid]; onUpdate("workSchedules",w); onUpdate("_toast","🗑️ Horários enviados para a lixeira"); }
+              }} style={{...S.btnSecondary,fontSize:12,color:"var(--red)",borderColor:"var(--red)44"}}>🗑️ Resetar horários</button>
+            </div>}
+            <WorkScheduleManagerTab restaurantId={rid} employees={employees} workSchedules={data?.workSchedules??{}} notifications={data?.notifications??[]} managers={data?.managers??[]} currentManagerName={currentUser?.name ?? (isOwner?"Admin AppTip":"Gestor")} onUpdate={onUpdate} communications={data?.communications??[]} isOwner={isOwner} />
+          </div>
         )}
 
         {/* NOTIFICAÇÕES */}
@@ -3899,8 +3979,8 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }
   const notifications = data?.notifications ?? [];
   const unreadNotifs = notifications.filter(n => !n.read && n.targetRole === "admin").length;
   const isMaster = currentUser?.isMaster === true;
-  const trash = data?.trash ?? { restaurants:[], managers:[], employees:[] };
-  const trashCount = (trash.restaurants?.length??0) + (trash.managers?.length??0) + (trash.employees?.length??0);
+  const trash = data?.trash ?? { restaurants:[], managers:[], employees:[], tabData:[] };
+  const trashCount = (trash.restaurants?.length??0) + (trash.managers?.length??0) + (trash.employees?.length??0) + (trash.tabData?.length??0);
   const [restTab, setRestTab] = useState("operacional");
   const [filtroFinanceiro, setFiltroFinanceiro] = useState("todos");
   const PIX_PADRAO = "11985499821";
@@ -5069,23 +5149,54 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }
 
         {/* LIXEIRA — só master */}
         {tab === "trash" && isMaster && (() => {
+          const cutoff7  = new Date(Date.now() - 7  * 24*60*60*1000).toISOString();
+          const cutoff30 = new Date(Date.now() - 30 * 24*60*60*1000).toISOString();
+
           const allItems = [
-            ...(trash.restaurants??[]).map(x=>({...x,_type:"restaurants",_icon:"🏢"})),
-            ...(trash.managers??[]).map(x=>({...x,_type:"managers",_icon:"👔"})),
-            ...(trash.employees??[]).map(x=>({...x,_type:"employees",_icon:"👤"})),
+            ...(trash.restaurants??[]).map(x=>({...x,_type:"restaurants",_icon:"🏢",_days:30})),
+            ...(trash.managers??[]).map(x=>({...x,_type:"managers",_icon:"👔",_days:30})),
+            ...(trash.employees??[]).map(x=>({...x,_type:"employees",_icon:"👤",_days:30})),
           ].sort((a,b)=>(b.deletedAt??"").localeCompare(a.deletedAt??""));
+
+          const tabItems = (trash.tabData??[])
+            .filter(x=>x.deletedAt > cutoff7)
+            .sort((a,b)=>(b.deletedAt??"").localeCompare(a.deletedAt??""));
+
+          const tabIcons = { tips:"💸", schedule:"📅", roles:"🏷️", employees:"👥", comunicados:"📢", faq:"❓", dp:"💬", horarios:"🕐" };
+
+          function restoreTab(entry) {
+            const { tabKey, snapshot, restaurantId } = entry;
+            if (tabKey === "tips") onUpdate("tips", [...(data?.tips??[]).filter(t=>t.restaurantId!==restaurantId), ...(snapshot.tips??[])]);
+            if (tabKey === "schedule") onUpdate("schedules", {...(data?.schedules??{}), [restaurantId]: snapshot.schedules});
+            if (tabKey === "roles") onUpdate("roles", [...(data?.roles??[]).filter(r=>r.restaurantId!==restaurantId), ...(snapshot.roles??[])]);
+            if (tabKey === "employees") onUpdate("employees", [...(data?.employees??[]).filter(e=>e.restaurantId!==restaurantId), ...(snapshot.employees??[])]);
+            if (tabKey === "comunicados") onUpdate("communications", [...(data?.communications??[]).filter(c=>c.restaurantId!==restaurantId), ...(snapshot.communications??[])]);
+            if (tabKey === "faq") onUpdate("faq", {...(data?.faq??{}), [restaurantId]: snapshot.faq});
+            if (tabKey === "dp") onUpdate("dpMessages", [...(data?.dpMessages??[]).filter(m=>m.restaurantId!==restaurantId), ...(snapshot.dpMessages??[])]);
+            if (tabKey === "horarios") onUpdate("workSchedules", {...(data?.workSchedules??{}), [restaurantId]: snapshot.workSchedules});
+            onUpdate("trash", {...trash, tabData:(trash.tabData??[]).filter(x=>x.id!==entry.id)});
+            onUpdate("_toast", `↩ ${entry.tabLabel} restaurado!`);
+          }
+
+          function hardDeleteTab(entry) {
+            if(!window.confirm(`Excluir permanentemente "${entry.tabLabel}" de ${entry.restaurantName}? Não tem volta.`)) return;
+            onUpdate("trash", {...trash, tabData:(trash.tabData??[]).filter(x=>x.id!==entry.id)});
+            onUpdate("_toast","🗑️ Excluído permanentemente.");
+          }
+
+          const totalCount = allItems.length + tabItems.length;
 
           return (
             <div>
               <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}}>
                 <div>
                   <h3 style={{color:"var(--text)",fontSize:16,fontWeight:700,margin:"0 0 4px"}}>🗑️ Lixeira</h3>
-                  <p style={{color:"var(--text3)",fontSize:13,margin:0}}>Itens excluídos. Só você (Master) pode ver e restaurar.</p>
+                  <p style={{color:"var(--text3)",fontSize:13,margin:0}}>Restaurantes/gestores/empregados: 30 dias · Dados de abas: 7 dias</p>
                 </div>
-                {allItems.length > 0 && (
+                {totalCount > 0 && (
                   <button onClick={()=>{
                     if(!window.confirm("Esvaziar lixeira permanentemente? Esta ação não pode ser desfeita.")) return;
-                    onUpdate("trash", {restaurants:[],managers:[],employees:[]});
+                    onUpdate("trash", {restaurants:[],managers:[],employees:[],tabData:[]});
                     onUpdate("_toast","🗑️ Lixeira esvaziada.");
                   }} style={{padding:"8px 16px",borderRadius:10,border:"1px solid var(--red)33",background:"transparent",color:"var(--red)",cursor:"pointer",fontFamily:"'DM Sans',sans-serif",fontSize:13,fontWeight:600}}>
                     Esvaziar tudo
@@ -5093,48 +5204,91 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }
                 )}
               </div>
 
-              {allItems.length === 0 && (
+              {totalCount === 0 && (
                 <div style={{...S.card,textAlign:"center",padding:48}}>
                   <div style={{fontSize:36,marginBottom:12}}>✨</div>
                   <p style={{color:"var(--text3)",fontSize:14}}>Lixeira vazia.</p>
                 </div>
               )}
 
-              <div style={{display:"flex",flexDirection:"column",gap:10}}>
-                {allItems.map(item=>{
-                  const deletedDaysAgo = item.deletedAt ? Math.floor((new Date()-new Date(item.deletedAt))/(1000*60*60*24)) : 0;
-                  const daysLeft = 30 - deletedDaysAgo;
-                  return (
-                    <div key={item.id} style={{...S.card,opacity:0.85}}>
-                      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-                        <div>
-                          <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:4}}>
-                            <span style={{fontSize:18}}>{item._icon}</span>
-                            <span style={{color:"var(--text)",fontWeight:700,fontSize:14,textDecoration:"line-through",opacity:0.7}}>{item.name}</span>
-                          </div>
-                          <div style={{color:"var(--text3)",fontSize:12}}>
-                            Excluído por {item.deletedBy} · {item.deletedAt ? new Date(item.deletedAt).toLocaleDateString("pt-BR") : "—"}
-                            {daysLeft > 0
-                              ? <span style={{color:daysLeft<7?"var(--red)":"var(--text3)",marginLeft:8}}>· {daysLeft}d até exclusão permanente</span>
-                              : <span style={{color:"var(--red)",marginLeft:8}}>· Pronto para exclusão</span>
-                            }
+              {/* Dados de abas — 7 dias */}
+              {tabItems.length > 0 && (
+                <div style={{marginBottom:20}}>
+                  <h4 style={{color:"var(--text2)",fontSize:13,fontWeight:700,margin:"0 0 10px",textTransform:"uppercase",letterSpacing:0.5}}>📂 Dados de abas — 7 dias</h4>
+                  <div style={{display:"flex",flexDirection:"column",gap:8}}>
+                    {tabItems.map(item=>{
+                      const daysAgo = Math.floor((new Date()-new Date(item.deletedAt))/(1000*60*60*24));
+                      const daysLeft = 7 - daysAgo;
+                      return (
+                        <div key={item.id} style={{...S.card,opacity:0.9,border:`1px solid var(--border)`}}>
+                          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                            <div>
+                              <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:4}}>
+                                <span style={{fontSize:16}}>{tabIcons[item.tabKey]??""}</span>
+                                <span style={{color:"var(--text)",fontWeight:700,fontSize:14}}>{item.tabLabel}</span>
+                                <span style={{color:"var(--text3)",fontSize:12}}>— {item.restaurantName}</span>
+                              </div>
+                              <div style={{color:"var(--text3)",fontSize:12}}>
+                                Resetado em {new Date(item.deletedAt).toLocaleDateString("pt-BR")}
+                                <span style={{color:daysLeft<=2?"var(--red)":"var(--text3)",marginLeft:8}}>· {daysLeft}d restante{daysLeft!==1?"s":""}</span>
+                              </div>
+                            </div>
+                            <div style={{display:"flex",gap:8}}>
+                              <button onClick={()=>restoreTab(item)}
+                                style={{padding:"7px 16px",borderRadius:8,border:"1px solid var(--green)44",background:"var(--green-bg)",color:"var(--green)",cursor:"pointer",fontFamily:"'DM Sans',sans-serif",fontSize:13,fontWeight:700}}>
+                                ↩ Restaurar
+                              </button>
+                              <button onClick={()=>hardDeleteTab(item)}
+                                style={{padding:"7px 12px",borderRadius:8,border:"1px solid var(--red)33",background:"transparent",color:"var(--red)",cursor:"pointer",fontFamily:"'DM Sans',sans-serif",fontSize:12}}>
+                                🗑️
+                              </button>
+                            </div>
                           </div>
                         </div>
-                        <div style={{display:"flex",gap:8}}>
-                          <button onClick={()=>restore(item._type, item)}
-                            style={{padding:"7px 16px",borderRadius:8,border:"1px solid var(--green)44",background:"var(--green-bg)",color:"var(--green)",cursor:"pointer",fontFamily:"'DM Sans',sans-serif",fontSize:13,fontWeight:700}}>
-                            ↩ Restaurar
-                          </button>
-                          <button onClick={()=>hardDelete(item._type, item)}
-                            style={{padding:"7px 12px",borderRadius:8,border:"1px solid var(--red)33",background:"transparent",color:"var(--red)",cursor:"pointer",fontFamily:"'DM Sans',sans-serif",fontSize:12}}>
-                            🗑️
-                          </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {/* Restaurantes, gestores, empregados — 30 dias */}
+              {allItems.length > 0 && (
+                <div>
+                  <h4 style={{color:"var(--text2)",fontSize:13,fontWeight:700,margin:"0 0 10px",textTransform:"uppercase",letterSpacing:0.5}}>🏢 Restaurantes · Gestores · Empregados — 30 dias</h4>
+                  <div style={{display:"flex",flexDirection:"column",gap:10}}>
+                    {allItems.map(item=>{
+                      const deletedDaysAgo = item.deletedAt ? Math.floor((new Date()-new Date(item.deletedAt))/(1000*60*60*24)) : 0;
+                      const daysLeft = 30 - deletedDaysAgo;
+                      return (
+                        <div key={item.id} style={{...S.card,opacity:0.85}}>
+                          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                            <div>
+                              <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:4}}>
+                                <span style={{fontSize:18}}>{item._icon}</span>
+                                <span style={{color:"var(--text)",fontWeight:700,fontSize:14,textDecoration:"line-through",opacity:0.7}}>{item.name}</span>
+                              </div>
+                              <div style={{color:"var(--text3)",fontSize:12}}>
+                                Excluído em {item.deletedAt ? new Date(item.deletedAt).toLocaleDateString("pt-BR") : "—"}
+                                <span style={{color:daysLeft<7?"var(--red)":"var(--text3)",marginLeft:8}}>· {daysLeft}d até exclusão permanente</span>
+                              </div>
+                            </div>
+                            <div style={{display:"flex",gap:8}}>
+                              <button onClick={()=>restore(item._type, item)}
+                                style={{padding:"7px 16px",borderRadius:8,border:"1px solid var(--green)44",background:"var(--green-bg)",color:"var(--green)",cursor:"pointer",fontFamily:"'DM Sans',sans-serif",fontSize:13,fontWeight:700}}>
+                                ↩ Restaurar
+                              </button>
+                              <button onClick={()=>hardDelete(item._type, item)}
+                                style={{padding:"7px 12px",borderRadius:8,border:"1px solid var(--red)33",background:"transparent",color:"var(--red)",cursor:"pointer",fontFamily:"'DM Sans',sans-serif",fontSize:12}}>
+                                🗑️
+                              </button>
+                            </div>
+                          </div>
                         </div>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
             </div>
           );
         })()}
