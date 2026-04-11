@@ -1942,7 +1942,8 @@ function EmployeePortal({ employees, roles, tips, schedules, restaurants, commun
   const emp = employees.find(e => e.id === empId);
   const role = emp ? roles.find(r => r.id === emp.roleId) : null;
   const restaurant = emp ? restaurants.find(r => r.id === emp.restaurantId) : null;
-  const isFirstAccess = emp && (emp.mustChangePin || String(emp.pin) === String(emp.empCode?.slice(-4)) || String(emp.pin) === String(emp.empCode));
+  const empNumericPin = (emp?.empCode ?? "").replace(/\D/g, "");
+  const isFirstAccess = emp && (emp.mustChangePin || String(emp.pin) === empNumericPin || String(emp.pin) === String(emp.empCode));
   const needsCpf = emp && !emp.cpf;
 
   const mk = monthKey(year, month);
@@ -2603,9 +2604,10 @@ function EmployeeSpreadsheet({ restEmps, restRoles, rid, employees, onUpdate, re
   }
 
   function resetPin(emp) {
-    if (!window.confirm(`Resetar PIN de "${emp.name}"?\n\nO PIN voltará para o código do empregado (${emp.empCode}) e ele será obrigado a trocar no próximo acesso.`)) return;
-    onUpdate("employees", employees.map(x => x.id===emp.id ? {...x, pin: emp.empCode, mustChangePin: true} : x));
-    onUpdate("_toast", `🔑 PIN de ${emp.name} resetado para ${emp.empCode}`);
+    const numericPin = (emp.empCode ?? "").replace(/\D/g, ""); // só os números ex: "0001"
+    if (!window.confirm(`Resetar PIN de "${emp.name}"?\n\nO PIN voltará para ${numericPin} (números do ID) e ele será obrigado a trocar no próximo acesso.`)) return;
+    onUpdate("employees", employees.map(x => x.id===emp.id ? {...x, pin: numericPin, mustChangePin: true} : x));
+    onUpdate("_toast", `🔑 PIN de ${emp.name} resetado para ${numericPin}`);
   }
 
   return (
