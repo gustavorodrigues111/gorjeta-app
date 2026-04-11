@@ -1,4 +1,4 @@
-// AppTip v4.6 — 2026-04-11f
+// AppTip v4.6 — 2026-04-11g
 import { useState, useEffect } from "react";
 import { db } from "./firebase";
 import { doc, getDoc, setDoc, deleteDoc, collection, getDocs } from "firebase/firestore";
@@ -4227,17 +4227,15 @@ Responda SOMENTE com o JSON abaixo, sem texto adicional, sem markdown:
 
                 console.log("confirmarEscala — mesKey:", mesKey, "rid:", rid, "aplicados:", aplicados);
 
-                // Fecha o modal ANTES de salvar para não causar reset de estado
+                // Fecha o modal
                 setShowAiSched(false);
                 setAiSchedPreview(null);
                 setAiSchedInput("");
 
-                // Salva depois de fechar
+                // Salva imediatamente
                 const newSched = { ...schedules, [rid]: { ...newRestSched, [mesKey]: newMesSched } };
-                setTimeout(() => {
-                  onUpdate("schedules", newSched);
-                  onUpdate("_toast", `✨ Escala atualizada! (${aplicados} empregado${aplicados!==1?"s":""} afetado${aplicados!==1?"s":""})`);
-                }, 50);
+                onUpdate("schedules", newSched);
+                onUpdate("_toast", `✨ Escala atualizada! (${aplicados} empregado${aplicados!==1?"s":""} afetado${aplicados!==1?"s":""})`);
               }
 
               return (
@@ -7760,10 +7758,11 @@ export default function App() {
     }
     const setters = { owners:setOwners, managers:setManagers, restaurants:setRestaurants, employees:setEmployees, roles:setRoles, tips:setTips, splits:setSplits, schedules:setSchedules, communications:setCommunications, commAcks:setCommAcks, faq:setFaq, dpMessages:setDpMessages, workSchedules:setWorkSchedules, notifications:setNotifications, noTipDays:setNoTipDays, trash:setTrash };
     const keys    = { owners:K.owners, managers:K.managers, restaurants:K.restaurants, employees:K.employees, roles:K.roles, tips:K.tips, splits:K.splits, schedules:K.schedules, communications:K.communications, commAcks:K.commAcks, faq:K.faq, dpMessages:K.dpMessages, workSchedules:K.workSchedules, notifications:K.notifications, noTipDays:K.noTipDays, trash:K.trash };
+    console.log("handleUpdate field:", field, "has setter:", !!setters[field], "has key:", !!keys[field]);
     setters[field]?.(value);
-    await save(keys[field], value);
+    if (keys[field]) await save(keys[field], value);
     const labels = { owners:"Admins atualizados", managers:"Gestores atualizados", restaurants:"Restaurantes atualizados", employees:"Empregados atualizados", roles:"Cargos atualizados", tips:"Gorjetas atualizadas", splits:"Percentuais salvos", schedules:"Escala atualizada", communications:"Comunicados atualizados", commAcks:"Ciências atualizadas", faq:"FAQ atualizado", dpMessages:"Mensagem enviada", workSchedules:"Horários salvos", notifications:"Notificações atualizadas" };
-    setToast(labels[field] ?? "Salvo!");
+    setToast(labels[field] ?? value ?? "Salvo!");
   }
 
   function doLogout() {
@@ -7811,7 +7810,7 @@ export default function App() {
       {view === "home" && <Home onLogin={()=>setView("login")} />}
       <Toast msg={toast} onClose={()=>setToast("")} />
       {/* Rodapé de versão */}
-      <div style={{position:"fixed",bottom:8,right:12,fontSize:10,color:"var(--text3)",fontFamily:"'DM Mono',monospace",opacity:0.45,pointerEvents:"none",zIndex:100}}>v4.6f</div>
+      <div style={{position:"fixed",bottom:8,right:12,fontSize:10,color:"var(--text3)",fontFamily:"'DM Mono',monospace",opacity:0.45,pointerEvents:"none",zIndex:100}}>v4.6g</div>
 
       {/* Modal Política de Privacidade */}
       <div id="apptip-privacy" style={{display:"none",position:"fixed",inset:0,background:"rgba(0,0,0,0.5)",zIndex:9999,alignItems:"center",justifyContent:"center",padding:20}} onClick={e=>{if(e.target===e.currentTarget)e.currentTarget.style.display="none";}}>
