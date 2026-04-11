@@ -2218,7 +2218,7 @@ function RoleSpreadsheet({ restRoles, rid, roles, onUpdate }) {
   const [editRows, setEditRows] = useState({});
   const [saved, setSaved] = useState({});
 
-  const ROLE_COLS = "2fr 80px 110px 120px";
+  const ROLE_COLS = "1.2fr 70px 120px 160px";
 
   function getRow(r) { return editRows[r.id] ?? { name: r.name, area: r.area, points: r.points === 0 ? "0" : String(r.points || "") }; }
   function setRow(id, field, val) { setEditRows(prev => ({ ...prev, [id]: { ...getRow({ id }), [field]: val } })); }
