@@ -2648,6 +2648,52 @@ function RoleSpreadsheet({ restRoles, rid, roles, onUpdate }) {
   const [newRow, setNewRow] = useState(blank());
   const [editRows, setEditRows] = useState({});
   const [saved, setSaved] = useState({});
+  const [aiInput, setAiInput] = useState("");
+  const [aiLoading, setAiLoading] = useState(false);
+  const [aiError, setAiError] = useState("");
+  const [showAi, setShowAi] = useState(false);
+
+  async function handleAiCargos() {
+    if (!aiInput.trim()) return;
+    setAiLoading(true); setAiError("");
+    try {
+      const prompt = `Você é um assistente de gestão de restaurantes. O gestor forneceu uma lista de cargos. Extraia os cargos e estruture como JSON.
+
+Entrada do gestor: "${aiInput.trim()}"
+
+Regras:
+- "área" deve ser uma dessas: Bar, Cozinha, Salão, Limpeza, Produção
+- "pontos" deve ser um número entre 0 e 20 (0 = sem gorjeta)
+- Se não mencionar pontos, estime baseado na hierarquia do cargo (ex: Gerente=10, Subchef=9, Garçom=6, Auxiliar=3)
+- Se não mencionar área, deduza pelo nome do cargo
+
+Responda APENAS com JSON válido:
+{"cargos": [{"nome": "...", "area": "...", "pontos": 6, "semGorjeta": false}]}`;
+
+      const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_KEY}`, {
+        method:"POST", headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({contents:[{parts:[{text:prompt}]}]})
+      });
+      const data = await res.json();
+      const text = data?.candidates?.[0]?.content?.parts?.[0]?.text ?? "";
+      const result = JSON.parse(text.replace(/```json|```/g,"").trim());
+      const novos = result.cargos.map(c => ({
+        id: `role-${Date.now()}-${Math.random().toString(36).slice(2,6)}`,
+        restaurantId: rid,
+        name: c.nome,
+        area: c.area,
+        points: c.semGorjeta ? 0 : (c.pontos ?? 1),
+        noTip: c.semGorjeta ?? false,
+        inactive: false,
+      }));
+      onUpdate("roles", [...roles, ...novos]);
+      setAiInput(""); setShowAi(false);
+      onUpdate("_toast", `✨ ${novos.length} cargo${novos.length>1?"s":""} adicionado${novos.length>1?"s":""} pela IA!`);
+    } catch(e) {
+      setAiError("Não foi possível processar. Tente reformular.");
+    }
+    setAiLoading(false);
+  }
 
   const ROLE_COLS = "1.2fr 70px 120px 160px";
 
@@ -2713,7 +2759,34 @@ function RoleSpreadsheet({ restRoles, rid, roles, onUpdate }) {
 
   return (
     <div style={{ fontFamily: "'DM Mono',monospace" }}>
-      <p style={{ color: "var(--text3)", fontSize: 12, marginBottom: 16 }}>Edite inline e clique em Salvar. Nova linha no topo para adicionar.</p>
+      <p style={{ color: "var(--text3)", fontSize: 12, marginBottom: 12 }}>Edite inline e clique em Salvar. Nova linha no topo para adicionar.</p>
+
+      {/* Assistente IA */}
+      <div style={{marginBottom:14}}>
+        <button onClick={()=>{setShowAi(!showAi);setAiError("");}}
+          style={{...S.btnSecondary,fontSize:12,display:"inline-flex",alignItems:"center",gap:6,padding:"7px 14px",
+            background:showAi?"var(--ac-bg)":undefined,borderColor:showAi?"var(--ac)":undefined,color:showAi?"var(--ac-text)":undefined}}>
+          ✨ Importar cargos com IA
+        </button>
+        {showAi && (
+          <div style={{marginTop:10,padding:"14px",borderRadius:12,background:"var(--ac-bg)",border:"1px solid var(--ac)33"}}>
+            <p style={{color:"var(--text2)",fontSize:13,margin:"0 0 6px",fontWeight:600}}>✨ Assistente de cargos — Gemini</p>
+            <p style={{color:"var(--text3)",fontSize:12,margin:"0 0 6px",lineHeight:1.5}}>Descreva os cargos livremente ou cole uma lista. A IA identifica nome, área e pontos.</p>
+            <p style={{color:"var(--text3)",fontSize:11,margin:"0 0 10px",fontStyle:"italic"}}>Ex: "Garçom 6pts Salão, Barman 7pts Bar" ou "temos garçons, ajudantes de cozinha e um gerente"</p>
+            <textarea value={aiInput} onChange={e=>setAiInput(e.target.value)}
+              placeholder="Cole ou descreva os cargos aqui..." rows={4}
+              style={{...S.input,resize:"vertical",marginBottom:8,fontSize:13}}/>
+            {aiError && <p style={{color:"var(--red)",fontSize:12,margin:"0 0 8px"}}>{aiError}</p>}
+            <div style={{display:"flex",gap:8}}>
+              <button onClick={handleAiCargos} disabled={!aiInput.trim()||aiLoading}
+                style={{...S.btnPrimary,flex:1,fontSize:13,opacity:(!aiInput.trim()||aiLoading)?0.6:1}}>
+                {aiLoading?"✨ Processando...":"✨ Criar cargos"}
+              </button>
+              <button onClick={()=>{setShowAi(false);setAiInput("");setAiError("");}} style={S.btnSecondary}>Cancelar</button>
+            </div>
+          </div>
+        )}
+      </div>
 
       {/* Cabeçalho */}
       <div style={{ display:"grid", gridTemplateColumns:ROLE_COLS, gap:6, marginBottom:6, padding:"0 8px" }}>
@@ -2846,6 +2919,69 @@ function EmployeeSpreadsheet({ restEmps, restRoles, rid, employees, onUpdate, re
   const [editRows, setEditRows] = useState({});
   const [saved, setSaved] = useState({});
   const [showInactive, setShowInactive] = useState(false);
+  const [showAiEmp, setShowAiEmp] = useState(false);
+  const [aiEmpInput, setAiEmpInput] = useState("");
+  const [aiEmpLoading, setAiEmpLoading] = useState(false);
+  const [aiEmpError, setAiEmpError] = useState("");
+
+  async function handleAiEmpregados() {
+    if (!aiEmpInput.trim()) return;
+    setAiEmpLoading(true); setAiEmpError("");
+    const cargosDisponiveis = restRoles.filter(r=>!r.inactive).map(r=>`${r.name} (id:${r.id})`).join(", ");
+    try {
+      const prompt = `Você é um assistente de gestão de restaurantes. O gestor forneceu uma lista de empregados. Extraia e estruture como JSON.
+
+Cargos disponíveis no restaurante: ${cargosDisponiveis || "nenhum cadastrado"}
+Entrada do gestor: "${aiEmpInput.trim()}"
+
+Regras:
+- "nome" é obrigatório (nome completo)
+- "cargoId" deve ser o id do cargo da lista acima se conseguir identificar, senão null
+- "admissao" no formato YYYY-MM-DD, se não informado use hoje: ${today()}
+- "cpf" só se explicitamente informado, senão null
+
+Responda APENAS com JSON válido:
+{"empregados": [{"nome": "...", "cargoId": "...", "admissao": "2025-01-15", "cpf": null}]}`;
+
+      const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_KEY}`, {
+        method:"POST", headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({contents:[{parts:[{text:prompt}]}]})
+      });
+      const data = await res.json();
+      const text = data?.candidates?.[0]?.content?.parts?.[0]?.text ?? "";
+      const result = JSON.parse(text.replace(/```json|```/g,"").trim());
+
+      const restCode = restCode_ || "XXX";
+      let seq = nextEmpSeq(employees, restCode);
+      const novos = result.empregados.map(e => {
+        const empCode = makeEmpCode(restCode, seq);
+        const pin = String(seq).padStart(4,"0");
+        seq++;
+        return {
+          id: empCode,
+          restaurantId: rid,
+          name: e.nome,
+          cpf: e.cpf || "",
+          admission: e.admissao || today(),
+          pin,
+          roleId: e.cargoId || "",
+          mustChangePin: true,
+        };
+      });
+
+      if (activeCount + novos.length > plano.empMax) {
+        setAiEmpError(`Limite do plano: ${plano.empMax} empregados. Você tem ${activeCount} ativos e está tentando adicionar ${novos.length}.`);
+        setAiEmpLoading(false); return;
+      }
+
+      onUpdate("employees", [...employees, ...novos]);
+      setAiEmpInput(""); setShowAiEmp(false);
+      onUpdate("_toast", `✨ ${novos.length} empregado${novos.length>1?"s":""} adicionado${novos.length>1?"s":""} pela IA!`);
+    } catch(e) {
+      setAiEmpError("Não foi possível processar. Tente reformular.");
+    }
+    setAiEmpLoading(false);
+  }
 
   const sorted = [...restEmps].sort((a,b) => {
     const rA = restRoles.find(r=>r.id===a.roleId);
@@ -2916,6 +3052,36 @@ function EmployeeSpreadsheet({ restEmps, restRoles, rid, employees, onUpdate, re
           Inativos ({inactiveEmps.length}){isOwner && inactiveEmps.length>0 && " · clique ✕ p/ excluir"}
         </button>
       </div>
+
+      {/* Assistente IA para empregados */}
+      {!showInactive && (
+        <div style={{marginBottom:14}}>
+          <button onClick={()=>{setShowAiEmp(!showAiEmp);setAiEmpError("");}}
+            style={{...S.btnSecondary,fontSize:12,display:"inline-flex",alignItems:"center",gap:6,padding:"7px 14px",
+              background:showAiEmp?"var(--ac-bg)":undefined,borderColor:showAiEmp?"var(--ac)":undefined,color:showAiEmp?"var(--ac-text)":undefined}}>
+            ✨ Importar empregados com IA
+          </button>
+          {showAiEmp && (
+            <div style={{marginTop:10,padding:"14px",borderRadius:12,background:"var(--ac-bg)",border:"1px solid var(--ac)33"}}>
+              <p style={{color:"var(--text2)",fontSize:13,margin:"0 0 6px",fontWeight:600}}>✨ Assistente de empregados — Gemini</p>
+              <p style={{color:"var(--text3)",fontSize:12,margin:"0 0 6px",lineHeight:1.5}}>Cole uma lista de empregados. A IA identifica nome, cargo e data de admissão. PIN e CPF precisam ser ajustados manualmente.</p>
+              <p style={{color:"var(--text3)",fontSize:11,margin:"0 0 10px",fontStyle:"italic"}}>Ex: "João Silva, garçom, admitido 01/03/2025; Maria Souza, barman; Pedro Lima, subchef desde jan/25"</p>
+              <textarea value={aiEmpInput} onChange={e=>setAiEmpInput(e.target.value)}
+                placeholder="Cole ou descreva os empregados aqui..." rows={4}
+                style={{...S.input,resize:"vertical",marginBottom:8,fontSize:13}}/>
+              {aiEmpError && <p style={{color:"var(--red)",fontSize:12,margin:"0 0 8px"}}>{aiEmpError}</p>}
+              <div style={{display:"flex",gap:8}}>
+                <button onClick={handleAiEmpregados} disabled={!aiEmpInput.trim()||aiEmpLoading}
+                  style={{...S.btnPrimary,flex:1,fontSize:13,opacity:(!aiEmpInput.trim()||aiEmpLoading)?0.6:1}}>
+                  {aiEmpLoading?"✨ Processando...":"✨ Adicionar empregados"}
+                </button>
+                <button onClick={()=>{setShowAiEmp(false);setAiEmpInput("");setAiEmpError("");}} style={S.btnSecondary}>Cancelar</button>
+              </div>
+              <p style={{color:"var(--text3)",fontSize:11,margin:"10px 0 0",fontStyle:"italic"}}>⚠️ Revise os dados após importar — PIN inicial = sequência numérica, empregado deve trocar no 1º acesso.</p>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Cabeçalho */}
       <div style={{display:"grid",gridTemplateColumns:EMP_COLS,gap:6,padding:"4px 8px",marginBottom:4}}>
@@ -3037,6 +3203,14 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
   const [showRecalc, setShowRecalc] = useState(false);
   const [splitForm, setSplitForm]         = useState(null);
   const [schedArea, setSchedArea]         = useState("Todos");
+  const [showAiSched, setShowAiSched]     = useState(false);
+  const [aiSchedStep, setAiSchedStep]     = useState(0); // 0=inicio 1=ferias 2=excecoes 3=preview
+  const [aiSchedInput, setAiSchedInput]   = useState("");
+  const [aiSchedFerias, setAiSchedFerias] = useState("");
+  const [aiSchedExcec, setAiSchedExcec]   = useState("");
+  const [aiSchedLoading, setAiSchedLoading] = useState(false);
+  const [aiSchedError, setAiSchedError]   = useState("");
+  const [aiSchedPreview, setAiSchedPreview] = useState(null); // {schedules, resumo}
   const [showExport, setShowExport]       = useState(false);
 
   const empSummary = restEmps.map(e => {
@@ -3966,6 +4140,221 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
               ))}
             </div>
 
+            {/* Assistente IA de Escala */}
+            {(()=>{
+              const mesLabel = monthLabel(year, month);
+              const mesKey = mk;
+              const prevMonth = month === 0 ? 11 : month - 1;
+              const prevYear  = month === 0 ? year - 1 : year;
+              const prevMk = `${prevYear}-${String(prevMonth+1).padStart(2,"0")}`;
+              const hasPrevSched = areaEmps.some(e => schedules?.[rid]?.[prevMk]?.[e.id]);
+
+              async function gerarEscalaIA() {
+                setAiSchedLoading(true); setAiSchedError("");
+                try {
+                  const daysInMonth = new Date(year, month+1, 0).getDate();
+                  const empList = areaEmps.map(e => {
+                    const role = restRoles.find(r => r.id === e.roleId);
+                    return `${e.name} (id:${e.id}, cargo:${role?.name??"—"}, área:${role?.area??"—"})`;
+                  }).join("\n");
+
+                  // Mês anterior como base
+                  const prevSchedData = {};
+                  if (aiSchedInput === "anterior") {
+                    areaEmps.forEach(e => {
+                      const prev = schedules?.[rid]?.[prevMk]?.[e.id] ?? {};
+                      // Copia mas mantém só folgas/férias estruturais
+                      const copied = {};
+                      Object.entries(prev).forEach(([date, status]) => {
+                        // Ajusta para o novo mês — pega só o dia
+                        const day = date.slice(8);
+                        const newDate = `${year}-${String(month+1).padStart(2,"0")}-${day}`;
+                        const d = parseInt(day);
+                        if (d <= daysInMonth) copied[newDate] = status;
+                      });
+                      prevSchedData[e.id] = copied;
+                    });
+                  }
+
+                  const prompt = `Você é um assistente de gestão de escalas de restaurantes. Gere a escala do mês ${mesLabel} para os empregados abaixo.
+
+Empregados:
+${empList}
+
+Mês: ${mesLabel} (${daysInMonth} dias)
+Dias da semana do dia 1: ${["Dom","Seg","Ter","Qua","Qui","Sex","Sáb"][new Date(`${year}-${String(month+1).padStart(2,"0")}-01T12:00:00`).getDay()]}
+
+${aiSchedInput === "anterior" ? `Base: copiar mês anterior com ajustes` : `Base: gerar do zero`}
+${aiSchedFerias ? `Férias/ausências: ${aiSchedFerias}` : ""}
+${aiSchedExcec ? `Exceções e observações: ${aiSchedExcec}` : ""}
+
+Regras:
+- Status possíveis: "off" (folga), "comp" (compensação), "vac" (férias), "faultj" (falta justificada), "faultu" (falta injustificada)
+- Dias sem status = trabalhando normalmente
+- Empregados trabalham 5 ou 6 dias por semana tipicamente
+- Distribua folgas nos fins de semana de forma equilibrada
+- Se férias mencionadas, marque todos os dias do período como "vac"
+
+Responda APENAS com JSON válido:
+{
+  "resumo": "descrição breve do que foi gerado",
+  "escala": {
+    "empId": {"YYYY-MM-DD": "off", "YYYY-MM-DD": "vac"}
+  }
+}`;
+
+                  const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_KEY}`, {
+                    method:"POST", headers:{"Content-Type":"application/json"},
+                    body:JSON.stringify({contents:[{parts:[{text:prompt}]}]})
+                  });
+                  const data2 = await res.json();
+                  const text = data2?.candidates?.[0]?.content?.parts?.[0]?.text ?? "";
+                  const result = JSON.parse(text.replace(/```json|```/g,"").trim());
+
+                  // Mescla com base do mês anterior se solicitado
+                  const escalaFinal = {};
+                  areaEmps.forEach(e => {
+                    const base = aiSchedInput === "anterior" ? (prevSchedData[e.id] ?? {}) : {};
+                    const aiDays = result.escala?.[e.id] ?? {};
+                    escalaFinal[e.id] = { ...base, ...aiDays };
+                  });
+
+                  setAiSchedPreview({ escala: escalaFinal, resumo: result.resumo });
+                  setAiSchedStep(3);
+                } catch(e) {
+                  setAiSchedError("Erro ao gerar escala. Tente novamente.");
+                }
+                setAiSchedLoading(false);
+              }
+
+              function confirmarEscala() {
+                if (!aiSchedPreview) return;
+                let newSched = { ...schedules };
+                Object.entries(aiSchedPreview.escala).forEach(([empId, days]) => {
+                  newSched = {
+                    ...newSched,
+                    [rid]: {
+                      ...(newSched[rid] ?? {}),
+                      [mesKey]: {
+                        ...(newSched[rid]?.[mesKey] ?? {}),
+                        [empId]: { ...(newSched[rid]?.[mesKey]?.[empId] ?? {}), ...days }
+                      }
+                    }
+                  };
+                });
+                onUpdate("schedules", newSched);
+                onUpdate("_toast", "✨ Escala gerada pela IA aplicada!");
+                setShowAiSched(false);
+                setAiSchedStep(0);
+                setAiSchedPreview(null);
+                setAiSchedInput(""); setAiSchedFerias(""); setAiSchedExcec("");
+              }
+
+              return (
+                <div style={{marginBottom:14}}>
+                  <button onClick={()=>{setShowAiSched(!showAiSched);setAiSchedStep(0);setAiSchedError("");setAiSchedPreview(null);}}
+                    style={{...S.btnSecondary,fontSize:12,display:"inline-flex",alignItems:"center",gap:6,padding:"7px 14px",
+                      background:showAiSched?"var(--ac-bg)":undefined,borderColor:showAiSched?"var(--ac)":undefined,color:showAiSched?"var(--ac-text)":undefined}}>
+                    ✨ Gerar escala com IA
+                  </button>
+
+                  {showAiSched && (
+                    <div style={{marginTop:10,padding:"16px",borderRadius:12,background:"var(--ac-bg)",border:"1px solid var(--ac)33"}}>
+                      <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:12}}>
+                        <span style={{fontSize:16}}>✨</span>
+                        <span style={{color:"var(--ac-text)",fontWeight:700,fontSize:14}}>Assistente de Escala — {mesLabel}</span>
+                      </div>
+
+                      {/* Passo 0 — base */}
+                      {aiSchedStep === 0 && (
+                        <div>
+                          <p style={{color:"var(--text2)",fontSize:13,margin:"0 0 14px"}}>Como quer gerar a escala de <strong>{mesLabel}</strong>?</p>
+                          <div style={{display:"flex",flexDirection:"column",gap:8}}>
+                            {hasPrevSched && (
+                              <button onClick={()=>{setAiSchedInput("anterior");setAiSchedStep(1);}}
+                                style={{padding:"12px 16px",borderRadius:10,border:"1px solid var(--ac)44",background:"var(--card-bg)",cursor:"pointer",textAlign:"left",fontFamily:"'DM Sans',sans-serif"}}>
+                                <div style={{fontWeight:700,fontSize:14,color:"var(--text)"}}>📋 Copiar mês anterior</div>
+                                <div style={{color:"var(--text3)",fontSize:12,marginTop:3}}>Usa a escala de {monthLabel(prevYear,prevMonth)} como base e permite ajustes</div>
+                              </button>
+                            )}
+                            <button onClick={()=>{setAiSchedInput("novo");setAiSchedStep(1);}}
+                              style={{padding:"12px 16px",borderRadius:10,border:"1px solid var(--border)",background:"var(--card-bg)",cursor:"pointer",textAlign:"left",fontFamily:"'DM Sans',sans-serif"}}>
+                              <div style={{fontWeight:700,fontSize:14,color:"var(--text)"}}>✨ Gerar do zero</div>
+                              <div style={{color:"var(--text3)",fontSize:12,marginTop:3}}>A IA distribui trabalho e folgas equilibradamente</div>
+                            </button>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Passo 1 — férias/ausências */}
+                      {aiSchedStep === 1 && (
+                        <div>
+                          <p style={{color:"var(--text2)",fontSize:13,margin:"0 0 8px"}}>Algum empregado de férias ou com ausência prolongada em {mesLabel}?</p>
+                          <textarea value={aiSchedFerias} onChange={e=>setAiSchedFerias(e.target.value)}
+                            placeholder='Ex: "João de férias do dia 5 ao 20, Maria afastada a semana toda" — ou deixe em branco se não houver'
+                            rows={3} style={{...S.input,resize:"vertical",marginBottom:12,fontSize:13}}/>
+                          <div style={{display:"flex",gap:8}}>
+                            <button onClick={()=>setAiSchedStep(2)} style={{...S.btnPrimary,flex:1,fontSize:13}}>Próximo →</button>
+                            <button onClick={()=>setAiSchedStep(0)} style={S.btnSecondary}>← Voltar</button>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Passo 2 — exceções */}
+                      {aiSchedStep === 2 && (
+                        <div>
+                          <p style={{color:"var(--text2)",fontSize:13,margin:"0 0 8px"}}>Alguma outra observação ou exceção para este mês?</p>
+                          <textarea value={aiSchedExcec} onChange={e=>setAiSchedExcec(e.target.value)}
+                            placeholder='Ex: "Feriado dia 15, Pedro folga às segundas, Cozinha não trabalha domingo" — ou deixe em branco'
+                            rows={3} style={{...S.input,resize:"vertical",marginBottom:12,fontSize:13}}/>
+                          {aiSchedError && <p style={{color:"var(--red)",fontSize:12,margin:"0 0 8px"}}>{aiSchedError}</p>}
+                          <div style={{display:"flex",gap:8}}>
+                            <button onClick={gerarEscalaIA} disabled={aiSchedLoading}
+                              style={{...S.btnPrimary,flex:1,fontSize:13,opacity:aiSchedLoading?0.6:1}}>
+                              {aiSchedLoading?"✨ Gerando escala...":"✨ Gerar escala"}
+                            </button>
+                            <button onClick={()=>setAiSchedStep(1)} style={S.btnSecondary}>← Voltar</button>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Passo 3 — preview */}
+                      {aiSchedStep === 3 && aiSchedPreview && (
+                        <div>
+                          <div style={{padding:"12px 14px",borderRadius:10,background:"var(--card-bg)",border:"1px solid var(--green)33",marginBottom:12}}>
+                            <p style={{color:"var(--green)",fontWeight:700,fontSize:13,margin:"0 0 4px"}}>✅ Escala gerada!</p>
+                            <p style={{color:"var(--text2)",fontSize:13,margin:0,lineHeight:1.6}}>{aiSchedPreview.resumo}</p>
+                          </div>
+                          <div style={{padding:"10px 14px",borderRadius:10,background:"var(--bg2)",border:"1px solid var(--border)",marginBottom:12,maxHeight:200,overflowY:"auto"}}>
+                            {areaEmps.map(e => {
+                              const days = aiSchedPreview.escala[e.id] ?? {};
+                              const offs = Object.entries(days).filter(([,s])=>s===DAY_OFF).length;
+                              const vacs = Object.entries(days).filter(([,s])=>s===DAY_VACATION).length;
+                              const faultus = Object.entries(days).filter(([,s])=>s===DAY_FAULT_U).length;
+                              return (
+                                <div key={e.id} style={{display:"flex",justifyContent:"space-between",padding:"5px 0",borderBottom:"1px solid var(--border)",fontSize:12}}>
+                                  <span style={{color:"var(--text)"}}>{e.name}</span>
+                                  <span style={{color:"var(--text3)"}}>
+                                    {offs>0?`${offs} folga${offs>1?"s":""} `:""}{vacs>0?`${vacs} dia${vacs>1?"s":""} férias `:""}{faultus>0?`${faultus} falta`:""}{offs===0&&vacs===0&&faultus===0?"normal":""}
+                                  </span>
+                                </div>
+                              );
+                            })}
+                          </div>
+                          <p style={{color:"var(--text3)",fontSize:12,margin:"0 0 12px",fontStyle:"italic"}}>⚠️ Revise a escala gerada antes de confirmar. Você pode ajustar manualmente após aplicar.</p>
+                          <div style={{display:"flex",gap:8}}>
+                            <button onClick={confirmarEscala} style={{...S.btnPrimary,flex:1,fontSize:13}}>✅ Aplicar escala</button>
+                            <button onClick={()=>{setAiSchedStep(2);setAiSchedPreview(null);}} style={S.btnSecondary}>← Refazer</button>
+                            <button onClick={()=>{setShowAiSched(false);setAiSchedStep(0);setAiSchedPreview(null);}} style={{...S.btnSecondary,color:"var(--red)"}}>Cancelar</button>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
+
             {areaEmps.length === 0 && <p style={{color:"var(--text3)",textAlign:"center"}}>Nenhum empregado {schedArea === "Todos" ? "cadastrado" : "nesta área"}.</p>}
 
             {areaEmps.length > 0 && (() => {
@@ -4318,17 +4707,15 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                         <div>
                           <span style={{color:isOn?"var(--text)":"var(--text3)",fontSize:13,fontWeight:isOn?600:400}}>{label}</span>
                         </div>
-                        <button disabled={!adminOk} onClick={()=>{
-                          if(!adminOk) return;
+                        <button onClick={()=>{
                           const novoValor = !gestorOn;
-                          // Mapa de aba → FAQ automática relacionada
                           const tabFaqMap = { recibos:"__recibos__", dp:"__dp__", comunicados:"__comunicados__" };
                           const faqId = tabFaqMap[key];
                           const curFaqAuto = restaurant.tabsGestor?.faqAuto ?? {};
                           const novoFaqAuto = faqId ? { ...curFaqAuto, [faqId]: novoValor } : curFaqAuto;
                           const updated = restaurants.map(r=>r.id===rid?{...r,tabsGestor:{...(r.tabsGestor??{}),[key]:novoValor,faqAuto:novoFaqAuto}}:r);
                           onUpdate("restaurants",updated);
-                        }} style={{padding:"5px 14px",borderRadius:20,border:"none",background:!adminOk?"var(--border)":isOn?"var(--green)":"var(--border)",color:!adminOk?"#999":isOn?"#fff":"#555",fontWeight:700,cursor:adminOk?"pointer":"not-allowed",fontFamily:"'DM Mono',monospace",fontSize:12}}>
+                        }} style={{padding:"5px 14px",borderRadius:20,border:"none",background:isOn?"var(--green)":"var(--border)",color:isOn?"#fff":"#555",fontWeight:700,cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:12}}>
                           {isOn?"Visível":"Oculta"}
                         </button>
                       </div>
