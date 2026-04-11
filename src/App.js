@@ -6444,11 +6444,12 @@ function Home({ onLogin }) {
   const [formSending, setFormSending] = useState(false);
 
   async function sendForm() {
-    if (!formData.nome.trim() || !formData.email.trim()) return;
+    if (!formData.nome.trim()) return;
     setFormSending(true);
-    const subject = encodeURIComponent(`AppTip — Interesse de ${formData.restaurante || formData.nome}`);
-    const body = encodeURIComponent(`Nome: ${formData.nome}\nEmail: ${formData.email}\nRestaurante: ${formData.restaurante || "—"}\nNº empregados: ${formData.empregados || "—"}\n\nMensagem:\n${formData.mensagem}`);
-    window.location.href = `mailto:contato@apptip.app?subject=${subject}&body=${body}`;
+    const msg = encodeURIComponent(
+      `Olá! Tenho interesse no AppTip.\n\nNome: ${formData.nome}\nRestaurante: ${formData.restaurante || "—"}\nNº empregados: ${formData.empregados || "—"}${formData.mensagem ? `\n\nMensagem: ${formData.mensagem}` : ""}`
+    );
+    window.open(`https://wa.me/5511985499821?text=${msg}`, "_blank");
     setTimeout(() => { setFormSent(true); setFormSending(false); }, 800);
   }
 
@@ -6622,27 +6623,20 @@ function Home({ onLogin }) {
             <p style={{color:"#8c7a5e",fontSize:16}}>Solicite uma demonstração gratuita ou tire suas dúvidas</p>
           </div>
 
-          {/* Cards de contato */}
-          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:28}}>
-            <div style={{background:"#fff",borderRadius:14,padding:"20px",border:"1px solid #ede8df",textAlign:"center"}}>
-              <div style={{fontSize:28,marginBottom:8}}>📧</div>
-              <div style={{fontWeight:700,fontSize:14,color:"#1c1208",marginBottom:4}}>E-mail</div>
-              <a href="mailto:contato@apptip.app" style={{color:ac,fontSize:13,fontWeight:600,textDecoration:"none"}}>contato@apptip.app</a>
-              <div style={{color:"#b0996e",fontSize:11,marginTop:6}}>Para todos os contatos</div>
-            </div>
-            <div style={{background:"#fff",borderRadius:14,padding:"20px",border:"1px solid #ede8df",textAlign:"center"}}>
-              <div style={{fontSize:28,marginBottom:8}}>💬</div>
-              <div style={{fontWeight:700,fontSize:14,color:"#1c1208",marginBottom:4}}>WhatsApp</div>
-              <span style={{color:"#8c7a5e",fontSize:13}}>(11) 98549-9821</span>
-              <div style={{color:"#b0996e",fontSize:11,marginTop:6}}>Exclusivo para clientes</div>
-            </div>
+          {/* E-mail — único contato exposto */}
+          <div style={{background:"#fff",borderRadius:14,padding:"20px",border:"1px solid #ede8df",textAlign:"center",marginBottom:28}}>
+            <div style={{fontSize:28,marginBottom:8}}>📧</div>
+            <div style={{fontWeight:700,fontSize:14,color:"#1c1208",marginBottom:6}}>E-mail</div>
+            <a href="mailto:contato@apptip.app" style={{color:ac,fontSize:15,fontWeight:700,textDecoration:"none"}}>contato@apptip.app</a>
+            <div style={{color:"#b0996e",fontSize:12,marginTop:6}}>Para dúvidas, parcerias e suporte</div>
           </div>
 
+          {/* Formulário → envia via WhatsApp */}
           {formSent ? (
             <div style={{textAlign:"center",padding:"48px",background:"#fff",borderRadius:16,border:"1px solid #ede8df"}}>
               <div style={{fontSize:48,marginBottom:16}}>✅</div>
               <h3 style={{fontSize:20,fontWeight:700,margin:"0 0 8px",color:"#1c1208"}}>Mensagem enviada!</h3>
-              <p style={{color:"#8c7a5e"}}>Retornaremos pelo e-mail em breve. Obrigado pelo interesse!</p>
+              <p style={{color:"#8c7a5e"}}>Entraremos em contato em breve. Obrigado pelo interesse no AppTip!</p>
             </div>
           ) : (
             <div style={{background:"#fff",borderRadius:16,padding:"36px",border:"1px solid #ede8df",boxShadow:"0 4px 24px rgba(0,0,0,0.06)"}}>
@@ -6653,29 +6647,24 @@ function Home({ onLogin }) {
                     <input value={formData.nome} onChange={e=>setFormData({...formData,nome:e.target.value})} placeholder="Seu nome" style={{width:"100%",padding:"11px 14px",borderRadius:10,border:"1px solid #ede8df",fontFamily:"'DM Sans',sans-serif",fontSize:14,outline:"none",boxSizing:"border-box",background:"#faf8f4"}}/>
                   </div>
                   <div>
-                    <label style={{display:"block",fontSize:13,color:"#8c7a5e",marginBottom:6,fontWeight:600}}>Email *</label>
-                    <input value={formData.email} onChange={e=>setFormData({...formData,email:e.target.value})} type="email" placeholder="seu@email.com" style={{width:"100%",padding:"11px 14px",borderRadius:10,border:"1px solid #ede8df",fontFamily:"'DM Sans',sans-serif",fontSize:14,outline:"none",boxSizing:"border-box",background:"#faf8f4"}}/>
-                  </div>
-                </div>
-                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
-                  <div>
                     <label style={{display:"block",fontSize:13,color:"#8c7a5e",marginBottom:6,fontWeight:600}}>Restaurante</label>
                     <input value={formData.restaurante} onChange={e=>setFormData({...formData,restaurante:e.target.value})} placeholder="Nome do restaurante" style={{width:"100%",padding:"11px 14px",borderRadius:10,border:"1px solid #ede8df",fontFamily:"'DM Sans',sans-serif",fontSize:14,outline:"none",boxSizing:"border-box",background:"#faf8f4"}}/>
                   </div>
-                  <div>
-                    <label style={{display:"block",fontSize:13,color:"#8c7a5e",marginBottom:6,fontWeight:600}}>Nº de empregados</label>
-                    <input value={formData.empregados} onChange={e=>setFormData({...formData,empregados:e.target.value})} placeholder="Ex: 15" type="number" style={{width:"100%",padding:"11px 14px",borderRadius:10,border:"1px solid #ede8df",fontFamily:"'DM Sans',sans-serif",fontSize:14,outline:"none",boxSizing:"border-box",background:"#faf8f4"}}/>
-                  </div>
+                </div>
+                <div>
+                  <label style={{display:"block",fontSize:13,color:"#8c7a5e",marginBottom:6,fontWeight:600}}>Nº de empregados</label>
+                  <input value={formData.empregados} onChange={e=>setFormData({...formData,empregados:e.target.value})} placeholder="Ex: 15" type="number" style={{width:"100%",padding:"11px 14px",borderRadius:10,border:"1px solid #ede8df",fontFamily:"'DM Sans',sans-serif",fontSize:14,outline:"none",boxSizing:"border-box",background:"#faf8f4"}}/>
                 </div>
                 <div>
                   <label style={{display:"block",fontSize:13,color:"#8c7a5e",marginBottom:6,fontWeight:600}}>Mensagem</label>
-                  <textarea value={formData.mensagem} onChange={e=>setFormData({...formData,mensagem:e.target.value})} placeholder="Conte um pouco sobre seu restaurante..." rows={3} style={{width:"100%",padding:"11px 14px",borderRadius:10,border:"1px solid #ede8df",fontFamily:"'DM Sans',sans-serif",fontSize:14,outline:"none",resize:"vertical",boxSizing:"border-box",background:"#faf8f4"}}/>
+                  <textarea value={formData.mensagem} onChange={e=>setFormData({...formData,mensagem:e.target.value})} placeholder="Conte um pouco sobre seu restaurante e o que precisa..." rows={3} style={{width:"100%",padding:"11px 14px",borderRadius:10,border:"1px solid #ede8df",fontFamily:"'DM Sans',sans-serif",fontSize:14,outline:"none",resize:"vertical",boxSizing:"border-box",background:"#faf8f4"}}/>
                 </div>
-                <button onClick={sendForm} disabled={!formData.nome.trim()||!formData.email.trim()||formSending}
-                  style={{padding:"14px",borderRadius:12,border:"none",background:(!formData.nome.trim()||!formData.email.trim())?"#e8e0d0":ac,color:"#fff",fontWeight:700,fontSize:16,cursor:(!formData.nome.trim()||!formData.email.trim())?"not-allowed":"pointer",fontFamily:"'DM Sans',sans-serif",boxShadow:"0 4px 16px #d4a01744"}}>
-                  {formSending?"Abrindo e-mail...":"Enviar por e-mail →"}
+                <button onClick={sendForm} disabled={!formData.nome.trim()||formSending}
+                  style={{padding:"14px",borderRadius:12,border:"none",background:!formData.nome.trim()?"#e8e0d0":"#25d366",color:"#fff",fontWeight:700,fontSize:16,cursor:!formData.nome.trim()?"not-allowed":"pointer",fontFamily:"'DM Sans',sans-serif",boxShadow:"0 4px 16px #25d36633",display:"flex",alignItems:"center",justifyContent:"center",gap:8}}>
+                  <span style={{fontSize:18}}>💬</span>
+                  {formSending?"Abrindo WhatsApp...":"Enviar pelo WhatsApp →"}
                 </button>
-                <p style={{color:"#b0996e",fontSize:12,textAlign:"center",margin:0}}>📧 Sua mensagem será aberta no seu app de e-mail para envio a <strong>contato@apptip.app</strong></p>
+                <p style={{color:"#b0996e",fontSize:12,textAlign:"center",margin:0}}>Você será redirecionado para o WhatsApp para enviar a mensagem</p>
               </div>
             </div>
           )}
