@@ -1,4 +1,4 @@
-// AppTip v4.6 — 2026-04-11i
+// AppTip v4.7 — 2026-04-11j — fix: AI escala (Gemini+Groq fallback, normalização IDs, deep copy schedules)
 import { useState, useEffect } from "react";
 import { db } from "./firebase";
 import { doc, getDoc, setDoc, deleteDoc, collection, getDocs } from "firebase/firestore";
@@ -4150,61 +4150,130 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
               const mesLabel = monthLabel(year, month);
               const mesKey = mk;
 
+              // Helper: normalize escala keys from names → employee IDs
+              function normalizeEscalaKeys(escala) {
+                const nomeParaId = {};
+                restEmps.forEach(e => {
+                  nomeParaId[e.id] = e.id; // ID direto
+                  nomeParaId[e.name.toLowerCase().trim()] = e.id;
+                  nomeParaId[e.name.split(" ")[0].toLowerCase().trim()] = e.id;
+                  // sem acentos
+                  const semAcento = (s) => s.normalize("NFD").replace(/[\u0300-\u036f]/g,"").toLowerCase().trim();
+                  nomeParaId[semAcento(e.name)] = e.id;
+                  nomeParaId[semAcento(e.name.split(" ")[0])] = e.id;
+                });
+                const normalized = {};
+                Object.entries(escala).forEach(([key, days]) => {
+                  const semAcento = (s) => s.normalize("NFD").replace(/[\u0300-\u036f]/g,"").toLowerCase().trim();
+                  const empId = nomeParaId[key] ?? nomeParaId[key.toLowerCase().trim()] ?? nomeParaId[semAcento(key)] ?? null;
+                  if (empId && days && typeof days === "object") {
+                    // Merge if same empId already exists (LLM might use name AND id)
+                    normalized[empId] = { ...(normalized[empId] ?? {}), ...days };
+                  } else {
+                    console.warn("AI escala: chave não mapeada →", key);
+                  }
+                });
+                return normalized;
+              }
+
               async function gerarEscalaIA() {
                 setAiSchedLoading(true); setAiSchedError(""); setAiSchedPreview(null);
                 try {
                   const daysInMonth = new Date(year, month+1, 0).getDate();
                   const empList = areaEmps.map(e => {
                     const role = restRoles.find(r => r.id === e.roleId);
-                    return `- ID_EXATO: "${e.id}" | Nome: "${e.name}" | Cargo: ${role?.name??"—"}`;
+                    return `- id: "${e.id}" | nome: "${e.name}" | cargo: ${role?.name??"—"}`;
                   }).join("\n");
 
                   const diaSemana1 = ["Domingo","Segunda","Terça","Quarta","Quinta","Sexta","Sábado"][new Date(`${year}-${String(month+1).padStart(2,"0")}-01T12:00:00`).getDay()];
 
                   const prompt = `Você é um assistente de escalas de restaurante. Interprete a instrução abaixo e gere a escala.
 
-EMPREGADOS DO RESTAURANTE:
+EMPREGADOS:
 ${empList}
 
-MÊS: ${mesLabel} de ${year} — ${daysInMonth} dias. Dia 1 cai numa ${diaSemana1}.
+MÊS: ${mesLabel} de ${year} — ${daysInMonth} dias. Dia 1 = ${diaSemana1}.
 
 INSTRUÇÃO DO GESTOR:
 "${aiSchedInput.trim()}"
 
-REGRAS CRÍTICAS:
-- Use EXATAMENTE o valor do campo ID_EXATO como chave no JSON de saída
-- NÃO use o nome do empregado como chave, use sempre o ID_EXATO
-- Status: "off"=folga, "vac"=férias, "faultj"=falta justificada, "faultu"=falta injustificada, "comp"=compensação
-- Inclua APENAS dias com status especial. Dias normais de trabalho NÃO devem aparecer
-- Datas no formato YYYY-MM-DD usando o mês ${String(month+1).padStart(2,"0")} e ano ${year}
-- Se o gestor disser "toda segunda", calcule todas as segundas do mês
-- Se disser "hoje", use ${new Date().toISOString().slice(0,10)}
+REGRAS:
+- Chave de cada empregado no JSON = campo "id" exato (ex: "${areaEmps[0]?.id ?? "abc123"}")
+- Status possíveis: "off"=folga, "vac"=férias, "faultj"=falta justificada, "faultu"=falta injustificada, "comp"=compensação
+- Inclua APENAS dias com status especial (dias normais de trabalho não devem aparecer)
+- Datas no formato YYYY-MM-DD (mês ${String(month+1).padStart(2,"0")}, ano ${year})
+- "toda segunda" = calcule todas as segundas-feiras do mês
+- "hoje" = ${new Date().toISOString().slice(0,10)}
 
-Responda SOMENTE com o JSON abaixo, sem texto adicional, sem markdown:
-{"resumo":"resumo curto do que foi feito","escala":{"ID_EMPREGADO":{"YYYY-MM-DD":"status"}}}`;
+Responda SOMENTE com JSON:
+{"resumo":"resumo curto","escala":{"<id_do_empregado>":{"YYYY-MM-DD":"status"}}}`;
 
-                  const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-                    method:"POST",
-                    headers:{"Content-Type":"application/json","Authorization":`Bearer ${GROQ_KEY}`},
-                    body:JSON.stringify({
-                      model:"llama-3.3-70b-versatile",
-                      temperature:0.1,
-                      response_format:{type:"json_object"},
-                      messages:[
-                        {role:"system",content:"Você é um assistente especializado em escalas de restaurantes. Sempre responda APENAS com JSON válido, sem texto adicional."},
-                        {role:"user",content:prompt}
-                      ]
-                    })
-                  });
-                  const data2 = await res.json();
-                  const raw = data2?.choices?.[0]?.message?.content ?? "";
-                  const result = JSON.parse(raw.replace(/```json|```/g,"").trim());
+                  let result = null;
 
-                  if (!result.escala) throw new Error("Sem escala no retorno");
-                  setAiSchedPreview({ escala: result.escala, resumo: result.resumo ?? "Escala interpretada." });
+                  // Tenta Gemini primeiro (mais confiável para JSON)
+                  if (GEMINI_KEY) {
+                    try {
+                      const gRes = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_KEY}`, {
+                        method:"POST",
+                        headers:{"Content-Type":"application/json"},
+                        body:JSON.stringify({
+                          contents:[{parts:[{text:prompt}]}],
+                          generationConfig:{temperature:0.1,responseMimeType:"application/json"}
+                        })
+                      });
+                      if (gRes.ok) {
+                        const gData = await gRes.json();
+                        const raw = gData?.candidates?.[0]?.content?.parts?.[0]?.text ?? "";
+                        if (raw) result = JSON.parse(raw.replace(/```json|```/g,"").trim());
+                      }
+                    } catch(gemErr) {
+                      console.warn("Gemini escala fallback:", gemErr);
+                    }
+                  }
+
+                  // Fallback: Groq
+                  if (!result?.escala && GROQ_KEY) {
+                    const gqRes = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+                      method:"POST",
+                      headers:{"Content-Type":"application/json","Authorization":`Bearer ${GROQ_KEY}`},
+                      body:JSON.stringify({
+                        model:"llama-3.3-70b-versatile",
+                        temperature:0.1,
+                        response_format:{type:"json_object"},
+                        messages:[
+                          {role:"system",content:"Você é um assistente especializado em escalas de restaurantes. Sempre responda APENAS com JSON válido, sem texto adicional."},
+                          {role:"user",content:prompt}
+                        ]
+                      })
+                    });
+                    if (!gqRes.ok) {
+                      const errBody = await gqRes.text().catch(()=>"");
+                      console.error("Groq API error:", gqRes.status, errBody);
+                      throw new Error(`API retornou erro ${gqRes.status}`);
+                    }
+                    const gqData = await gqRes.json();
+                    const raw = gqData?.choices?.[0]?.message?.content ?? "";
+                    if (!raw) throw new Error("Resposta vazia da API");
+                    result = JSON.parse(raw.replace(/```json|```/g,"").trim());
+                  }
+
+                  if (!result?.escala) throw new Error("Sem escala no retorno da IA");
+
+                  // Normaliza chaves: nome → id
+                  const escalaNorm = normalizeEscalaKeys(result.escala);
+                  const matched = Object.keys(escalaNorm).length;
+                  const original = Object.keys(result.escala).length;
+                  if (matched === 0 && original > 0) {
+                    throw new Error("Nenhum empregado reconhecido na resposta da IA");
+                  }
+                  const warn = matched < original ? ` (${original - matched} empregado(s) não reconhecido(s))` : "";
+
+                  setAiSchedPreview({ escala: escalaNorm, resumo: (result.resumo ?? "Escala interpretada.") + warn });
                 } catch(e) {
                   console.error("AI sched error:", e);
-                  setAiSchedError("Não foi possível interpretar. Reformule a instrução e tente novamente.");
+                  setAiSchedError(e.message?.includes("API retornou") || e.message?.includes("Nenhum empregado")
+                    ? `❌ ${e.message}`
+                    : "Não foi possível interpretar. Reformule a instrução e tente novamente.");
                 }
                 setAiSchedLoading(false);
               }
@@ -4212,34 +4281,26 @@ Responda SOMENTE com o JSON abaixo, sem texto adicional, sem markdown:
               function confirmarEscala() {
                 if (!aiSchedPreview) return;
 
-                const nomeParaId = {};
-                restEmps.forEach(e => {
-                  nomeParaId[e.name.toLowerCase().trim()] = e.id;
-                  nomeParaId[e.name.split(" ")[0].toLowerCase().trim()] = e.id;
-                });
-
-                // Mesmo padrão do cycleStatus que funciona no clique manual
-                let updatedSched = { ...schedules };
-                Object.entries(aiSchedPreview.escala).forEach(([empKey, days]) => {
-                  const empId = restEmps.find(e => e.id === empKey)?.id
-                    ?? nomeParaId[empKey.toLowerCase().trim()]
-                    ?? null;
-                  if (!empId) return;
-                  const empDayMap = { ...(updatedSched?.[rid]?.[mk]?.[empId] ?? {}) };
+                // As chaves já foram normalizadas para IDs reais no gerarEscalaIA
+                let updatedSched = JSON.parse(JSON.stringify(schedules ?? {})); // deep copy
+                Object.entries(aiSchedPreview.escala).forEach(([empId, days]) => {
+                  // Verifica se o empId realmente existe
+                  if (!restEmps.find(e => e.id === empId)) return;
+                  if (!updatedSched[rid]) updatedSched[rid] = {};
+                  if (!updatedSched[rid][mk]) updatedSched[rid][mk] = {};
+                  const empDayMap = { ...(updatedSched[rid][mk][empId] ?? {}) };
                   Object.entries(days).forEach(([dateStr, status]) => {
                     if (status) empDayMap[dateStr] = status;
                     else delete empDayMap[dateStr];
                   });
-                  updatedSched = {
-                    ...updatedSched,
-                    [rid]: { ...(updatedSched?.[rid]??{}), [mk]: { ...(updatedSched?.[rid]?.[mk]??{}), [empId]: empDayMap } }
-                  };
+                  updatedSched[rid][mk][empId] = empDayMap;
                 });
 
+                onUpdate("schedules", updatedSched);
                 setShowAiSched(false);
                 setAiSchedPreview(null);
                 setAiSchedInput("");
-                onUpdate("schedules", updatedSched);
+                onUpdate("_toast", "✅ Escala aplicada com sucesso!");
               }
 
               return (
@@ -4276,15 +4337,15 @@ Responda SOMENTE com o JSON abaixo, sem texto adicional, sem markdown:
                           <p style={{color:"var(--green)",fontWeight:700,fontSize:13,margin:"0 0 6px"}}>✅ Escala interpretada!</p>
                           <p style={{color:"var(--text2)",fontSize:13,margin:"0 0 10px",lineHeight:1.6}}>{aiSchedPreview.resumo}</p>
                           <div style={{maxHeight:180,overflowY:"auto"}}>
-                            {areaEmps.map(e => {
-                              const days = aiSchedPreview.escala[e.id] ?? {};
+                            {Object.entries(aiSchedPreview.escala).map(([empId, days]) => {
+                              const emp = restEmps.find(e => e.id === empId);
                               const entries = Object.entries(days);
-                              if (!entries.length) return null;
+                              if (!entries.length || !emp) return null;
                               return (
-                                <div key={e.id} style={{padding:"5px 0",borderBottom:"1px solid var(--border)",fontSize:12}}>
-                                  <span style={{color:"var(--text)",fontWeight:600}}>{e.name}:</span>{" "}
+                                <div key={empId} style={{padding:"5px 0",borderBottom:"1px solid var(--border)",fontSize:12}}>
+                                  <span style={{color:"var(--text)",fontWeight:600}}>{emp.name}:</span>{" "}
                                   <span style={{color:"var(--text3)"}}>
-                                    {entries.map(([date,status])=>{
+                                    {entries.sort((a,b)=>a[0].localeCompare(b[0])).map(([date,status])=>{
                                       const labels = {off:"Folga",comp:"Comp.",vac:"Férias",faultj:"Falta Just.",faultu:"Falta Injust."};
                                       return `${date.slice(8)}/${date.slice(5,7)} ${labels[status]??status}`;
                                     }).join(" · ")}
