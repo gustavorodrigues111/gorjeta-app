@@ -2218,7 +2218,7 @@ function RoleSpreadsheet({ restRoles, rid, roles, onUpdate }) {
   const [editRows, setEditRows] = useState({});
   const [saved, setSaved] = useState({});
 
-  const sorted = [...restRoles].sort((a, b) => a.area.localeCompare(b.area) || a.name.localeCompare(b.name));
+  const ROLE_COLS = "2fr 80px 110px 120px";
 
   function getRow(r) { return editRows[r.id] ?? { name: r.name, area: r.area, points: r.points === 0 ? "0" : String(r.points || "") }; }
   function setRow(id, field, val) { setEditRows(prev => ({ ...prev, [id]: { ...getRow({ id }), [field]: val } })); }
@@ -2244,53 +2244,92 @@ function RoleSpreadsheet({ restRoles, rid, roles, onUpdate }) {
   function inactivateRole(id) { onUpdate("roles", roles.map(x => x.id === id ? {...x, inactive: true} : x)); }
   function reactivateRole(id) { onUpdate("roles", roles.map(x => x.id === id ? {...x, inactive: false} : x)); }
 
-  const inStyle = { background: "var(--bg1)", border: "1px solid var(--border)", borderRadius: 8, color: "var(--text)", fontFamily: "DM Mono,monospace", fontSize: 12, padding: "8px 10px", outline: "none", width: "100%" };
+  const inStyle = { background: "var(--bg1)", border: "1px solid var(--border)", borderRadius: 8, color: "var(--text)", fontFamily: "DM Mono,monospace", fontSize: 12, padding: "6px 8px", outline: "none", width: "100%", boxSizing:"border-box" };
   const sel = { ...inStyle, cursor: "pointer" };
   const ac = "#f5c842";
 
+  // Agrupar por área
+  const activeByArea = {};
+  const inactiveList = [];
+  AREAS.forEach(a => { activeByArea[a] = []; });
+  [...restRoles].sort((a,b) => a.name.localeCompare(b.name)).forEach(r => {
+    if (r.inactive) inactiveList.push(r);
+    else if (activeByArea[r.area]) activeByArea[r.area].push(r);
+    else activeByArea[r.area] = [r];
+  });
+
+  const renderRow = (r) => {
+    const row = getRow(r);
+    const isSaved = saved[r.id];
+    return (
+      <div key={r.id} style={{ display:"grid", gridTemplateColumns:ROLE_COLS, gap:6, marginBottom:4, background:"var(--card-bg)", borderRadius:10, padding:"6px 8px", border:`1px solid ${isSaved?"#10b98166":r.inactive?"#8b5cf622":"#2a2a2a"}`, opacity:r.inactive?0.6:1, alignItems:"center" }}>
+        <input value={row.name} onChange={e => setRow(r.id, "name", e.target.value)} style={inStyle} />
+        <input type="number" min="0" step="0.5" value={r.noTip ? 0 : row.points} disabled={r.noTip} onChange={e => setRow(r.id, "points", e.target.value)} style={{...inStyle, opacity: r.noTip ? 0.4 : 1, textAlign:"center"}} />
+        <label style={{display:"flex",alignItems:"center",gap:6,cursor:"pointer",color:"var(--text2)",fontSize:12,fontFamily:"DM Mono,monospace",whiteSpace:"nowrap"}}>
+          <input type="checkbox" checked={!!r.noTip} onChange={e=>{onUpdate("roles",roles.map(x=>x.id===r.id?{...x,noTip:e.target.checked,points:e.target.checked?0:parseFloat(row.points)||1}:x));}} style={{width:14,height:14,cursor:"pointer",accentColor:ac}}/>
+          Sem gorjeta
+        </label>
+        <div style={{display:"flex",gap:4,justifyContent:"flex-end"}}>
+          <button onClick={()=>saveRole(r)} style={{padding:"5px 10px",borderRadius:7,border:"none",background:isSaved?"#10b981":ac,color:"#111",fontWeight:700,fontSize:11,cursor:"pointer",fontFamily:"DM Mono,monospace",whiteSpace:"nowrap"}}>{isSaved?"✓":"Salvar"}</button>
+          {r.inactive
+            ? <button onClick={()=>reactivateRole(r.id)} style={{padding:"5px 10px",borderRadius:7,border:"1px solid #10b98144",background:"transparent",color:"#10b981",cursor:"pointer",fontSize:11,fontFamily:"DM Mono,monospace",whiteSpace:"nowrap"}}>Reativar</button>
+            : <button onClick={()=>inactivateRole(r.id)} style={{padding:"5px 10px",borderRadius:7,border:"1px solid #f59e0b44",background:"transparent",color:"#f59e0b",cursor:"pointer",fontSize:11,fontFamily:"DM Mono,monospace",whiteSpace:"nowrap"}}>Inativar</button>
+          }
+        </div>
+      </div>
+    );
+  };
+
   return (
     <div style={{ fontFamily: "DM Mono,monospace" }}>
-      <p style={{ color: "var(--text3)", fontSize: 12, marginBottom: 16 }}>Edite inline e clique em Salvar na linha. Nova linha no topo para adicionar.</p>
+      <p style={{ color: "var(--text3)", fontSize: 12, marginBottom: 16 }}>Edite inline e clique em Salvar. Nova linha no topo para adicionar.</p>
 
-      {/* Header */}
-      <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr 80px 90px 80px", gap: 6, marginBottom: 8, padding: "0 6px" }}>
-        {["Nome do Cargo", "Área", "Pontos", "Sem gorjeta", ""].map(h => <div key={h} style={{ color: "var(--text3)", fontSize: 11 }}>{h}</div>)}
+      {/* Cabeçalho */}
+      <div style={{ display:"grid", gridTemplateColumns:ROLE_COLS, gap:6, marginBottom:6, padding:"0 8px" }}>
+        {["Nome do Cargo","Pontos","",""].map((h,i) => <div key={i} style={{color:"var(--text3)",fontSize:10,fontWeight:700}}>{h}</div>)}
       </div>
 
-      {/* New row */}
-      <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr 80px 90px 80px", gap: 6, marginBottom: 6, background: "#1a2a1a", borderRadius: 10, padding: 8, border: "1px solid #10b98144" }}>
+      {/* Nova linha */}
+      <div style={{ display:"grid", gridTemplateColumns:ROLE_COLS, gap:6, marginBottom:16, background:"#0d1a0d", borderRadius:10, padding:"6px 8px", border:"1px solid #10b98144", alignItems:"center" }}>
         <input value={newRow.name} onChange={e => setNewRow(p => ({ ...p, name: e.target.value }))} placeholder="Nome do cargo…" style={inStyle} />
-        <select value={newRow.area} onChange={e => setNewRow(p => ({ ...p, area: e.target.value }))} style={sel}>
-          {AREAS.map(a => <option key={a} value={a}>{a}</option>)}
-        </select>
-        <input type="number" min="0.5" step="0.5" value={newRow.noTip ? 0 : newRow.points} disabled={newRow.noTip} onChange={e => setNewRow(p => ({ ...p, points: e.target.value }))} style={{...inStyle, opacity: newRow.noTip ? 0.4 : 1}} />
-        <label style={{display:"flex",alignItems:"center",gap:6,cursor:"pointer",color:"var(--text2)",fontSize:12,fontFamily:"DM Mono,monospace"}}><input type="checkbox" checked={!!newRow.noTip} onChange={e=>setNewRow(p=>({...p,noTip:e.target.checked,points:e.target.checked?"0":p.points}))} style={{width:16,height:16,cursor:"pointer"}}/>Não entra</label>
-        <button onClick={saveNew} style={{ background: "#10b981", border: "none", borderRadius: 8, color: "var(--text)", fontWeight: 700, fontSize: 12, cursor: "pointer", padding: "8px 4px", fontFamily: "DM Mono,monospace" }}>+ Add</button>
+        <input type="number" min="0.5" step="0.5" value={newRow.noTip ? 0 : newRow.points} disabled={newRow.noTip} onChange={e => setNewRow(p => ({ ...p, points: e.target.value }))} style={{...inStyle, opacity: newRow.noTip ? 0.4 : 1, textAlign:"center"}} />
+        <div style={{display:"flex",alignItems:"center",gap:6}}>
+          <label style={{display:"flex",alignItems:"center",gap:6,cursor:"pointer",color:"var(--text2)",fontSize:12,whiteSpace:"nowrap"}}>
+            <input type="checkbox" checked={!!newRow.noTip} onChange={e=>setNewRow(p=>({...p,noTip:e.target.checked,points:e.target.checked?"0":p.points}))} style={{width:14,height:14,cursor:"pointer",accentColor:ac}}/>
+            Sem gorjeta
+          </label>
+        </div>
+        <div style={{display:"flex",alignItems:"center",gap:6}}>
+          <select value={newRow.area} onChange={e => setNewRow(p => ({ ...p, area: e.target.value }))} style={{...sel,flex:1}}>
+            {AREAS.map(a => <option key={a} value={a}>{a}</option>)}
+          </select>
+          <button onClick={saveNew} style={{padding:"6px 10px",borderRadius:8,border:"none",background:"#10b981",color:"#fff",fontWeight:700,fontSize:12,cursor:"pointer",fontFamily:"DM Mono,monospace",whiteSpace:"nowrap"}}>+ Add</button>
+        </div>
       </div>
 
-      {/* Existing rows */}
-      {sorted.length === 0 && <p style={{ color: "var(--text3)", textAlign: "center", marginTop: 20 }}>Nenhum cargo cadastrado.</p>}
-      {sorted.map(r => {
-        const row = getRow(r);
-        const isSaved = saved[r.id];
+      {/* Agrupado por área */}
+      {AREAS.map(area => {
+        const areaRoles = activeByArea[area] ?? [];
+        if (!areaRoles.length) return null;
         return (
-          <div key={r.id} style={{ display: "grid", gridTemplateColumns: "2fr 1fr 80px 90px 80px", gap: 6, marginBottom: 6, background: "var(--card-bg)", borderRadius: 10, padding: 8, border: `1px solid ${isSaved ? "#10b98166" : "#2a2a2a"}`, transition: "border-color 0.3s" }}>
-            <input value={row.name} onChange={e => setRow(r.id, "name", e.target.value)} style={inStyle} />
-            <select value={row.area} onChange={e => setRow(r.id, "area", e.target.value)} style={sel}>
-              {AREAS.map(a => <option key={a} value={a}>{a}</option>)}
-            </select>
-            <input type="number" min="0.5" step="0.5" value={r.noTip ? 0 : row.points} disabled={r.noTip} onChange={e => setRow(r.id, "points", e.target.value)} style={{...inStyle, opacity: r.noTip ? 0.4 : 1}} />
-            <label style={{display:"flex",alignItems:"center",gap:6,cursor:"pointer",color:"var(--text2)",fontSize:12,fontFamily:"DM Mono,monospace"}}><input type="checkbox" checked={!!r.noTip} onChange={e=>{onUpdate("roles",roles.map(x=>x.id===r.id?{...x,noTip:e.target.checked,points:e.target.checked?0:parseFloat(row.points)||1}:x));}} style={{width:16,height:16,cursor:"pointer"}}/>Não entra</label>
-            <div style={{ display: "flex", gap: 4 }}>
-              <button onClick={() => saveRole(r)} style={{ flex: 1, background: isSaved ? "#10b981" : ac, border: "none", borderRadius: 8, color: "#111", fontWeight: 700, fontSize: 11, cursor: "pointer", padding: "4px 2px", fontFamily: "DM Mono,monospace" }}>{isSaved ? "✓" : "Salvar"}</button>
-              {r.inactive
-                ? <button onClick={() => reactivateRole(r.id)} style={{ padding:"4px 8px", borderRadius:8, border:"1px solid #10b98144", background:"transparent", color:"#10b981", cursor:"pointer", fontSize:11, fontFamily:"DM Mono,monospace" }}>Reativar</button>
-                : <button onClick={() => inactivateRole(r.id)} style={{ padding:"4px 8px", borderRadius:8, border:"1px solid #f59e0b44", background:"transparent", color:"#f59e0b", cursor:"pointer", fontSize:11, fontFamily:"DM Mono,monospace" }}>Inativar</button>
-              }
+          <div key={area} style={{marginBottom:16}}>
+            <div style={{color:AREA_COLORS[area]??"#888",fontSize:11,fontWeight:700,padding:"6px 8px 4px",borderBottom:`1px solid ${AREA_COLORS[area]??"#333"}33`,marginBottom:4,letterSpacing:1}}>
+              {area.toUpperCase()} · {areaRoles.length} cargo{areaRoles.length!==1?"s":""}
             </div>
+            {areaRoles.map(renderRow)}
           </div>
         );
       })}
+
+      {/* Inativos */}
+      {inactiveList.length > 0 && (
+        <div style={{marginTop:8}}>
+          <div style={{color:"#555",fontSize:11,fontWeight:700,padding:"6px 8px 4px",borderBottom:"1px solid #33333344",marginBottom:4,letterSpacing:1}}>
+            INATIVOS · {inactiveList.length}
+          </div>
+          {inactiveList.map(renderRow)}
+        </div>
+      )}
     </div>
   );
 }
