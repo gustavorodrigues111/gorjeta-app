@@ -1,4 +1,4 @@
-// AppTip v4.6 — 2026-04-11g
+// AppTip v4.6 — 2026-04-11h
 import { useState, useEffect } from "react";
 import { db } from "./firebase";
 import { doc, getDoc, setDoc, deleteDoc, collection, getDocs } from "firebase/firestore";
@@ -4212,30 +4212,28 @@ Responda SOMENTE com o JSON abaixo, sem texto adicional, sem markdown:
                   nomeParaId[e.name.split(" ")[0].toLowerCase().trim()] = e.id;
                 });
 
-                const newRestSched = { ...(schedules?.[rid] ?? {}) };
-                const newMesSched  = { ...(newRestSched[mesKey] ?? {}) };
-
-                let aplicados = 0;
+                // Mesmo padrão do cycleStatus que funciona no clique manual
+                let updatedSched = { ...schedules };
                 Object.entries(aiSchedPreview.escala).forEach(([empKey, days]) => {
                   const empId = restEmps.find(e => e.id === empKey)?.id
                     ?? nomeParaId[empKey.toLowerCase().trim()]
                     ?? null;
-                  if (!empId) { console.warn("Empregado não encontrado:", empKey); return; }
-                  newMesSched[empId] = { ...(newMesSched[empId] ?? {}), ...days };
-                  aplicados++;
+                  if (!empId) return;
+                  const empDayMap = { ...(updatedSched?.[rid]?.[mk]?.[empId] ?? {}) };
+                  Object.entries(days).forEach(([dateStr, status]) => {
+                    if (status) empDayMap[dateStr] = status;
+                    else delete empDayMap[dateStr];
+                  });
+                  updatedSched = {
+                    ...updatedSched,
+                    [rid]: { ...(updatedSched?.[rid]??{}), [mk]: { ...(updatedSched?.[rid]?.[mk]??{}), [empId]: empDayMap } }
+                  };
                 });
 
-                console.log("confirmarEscala — mesKey:", mesKey, "rid:", rid, "aplicados:", aplicados);
-
-                // Fecha o modal
                 setShowAiSched(false);
                 setAiSchedPreview(null);
                 setAiSchedInput("");
-
-                // Salva imediatamente
-                const newSched = { ...schedules, [rid]: { ...newRestSched, [mesKey]: newMesSched } };
-                onUpdate("schedules", newSched);
-                onUpdate("_toast", `✨ Escala atualizada! (${aplicados} empregado${aplicados!==1?"s":""} afetado${aplicados!==1?"s":""})`);
+                onUpdate("schedules", updatedSched);
               }
 
               return (
@@ -7810,7 +7808,7 @@ export default function App() {
       {view === "home" && <Home onLogin={()=>setView("login")} />}
       <Toast msg={toast} onClose={()=>setToast("")} />
       {/* Rodapé de versão */}
-      <div style={{position:"fixed",bottom:8,right:12,fontSize:10,color:"var(--text3)",fontFamily:"'DM Mono',monospace",opacity:0.45,pointerEvents:"none",zIndex:100}}>v4.6g</div>
+      <div style={{position:"fixed",bottom:8,right:12,fontSize:10,color:"var(--text3)",fontFamily:"'DM Mono',monospace",opacity:0.45,pointerEvents:"none",zIndex:100}}>v4.6h</div>
 
       {/* Modal Política de Privacidade */}
       <div id="apptip-privacy" style={{display:"none",position:"fixed",inset:0,background:"rgba(0,0,0,0.5)",zIndex:9999,alignItems:"center",justifyContent:"center",padding:20}} onClick={e=>{if(e.target===e.currentTarget)e.currentTarget.style.display="none";}}>
