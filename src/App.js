@@ -3280,7 +3280,10 @@ function SuperManagerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, 
           <span style={{ color:ac, fontWeight:700 }}>Super Gestor</span>
           <span style={{ color:"var(--text3)", fontSize:12 }}>· {currentUser?.name}</span>
         </div>
-        <button onClick={onBack} style={{ ...S.btnSecondary, fontSize:12 }}>Sair</button>
+        <div style={{display:"flex",gap:8,alignItems:"center"}}>
+          <button onClick={toggleTheme} style={{background:"none",border:"1px solid var(--border)",borderRadius:20,padding:"6px 10px",cursor:"pointer",fontSize:16,color:"var(--text2)"}}>{theme==="dark"?"☀️":"🌙"}</button>
+          <button onClick={onBack} style={{ ...S.btnSecondary, fontSize:12 }}>Sair</button>
+        </div>
       </div>
       <div style={{ display:"flex", borderBottom:"1px solid var(--border)", background:"var(--bg1)", overflowX:"auto" }}>
         {TABS.map(([id,lbl])=>(
@@ -3712,7 +3715,6 @@ export default function App() {
 
   if (!loaded) return <div style={{minHeight:"100vh",background:"var(--bg)",display:"flex",alignItems:"center",justifyContent:"center",color:"#f5c842",fontFamily:"DM Mono,monospace",fontSize:18}}>Carregando…</div>;
 
-  // Theme toggle button - fixed position
   return (
     <>
       {view === "home"     && <Home onManager={()=>setView("login")} onEmployee={()=>setView("employee")} />}
