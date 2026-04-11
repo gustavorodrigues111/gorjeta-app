@@ -1830,40 +1830,43 @@ function EmployeePortal({ employees, roles, tips, schedules, restaurants, commun
     </div>
   );
 
+  // Bottom nav config: icon + short label
+  const NAV = [
+    ["comunicados","📢","Avisos"],
+    ["escala","📅","Escala"],
+    ["extrato","💸","Gorjeta"],
+    ["horarios","🕐","Horários"],
+    ["recibos","📄","Recibos"],
+    ["faq","❓","FAQ"],
+    ["dp","💬","Fale DP"],
+  ];
+
   return (
-    <div style={{ minHeight: "100vh", background: bg, fontFamily: "DM Mono,monospace" }}>
-      <div style={{ background: "var(--bg1)", borderBottom: "1px solid var(--border)", padding: "14px 20px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+    <div style={{ minHeight: "100vh", background: bg, fontFamily: "DM Mono,monospace", paddingBottom: 76 }}>
+      {/* Header */}
+      <div style={{ background: "var(--bg1)", borderBottom: "1px solid var(--border)", padding: "12px 16px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
         <div>
-          <div style={{ color: ac, fontWeight: 700 }}>{emp?.name}</div>
+          <div style={{ color: ac, fontWeight: 700, fontSize: 15 }}>{emp?.name}</div>
           <div style={{ color: "var(--text3)", fontSize: 11 }}>{role?.name} · {restaurant?.name}</div>
         </div>
-        <button onClick={() => { setEmpId(null); setCpf(""); setPin(""); }} style={{ ...S.btnSecondary, fontSize: 12 }}>Sair</button>
+        <button onClick={() => { setEmpId(null); setCpf(""); setPin(""); }} style={{ ...S.btnSecondary, fontSize: 12, padding: "6px 14px" }}>Sair</button>
       </div>
-      <div style={{ display: "flex", borderBottom: "1px solid var(--border)", background: "var(--bg1)", overflowX: "auto" }}>
-        {TABS.map(([id, lbl]) => {
-          const blocked = hasPending && id !== "comunicados";
-          return (
-            <button key={id} onClick={() => handleTabChange(id)}
-              style={{ padding: "11px 12px", background: "none", border: "none", borderBottom: `2px solid ${tab === id ? ac : "transparent"}`, color: tab === id ? ac : blocked ? "#333" : "#555", cursor: blocked ? "not-allowed" : "pointer", fontSize: 11, fontFamily: "DM Mono,monospace", fontWeight: tab === id ? 700 : 400, whiteSpace: "nowrap" }}>
-              {lbl}
-              {id === "comunicados" && pendingComms.length > 0 && <span style={{ background: "#e74c3c", color: "var(--text)", borderRadius: 10, padding: "1px 5px", fontSize: 9, marginLeft: 4 }}>{pendingComms.length}</span>}
-            </button>
-          );
-        })}
-      </div>
+
       {hasPending && (
-        <div style={{ background: "#e74c3c22", padding: "8px 16px", fontSize: 12, color: "#e74c3c", fontFamily: "DM Mono,monospace", textAlign: "center" }}>
-          ⚠️ Dê ciência nos comunicados pendentes para acessar as outras abas.
+        <div style={{ background: "#e74c3c22", padding: "8px 16px", fontSize: 12, color: "#e74c3c", textAlign: "center" }}>
+          ⚠️ Dê ciência nos comunicados para acessar as outras abas.
         </div>
       )}
-      <div style={{ padding: "20px 16px", maxWidth: 540, margin: "0 auto" }}>
+
+      {/* Content */}
+      <div style={{ padding: "16px 16px", maxWidth: 600, margin: "0 auto" }}>
 
         {tab === "extrato" && (
           <div>
             <div style={{ marginBottom: 20 }}><MonthNav year={year} month={month} onChange={(y, m) => { setYear(y); setMonth(m); }} /></div>
             {/* Legal disclaimer */}
             <div style={{ background: "var(--bg1)", border: "1px solid var(--border)", borderRadius: 10, padding: "10px 14px", marginBottom: 16, fontSize: 11, color: "var(--text3)", lineHeight: 1.5 }}>
-              ⚠️ <strong style={{ color: "#666" }}>Aviso:</strong> Os valores exibidos são aproximados, apurados até o momento atual e sujeitos a alterações. Esta tela tem caráter informativo e de transparência, podendo conter imprecisões. Os valores definitivos serão apurados pela empresa e comunicados pelos canais oficiais.
+              ⚠️ <strong style={{ color: "var(--text2)" }}>Aviso:</strong> Os valores exibidos são aproximados, apurados até o momento atual e sujeitos a alterações. Esta tela tem caráter informativo e de transparência, podendo conter imprecisões. Os valores definitivos serão apurados pela empresa e comunicados pelos canais oficiais.
             </div>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10, marginBottom: 20 }}>
               {[["Bruto", grossTotal, "#fff"], ["Imposto", taxTotal, "#e74c3c"], ["Líquido", netTotal, ac]].map(([lbl, val, col]) => (
@@ -2006,6 +2009,26 @@ function EmployeePortal({ employees, roles, tips, schedules, restaurants, commun
           <ReceibosEmployeeTab empId={empId} restaurantId={emp?.restaurantId} receipts={receipts ?? []} />
         )}
 
+      </div>
+
+      {/* Bottom navigation bar */}
+      <div style={{ position: "fixed", bottom: 0, left: 0, right: 0, background: "var(--bg1)", borderTop: "1px solid var(--border)", display: "flex", zIndex: 100, paddingBottom: "env(safe-area-inset-bottom, 0px)" }}>
+        {NAV.map(([id, icon, label]) => {
+          const blocked = hasPending && id !== "comunicados";
+          const isActive = tab === id;
+          const hasBadge = id === "comunicados" && pendingComms.length > 0;
+          return (
+            <button key={id} onClick={() => !blocked && handleTabChange(id)}
+              style={{ flex: 1, background: "none", border: "none", padding: "10px 4px 8px", cursor: blocked ? "not-allowed" : "pointer", display: "flex", flexDirection: "column", alignItems: "center", gap: 3, opacity: blocked ? 0.3 : 1, position: "relative" }}>
+              {hasBadge && (
+                <span style={{ position: "absolute", top: 6, right: "calc(50% - 14px)", background: "#e74c3c", color: "#fff", borderRadius: 10, padding: "1px 5px", fontSize: 9, fontWeight: 700, fontFamily: "DM Mono,monospace", lineHeight: 1.4 }}>{pendingComms.length}</span>
+              )}
+              <span style={{ fontSize: 22, lineHeight: 1 }}>{icon}</span>
+              <span style={{ fontSize: 9, fontFamily: "DM Mono,monospace", color: isActive ? ac : "var(--text3)", fontWeight: isActive ? 700 : 400, letterSpacing: 0 }}>{label}</span>
+              {isActive && <div style={{ position: "absolute", bottom: 0, left: "20%", right: "20%", height: 2, background: ac, borderRadius: 2 }}/>}
+            </button>
+          );
+        })}
       </div>
     </div>
   );
