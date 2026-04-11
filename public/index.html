@@ -3,53 +3,88 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <meta name="theme-color" content="#0f0f0f" />
+    <meta name="theme-color" content="#faf8f4" />
     <meta name="description" content="AppTip — Gestão de equipe para restaurantes" />
     <title>AppTip</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&display=swap" rel="stylesheet" />
+    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;0,9..40,800;1,9..40,400&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet" />
     <style>
       * { margin: 0; padding: 0; box-sizing: border-box; }
 
+      /* TEMA 3 — Warm Minimal (padrão claro) */
       :root {
-        --bg:        #0f0f0f;
-        --bg1:       #111111;
-        --bg2:       #141414;
-        --bg3:       #1a1a1a;
-        --bg4:       #2a2a2a;
-        --bg5:       #0a0a0a;
-        --border:    #2a2a2a;
-        --text:      #ffffff;
-        --text2:     #aaaaaa;
-        --text3:     #555555;
-        --card-bg:   #1a1a1a;
-        --input-bg:  #111111;
-        --header-bg: #141414;
-        --sticky-bg: #111111;
-        --sticky-bg2:#141414;
-        --ac:        #f5c842;
+        --bg:        #faf8f4;
+        --bg1:       #ffffff;
+        --bg2:       #f2efe8;
+        --bg3:       #ede9e0;
+        --bg4:       #e4dfd4;
+        --bg5:       #fdfcf9;
+        --border:    #e8e2d8;
+        --text:      #1c1710;
+        --text2:     #4a3f30;
+        --text3:     #9a8d7a;
+        --card-bg:   #ffffff;
+        --input-bg:  #faf8f4;
+        --header-bg: #ffffff;
+        --sticky-bg: #ffffff;
+        --sticky-bg2:#f2efe8;
+        --ac:        #d4a017;
+        --ac-bg:     #d4a01715;
+        --ac-text:   #b8880f;
+        --green:     #2d8f5e;
+        --green-bg:  #2d8f5e15;
+        --red:       #c0392b;
+        --red-bg:    #c0392b12;
+        --blue:      #2563eb;
+        --blue-bg:   #2563eb12;
       }
 
-      body.light-mode {
-        --bg:        #dde1e7;
-        --bg1:       #e8ecf0;
-        --bg2:       #d4d8de;
-        --bg3:       #c8ccd2;
-        --bg4:       #b8bcc4;
-        --bg5:       #eef0f3;
-        --border:    #b0b6c0;
-        --text:      #111318;
-        --text2:     #2d3340;
-        --text3:     #5a6070;
-        --card-bg:   #e8ecf0;
-        --input-bg:  #f5f6f8;
-        --header-bg: #cdd1d8;
-        --sticky-bg: #e8ecf0;
-        --sticky-bg2:#dde1e7;
-        --ac:        #b8900a;
+      /* TEMA ESCURO — versão escura do Warm */
+      body.dark-mode {
+        --bg:        #1a1510;
+        --bg1:       #211c16;
+        --bg2:       #2a2318;
+        --bg3:       #332b1e;
+        --bg4:       #3d3325;
+        --bg5:       #140f0a;
+        --border:    #3d3325;
+        --text:      #f0ece4;
+        --text2:     #c4b89a;
+        --text3:     #7a6e5a;
+        --card-bg:   #211c16;
+        --input-bg:  #1a1510;
+        --header-bg: #211c16;
+        --sticky-bg: #211c16;
+        --sticky-bg2:#2a2318;
+        --ac:        #d4a017;
+        --ac-bg:     #d4a01720;
+        --ac-text:   #e8b820;
+        --green:     #3db87a;
+        --green-bg:  #3db87a18;
+        --red:       #e05a4a;
+        --red-bg:    #e05a4a15;
+        --blue:      #4a90e2;
+        --blue-bg:   #4a90e215;
       }
 
-      body { background: var(--bg); font-family: 'DM Mono', monospace; color: var(--text); transition: background 0.2s, color 0.2s; }
+      body {
+        background: var(--bg);
+        font-family: 'DM Sans', sans-serif;
+        color: var(--text);
+        transition: background 0.2s, color 0.2s;
+        -webkit-font-smoothing: antialiased;
+      }
+
+      /* Valores numéricos usam DM Mono */
+      .mono { font-family: 'DM Mono', monospace !important; }
+
+      /* Utilitários responsivos */
+      .no-wrap { white-space: nowrap; }
+
+      /* Scrollbar discreta */
+      ::-webkit-scrollbar { width: 6px; height: 6px; }
+      ::-webkit-scrollbar-track { background: transparent; }
+      ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
     </style>
   </head>
   <body>

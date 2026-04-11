@@ -105,28 +105,30 @@ const K = {
 };
 
 //
+const ac = "#d4a017";
 const S = {
-  input: { width: "100%", boxSizing: "border-box", padding: "11px 14px", borderRadius: 10, border: "1px solid var(--border)", background: "var(--input-bg)", color: "var(--text)", fontSize: 14, fontFamily: "DM Mono,monospace", outline: "none" },
-  btnPrimary: { width: "100%", padding: "12px", borderRadius: 12, background: "#f5c842", border: "none", color: "#111", fontWeight: 700, fontSize: 14, cursor: "pointer", fontFamily: "DM Mono,monospace" },
-  btnSecondary: { padding: "8px 18px", borderRadius: 10, border: "1px solid var(--border)", background: "transparent", color: "var(--text2)", cursor: "pointer", fontFamily: "DM Mono,monospace", fontSize: 13 },
-  card: { background: "var(--card-bg)", borderRadius: 16, padding: "18px 20px", border: "1px solid var(--border)" },
-  label: { color: "var(--text3)", fontSize: 12, marginBottom: 4, display: "block" },
+  input: { width:"100%", boxSizing:"border-box", padding:"11px 14px", borderRadius:10, border:"1px solid var(--border)", background:"var(--input-bg)", color:"var(--text)", fontSize:14, fontFamily:"'DM Sans',sans-serif", outline:"none" },
+  btnPrimary: { width:"100%", padding:"12px", borderRadius:12, background:ac, border:"none", color:"#fff", fontWeight:700, fontSize:14, cursor:"pointer", fontFamily:"'DM Sans',sans-serif" },
+  btnSecondary: { padding:"8px 18px", borderRadius:10, border:"1px solid var(--border)", background:"transparent", color:"var(--text2)", cursor:"pointer", fontFamily:"'DM Sans',sans-serif", fontSize:13 },
+  card: { background:"var(--card-bg)", borderRadius:16, padding:"18px 20px", border:"1px solid var(--border)" },
+  label: { color:"var(--text3)", fontSize:12, marginBottom:4, display:"block", fontWeight:500 },
+  mono: { fontFamily:"'DM Mono',monospace" },
 };
 
 //
 function Toast({ msg, onClose }) {
   useEffect(() => { if (msg) { const t = setTimeout(onClose, 3200); return () => clearTimeout(t); } }, [msg, onClose]); // eslint-disable-line react-hooks/exhaustive-deps
   if (!msg) return null;
-  return <div style={{ position: "fixed", bottom: 32, left: "50%", transform: "translateX(-50%)", background: "var(--bg3)", color: "#f5c842", padding: "12px 28px", borderRadius: 40, fontFamily: "DM Mono,monospace", fontSize: 14, boxShadow: "0 8px 32px rgba(0,0,0,.3)", zIndex: 9999, letterSpacing: 1, whiteSpace: "nowrap" }}>{msg}</div>;
+  return <div style={{ position:"fixed", bottom:32, left:"50%", transform:"translateX(-50%)", background:"var(--text)", color:"var(--bg)", padding:"12px 28px", borderRadius:40, fontFamily:"'DM Sans',sans-serif", fontWeight:600, fontSize:14, boxShadow:"0 8px 32px rgba(0,0,0,.15)", zIndex:9999, whiteSpace:"nowrap" }}>{msg}</div>;
 }
 
 function Modal({ title, onClose, children, wide }) {
   return (
-    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.6)", zIndex: 8000, display: "flex", alignItems: "center", justifyContent: "center", padding: 16, overflowY: "auto" }}>
-      <div style={{ background: "var(--card-bg)", borderRadius: 20, padding: 28, width: "100%", maxWidth: wide ? 680 : 480, border: "1px solid var(--border)", maxHeight: "92vh", overflowY: "auto" }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
-          <h3 style={{ color: "#f5c842", margin: 0, fontFamily: "DM Mono,monospace", fontSize: 16 }}>{title}</h3>
-          <button onClick={onClose} style={{ background: "none", border: "none", color: "var(--text3)", fontSize: 20, cursor: "pointer" }}>✕</button>
+    <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,.4)", zIndex:8000, display:"flex", alignItems:"center", justifyContent:"center", padding:16, overflowY:"auto" }}>
+      <div style={{ background:"var(--card-bg)", borderRadius:20, padding:28, width:"100%", maxWidth:wide?680:480, border:"1px solid var(--border)", maxHeight:"92vh", overflowY:"auto", boxShadow:"0 20px 60px rgba(0,0,0,.15)" }}>
+        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:20 }}>
+          <h3 style={{ color:"var(--text)", margin:0, fontFamily:"'DM Sans',sans-serif", fontSize:17, fontWeight:700 }}>{title}</h3>
+          <button onClick={onClose} style={{ background:"none", border:"none", color:"var(--text3)", fontSize:20, cursor:"pointer" }}>✕</button>
         </div>
         {children}
       </div>
@@ -135,34 +137,34 @@ function Modal({ title, onClose, children, wide }) {
 }
 
 function AreaBadge({ area }) {
-  return <span style={{ background: AREA_COLORS[area] + "22", color: AREA_COLORS[area], borderRadius: 6, padding: "2px 9px", fontSize: 11, fontWeight: 700 }}>{area}</span>;
+  return <span style={{ background:AREA_COLORS[area]+"22", color:AREA_COLORS[area], borderRadius:6, padding:"2px 9px", fontSize:11, fontWeight:700 }}>{area}</span>;
 }
 
 function PillBar({ options, value, onChange }) {
   return (
-    <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+    <div style={{ display:"flex", gap:6, flexWrap:"wrap" }}>
       {options.map(o => (
-        <button key={o} onClick={() => onChange(o)} style={{ padding: "6px 14px", borderRadius: 20, border: `1px solid ${value === o ? "#f5c842" : "#2a2a2a"}`, background: value === o ? "#f5c842" : "transparent", color: value === o ? "#111" : "#555", cursor: "pointer", fontFamily: "DM Mono,monospace", fontSize: 12, fontWeight: value === o ? 700 : 400 }}>{o}</button>
+        <button key={o} onClick={() => onChange(o)} style={{ padding:"6px 16px", borderRadius:20, border:`1px solid ${value===o?ac:"var(--border)"}`, background:value===o?ac:"transparent", color:value===o?"#fff":"var(--text3)", cursor:"pointer", fontFamily:"'DM Sans',sans-serif", fontSize:13, fontWeight:value===o?700:500 }}>{o}</button>
       ))}
     </div>
   );
 }
 
 function MonthNav({ year, month, onChange }) {
-  const prev = () => { let m = month - 1, y = year; if (m < 0) { m = 11; y--; } onChange(y, m); };
-  const next = () => { let m = month + 1, y = year; if (m > 11) { m = 0; y++; } onChange(y, m); };
+  const prev = () => { let m=month-1, y=year; if(m<0){m=11;y--;} onChange(y,m); };
+  const next = () => { let m=month+1, y=year; if(m>11){m=0;y++;} onChange(y,m); };
   return (
-    <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-      <button onClick={prev} style={{ ...S.btnSecondary, padding: "6px 12px" }}>‹</button>
-      <span style={{ color: "var(--text)", fontFamily: "DM Mono,monospace", fontSize: 14, minWidth: 140, textAlign: "center", textTransform: "capitalize" }}>{monthLabel(year, month)}</span>
-      <button onClick={next} style={{ ...S.btnSecondary, padding: "6px 12px" }}>›</button>
+    <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+      <button onClick={prev} style={{ ...S.btnSecondary, padding:"6px 12px" }}>‹</button>
+      <span style={{ color:"var(--text)", fontFamily:"'DM Mono',monospace", fontSize:13, minWidth:140, textAlign:"center", textTransform:"capitalize" }}>{monthLabel(year,month)}</span>
+      <button onClick={next} style={{ ...S.btnSecondary, padding:"6px 12px" }}>›</button>
     </div>
   );
 }
 
 function PermBadge({ label, on }) {
-  if (!on) return null; // só mostra o que tem acesso
-  return <span style={{ background: "#10b98122", color: "#10b981", borderRadius: 6, padding: "2px 10px", fontSize: 11, fontWeight: 700 }}>✓ {label}</span>;
+  if (!on) return null;
+  return <span style={{ background:"var(--green-bg)", color:"var(--green)", borderRadius:6, padding:"2px 10px", fontSize:11, fontWeight:700 }}>✓ {label}</span>;
 }
 
 //
@@ -197,7 +199,7 @@ function CalendarGrid({ year, month, dayMap, onDayClick, readOnly }) {
   return (
     <div>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 3, marginBottom: 3 }}>
-        {WEEKDAYS.map(w => <div key={w} style={{ textAlign: "center", color: "var(--text3)", fontSize: 10, fontFamily: "DM Mono,monospace", padding: "4px 0" }}>{w}</div>)}
+        {WEEKDAYS.map(w => <div key={w} style={{ textAlign: "center", color: "var(--text3)", fontSize: 10, fontFamily: "'DM Mono',monospace", padding: "4px 0" }}>{w}</div>)}
       </div>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 3 }}>
         {cells.map((dateStr, idx) => {
@@ -206,7 +208,7 @@ function CalendarGrid({ year, month, dayMap, onDayClick, readOnly }) {
           const col = colorOf(dateStr);
           return (
             <button key={dateStr} onClick={() => !readOnly && onDayClick && onDayClick(dateStr)}
-              style={{ aspectRatio: "1", borderRadius: 8, border: `1px solid ${col.border}`, background: col.bg, color: col.text, cursor: readOnly ? "default" : "pointer", fontFamily: "DM Mono,monospace", fontSize: 12, fontWeight: 600, padding: 0 }}>
+              style={{ aspectRatio: "1", borderRadius: 8, border: `1px solid ${col.border}`, background: col.bg, color: col.text, cursor: readOnly ? "default" : "pointer", fontFamily: "'DM Mono',monospace", fontSize: 12, fontWeight: 600, padding: 0 }}>
               {d}
             </button>
           );
@@ -216,7 +218,7 @@ function CalendarGrid({ year, month, dayMap, onDayClick, readOnly }) {
         {LEGEND.map(([c, lbl]) => (
           <div key={lbl} style={{ display: "flex", alignItems: "center", gap: 4 }}>
             <div style={{ width: 11, height: 11, borderRadius: 3, background: c + "33", border: `1px solid ${c}`, flexShrink: 0 }} />
-            <span style={{ color: "var(--text3)", fontSize: 10, fontFamily: "DM Mono,monospace" }}>{lbl}</span>
+            <span style={{ color: "var(--text3)", fontSize: 10, fontFamily: "'DM Mono',monospace" }}>{lbl}</span>
           </div>
         ))}
       </div>
@@ -392,10 +394,10 @@ function ExportModal({ onClose, employees, roles, tips, restaurant }) {
           <div style={{ background: "var(--bg1)", borderRadius: 10, padding: 12, fontSize: 12 }}>
             <div style={{ display: "flex", justifyContent: "space-between", color: "var(--text2)", marginBottom: 3 }}><span>Dias com gorjeta</span><span style={{ color: "var(--text)" }}>{preview.dias}</span></div>
             <div style={{ display: "flex", justifyContent: "space-between", color: "var(--text2)", marginBottom: 3 }}><span>Empregados</span><span style={{ color: "var(--text)" }}>{preview.emps}</span></div>
-            <div style={{ display: "flex", justifyContent: "space-between", color: "var(--text2)" }}><span>Total bruto</span><span style={{ color: "#f5c842", fontWeight: 700 }}>{fmt(preview.total)}</span></div>
+            <div style={{ display: "flex", justifyContent: "space-between", color: "var(--text2)" }}><span>Total bruto</span><span style={{ color: "var(--ac)", fontWeight: 700 }}>{fmt(preview.total)}</span></div>
           </div>
         )}
-        {status === "loading" && <p style={{ color: "#f5c842", textAlign: "center", fontSize: 13 }}>⏳ Gerando arquivo…</p>}
+        {status === "loading" && <p style={{ color: "var(--ac)", textAlign: "center", fontSize: 13 }}>⏳ Gerando arquivo…</p>}
         {status === "done"    && <p style={{ color: "#10b981", textAlign: "center", fontSize: 13 }}>✅ Arquivo salvo nos seus downloads!</p>}
         {status === "error"   && <p style={{ color: "#e74c3c", textAlign: "center", fontSize: 13 }}>❌ Erro ao gerar. Tente novamente.</p>}
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
@@ -428,7 +430,7 @@ function ComunicadosTab({ empId, restaurantId, communications, commAcks, onUpdat
   const pending = myComms.filter(c => !commAcks?.[c.id]?.[empId]);
   const done    = myComms.filter(c =>  commAcks?.[c.id]?.[empId]);
   const [tab, setTab] = useState("pending");
-  const ac = "#f5c842";
+  const ac = "var(--ac)";
 
   function ack(commId) {
     const now = new Date().toISOString();
@@ -443,13 +445,13 @@ function ComunicadosTab({ empId, restaurantId, communications, commAcks, onUpdat
   return (
     <div>
       {pending.length > 0 && (
-        <div style={{ background: "#e74c3c22", border: "1px solid #e74c3c44", borderRadius: 10, padding: "10px 14px", marginBottom: 16, fontSize: 12, color: "#e74c3c", fontFamily: "DM Mono,monospace" }}>
+        <div style={{ background: "#e74c3c22", border: "1px solid #e74c3c44", borderRadius: 10, padding: "10px 14px", marginBottom: 16, fontSize: 12, color: "#e74c3c", fontFamily: "'DM Mono',monospace" }}>
           ⚠️ Você tem <strong>{pending.length}</strong> comunicado{pending.length > 1 ? "s" : ""} pendente{pending.length > 1 ? "s" : ""} de ciência.
         </div>
       )}
       <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
         {[["pending", `Pendentes (${pending.length})`], ["done", `Lidos (${done.length})`]].map(([id, lbl]) => (
-          <button key={id} onClick={() => setTab(id)} style={{ flex: 1, padding: "8px", borderRadius: 10, border: `1px solid ${tab === id ? ac : "#2a2a2a"}`, background: tab === id ? ac + "22" : "transparent", color: tab === id ? ac : "#555", cursor: "pointer", fontFamily: "DM Mono,monospace", fontSize: 12 }}>{lbl}</button>
+          <button key={id} onClick={() => setTab(id)} style={{ flex: 1, padding: "8px", borderRadius: 10, border: `1px solid ${tab === id ? ac : "#2a2a2a"}`, background: tab === id ? ac + "22" : "transparent", color: tab === id ? ac : "#555", cursor: "pointer", fontFamily: "'DM Mono',monospace", fontSize: 12 }}>{lbl}</button>
         ))}
       </div>
       {list.length === 0 && <p style={{ color: "var(--text3)", textAlign: "center", fontSize: 14 }}>Nenhum comunicado {tab === "pending" ? "pendente" : "lido"}.</p>}
@@ -462,7 +464,7 @@ function ComunicadosTab({ empId, restaurantId, communications, commAcks, onUpdat
             {commAcks?.[c.id]?.[empId] && <span style={{ color: "#10b981", marginLeft: 12 }}>✓ Ciência em {new Date(commAcks[c.id][empId]).toLocaleString("pt-BR")}</span>}
           </div>
           {!commAcks?.[c.id]?.[empId] && (
-            <button onClick={() => ack(c.id)} style={{ width: "100%", padding: "11px", borderRadius: 10, background: "#f5c842", border: "none", color: "#111", fontWeight: 700, fontSize: 14, cursor: "pointer", fontFamily: "DM Mono,monospace" }}>
+            <button onClick={() => ack(c.id)} style={{ width: "100%", padding: "11px", borderRadius: 10, background: "var(--ac)", border: "none", color: "#111", fontWeight: 700, fontSize: 14, cursor: "pointer", fontFamily: "'DM Mono',monospace" }}>
               ✓ Dar Ciência
             </button>
           )}
@@ -483,7 +485,7 @@ function FaqTab({ restaurantId, faq }) {
     <div>
       {items.map((item, i) => (
         <div key={item.id ?? i} style={{ background: "var(--card-bg)", borderRadius: 12, marginBottom: 8, border: "1px solid var(--border)", overflow: "hidden" }}>
-          <button onClick={() => setOpen(open === i ? null : i)} style={{ width: "100%", padding: "14px 16px", background: "none", border: "none", color: open === i ? "#f5c842" : "#fff", textAlign: "left", cursor: "pointer", fontFamily: "DM Mono,monospace", fontSize: 14, fontWeight: 600, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <button onClick={() => setOpen(open === i ? null : i)} style={{ width: "100%", padding: "14px 16px", background: "none", border: "none", color: open === i ? "var(--ac)" : "#fff", textAlign: "left", cursor: "pointer", fontFamily: "'DM Mono',monospace", fontSize: 14, fontWeight: 600, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
             <span>{item.q}</span>
             <span style={{ fontSize: 18, color: "var(--text3)" }}>{open === i ? "−" : "+"}</span>
           </button>
@@ -503,7 +505,7 @@ function FaleDpTab({ empId, emp, restaurantId, dpMessages, onUpdate }) {
   const [anon, setAnon] = useState(false);
   const [sent, setSent] = useState(false);
   const CATS = [["sugestao","💡 Sugestão"],["elogio","👏 Elogio"],["reclamacao","⚠️ Reclamação"],["denuncia","🚨 Denúncia"]];
-  const ac = "#f5c842";
+  const ac = "var(--ac)";
 
   function send() {
     if (!body.trim()) return;
@@ -529,7 +531,7 @@ function FaleDpTab({ empId, emp, restaurantId, dpMessages, onUpdate }) {
       </p>
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 14 }}>
         {CATS.map(([val, lbl]) => (
-          <button key={val} onClick={() => setCategory(val)} style={{ padding: "10px", borderRadius: 10, border: `1px solid ${category === val ? ac : "#2a2a2a"}`, background: category === val ? ac + "22" : "transparent", color: category === val ? ac : "#555", cursor: "pointer", fontFamily: "DM Mono,monospace", fontSize: 12, fontWeight: category === val ? 700 : 400 }}>{lbl}</button>
+          <button key={val} onClick={() => setCategory(val)} style={{ padding: "10px", borderRadius: 10, border: `1px solid ${category === val ? ac : "#2a2a2a"}`, background: category === val ? ac + "22" : "transparent", color: category === val ? ac : "#555", cursor: "pointer", fontFamily: "'DM Mono',monospace", fontSize: 12, fontWeight: category === val ? 700 : 400 }}>{lbl}</button>
         ))}
       </div>
       <div style={{ marginBottom: 12 }}>
@@ -537,14 +539,14 @@ function FaleDpTab({ empId, emp, restaurantId, dpMessages, onUpdate }) {
         <textarea value={body} onChange={e => setBody(e.target.value)} placeholder="Escreva sua mensagem aqui…" rows={5} style={{ ...S.input, resize: "vertical", lineHeight: 1.5 }} />
       </div>
       <div style={{ marginBottom: 14 }}>
-        <button onClick={() => setAnon(!anon)} style={{ display: "flex", alignItems: "center", gap: 8, background: "none", border: "none", cursor: "pointer", fontFamily: "DM Mono,monospace", color: anon ? ac : "#555", fontSize: 13, padding: 0 }}>
+        <button onClick={() => setAnon(!anon)} style={{ display: "flex", alignItems: "center", gap: 8, background: "none", border: "none", cursor: "pointer", fontFamily: "'DM Mono',monospace", color: anon ? ac : "#555", fontSize: 13, padding: 0 }}>
           <div style={{ width: 18, height: 18, borderRadius: 4, border: `2px solid ${anon ? ac : "#555"}`, background: anon ? ac : "transparent", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, color: "#111" }}>{anon ? "✓" : ""}</div>
           Enviar de forma anônima
         </button>
         {!anon && <p style={{ color: "var(--text3)", fontSize: 11, marginTop: 4, marginLeft: 26 }}>Identificado como: <strong style={{ color: "var(--text2)" }}>{emp?.name}</strong></p>}
       </div>
       {sent && <p style={{ color: "#10b981", fontSize: 13, marginBottom: 10 }}>✅ Mensagem enviada com sucesso!</p>}
-      <button onClick={send} disabled={!body.trim()} style={{ width: "100%", padding: "12px", borderRadius: 12, background: body.trim() ? ac : "#2a2a2a", border: "none", color: "#111", fontWeight: 700, fontSize: 14, cursor: body.trim() ? "pointer" : "default", fontFamily: "DM Mono,monospace" }}>
+      <button onClick={send} disabled={!body.trim()} style={{ width: "100%", padding: "12px", borderRadius: 12, background: body.trim() ? ac : "#2a2a2a", border: "none", color: "#111", fontWeight: 700, fontSize: 14, cursor: body.trim() ? "pointer" : "default", fontFamily: "'DM Mono',monospace" }}>
         Enviar Mensagem
       </button>
 
@@ -568,10 +570,10 @@ function FaleDpTab({ empId, emp, restaurantId, dpMessages, onUpdate }) {
           };
           onUpdate("dpMessages", [...dpMessages, msg]);
           onUpdate("_toast", "✅ Solicitação enviada ao gestor.");
-        }} style={{padding:"8px 16px",borderRadius:8,border:"1px solid #ef444433",background:"transparent",color:"#ef4444",cursor:"pointer",fontFamily:"DM Mono,monospace",fontSize:12}}>
+        }} style={{padding:"8px 16px",borderRadius:8,border:"1px solid #ef444433",background:"transparent",color:"#ef4444",cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:12}}>
           Solicitar exclusão dos meus dados
         </button>
-        <button onClick={()=>document.getElementById("apptip-privacy").style.display="flex"} style={{display:"block",marginTop:8,background:"none",border:"none",color:"var(--text3)",cursor:"pointer",fontFamily:"DM Mono,monospace",fontSize:11,padding:0,textDecoration:"underline"}}>
+        <button onClick={()=>document.getElementById("apptip-privacy").style.display="flex"} style={{display:"block",marginTop:8,background:"none",border:"none",color:"var(--text3)",cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:11,padding:0,textDecoration:"underline"}}>
           Ver Política de Privacidade completa
         </button>
       </div>
@@ -592,7 +594,7 @@ function ComunicadosManagerTab({ restaurantId, communications, commAcks, employe
   const [selComm, setSelComm] = useState(null);
   const [selAreas, setSelAreas] = useState([]);
   const [selEmps, setSelEmps] = useState([]);
-  const ac = "#f5c842";
+  const ac = "var(--ac)";
 
   // target logic: "all" | "areas:[Bar,Cozinha]" | "emps:[id1,id2]"
   function toggleArea(a) { setSelAreas(p => p.includes(a) ? p.filter(x=>x!==a) : [...p,a]); setSelEmps([]); }
@@ -686,7 +688,7 @@ function ComunicadosManagerTab({ restaurantId, communications, commAcks, employe
               <label style={S.label}>Destinatários</label>
               {/* Todos button */}
               <div style={{marginBottom:8}}>
-                <button onClick={selectAll} style={{padding:"5px 14px",borderRadius:20,border:`1px solid ${isAll?"#f5c842":"var(--border)"}`,background:isAll?"#f5c84222":"transparent",color:isAll?"#f5c842":"var(--text3)",cursor:"pointer",fontFamily:"DM Mono,monospace",fontSize:12,fontWeight:isAll?700:400}}>
+                <button onClick={selectAll} style={{padding:"5px 14px",borderRadius:20,border:`1px solid ${isAll?"var(--ac)":"var(--border)"}`,background:isAll?"var(--ac)22":"transparent",color:isAll?"var(--ac)":"var(--text3)",cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:12,fontWeight:isAll?700:400}}>
                   👥 Todos
                 </button>
               </div>
@@ -696,7 +698,7 @@ function ComunicadosManagerTab({ restaurantId, communications, commAcks, employe
                 <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
                   {AREAS.map(a=>{
                     const on = selAreas.includes(a);
-                    return <button key={a} onClick={()=>toggleArea(a)} style={{padding:"4px 12px",borderRadius:20,border:`1px solid ${on?AREA_COLORS[a]??"#555":"var(--border)"}`,background:on?(AREA_COLORS[a]??"#555")+"22":"transparent",color:on?AREA_COLORS[a]??"var(--text)":"var(--text3)",cursor:"pointer",fontFamily:"DM Mono,monospace",fontSize:12,fontWeight:on?700:400}}>{a}</button>;
+                    return <button key={a} onClick={()=>toggleArea(a)} style={{padding:"4px 12px",borderRadius:20,border:`1px solid ${on?AREA_COLORS[a]??"#555":"var(--border)"}`,background:on?(AREA_COLORS[a]??"#555")+"22":"transparent",color:on?AREA_COLORS[a]??"var(--text)":"var(--text3)",cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:12,fontWeight:on?700:400}}>{a}</button>;
                   })}
                 </div>
               </div>
@@ -706,7 +708,7 @@ function ComunicadosManagerTab({ restaurantId, communications, commAcks, employe
                 <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
                   {restEmps.sort((a,b)=>a.name.localeCompare(b.name)).map(e=>{
                     const on = selEmps.includes(e.id);
-                    return <button key={e.id} onClick={()=>toggleEmp(e.id)} style={{padding:"4px 12px",borderRadius:20,border:`1px solid ${on?"#10b981":"var(--border)"}`,background:on?"#10b98122":"transparent",color:on?"#10b981":"var(--text3)",cursor:"pointer",fontFamily:"DM Mono,monospace",fontSize:12,fontWeight:on?700:400}}>{e.name.split(" ")[0]}</button>;
+                    return <button key={e.id} onClick={()=>toggleEmp(e.id)} style={{padding:"4px 12px",borderRadius:20,border:`1px solid ${on?"#10b981":"var(--border)"}`,background:on?"#10b98122":"transparent",color:on?"#10b981":"var(--text3)",cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:12,fontWeight:on?700:400}}>{e.name.split(" ")[0]}</button>;
                   })}
                 </div>
               </div>
@@ -735,7 +737,7 @@ function ComunicadosManagerTab({ restaurantId, communications, commAcks, employe
               </div>
               <div style={{ display: "flex", gap: 8 }}>
                 <button onClick={() => setSelComm(c.id)} style={{ ...S.btnSecondary, fontSize: 12 }}>Ver ciências</button>
-                <button onClick={() => remove(c.id)} style={{ background: "none", border: "1px solid #e74c3c33", borderRadius: 8, color: "#e74c3c", cursor: "pointer", fontSize: 12, padding: "6px 12px", fontFamily: "DM Mono,monospace" }}>✕</button>
+                <button onClick={() => remove(c.id)} style={{ background: "none", border: "1px solid #e74c3c33", borderRadius: 8, color: "#e74c3c", cursor: "pointer", fontSize: 12, padding: "6px 12px", fontFamily: "'DM Mono',monospace" }}>✕</button>
               </div>
             </div>
           </div>
@@ -752,7 +754,7 @@ function FaqManagerTab({ restaurantId, faq, onUpdate }) {
   const items = faq?.[restaurantId] ?? [];
   const [editIdx, setEditIdx] = useState(null);
   const [form, setForm] = useState({ q: "", a: "" });
-  const ac = "#f5c842";
+  const ac = "var(--ac)";
 
   function saveItem() {
     if (!form.q.trim() || !form.a.trim()) return;
@@ -788,7 +790,7 @@ function FaqManagerTab({ restaurantId, faq, onUpdate }) {
             </div>
             <div style={{ display: "flex", gap: 8, marginLeft: 8 }}>
               <button onClick={() => { setEditIdx(i); setForm({ q: item.q, a: item.a }); }} style={{ ...S.btnSecondary, fontSize: 12 }}>Editar</button>
-              <button onClick={() => removeItem(i)} style={{ background: "none", border: "1px solid #e74c3c33", borderRadius: 8, color: "#e74c3c", cursor: "pointer", fontSize: 12, padding: "6px 12px", fontFamily: "DM Mono,monospace" }}>✕</button>
+              <button onClick={() => removeItem(i)} style={{ background: "none", border: "1px solid #e74c3c33", borderRadius: 8, color: "#e74c3c", cursor: "pointer", fontSize: 12, padding: "6px 12px", fontFamily: "'DM Mono',monospace" }}>✕</button>
             </div>
           </div>
         </div>
@@ -835,7 +837,7 @@ function NotificacoesTab({ restaurantId, dpMessages, notifications, onUpdate }) 
   const CATS = { sugestao:"💡 Sugestão", elogio:"👏 Elogio", reclamacao:"⚠️ Reclamação", denuncia:"🚨 Denúncia" };
 
   return (
-    <div style={{fontFamily:"DM Mono,monospace"}}>
+    <div style={{fontFamily:"'DM Mono',monospace"}}>
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}}>
         <div>
           <p style={{color:ac,fontSize:15,fontWeight:700,margin:0}}>📬 Notificações</p>
@@ -849,13 +851,13 @@ function NotificacoesTab({ restaurantId, dpMessages, notifications, onUpdate }) 
         const isDP = item._kind === "dp";
         const isSys = item._kind === "sys";
         return (
-          <div key={item.id} style={{...S.card,marginBottom:10,opacity:item.read?0.65:1,borderColor:item.read?"#2a2a2a":isDP?"#f5c84244":"#3b82f644"}}>
+          <div key={item.id} style={{...S.card,marginBottom:10,opacity:item.read?0.65:1,borderColor:item.read?"#2a2a2a":isDP?"var(--ac)44":"#3b82f644"}}>
             <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:8}}>
               <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
-                {isDP && <span style={{background:"#f5c84222",color:"#f5c842",borderRadius:6,padding:"2px 8px",fontSize:10,fontWeight:700}}>💬 Fale com DP</span>}
+                {isDP && <span style={{background:"var(--ac)22",color:"var(--ac)",borderRadius:6,padding:"2px 8px",fontSize:10,fontWeight:700}}>💬 Fale com DP</span>}
                 {isSys && <span style={{background:"#3b82f622",color:"#3b82f6",borderRadius:6,padding:"2px 8px",fontSize:10,fontWeight:700}}>⚙️ Sistema</span>}
                 {isDP && item.category && <span style={{color:"var(--text3)",fontSize:11}}>{CATS[item.category]??item.category}</span>}
-                {!item.read && <span style={{background:isDP?"#f5c842":"#3b82f6",color:"#111",borderRadius:4,padding:"1px 6px",fontSize:10,fontWeight:700}}>Novo</span>}
+                {!item.read && <span style={{background:isDP?"var(--ac)":"#3b82f6",color:"#111",borderRadius:4,padding:"1px 6px",fontSize:10,fontWeight:700}}>Novo</span>}
               </div>
               <span style={{color:"var(--text3)",fontSize:11,whiteSpace:"nowrap"}}>{date ? new Date(date).toLocaleString("pt-BR") : ""}</span>
             </div>
@@ -972,7 +974,7 @@ function validateWeekSchedule(days) {
 
 // ── Work Schedule Manager Tab ─────────────────────────────────────────────────
 function WorkScheduleManagerTab({ restaurantId, employees, workSchedules, notifications, managers, currentManagerName, onUpdate, communications, isSuperManager }) {
-  const ac = "#f5c842";
+  const ac = "var(--ac)";
   const restEmps = employees.filter(e => e.restaurantId === restaurantId && !e.inactive);
   const [selEmpId, setSelEmpId] = useState(null);
   const [editDays, setEditDays] = useState({});
@@ -1119,7 +1121,7 @@ function WorkScheduleManagerTab({ restaurantId, employees, workSchedules, notifi
                     });
                     setSelectedSchedIds(new Set());
                     onUpdate("_toast", `🗑️ ${selectedSchedIds.size} versão(ões) apagada(s)`);
-                  }} style={{padding:"5px 12px",borderRadius:8,border:"none",background:"#ef4444",color:"#fff",fontWeight:700,cursor:"pointer",fontFamily:"DM Mono,monospace",fontSize:11}}>
+                  }} style={{padding:"5px 12px",borderRadius:8,border:"none",background:"#ef4444",color:"#fff",fontWeight:700,cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:11}}>
                     🗑️ Apagar selecionadas ({selectedSchedIds.size})
                   </button>
                 )}
@@ -1148,7 +1150,7 @@ function WorkScheduleManagerTab({ restaurantId, employees, workSchedules, notifi
 
       {/* Weekly schedule table */}
       <div style={{...S.card,marginBottom:16,overflowX:"auto"}}>
-        <table style={{width:"100%",borderCollapse:"collapse",fontFamily:"DM Mono,monospace",fontSize:13}}>
+        <table style={{width:"100%",borderCollapse:"collapse",fontFamily:"'DM Mono',monospace",fontSize:13}}>
           <thead>
             <tr>
               {["Dia","Entrada","Saída","Intervalo (min)","Hrs reais","Hrs diurnas","Hrs noturnas (real)","Hrs noturnas (ficta)","Hrs contratuais",""].map(h=>(
@@ -1181,9 +1183,9 @@ function WorkScheduleManagerTab({ restaurantId, employees, workSchedules, notifi
                   <td style={{padding:"6px 10px",color:"var(--text2)"}}>{calc?fmtHHMM(calc.diurnal):"—"}</td>
                   <td style={{padding:"6px 10px",color:"#8b5cf6"}}>{calc?fmtHHMM(calc.nocturnal):"—"}</td>
                   <td style={{padding:"6px 10px",color:"#ec4899"}}>{calc?fmtHHMM(calc.nocturnalFicta):"—"}</td>
-                  <td style={{padding:"6px 10px",color:calc&&calc.totalContract>10*60?"#ef4444":"#f5c842",fontWeight:700}}>{calc?fmtHHMM(calc.totalContract):"—"}</td>
+                  <td style={{padding:"6px 10px",color:calc&&calc.totalContract>10*60?"#ef4444":"var(--ac)",fontWeight:700}}>{calc?fmtHHMM(calc.totalContract):"—"}</td>
                   <td style={{padding:"4px 6px"}}>
-                    {hasDay && <button onClick={()=>clearDay(dayIdx)} style={{background:"none",border:"1px solid #e74c3c33",borderRadius:6,color:"#e74c3c",cursor:"pointer",padding:"3px 8px",fontSize:11,fontFamily:"DM Mono,monospace"}}>Folga</button>}
+                    {hasDay && <button onClick={()=>clearDay(dayIdx)} style={{background:"none",border:"1px solid #e74c3c33",borderRadius:6,color:"#e74c3c",cursor:"pointer",padding:"3px 8px",fontSize:11,fontFamily:"'DM Mono',monospace"}}>Folga</button>}
                   </td>
                 </tr>
               );
@@ -1210,7 +1212,7 @@ function WorkScheduleManagerTab({ restaurantId, employees, workSchedules, notifi
 
       {/* Valid from modal */}
       {showValidFrom && (
-        <div style={{...S.card,border:"1px solid #f5c84244",marginBottom:16}}>
+        <div style={{...S.card,border:"1px solid var(--ac)44",marginBottom:16}}>
           <p style={{color:ac,fontWeight:700,fontSize:14,margin:"0 0 10px"}}>📅 A partir de quando este horário entra em vigor?</p>
           <input type="date" value={validFrom} onChange={e=>setValidFrom(e.target.value)} style={{...S.input,marginBottom:12}}/>
           <p style={{color:"var(--text3)",fontSize:12,marginBottom:12}}>Todos os gestores marcados como DP receberão uma notificação com esta alteração.</p>
@@ -1230,13 +1232,13 @@ function WorkScheduleManagerTab({ restaurantId, employees, workSchedules, notifi
 
 // ── Work Schedule Employee Tab ────────────────────────────────────────────────
 function WorkScheduleEmployeeTab({ empId, restaurantId, workSchedules }) {
-  const ac = "#f5c842";
+  const ac = "var(--ac)";
   const empScheds = [...(workSchedules?.[restaurantId]?.[empId] ?? [])].sort((a,b)=>a.validFrom.localeCompare(b.validFrom));
   const current = empScheds[empScheds.length - 1];
 
   function scheduleBlock(s, validUntil) {
     return (
-      <div style={{fontFamily:"DM Mono,monospace"}}>
+      <div style={{fontFamily:"'DM Mono',monospace"}}>
         {[0,1,2,3,4,5,6].map(i => {
           const d = s.days[i];
           const hasShift = d?.in && d?.out;
@@ -1266,9 +1268,9 @@ function WorkScheduleEmployeeTab({ empId, restaurantId, workSchedules }) {
   );
 
   return (
-    <div style={{fontFamily:"DM Mono,monospace"}}>
+    <div style={{fontFamily:"'DM Mono',monospace"}}>
       {/* Current schedule */}
-      <div style={{...S.card,marginBottom:20,borderColor:"#f5c84233"}}>
+      <div style={{...S.card,marginBottom:20,borderColor:"var(--ac)33"}}>
         <p style={{color:ac,fontSize:14,fontWeight:700,margin:"0 0 2px"}}>🕐 Horário atual</p>
         <p style={{color:"var(--text3)",fontSize:12,marginBottom:14}}>Vigência a partir de {fmtDate(current.validFrom)}</p>
         {scheduleBlock(current, null)}
@@ -1309,7 +1311,7 @@ function DpManagerTab({ restaurantId, dpMessages, onUpdate, isSuperManager }) {
   const CATS = { all: "Todos", sugestao: "💡 Sugestões", elogio: "👏 Elogios", reclamacao: "⚠️ Reclamações", denuncia: "🚨 Denúncias" };
   const filtered = filter === "all" ? msgs : msgs.filter(m => m.category === filter);
   const unread = msgs.filter(m => !m.read).length;
-  const ac = "#f5c842";
+  const ac = "var(--ac)";
 
   function markRead(id) {
     onUpdate("dpMessages", dpMessages.map(m => m.id === id ? { ...m, read: true } : m));
@@ -1330,16 +1332,16 @@ function DpManagerTab({ restaurantId, dpMessages, onUpdate, isSuperManager }) {
 
   return (
     <div>
-      {unread > 0 && <div style={{ background: "#f5c84222", border: "1px solid #f5c84244", borderRadius: 10, padding: "8px 14px", marginBottom: 12, fontSize: 12, color: ac, fontFamily: "DM Mono,monospace" }}>📬 {unread} mensagem{unread > 1 ? "s" : ""} não lida{unread > 1 ? "s" : ""}</div>}
+      {unread > 0 && <div style={{ background: "var(--ac)22", border: "1px solid var(--ac)44", borderRadius: 10, padding: "8px 14px", marginBottom: 12, fontSize: 12, color: ac, fontFamily: "'DM Mono',monospace" }}>📬 {unread} mensagem{unread > 1 ? "s" : ""} não lida{unread > 1 ? "s" : ""}</div>}
 
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:8,marginBottom:16}}>
         <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
           {Object.entries(CATS).map(([val, lbl]) => (
-            <button key={val} onClick={() => setFilter(val)} style={{ padding: "6px 12px", borderRadius: 20, border: `1px solid ${filter === val ? ac : "#2a2a2a"}`, background: filter === val ? ac + "22" : "transparent", color: filter === val ? ac : "#555", cursor: "pointer", fontFamily: "DM Mono,monospace", fontSize: 11 }}>{lbl}</button>
+            <button key={val} onClick={() => setFilter(val)} style={{ padding: "6px 12px", borderRadius: 20, border: `1px solid ${filter === val ? ac : "#2a2a2a"}`, background: filter === val ? ac + "22" : "transparent", color: filter === val ? ac : "#555", cursor: "pointer", fontFamily: "'DM Mono',monospace", fontSize: 11 }}>{lbl}</button>
           ))}
         </div>
         {isSuperManager && selectedIds.size > 0 && (
-          <button onClick={deleteSelected} style={{padding:"6px 14px",borderRadius:8,border:"none",background:"#ef4444",color:"#fff",fontWeight:700,cursor:"pointer",fontFamily:"DM Mono,monospace",fontSize:12}}>
+          <button onClick={deleteSelected} style={{padding:"6px 14px",borderRadius:8,border:"none",background:"#ef4444",color:"#fff",fontWeight:700,cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:12}}>
             🗑️ Apagar selecionadas ({selectedIds.size})
           </button>
         )}
@@ -1347,7 +1349,7 @@ function DpManagerTab({ restaurantId, dpMessages, onUpdate, isSuperManager }) {
 
       {filtered.length === 0 && <p style={{ color: "var(--text3)", textAlign: "center" }}>Nenhuma mensagem.</p>}
       {filtered.map(m => (
-        <div key={m.id} style={{ ...S.card, marginBottom: 10, opacity: m.read ? 0.7 : 1, borderColor: selectedIds.has(m.id) ? "#ef444488" : m.read ? "#2a2a2a" : "#f5c84244", background: selectedIds.has(m.id) ? "#1a0808" : undefined }}>
+        <div key={m.id} style={{ ...S.card, marginBottom: 10, opacity: m.read ? 0.7 : 1, borderColor: selectedIds.has(m.id) ? "#ef444488" : m.read ? "#2a2a2a" : "var(--ac)44", background: selectedIds.has(m.id) ? "#1a0808" : undefined }}>
           <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8, alignItems:"flex-start" }}>
             <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
               {isSuperManager && (
@@ -1384,7 +1386,7 @@ function ReceibosManagerTab({ restaurantId, employees, roles, restaurants, recei
   const [assignTarget, setAssignTarget] = useState({}); // {receiptId: empId}
   const [unmatchedAction, setUnmatchedAction] = useState({}); // {receiptId: "create"|"assign"}
   const [newEmpForm, setNewEmpForm] = useState({}); // {receiptId: {name,cpf,admission,roleId}}
-  const ac = "#f5c842";
+  const ac = "var(--ac)";
 
   async function handleUpload(e) {
     const file = e.target.files[0];
@@ -1618,7 +1620,7 @@ function ReceibosManagerTab({ restaurantId, employees, roles, restaurants, recei
   const months = [...new Set(myReceipts.filter(r=>!r.unmatched).map(r => r.month))].sort().reverse();
 
   return (
-    <div style={{fontFamily:"DM Mono,monospace"}}>
+    <div style={{fontFamily:"'DM Mono',monospace"}}>
       <div style={{...S.card, marginBottom:20}}>
         <p style={{color:ac,fontSize:14,fontWeight:700,margin:"0 0 6px"}}>📤 Importar Recibos</p>
         <p style={{color:"var(--text3)",fontSize:12,marginBottom:14}}>Selecione o tipo e o mês antes de enviar o PDF.</p>
@@ -1627,7 +1629,7 @@ function ReceibosManagerTab({ restaurantId, employees, roles, restaurants, recei
             <label style={S.label}>Tipo de recibo</label>
             <div style={{display:"flex",gap:8}}>
               {[["pagamento","💰 Pagamento"],["adiantamento","💵 Adiantamento"],["13salario","🎄 13º Salário"],["ferias","🏖️ Férias"]].map(([v,l])=>(
-                <button key={v} onClick={()=>setType(v)} style={{flex:1,padding:"10px 6px",borderRadius:10,border:`2px solid ${type===v?ac:"var(--border)"}`,background:type===v?ac+"22":"transparent",color:type===v?ac:"var(--text3)",cursor:"pointer",fontFamily:"DM Mono,monospace",fontSize:12,fontWeight:type===v?700:400}}>
+                <button key={v} onClick={()=>setType(v)} style={{flex:1,padding:"10px 6px",borderRadius:10,border:`2px solid ${type===v?ac:"var(--border)"}`,background:type===v?ac+"22":"transparent",color:type===v?ac:"var(--text3)",cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:12,fontWeight:type===v?700:400}}>
                   {l}
                 </button>
               ))}
@@ -1677,13 +1679,13 @@ function ReceibosManagerTab({ restaurantId, employees, roles, restaurants, recei
                       <button onClick={()=>{
                         setUnmatchedAction(p=>({...p,[r.id]:"create"}));
                         setNewEmpForm(p=>({...p,[r.id]:{name:r.extractedName||"",cpf:r.extractedCpf||"",admission:r.extractedAdmission||"",roleId:"",newRoleName:r.extractedRole||"",newRoleArea:"Salão",newRolePoints:"1",creatingRole:false}}));
-                      }} style={{padding:"8px 16px",borderRadius:8,border:"none",background:"#10b981",color:"#fff",cursor:"pointer",fontFamily:"DM Mono,monospace",fontSize:12,fontWeight:700}}>
+                      }} style={{padding:"8px 16px",borderRadius:8,border:"none",background:"#10b981",color:"#fff",cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:12,fontWeight:700}}>
                         ➕ Criar novo empregado
                       </button>
-                      <button onClick={()=>setUnmatchedAction(p=>({...p,[r.id]:"assign"}))} style={{padding:"8px 16px",borderRadius:8,border:"1px solid var(--border)",background:"transparent",color:"var(--text2)",cursor:"pointer",fontFamily:"DM Mono,monospace",fontSize:12}}>
+                      <button onClick={()=>setUnmatchedAction(p=>({...p,[r.id]:"assign"}))} style={{padding:"8px 16px",borderRadius:8,border:"1px solid var(--border)",background:"transparent",color:"var(--text2)",cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:12}}>
                         🔗 Associar a existente
                       </button>
-                      <button onClick={()=>onUpdate("receipts",receipts.filter(x=>x.id!==r.id))} style={{padding:"8px 12px",borderRadius:8,border:"1px solid #e74c3c33",background:"transparent",color:"#e74c3c",cursor:"pointer",fontFamily:"DM Mono,monospace",fontSize:12}}>
+                      <button onClick={()=>onUpdate("receipts",receipts.filter(x=>x.id!==r.id))} style={{padding:"8px 12px",borderRadius:8,border:"1px solid #e74c3c33",background:"transparent",color:"#e74c3c",cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:12}}>
                         ✕ Descartar
                       </button>
                     </div>
@@ -1716,7 +1718,7 @@ function ReceibosManagerTab({ restaurantId, employees, roles, restaurants, recei
                               {restRoles.map(role=><option key={role.id} value={role.id}>{role.name} ({role.area})</option>)}
                             </select>
                             <button onClick={()=>setNewEmpForm(p=>({...p,[r.id]:{...form,creatingRole:true,roleId:""}}))}
-                              title="Criar novo cargo" style={{padding:"8px 10px",borderRadius:8,border:"1px solid #10b98144",background:"#10b98111",color:"#10b981",cursor:"pointer",fontFamily:"DM Mono,monospace",fontSize:13,whiteSpace:"nowrap"}}>+ Novo</button>
+                              title="Criar novo cargo" style={{padding:"8px 10px",borderRadius:8,border:"1px solid #10b98144",background:"#10b98111",color:"#10b981",cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:13,whiteSpace:"nowrap"}}>+ Novo</button>
                           </div>
                         ) : (
                           <div style={{display:"flex",flexDirection:"column",gap:6,padding:"10px 12px",background:"var(--bg3)",borderRadius:8,border:"1px solid #10b98133"}}>
@@ -1734,7 +1736,7 @@ function ReceibosManagerTab({ restaurantId, employees, roles, restaurants, recei
                                 const newRole = { id:`role-${Date.now()}-${Math.random().toString(36).slice(2,5)}`, restaurantId, name:form.newRoleName.trim(), area:form.newRoleArea, points:parseFloat(form.newRolePoints)??0, inactive:false };
                                 onUpdate("roles", [...roles, newRole]);
                                 setNewEmpForm(p=>({...p,[r.id]:{...form,roleId:newRole.id,creatingRole:false}}));
-                              }} style={{flex:1,padding:"6px",borderRadius:8,border:"none",background:"#10b981",color:"#fff",cursor:"pointer",fontFamily:"DM Mono,monospace",fontSize:12,fontWeight:700}}>✅ Criar cargo</button>
+                              }} style={{flex:1,padding:"6px",borderRadius:8,border:"none",background:"#10b981",color:"#fff",cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:12,fontWeight:700}}>✅ Criar cargo</button>
                               <button onClick={()=>setNewEmpForm(p=>({...p,[r.id]:{...form,creatingRole:false}}))} style={{...S.btnSecondary,fontSize:11,padding:"6px 10px"}}>Cancelar</button>
                             </div>
                           </div>
@@ -1754,7 +1756,7 @@ function ReceibosManagerTab({ restaurantId, employees, roles, restaurants, recei
                         onUpdate("receipts", receipts.map(x=>x.id===r.id?{...x,empId:newEmp.id,empName:newEmp.name,unmatched:false}:x));
                         setUnmatchedAction(p=>{const n={...p};delete n[r.id];return n;});
                         alert(`✅ Empregado "${newEmp.name}" criado!\nCódigo: ${empCode} | PIN: ${pin}`);
-                      }} style={{padding:"8px 16px",borderRadius:8,border:"none",background:"#10b981",color:"#fff",cursor:"pointer",fontFamily:"DM Mono,monospace",fontSize:12,fontWeight:700}}>
+                      }} style={{padding:"8px 16px",borderRadius:8,border:"none",background:"#10b981",color:"#fff",cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:12,fontWeight:700}}>
                         ✅ Criar e associar
                       </button>
                       <button onClick={()=>setUnmatchedAction(p=>{const n={...p};delete n[r.id];return n;})} style={{...S.btnSecondary,fontSize:12}}>Voltar</button>
@@ -1777,7 +1779,7 @@ function ReceibosManagerTab({ restaurantId, employees, roles, restaurants, recei
                         if(!emp) return;
                         onUpdate("receipts", receipts.map(x=>x.id===r.id?{...x,empId:emp.id,empName:emp.name,unmatched:false}:x));
                         setUnmatchedAction(p=>{const n={...p};delete n[r.id];return n;});
-                      }} disabled={!assignTarget[r.id]} style={{padding:"8px 14px",borderRadius:8,border:"none",background:assignTarget[r.id]?ac:"var(--bg4)",color:"#111",fontWeight:700,cursor:assignTarget[r.id]?"pointer":"default",fontFamily:"DM Mono,monospace",fontSize:12}}>
+                      }} disabled={!assignTarget[r.id]} style={{padding:"8px 14px",borderRadius:8,border:"none",background:assignTarget[r.id]?ac:"var(--bg4)",color:"#111",fontWeight:700,cursor:assignTarget[r.id]?"pointer":"default",fontFamily:"'DM Mono',monospace",fontSize:12}}>
                         Associar
                       </button>
                       <button onClick={()=>setUnmatchedAction(p=>{const n={...p};delete n[r.id];return n;})} style={{...S.btnSecondary,fontSize:12}}>Voltar</button>
@@ -1819,7 +1821,7 @@ function ReceibosManagerTab({ restaurantId, employees, roles, restaurants, recei
                   <details key={t} open style={{marginBottom:8,background:"var(--bg2)",borderRadius:10,border:`1px solid ${color}33`,overflow:"hidden"}}>
                     <summary style={{padding:"8px 12px",cursor:"pointer",display:"flex",justifyContent:"space-between",alignItems:"center",listStyle:"none",userSelect:"none"}}>
                       <span style={{color,fontSize:12,fontWeight:700}}>{label} ({tReceipts.length})</span>
-                      <button onClick={e=>{e.preventDefault();e.stopPropagation();if(window.confirm(`Excluir TODOS os ${tReceipts.length} recibos de ${label} de ${mLabel}?`)) onUpdate("receipts", receipts.filter(r=>!(r.month===m&&r.type===t&&r.restaurantId===restaurantId)));}} style={{background:"none",border:"1px solid #e74c3c33",borderRadius:6,color:"#e74c3c",cursor:"pointer",fontSize:11,padding:"2px 8px",fontFamily:"DM Mono,monospace"}}>
+                      <button onClick={e=>{e.preventDefault();e.stopPropagation();if(window.confirm(`Excluir TODOS os ${tReceipts.length} recibos de ${label} de ${mLabel}?`)) onUpdate("receipts", receipts.filter(r=>!(r.month===m&&r.type===t&&r.restaurantId===restaurantId)));}} style={{background:"none",border:"1px solid #e74c3c33",borderRadius:6,color:"#e74c3c",cursor:"pointer",fontSize:11,padding:"2px 8px",fontFamily:"'DM Mono',monospace"}}>
                         Excluir todos
                       </button>
                     </summary>
@@ -1837,7 +1839,7 @@ function ReceibosManagerTab({ restaurantId, employees, roles, restaurants, recei
                             <option value="13salario">🎄 13º Salário</option>
                             <option value="ferias">🏖️ Férias</option>
                           </select>
-                          <button onClick={()=>{if(window.confirm(`Excluir recibo de ${r.empName}?`)) onUpdate("receipts", receipts.filter(x=>x.id!==r.id));}} style={{background:"none",border:"1px solid #e74c3c33",borderRadius:6,color:"#e74c3c",cursor:"pointer",fontSize:12,padding:"4px 8px",fontFamily:"DM Mono,monospace",flexShrink:0}}>✕</button>
+                          <button onClick={()=>{if(window.confirm(`Excluir recibo de ${r.empName}?`)) onUpdate("receipts", receipts.filter(x=>x.id!==r.id));}} style={{background:"none",border:"1px solid #e74c3c33",borderRadius:6,color:"#e74c3c",cursor:"pointer",fontSize:12,padding:"4px 8px",fontFamily:"'DM Mono',monospace",flexShrink:0}}>✕</button>
                         </div>
                       ))}
                     </div>
@@ -1860,7 +1862,7 @@ function ReceibosEmployeeTab({ empId, restaurantId, receipts }) {
     .sort((a,b) => b.month.localeCompare(a.month));
   const months = [...new Set(myReceipts.map(r => r.month))];
   const [selReceipt, setSelReceipt] = useState(null);
-  const ac = "#f5c842";
+  const ac = "var(--ac)";
 
   if (selReceipt) {
     return (
@@ -1870,7 +1872,7 @@ function ReceibosEmployeeTab({ empId, restaurantId, receipts }) {
         <div style={{color:"var(--text3)",fontSize:12,marginBottom:12}}>{selReceipt.month} · {selReceipt.type==="pagamento"?"💰 Pagamento":"💵 Adiantamento"}</div>
         <img src={selReceipt.dataUrl} alt="Recibo" style={{width:"100%",borderRadius:10,border:"1px solid var(--border)"}}/>
         <a href={selReceipt.dataUrl} download={`recibo_${selReceipt.month}_${selReceipt.type}.jpg`}
-          style={{display:"block",marginTop:12,...S.btnPrimary,textAlign:"center",textDecoration:"none",padding:"12px",borderRadius:12,background:ac,color:"#111",fontWeight:700,fontFamily:"DM Mono,monospace",fontSize:14}}>
+          style={{display:"block",marginTop:12,...S.btnPrimary,textAlign:"center",textDecoration:"none",padding:"12px",borderRadius:12,background:ac,color:"#111",fontWeight:700,fontFamily:"'DM Mono',monospace",fontSize:14}}>
           ⬇️ Baixar Recibo
         </a>
       </div>
@@ -1895,7 +1897,7 @@ function ReceibosEmployeeTab({ empId, restaurantId, receipts }) {
             <p style={{color:ac,fontWeight:700,margin:"0 0 10px",fontSize:13}}>{m}</p>
             {mR.map(r=>(
               <button key={r.id} onClick={()=>setSelReceipt(r)}
-                style={{width:"100%",display:"flex",justifyContent:"space-between",alignItems:"center",padding:"12px",borderRadius:10,border:"1px solid var(--border)",background:"var(--bg1)",cursor:"pointer",fontFamily:"DM Mono,monospace",marginBottom:6}}>
+                style={{width:"100%",display:"flex",justifyContent:"space-between",alignItems:"center",padding:"12px",borderRadius:10,border:"1px solid var(--border)",background:"var(--bg1)",cursor:"pointer",fontFamily:"'DM Mono',monospace",marginBottom:6}}>
                 <span style={{color:"var(--text)",fontSize:13}}>{r.type==="pagamento"?"💰 Recibo de Pagamento":r.type==="adiantamento"?"💵 Recibo de Adiantamento":r.type==="ferias"?"🏖️ Férias":"🎄 13º Salário"}</span>
                 <span style={{color:"var(--text3)",fontSize:11}}>Ver →</span>
               </button>
@@ -1908,27 +1910,13 @@ function ReceibosEmployeeTab({ empId, restaurantId, receipts }) {
 }
 
 function EmployeePortal({ employees, roles, tips, schedules, restaurants, communications, commAcks, faq, dpMessages, receipts, workSchedules, onBack, onUpdateEmployee, onUpdate, toggleTheme, theme }) {
-  const [cpf, setCpf] = useState("");
-  const [pin, setPin] = useState("");
-  const [err, setErr] = useState("");
   const [empId, setEmpId] = useState(() => localStorage.getItem("apptip_empid") || null);
-  const [loginAttempts, setLoginAttempts] = useState(0);
-  const [loginBlockedUntil, setLoginBlockedUntil] = useState(null);
-  const [termsAccepted, setTermsAccepted] = useState(() => localStorage.getItem("apptip_terms") === "1");
-  const [showTerms, setShowTerms] = useState(false);
-
-  const loginIsBlocked = loginBlockedUntil && new Date() < loginBlockedUntil;
-
-  useEffect(() => {
-    if (!loginBlockedUntil) return;
-    const t = setInterval(() => { if (new Date() >= loginBlockedUntil) { setLoginBlockedUntil(null); setErr(""); clearInterval(t); } }, 1000);
-    return () => clearInterval(t);
-  }, [loginBlockedUntil]);
 
   useEffect(() => {
     if (empId) localStorage.setItem("apptip_empid", empId);
     else localStorage.removeItem("apptip_empid");
   }, [empId]);
+
   const now = new Date();
   const [year, setYear] = useState(now.getFullYear());
   const [month, setMonth] = useState(now.getMonth());
@@ -1952,7 +1940,6 @@ function EmployeePortal({ employees, roles, tips, schedules, restaurants, commun
   const taxTotal   = myTips.reduce((a, t) => a + (t.myTax   ?? 0), 0);
   const netTotal   = myTips.reduce((a, t) => a + (t.myNet   ?? 0), 0);
   const dayMap = emp ? (schedules?.[emp.restaurantId]?.[mk]?.[empId] ?? {}) : {};
-  const ac = "#f5c842"; const bg = "#0f0f0f";
 
   // Pending communications
   const empRole = roles?.find(r => r.id === emp?.roleId);
@@ -1992,35 +1979,6 @@ function EmployeePortal({ employees, roles, tips, schedules, restaurants, commun
     if (hasPending && tab !== "comunicados") setTab("comunicados");
   }, [hasPending, tab]);
 
-  function tryLogin() {
-    if (loginIsBlocked) return;
-    const cleanInput = cpf.trim().toUpperCase().replace(/\s/g,"");
-    const cleanPin = pin.trim();
-    const found = employees.find(e =>
-      (e.empCode && e.empCode.toUpperCase() === cleanInput && String(e.pin) === cleanPin) ||
-      (e.cpf && e.cpf.replace(/\D/g,"") === cleanInput.replace(/\D/g,"") && String(e.pin) === cleanPin)
-    );
-    if (!found) {
-      const na = loginAttempts + 1;
-      setLoginAttempts(na);
-      if (na >= 5) {
-        setLoginBlockedUntil(new Date(Date.now() + 30000));
-        setLoginAttempts(0);
-        setErr("Muitas tentativas. Aguarde 30 segundos.");
-      } else {
-        setErr(`ID/CPF ou PIN incorretos. ${5-na} tentativa${5-na!==1?"s":""} restante${5-na!==1?"s":""}.`);
-      }
-      return;
-    }
-    if (found.inactive && found.inactiveFrom && found.inactiveFrom <= today()) {
-      setErr("Acesso desativado. Entre em contato com o departamento pessoal.");
-      return;
-    }
-    setErr("");
-    setLoginAttempts(0);
-    setEmpId(found.id);
-  }
-
   function completeFirstAccess() {
     if (needsCpf && !firstCpf.trim()) { setFirstErr("Informe seu CPF."); return; }
     if (firstPin.length !== 4 || !/^\d{4}$/.test(firstPin)) { setFirstErr("PIN deve ter exatamente 4 dígitos numéricos."); return; }
@@ -2029,45 +1987,40 @@ function EmployeePortal({ employees, roles, tips, schedules, restaurants, commun
     onUpdateEmployee(updated);
   }
 
-  if (!empId) return (
-    <div style={{ minHeight: "100vh", background: bg, display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "DM Mono,monospace", padding: 24 }}>
-      <div style={{ ...S.card, maxWidth: 340, width: "100%", textAlign: "center" }}>
-        <div style={{ fontSize: 36, marginBottom: 8 }}>👤</div>
-        <h2 style={{ color: ac, margin: "0 0 4px" }}>Área do Empregado</h2>
-        <p style={{ color: "var(--text3)", fontSize: 13, marginBottom: 22 }}>Use seu ID (ex: QUI0001) ou CPF + PIN</p>
-        <div style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 14, textAlign: "left" }}>
-          <div><label style={S.label}>ID ou CPF</label><input value={cpf} onChange={e => setCpf(e.target.value)} placeholder="QUI0001 ou 000.000.000-00" style={S.input} disabled={loginIsBlocked}/></div>
-          <div><label style={S.label}>PIN (4 dígitos)</label><input type="password" inputMode="numeric" maxLength={4} value={pin} onChange={e => setPin(e.target.value)} placeholder="••••" style={{ ...S.input, letterSpacing: 6, fontSize: 18, textAlign: "center" }} onKeyDown={e => e.key === "Enter" && tryLogin()} disabled={loginIsBlocked}/></div>
-        </div>
-        {/* Aceite de termos */}
-        {!termsAccepted && (
-          <label style={{display:"flex",alignItems:"flex-start",gap:8,textAlign:"left",marginBottom:12,cursor:"pointer"}}>
-            <input type="checkbox" checked={termsAccepted} onChange={e=>{setTermsAccepted(e.target.checked);if(e.target.checked)localStorage.setItem("apptip_terms","1");}} style={{width:15,height:15,marginTop:2,accentColor:ac,flexShrink:0}}/>
-            <span style={{color:"var(--text3)",fontSize:11}}>Li e aceito a <button onClick={e=>{e.preventDefault();document.getElementById("apptip-privacy").style.display="flex";}} style={{background:"none",border:"none",color:ac,cursor:"pointer",fontFamily:"DM Mono,monospace",fontSize:11,padding:0,textDecoration:"underline"}}>Política de Privacidade</button> e o uso dos meus dados para gestão de gorjetas.</span>
-          </label>
-        )}
-        {err && <p style={{ color: loginIsBlocked?"#f59e0b":"#e74c3c", fontSize: 13, marginBottom: 10 }}>{err}</p>}
-        <button onClick={tryLogin} disabled={loginIsBlocked || !termsAccepted} style={{ ...S.btnPrimary, marginBottom: 12, opacity:(loginIsBlocked||!termsAccepted)?0.5:1, cursor:(loginIsBlocked||!termsAccepted)?"not-allowed":"pointer" }}>Entrar</button>
-        {termsAccepted && <p style={{color:"var(--text3)",fontSize:10,marginBottom:12}}><button onClick={()=>document.getElementById("apptip-privacy").style.display="flex"} style={{background:"none",border:"none",color:"var(--text3)",cursor:"pointer",fontFamily:"DM Mono,monospace",fontSize:10,padding:0,textDecoration:"underline"}}>Política de Privacidade</button></p>}
-        <button onClick={onBack} style={{ ...S.btnSecondary, width: "100%" }}>← Voltar</button>
-      </div>
-    </div>
-  );
+  // Se não tem empId — redireciona para login unificado
+  if (!empId) { onBack(); return null; }
 
   if (empId && isFirstAccess) return (
-    <div style={{ minHeight:"100vh", background:bg, display:"flex", alignItems:"center", justifyContent:"center", fontFamily:"DM Mono,monospace", padding:24 }}>
-      <div style={{ ...S.card, maxWidth:360, width:"100%" }}>
-        <div style={{ textAlign:"center", marginBottom:20 }}>
-          <div style={{ fontSize:32 }}>🔑</div>
-          <h2 style={{ color:ac, margin:"8px 0 4px" }}>Primeiro Acesso</h2>
-          <p style={{ color:"var(--text3)", fontSize:13 }}>{emp?.mustChangePin ? `PIN resetado pelo gestor. Defina um novo PIN, ${emp?.name}.` : `Bem-vindo, ${emp?.name}!${needsCpf?" Complete seu cadastro e defina seu PIN.":" Defina seu PIN de acesso."}`}</p>
+    <div style={{ minHeight:"100vh", background:"var(--bg)", display:"flex", alignItems:"center", justifyContent:"center", fontFamily:"'DM Sans',sans-serif", padding:24 }}>
+      <div style={{ ...S.card, maxWidth:380, width:"100%", boxShadow:"0 8px 32px rgba(0,0,0,0.08)" }}>
+        <div style={{ textAlign:"center", marginBottom:24 }}>
+          <div style={{ fontSize:36, marginBottom:12 }}>🔑</div>
+          <h2 style={{ color:"var(--text)", margin:"0 0 8px", fontSize:22, fontWeight:800 }}>
+            {emp?.mustChangePin ? "Novo PIN" : "Primeiro Acesso"}
+          </h2>
+          <p style={{ color:"var(--text3)", fontSize:14, lineHeight:1.5 }}>
+            {emp?.mustChangePin
+              ? `PIN resetado pelo gestor. Defina um novo PIN, ${emp?.name}.`
+              : `Bem-vindo, ${emp?.name}! ${needsCpf ? "Complete seu cadastro e defina seu PIN." : "Defina seu PIN de acesso."}`}
+          </p>
         </div>
-        <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
-          {needsCpf && <div><label style={S.label}>Seu CPF</label><input value={firstCpf} onChange={e=>setFirstCpf(maskCpf(e.target.value))} placeholder="000.000.000-00" style={S.input} inputMode="numeric"/></div>}
-          <div><label style={S.label}>Novo PIN (4 dígitos)</label><input type="password" inputMode="numeric" maxLength={4} value={firstPin} onChange={e=>setFirstPin(e.target.value)} placeholder="••••" style={{ ...S.input, letterSpacing:6, fontSize:20, textAlign:"center" }}/></div>
-          <div><label style={S.label}>Confirmar PIN</label><input type="password" inputMode="numeric" maxLength={4} value={firstPin2} onChange={e=>setFirstPin2(e.target.value)} placeholder="••••" style={{ ...S.input, letterSpacing:6, fontSize:20, textAlign:"center" }} onKeyDown={e=>e.key==="Enter"&&completeFirstAccess()}/></div>
-          {firstErr && <p style={{ color:"#e74c3c", fontSize:13, margin:0 }}>{firstErr}</p>}
-          <button onClick={completeFirstAccess} style={S.btnPrimary}>Confirmar e Entrar</button>
+        <div style={{ display:"flex", flexDirection:"column", gap:12 }}>
+          {needsCpf && (
+            <div>
+              <label style={S.label}>Seu CPF</label>
+              <input value={firstCpf} onChange={e=>setFirstCpf(maskCpf(e.target.value))} placeholder="000.000.000-00" style={S.input} inputMode="numeric"/>
+            </div>
+          )}
+          <div>
+            <label style={S.label}>Novo PIN (4 dígitos)</label>
+            <input type="password" inputMode="numeric" maxLength={4} value={firstPin} onChange={e=>setFirstPin(e.target.value)} placeholder="••••" style={{ ...S.input, letterSpacing:8, fontSize:22, textAlign:"center", fontFamily:"'DM Mono',monospace" }}/>
+          </div>
+          <div>
+            <label style={S.label}>Confirmar PIN</label>
+            <input type="password" inputMode="numeric" maxLength={4} value={firstPin2} onChange={e=>setFirstPin2(e.target.value)} placeholder="••••" style={{ ...S.input, letterSpacing:8, fontSize:22, textAlign:"center", fontFamily:"'DM Mono',monospace" }} onKeyDown={e=>e.key==="Enter"&&completeFirstAccess()}/>
+          </div>
+          {firstErr && <div style={{background:"var(--red-bg)",border:"1px solid var(--red)33",borderRadius:8,padding:"10px 12px",color:"var(--red)",fontSize:13}}>{firstErr}</div>}
+          <button onClick={completeFirstAccess} style={{...S.btnPrimary,marginTop:4}}>Confirmar e Entrar →</button>
         </div>
       </div>
     </div>
@@ -2085,23 +2038,23 @@ function EmployeePortal({ employees, roles, tips, schedules, restaurants, commun
   ].filter(Boolean);
 
   return (
-    <div style={{ minHeight: "100vh", background: bg, fontFamily: "DM Mono,monospace", paddingBottom: 76 }}>
+    <div style={{ minHeight:"100vh", background:"var(--bg)", fontFamily:"'DM Sans',sans-serif", paddingBottom:76 }}>
       {/* Header */}
-      <div style={{ background: "var(--bg1)", borderBottom: "1px solid var(--border)", padding: "12px 16px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+      <div style={{ background:"var(--header-bg)", borderBottom:"1px solid var(--border)", padding:"12px 16px", display:"flex", justifyContent:"space-between", alignItems:"center", boxShadow:"0 1px 4px rgba(0,0,0,0.04)" }}>
         <div>
-          <div style={{ color: ac, fontWeight: 700, fontSize: 15 }}>{emp?.name}</div>
-          <div style={{ color: "var(--text3)", fontSize: 11 }}>{role?.name} · {restaurant?.name}</div>
+          <div style={{ color:"var(--text)", fontWeight:700, fontSize:15 }}>{emp?.name}</div>
+          <div style={{ color:"var(--text3)", fontSize:11 }}>{role?.name} · {restaurant?.name}</div>
         </div>
         <div style={{display:"flex",gap:8,alignItems:"center"}}>
           <button onClick={toggleTheme} style={{background:"none",border:"1px solid var(--border)",borderRadius:20,padding:"6px 10px",cursor:"pointer",fontSize:16,color:"var(--text2)"}}>
             {theme==="dark"?"☀️":"🌙"}
           </button>
-          <button onClick={() => { setEmpId(null); setCpf(""); setPin(""); }} style={{ ...S.btnSecondary, fontSize: 12, padding: "6px 14px" }}>Sair</button>
+          <button onClick={() => { setEmpId(null); onBack(); }} style={{ ...S.btnSecondary, fontSize:12, padding:"6px 14px" }}>Sair</button>
         </div>
       </div>
 
       {hasPending && (
-        <div style={{ background: "#e74c3c22", padding: "8px 16px", fontSize: 12, color: "#e74c3c", textAlign: "center" }}>
+        <div style={{ background:"var(--red-bg)", padding:"8px 16px", fontSize:13, color:"var(--red)", textAlign:"center", fontWeight:500 }}>
           ⚠️ Dê ciência nos comunicados para acessar as outras abas.
         </div>
       )}
@@ -2172,8 +2125,8 @@ function EmployeePortal({ employees, roles, tips, schedules, restaurants, commun
           <div>
             <div style={{ marginBottom: 20 }}><MonthNav year={year} month={month} onChange={(y, m) => { setYear(y); setMonth(m); }} /></div>
             <div style={{display:"flex",gap:8,marginBottom:14}}>
-              <button onClick={()=>setEmpSchedView("mine")} style={{flex:1,padding:"8px",borderRadius:10,border:`1px solid ${empSchedView==="mine"?ac:"#2a2a2a"}`,background:empSchedView==="mine"?ac+"22":"transparent",color:empSchedView==="mine"?ac:"#555",cursor:"pointer",fontFamily:"DM Mono,monospace",fontSize:12}}>Minha Escala</button>
-              <button onClick={()=>setEmpSchedView("area")} style={{flex:1,padding:"8px",borderRadius:10,border:`1px solid ${empSchedView==="area"?ac:"#2a2a2a"}`,background:empSchedView==="area"?ac+"22":"transparent",color:empSchedView==="area"?ac:"#555",cursor:"pointer",fontFamily:"DM Mono,monospace",fontSize:12}}>Escala da Área</button>
+              <button onClick={()=>setEmpSchedView("mine")} style={{flex:1,padding:"8px",borderRadius:10,border:`1px solid ${empSchedView==="mine"?ac:"#2a2a2a"}`,background:empSchedView==="mine"?ac+"22":"transparent",color:empSchedView==="mine"?ac:"#555",cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:12}}>Minha Escala</button>
+              <button onClick={()=>setEmpSchedView("area")} style={{flex:1,padding:"8px",borderRadius:10,border:`1px solid ${empSchedView==="area"?ac:"#2a2a2a"}`,background:empSchedView==="area"?ac+"22":"transparent",color:empSchedView==="area"?ac:"#555",cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:12}}>Escala da Área</button>
             </div>
 
             {empSchedView === "mine" && (
@@ -2246,14 +2199,14 @@ function EmployeePortal({ employees, roles, tips, schedules, restaurants, commun
                     {LEGEND.map(([c,lbl])=>(
                       <div key={lbl} style={{display:"flex",alignItems:"center",gap:3}}>
                         <div style={{width:10,height:10,borderRadius:3,background:c+"33",border:`1px solid ${c}`,flexShrink:0}}/>
-                        <span style={{color:"var(--text3)",fontSize:9,fontFamily:"DM Mono,monospace"}}>{lbl}</span>
+                        <span style={{color:"var(--text3)",fontSize:9,fontFamily:"'DM Mono',monospace"}}>{lbl}</span>
                       </div>
                     ))}
                   </div>
 
                   {/* Tabela com scroll horizontal */}
                   <div style={{overflowX:"auto",WebkitOverflowScrolling:"touch",borderRadius:10,border:"1px solid var(--border)"}}>
-                    <table style={{borderCollapse:"collapse",fontFamily:"DM Mono,monospace",fontSize:10,minWidth:"100%"}}>
+                    <table style={{borderCollapse:"collapse",fontFamily:"'DM Mono',monospace",fontSize:10,minWidth:"100%"}}>
                       <thead>
                         <tr style={{background:"var(--bg1)"}}>
                           <th style={{position:"sticky",left:0,background:"var(--bg1)",zIndex:2,padding:"6px 8px",textAlign:"left",color:"var(--text3)",fontSize:10,borderBottom:"1px solid var(--border)",whiteSpace:"nowrap",minWidth:90}}>
@@ -2266,7 +2219,7 @@ function EmployeePortal({ employees, roles, tips, schedules, restaurants, commun
                             const isWe = wd===0||wd===6;
                             const isToday = date === today();
                             return (
-                              <th key={d} style={{padding:"3px 1px",textAlign:"center",color:isToday?ac:isWe?"#f59e0b":"#444",fontSize:9,borderBottom:"1px solid var(--border)",minWidth:22,width:22,background:isToday?"#f5c84211":"transparent"}}>
+                              <th key={d} style={{padding:"3px 1px",textAlign:"center",color:isToday?ac:isWe?"#f59e0b":"#444",fontSize:9,borderBottom:"1px solid var(--border)",minWidth:22,width:22,background:isToday?"var(--ac)11":"transparent"}}>
                                 <div style={{fontWeight:isToday?700:400}}>{d}</div>
                                 <div style={{fontSize:7,opacity:0.7}}>{["D","S","T","Q","Q","S","S"][wd]}</div>
                               </th>
@@ -2299,7 +2252,7 @@ function EmployeePortal({ employees, roles, tips, schedules, restaurants, commun
                                 return (
                                   <td key={d} style={{
                                     textAlign:"center",padding:"3px 1px",
-                                    background:isToday?"#f5c84211":status?color+"22":(isWe?"#1a1a0a":"transparent"),
+                                    background:isToday?"var(--ac)11":status?color+"22":(isWe?"#1a1a0a":"transparent"),
                                     borderRight:"1px solid #1a1a1a",
                                     width:22,outline:isToday?`1px solid ${ac}44`:undefined
                                   }}>
@@ -2346,20 +2299,20 @@ function EmployeePortal({ employees, roles, tips, schedules, restaurants, commun
       </div>
 
       {/* Bottom navigation bar */}
-      <div style={{ position: "fixed", bottom: 0, left: 0, right: 0, background: "var(--bg1)", borderTop: "1px solid var(--border)", display: "flex", zIndex: 100, paddingBottom: "env(safe-area-inset-bottom, 0px)" }}>
+      <div style={{ position:"fixed", bottom:0, left:0, right:0, background:"var(--header-bg)", borderTop:"1px solid var(--border)", display:"flex", zIndex:100, paddingBottom:"env(safe-area-inset-bottom, 0px)", boxShadow:"0 -2px 12px rgba(0,0,0,0.06)" }}>
         {NAV.map(([id, icon, label]) => {
           const blocked = hasPending && id !== "comunicados";
           const isActive = tab === id;
           const hasBadge = id === "comunicados" && pendingComms.length > 0;
           return (
             <button key={id} onClick={() => !blocked && handleTabChange(id)}
-              style={{ flex: 1, background: "none", border: "none", padding: "10px 4px 8px", cursor: blocked ? "not-allowed" : "pointer", display: "flex", flexDirection: "column", alignItems: "center", gap: 3, opacity: blocked ? 0.3 : 1, position: "relative" }}>
+              style={{ flex:1, background:"none", border:"none", padding:"10px 4px 8px", cursor:blocked?"not-allowed":"pointer", display:"flex", flexDirection:"column", alignItems:"center", gap:3, opacity:blocked?0.3:1, position:"relative" }}>
               {hasBadge && (
-                <span style={{ position: "absolute", top: 6, right: "calc(50% - 14px)", background: "#e74c3c", color: "#fff", borderRadius: 10, padding: "1px 5px", fontSize: 9, fontWeight: 700, fontFamily: "DM Mono,monospace", lineHeight: 1.4 }}>{pendingComms.length}</span>
+                <span style={{ position:"absolute", top:6, right:"calc(50% - 14px)", background:"var(--red)", color:"#fff", borderRadius:10, padding:"1px 5px", fontSize:9, fontWeight:700, lineHeight:1.4 }}>{pendingComms.length}</span>
               )}
-              <span style={{ fontSize: 22, lineHeight: 1 }}>{icon}</span>
-              <span style={{ fontSize: 9, fontFamily: "DM Mono,monospace", color: isActive ? ac : "var(--text3)", fontWeight: isActive ? 700 : 400, letterSpacing: 0 }}>{label}</span>
-              {isActive && <div style={{ position: "absolute", bottom: 0, left: "20%", right: "20%", height: 2, background: ac, borderRadius: 2 }}/>}
+              <span style={{ fontSize:22, lineHeight:1 }}>{icon}</span>
+              <span style={{ fontSize:9, fontFamily:"'DM Sans',sans-serif", color:isActive?ac:"var(--text3)", fontWeight:isActive?700:500 }}>{label}</span>
+              {isActive && <div style={{ position:"absolute", bottom:0, left:"20%", right:"20%", height:2, background:ac, borderRadius:2 }}/>}
             </button>
           );
         })}
@@ -2401,9 +2354,9 @@ function RoleSpreadsheet({ restRoles, rid, roles, onUpdate }) {
   function inactivateRole(id) { onUpdate("roles", roles.map(x => x.id === id ? {...x, inactive: true} : x)); }
   function reactivateRole(id) { onUpdate("roles", roles.map(x => x.id === id ? {...x, inactive: false} : x)); }
 
-  const inStyle = { background: "var(--bg1)", border: "1px solid var(--border)", borderRadius: 8, color: "var(--text)", fontFamily: "DM Mono,monospace", fontSize: 12, padding: "6px 8px", outline: "none", width: "100%", boxSizing:"border-box" };
+  const inStyle = { background: "var(--bg1)", border: "1px solid var(--border)", borderRadius: 8, color: "var(--text)", fontFamily: "'DM Mono',monospace", fontSize: 12, padding: "6px 8px", outline: "none", width: "100%", boxSizing:"border-box" };
   const sel = { ...inStyle, cursor: "pointer" };
-  const ac = "#f5c842";
+  const ac = "var(--ac)";
 
   // Agrupar por área
   const activeByArea = {};
@@ -2422,15 +2375,15 @@ function RoleSpreadsheet({ restRoles, rid, roles, onUpdate }) {
       <div key={r.id} style={{ display:"grid", gridTemplateColumns:ROLE_COLS, gap:6, marginBottom:4, background:"var(--card-bg)", borderRadius:10, padding:"6px 8px", border:`1px solid ${isSaved?"#10b98166":r.inactive?"#8b5cf622":"#2a2a2a"}`, opacity:r.inactive?0.6:1, alignItems:"center" }}>
         <input value={row.name} onChange={e => setRow(r.id, "name", e.target.value)} style={inStyle} />
         <input type="number" min="0" step="0.5" value={r.noTip ? 0 : row.points} disabled={r.noTip} onChange={e => setRow(r.id, "points", e.target.value)} style={{...inStyle, opacity: r.noTip ? 0.4 : 1, textAlign:"center"}} />
-        <label style={{display:"flex",alignItems:"center",gap:6,cursor:"pointer",color:"var(--text2)",fontSize:12,fontFamily:"DM Mono,monospace",whiteSpace:"nowrap"}}>
+        <label style={{display:"flex",alignItems:"center",gap:6,cursor:"pointer",color:"var(--text2)",fontSize:12,fontFamily:"'DM Mono',monospace",whiteSpace:"nowrap"}}>
           <input type="checkbox" checked={!!r.noTip} onChange={e=>{onUpdate("roles",roles.map(x=>x.id===r.id?{...x,noTip:e.target.checked,points:e.target.checked?0:parseFloat(row.points)||1}:x));}} style={{width:14,height:14,cursor:"pointer",accentColor:ac}}/>
           Sem gorjeta
         </label>
         <div style={{display:"flex",gap:4,justifyContent:"flex-end"}}>
-          <button onClick={()=>saveRole(r)} style={{padding:"5px 10px",borderRadius:7,border:"none",background:isSaved?"#10b981":ac,color:"#111",fontWeight:700,fontSize:11,cursor:"pointer",fontFamily:"DM Mono,monospace",whiteSpace:"nowrap"}}>{isSaved?"✓":"Salvar"}</button>
+          <button onClick={()=>saveRole(r)} style={{padding:"5px 10px",borderRadius:7,border:"none",background:isSaved?"#10b981":ac,color:"#111",fontWeight:700,fontSize:11,cursor:"pointer",fontFamily:"'DM Mono',monospace",whiteSpace:"nowrap"}}>{isSaved?"✓":"Salvar"}</button>
           {r.inactive
-            ? <button onClick={()=>reactivateRole(r.id)} style={{padding:"5px 10px",borderRadius:7,border:"1px solid #10b98144",background:"transparent",color:"#10b981",cursor:"pointer",fontSize:11,fontFamily:"DM Mono,monospace",whiteSpace:"nowrap"}}>Reativar</button>
-            : <button onClick={()=>inactivateRole(r.id)} style={{padding:"5px 10px",borderRadius:7,border:"1px solid #f59e0b44",background:"transparent",color:"#f59e0b",cursor:"pointer",fontSize:11,fontFamily:"DM Mono,monospace",whiteSpace:"nowrap"}}>Inativar</button>
+            ? <button onClick={()=>reactivateRole(r.id)} style={{padding:"5px 10px",borderRadius:7,border:"1px solid #10b98144",background:"transparent",color:"#10b981",cursor:"pointer",fontSize:11,fontFamily:"'DM Mono',monospace",whiteSpace:"nowrap"}}>Reativar</button>
+            : <button onClick={()=>inactivateRole(r.id)} style={{padding:"5px 10px",borderRadius:7,border:"1px solid #f59e0b44",background:"transparent",color:"#f59e0b",cursor:"pointer",fontSize:11,fontFamily:"'DM Mono',monospace",whiteSpace:"nowrap"}}>Inativar</button>
           }
         </div>
       </div>
@@ -2438,7 +2391,7 @@ function RoleSpreadsheet({ restRoles, rid, roles, onUpdate }) {
   };
 
   return (
-    <div style={{ fontFamily: "DM Mono,monospace" }}>
+    <div style={{ fontFamily: "'DM Mono',monospace" }}>
       <p style={{ color: "var(--text3)", fontSize: 12, marginBottom: 16 }}>Edite inline e clique em Salvar. Nova linha no topo para adicionar.</p>
 
       {/* Cabeçalho */}
@@ -2460,7 +2413,7 @@ function RoleSpreadsheet({ restRoles, rid, roles, onUpdate }) {
           <select value={newRow.area} onChange={e => setNewRow(p => ({ ...p, area: e.target.value }))} style={{...sel,flex:1}}>
             {AREAS.map(a => <option key={a} value={a}>{a}</option>)}
           </select>
-          <button onClick={saveNew} style={{padding:"6px 10px",borderRadius:8,border:"none",background:"#10b981",color:"#fff",fontWeight:700,fontSize:12,cursor:"pointer",fontFamily:"DM Mono,monospace",whiteSpace:"nowrap"}}>+ Add</button>
+          <button onClick={saveNew} style={{padding:"6px 10px",borderRadius:8,border:"none",background:"#10b981",color:"#fff",fontWeight:700,fontSize:12,cursor:"pointer",fontFamily:"'DM Mono',monospace",whiteSpace:"nowrap"}}>+ Add</button>
         </div>
       </div>
 
@@ -2495,10 +2448,10 @@ function RoleSpreadsheet({ restRoles, rid, roles, onUpdate }) {
 // ─── EmpRowLine definido FORA do EmployeeSpreadsheet para evitar re-mount ───
 const EMP_COLS        = "80px 2fr 1.2fr 100px auto 1.5fr auto";
 const EMP_COLS_HEADER = "80px 2fr 1.2fr 100px auto 1.5fr auto";
-const empInS2 = { background:"var(--bg1)", border:"1px solid var(--border)", borderRadius:6, color:"var(--text)", fontFamily:"DM Mono,monospace", fontSize:12, padding:"6px 8px", outline:"none", width:"100%", boxSizing:"border-box" };
+const empInS2 = { background:"var(--bg1)", border:"1px solid var(--border)", borderRadius:6, color:"var(--text)", fontFamily:"'DM Mono',monospace", fontSize:12, padding:"6px 8px", outline:"none", width:"100%", boxSizing:"border-box" };
 
 function EmpRowLine({ emp, isNew, row, restRoles, isSaved, isSuperManager, onChange, onSave, onToggleInactive, onDelete, onAdd, onResetPin, employees }) {
-  const ac = "#f5c842";
+  const ac = "var(--ac)";
   const isInactive = !isNew && emp?.inactive && emp?.inactiveFrom <= today();
   return (
     <div style={{display:"grid",gridTemplateColumns:EMP_COLS,gap:6,padding:"6px 8px",marginBottom:4,
@@ -2507,7 +2460,7 @@ function EmpRowLine({ emp, isNew, row, restRoles, isSaved, isSuperManager, onCha
       alignItems:"center",opacity:isInactive?0.75:1}}>
 
       {/* ID / código */}
-      <div style={{color:"var(--text3)",fontSize:11,fontFamily:"DM Mono,monospace",textAlign:"center"}}>
+      <div style={{color:"var(--text3)",fontSize:11,fontFamily:"'DM Mono',monospace",textAlign:"center"}}>
         {isNew ? <span style={{color:"#555",fontSize:10}}>Auto</span> : <span style={{color:ac,fontWeight:700}}>{emp?.empCode ?? "—"}</span>}
       </div>
 
@@ -2521,7 +2474,7 @@ function EmpRowLine({ emp, isNew, row, restRoles, isSaved, isSuperManager, onCha
           style={{...empInS2,width:70,flexShrink:0}}/>
         {!isNew && isSuperManager && (
           <button onClick={()=>onResetPin(emp)} title="Resetar PIN para o código do empregado"
-            style={{padding:"5px 8px",borderRadius:6,border:"1px solid #f59e0b44",background:"transparent",color:"#f59e0b",cursor:"pointer",fontSize:10,fontFamily:"DM Mono,monospace",whiteSpace:"nowrap"}}>
+            style={{padding:"5px 8px",borderRadius:6,border:"1px solid #f59e0b44",background:"transparent",color:"#f59e0b",cursor:"pointer",fontSize:10,fontFamily:"'DM Mono',monospace",whiteSpace:"nowrap"}}>
             🔑
           </button>
         )}
@@ -2539,16 +2492,16 @@ function EmpRowLine({ emp, isNew, row, restRoles, isSaved, isSuperManager, onCha
       {/* Última coluna: ações */}
       <div style={{display:"flex",gap:4,alignItems:"center"}}>
         {isNew
-          ? <button onClick={onAdd} style={{padding:"6px 12px",borderRadius:8,border:"none",background:"#10b981",color:"#fff",fontWeight:700,cursor:"pointer",fontFamily:"DM Mono,monospace",fontSize:12,whiteSpace:"nowrap"}}>+ Add</button>
+          ? <button onClick={onAdd} style={{padding:"6px 12px",borderRadius:8,border:"none",background:"#10b981",color:"#fff",fontWeight:700,cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:12,whiteSpace:"nowrap"}}>+ Add</button>
           : <>
-              <button onClick={onSave} style={{padding:"4px 10px",borderRadius:6,border:"none",background:isSaved?"#10b981":ac,color:"#111",fontWeight:700,cursor:"pointer",fontFamily:"DM Mono,monospace",fontSize:11}}>{isSaved?"✓":"Salvar"}</button>
+              <button onClick={onSave} style={{padding:"4px 10px",borderRadius:6,border:"none",background:isSaved?"#10b981":ac,color:"#111",fontWeight:700,cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:11}}>{isSaved?"✓":"Salvar"}</button>
               <button onClick={onToggleInactive} title={isInactive?"Reativar":"Inativar"}
-                style={{padding:"4px 8px",borderRadius:6,border:`1px solid ${isInactive?"#10b98144":"#f59e0b44"}`,background:"transparent",color:isInactive?"#10b981":"#f59e0b",cursor:"pointer",fontSize:11,fontFamily:"DM Mono,monospace"}}>
+                style={{padding:"4px 8px",borderRadius:6,border:`1px solid ${isInactive?"#10b98144":"#f59e0b44"}`,background:"transparent",color:isInactive?"#10b981":"#f59e0b",cursor:"pointer",fontSize:11,fontFamily:"'DM Mono',monospace"}}>
                 {isInactive?"↑":"↓"}
               </button>
               {isSuperManager && isInactive && (
                 <button onClick={onDelete} title="Excluir permanentemente"
-                  style={{padding:"4px 8px",borderRadius:6,border:"1px solid #e74c3c44",background:"transparent",color:"#e74c3c",cursor:"pointer",fontSize:11,fontFamily:"DM Mono,monospace"}}>✕</button>
+                  style={{padding:"4px 8px",borderRadius:6,border:"1px solid #e74c3c44",background:"transparent",color:"#e74c3c",cursor:"pointer",fontSize:11,fontFamily:"'DM Mono',monospace"}}>✕</button>
               )}
             </>
         }
@@ -2632,12 +2585,12 @@ function EmployeeSpreadsheet({ restEmps, restRoles, rid, employees, onUpdate, re
   }
 
   return (
-    <div style={{fontFamily:"DM Mono,monospace"}}>
+    <div style={{fontFamily:"'DM Mono',monospace"}}>
       <div style={{display:"flex",gap:8,marginBottom:16}}>
-        <button onClick={()=>setShowInactive(false)} style={{flex:1,padding:"8px",borderRadius:10,border:`1px solid ${!showInactive?"#10b981":"var(--border)"}`,background:!showInactive?"#10b98122":"transparent",color:!showInactive?"#10b981":"var(--text3)",cursor:"pointer",fontFamily:"DM Mono,monospace",fontSize:13}}>
+        <button onClick={()=>setShowInactive(false)} style={{flex:1,padding:"8px",borderRadius:10,border:`1px solid ${!showInactive?"#10b981":"var(--border)"}`,background:!showInactive?"#10b98122":"transparent",color:!showInactive?"#10b981":"var(--text3)",cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:13}}>
           Ativos ({activeEmps.length})
         </button>
-        <button onClick={()=>setShowInactive(true)} style={{flex:1,padding:"8px",borderRadius:10,border:`1px solid ${showInactive?"#8b5cf6":"var(--border)"}`,background:showInactive?"#8b5cf622":"transparent",color:showInactive?"#8b5cf6":"var(--text3)",cursor:"pointer",fontFamily:"DM Mono,monospace",fontSize:13}}>
+        <button onClick={()=>setShowInactive(true)} style={{flex:1,padding:"8px",borderRadius:10,border:`1px solid ${showInactive?"#8b5cf6":"var(--border)"}`,background:showInactive?"#8b5cf622":"transparent",color:showInactive?"#8b5cf6":"var(--text3)",cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:13}}>
           Inativos ({inactiveEmps.length}){isSuperManager && inactiveEmps.length>0 && " · clique ✕ p/ excluir"}
         </button>
       </div>
@@ -2905,7 +2858,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
     : restEmps.filter(e => restRoles.find(r => r.id === e.roleId)?.area === schedArea);
   const dim = new Date(year, month + 1, 0).getDate();
 
-  const ac = "#f5c842";
+  const ac = "var(--ac)";
   const canTips  = perms.tips     || isSuperManager;
   const canSched = perms.schedule || isSuperManager;
   const isDP     = perms.isDP === true;
@@ -2932,7 +2885,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
   const [tab, setTab] = useState(isSuperManager ? "dashboard" : isDP ? "notificacoes" : (perms.tips ? "dashboard" : "schedule"));
 
   return (
-    <div style={{ fontFamily: "DM Mono,monospace" }}>
+    <div style={{ fontFamily: "'DM Mono',monospace" }}>
       {/* Restaurant sub-header */}
       <div style={{ background: "var(--bg2)", borderBottom: "1px solid var(--border)", padding: "10px 20px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
         <div>
@@ -2945,7 +2898,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
       {/* Tabs */}
       <div style={{ display: "flex", borderBottom: "1px solid var(--border)", background: "var(--bg1)", overflowX: "auto" }}>
         {TABS.map(([id, lbl]) => (
-          <button key={id} onClick={() => setTab(id)} style={{ padding: "11px 14px", background: "none", border: "none", borderBottom: `2px solid ${tab === id ? ac : "transparent"}`, color: tab === id ? ac : "#555", cursor: "pointer", fontSize: 12, fontFamily: "DM Mono,monospace", fontWeight: tab === id ? 700 : 400, whiteSpace: "nowrap" }}>{lbl}</button>
+          <button key={id} onClick={() => setTab(id)} style={{ padding: "11px 14px", background: "none", border: "none", borderBottom: `2px solid ${tab === id ? ac : "transparent"}`, color: tab === id ? ac : "#555", cursor: "pointer", fontSize: 12, fontFamily: "'DM Mono',monospace", fontWeight: tab === id ? 700 : 400, whiteSpace: "nowrap" }}>{lbl}</button>
         ))}
       </div>
 
@@ -3118,7 +3071,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                     ["👥 Equipe",         "employees"],
                     ["📢 Comunicados",    "comunicados"],
                   ].filter(([,t])=>TABS.some(tb=>tb[0]===t)).map(([lbl,t])=>(
-                    <button key={t} onClick={()=>setTab(t)} style={{padding:"10px",borderRadius:10,border:"1px solid var(--border)",background:"var(--bg1)",color:"var(--text2)",cursor:"pointer",fontFamily:"DM Mono,monospace",fontSize:12,textAlign:"left",fontWeight:500}}>
+                    <button key={t} onClick={()=>setTab(t)} style={{padding:"10px",borderRadius:10,border:"1px solid var(--border)",background:"var(--bg1)",color:"var(--text2)",cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:12,textAlign:"left",fontWeight:500}}>
                       {lbl}
                     </button>
                   ))}
@@ -3213,7 +3166,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                       if      (isNoTip)               { bg = "#0f0d1f"; border = "#6366f166"; }
                       else if (isLaunched && !isDirty) { bg = "#0a1a0a"; border = "#10b98133"; }
                       else if (isDirty)                { bg = "#1a1200"; border = "#f59e0b55"; }
-                      else if (hasVal)                 { bg = "#1a1a0a"; border = "#f5c84233"; }
+                      else if (hasVal)                 { bg = "#1a1a0a"; border = "var(--ac)33"; }
 
                       return (
                         <div key={date} style={{display:"grid",gridTemplateColumns:"46px 1fr 1fr 100px 90px",gap:6,padding:"5px 8px",marginBottom:4,borderRadius:10,background:bg,border:`1px solid ${border}`,alignItems:"center"}}>
@@ -3261,7 +3214,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                               onChange={e=>setNoTip(date, e.target.checked)}
                               style={{width:18,height:18,cursor:isLaunched?"default":"pointer",accentColor:"#6366f1"}}
                             />
-                            <span style={{fontSize:9,color:isNoTip?"#818cf8":"#555",fontFamily:"DM Mono,monospace"}}>Sem gorjeta</span>
+                            <span style={{fontSize:9,color:isNoTip?"#818cf8":"#555",fontFamily:"'DM Mono',monospace"}}>Sem gorjeta</span>
                           </label>
 
                           {/* Ação */}
@@ -3270,7 +3223,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                               <button onClick={()=>{
                                 const n=calcTipForDate(date,val,row.note);
                                 if(n>0){setTipRows(prev=>prev.filter(r=>r.date!==date));onUpdate("_toast",`✅ ${fmtDate(date)}: ${n} emp.`);}
-                              }} style={{padding:"5px 12px",borderRadius:8,border:"none",background:ac,color:"#111",fontWeight:700,cursor:"pointer",fontFamily:"DM Mono,monospace",fontSize:11,whiteSpace:"nowrap"}}>
+                              }} style={{padding:"5px 12px",borderRadius:8,border:"none",background:ac,color:"#111",fontWeight:700,cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:11,whiteSpace:"nowrap"}}>
                                 Lançar
                               </button>
                             )}
@@ -3278,7 +3231,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                               <button onClick={()=>{
                                 const n=calcTipForDate(date,val,row.note);
                                 if(n>0){setTipRows(prev=>prev.filter(r=>r.date!==date));onUpdate("_toast",`✏️ atualizado`);}
-                              }} style={{padding:"5px 10px",borderRadius:8,border:"none",background:"#f59e0b",color:"#111",fontWeight:700,cursor:"pointer",fontFamily:"DM Mono,monospace",fontSize:11,whiteSpace:"nowrap"}}>
+                              }} style={{padding:"5px 10px",borderRadius:8,border:"none",background:"#f59e0b",color:"#111",fontWeight:700,cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:11,whiteSpace:"nowrap"}}>
                                 Salvar
                               </button>
                             )}
@@ -3289,7 +3242,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                                 onUpdate("tips",tips.filter(t=>!(t.restaurantId===rid&&t.date===date)));
                                 setTipRows(prev=>prev.filter(r=>r.date!==date));
                                 onUpdate("_toast",`🗑️ ${fmtDate(date)}: removido`);
-                              }} style={{padding:"4px 7px",borderRadius:7,border:"1px solid #ef444433",background:"transparent",color:"#ef4444",cursor:"pointer",fontFamily:"DM Mono,monospace",fontSize:12}}>
+                              }} style={{padding:"4px 7px",borderRadius:7,border:"1px solid #ef444433",background:"transparent",color:"#ef4444",cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:12}}>
                                 ✕
                               </button>
                             )}
@@ -3329,7 +3282,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                   {tipDates.map(d => (
                     <div key={d} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"8px 0",borderBottom:"1px solid var(--border)"}}>
                       <span style={{color:"var(--text2)",fontSize:13}}>{fmtDate(d)}</span>
-                      <button onClick={()=>{const n=recalcTipDay(d);onUpdate("_toast",`🔄 Dia ${fmtDate(d)} recalculado para ${n} empregados`);}} style={{padding:"6px 14px",borderRadius:8,border:"1px solid #f59e0b44",background:"transparent",color:"#f59e0b",cursor:"pointer",fontFamily:"DM Mono,monospace",fontSize:12}}>Recalcular</button>
+                      <button onClick={()=>{const n=recalcTipDay(d);onUpdate("_toast",`🔄 Dia ${fmtDate(d)} recalculado para ${n} empregados`);}} style={{padding:"6px 14px",borderRadius:8,border:"1px solid #f59e0b44",background:"transparent",color:"#f59e0b",cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:12}}>Recalcular</button>
                     </div>
                   ))}
                   {tipDates.length > 1 && (
@@ -3361,7 +3314,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                       </div>
                     );
                   })}
-                  <button onClick={()=>{const ids=new Set(dT.map(t=>t.id));onUpdate("tips",tips.filter(t=>!ids.has(t.id)));onUpdate("_toast","Lançamento removido.");}} style={{marginTop:10,background:"none",border:"1px solid #e74c3c33",borderRadius:8,color:"#e74c3c",cursor:"pointer",fontSize:12,padding:"4px 12px",fontFamily:"DM Mono,monospace"}}>Remover lançamento</button>
+                  <button onClick={()=>{const ids=new Set(dT.map(t=>t.id));onUpdate("tips",tips.filter(t=>!ids.has(t.id)));onUpdate("_toast","Lançamento removido.");}} style={{marginTop:10,background:"none",border:"1px solid #e74c3c33",borderRadius:8,color:"#e74c3c",cursor:"pointer",fontSize:12,padding:"4px 12px",fontFamily:"'DM Mono',monospace"}}>Remover lançamento</button>
                 </div>
               );
             })}
@@ -3438,7 +3391,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                   if (added) parts.push(`${added} folga(s) adicionada(s)`);
                   if (removed) parts.push(`${removed} folga(s) removida(s) fora do contrato`);
                   onUpdate("_toast", parts.length ? `✅ ${parts.join(" · ")}` : "Escala já está de acordo com o contrato");
-                }} style={{padding:"8px 12px",borderRadius:10,border:"1px solid #e74c3c44",background:"transparent",color:"#e74c3c",cursor:"pointer",fontFamily:"DM Mono,monospace",fontSize:12,whiteSpace:"nowrap"}}>
+                }} style={{padding:"8px 12px",borderRadius:10,border:"1px solid #e74c3c44",background:"transparent",color:"#e74c3c",cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:12,whiteSpace:"nowrap"}}>
                   📅 Folgas do contrato
                 </button>
                 <button onClick={async () => {
@@ -3537,7 +3490,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                   });
 
                   doc.save(`escala_${schedArea}_${year}_${String(month+1).padStart(2,"0")}.pdf`);
-                }} style={{padding:"8px 12px",borderRadius:10,border:"1px solid var(--border)",background:"transparent",color:"var(--text2)",cursor:"pointer",fontFamily:"DM Mono,monospace",fontSize:12,whiteSpace:"nowrap"}}>
+                }} style={{padding:"8px 12px",borderRadius:10,border:"1px solid var(--border)",background:"transparent",color:"var(--text2)",cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:12,whiteSpace:"nowrap"}}>
                   📄 PDF
                 </button>
               </div>
@@ -3550,7 +3503,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                   <div style={{width:20,height:16,borderRadius:3,background:c+"33",border:`1px solid ${c}`,display:"flex",alignItems:"center",justifyContent:"center"}}>
                     <span style={{color:c,fontSize:9,fontWeight:700}}>{s}</span>
                   </div>
-                  <span style={{color:"var(--text3)",fontSize:10,fontFamily:"DM Mono,monospace"}}>{l}</span>
+                  <span style={{color:"var(--text3)",fontSize:10,fontFamily:"'DM Mono',monospace"}}>{l}</span>
                 </div>
               ))}
             </div>
@@ -3586,7 +3539,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
 
               return (
                 <div style={{overflowX:"auto",WebkitOverflowScrolling:"touch"}}>
-                  <table style={{borderCollapse:"collapse",fontFamily:"DM Mono,monospace",fontSize:11,minWidth:"100%"}}>
+                  <table style={{borderCollapse:"collapse",fontFamily:"'DM Mono',monospace",fontSize:11,minWidth:"100%"}}>
                     <thead>
                       <tr>
                         <th style={{position:"sticky",left:0,background:"var(--card-bg)",zIndex:2,padding:"6px 10px",textAlign:"left",color:"var(--text3)",fontSize:11,borderBottom:"1px solid var(--border)",whiteSpace:"nowrap",minWidth:120}}>
@@ -3725,7 +3678,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                         <button onClick={()=>{
                           const updated = restaurants.map(r=>r.id===rid?{...r,tabsConfig:{...(r.tabsConfig??{}),[key]:!isOn}}:r);
                           onUpdate("restaurants",updated);
-                        }} style={{padding:"5px 14px",borderRadius:20,border:"none",background:isOn?"#10b981":"#2a2a2a",color:isOn?"#fff":"#555",fontWeight:700,cursor:"pointer",fontFamily:"DM Mono,monospace",fontSize:12}}>
+                        }} style={{padding:"5px 14px",borderRadius:20,border:"none",background:isOn?"#10b981":"#2a2a2a",color:isOn?"#fff":"#555",fontWeight:700,cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:12}}>
                           {isOn?"Ativa":"Inativa"}
                         </button>
                       </div>
@@ -3744,7 +3697,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                     <button key={rate} onClick={()=>{
                       onUpdate("restaurants", restaurants.map(r=>r.id===rid?{...r,taxRate:rate}:r));
                       onUpdate("_toast","Retenção salva!");
-                    }} style={{flex:1,padding:"12px",borderRadius:12,border:`2px solid ${sel?ac:"#2a2a2a"}`,background:sel?ac+"11":"transparent",cursor:"pointer",fontFamily:"DM Mono,monospace",fontSize:16,fontWeight:700,color:sel?ac:"#555"}}>
+                    }} style={{flex:1,padding:"12px",borderRadius:12,border:`2px solid ${sel?ac:"#2a2a2a"}`,background:sel?ac+"11":"transparent",cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:16,fontWeight:700,color:sel?ac:"#555"}}>
                       {lbl}
                     </button>
                   );
@@ -3791,7 +3744,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                       const updated = restaurants.map(r=>r.id===rid?{...r,divisionMode:mode}:r);
                       onUpdate("restaurants",updated);
                       onUpdate("_toast","Modalidade salva!");
-                    }} style={{padding:"14px 16px",borderRadius:12,border:`2px solid ${selected?ac:"#2a2a2a"}`,background:selected?ac+"11":"transparent",cursor:"pointer",textAlign:"left",fontFamily:"DM Mono,monospace"}}>
+                    }} style={{padding:"14px 16px",borderRadius:12,border:`2px solid ${selected?ac:"#2a2a2a"}`,background:selected?ac+"11":"transparent",cursor:"pointer",textAlign:"left",fontFamily:"'DM Mono',monospace"}}>
                       <div style={{color:selected?ac:"#fff",fontWeight:700,fontSize:14}}>{label}</div>
                       <div style={{color:"var(--text3)",fontSize:12,marginTop:4}}>{desc}</div>
                     </button>
@@ -3888,13 +3841,13 @@ function SuperManagerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, 
   ];
   function getPlano(r) { return PLANOS.find(p=>p.id===(r.planoId??"p10")) ?? PLANOS[0]; }
 
-  const ac = "#f5c842";
+  const ac = "var(--ac)";
   const TABS = [["restaurants","🏢 Restaurantes"],["managers","👔 Gestores"],["superManagers","⭐ Super Gestores"]];
 
   if (selRestaurant) {
     const rest = restaurants.find(r => r.id === selRestaurant);
     return (
-      <div style={{ minHeight:"100vh", background:"var(--bg)", fontFamily:"DM Mono,monospace" }}>
+      <div style={{ minHeight:"100vh", background:"var(--bg)", fontFamily:"'DM Mono',monospace" }}>
         <div style={{ background:"var(--bg1)", borderBottom:"1px solid var(--border)", padding:"14px 20px", display:"flex", justifyContent:"space-between", alignItems:"center" }}>
           <div style={{ display:"flex", alignItems:"center", gap:8 }}>
             <button onClick={()=>setSelRestaurant(null)} style={{ ...S.btnSecondary, fontSize:12, padding:"6px 12px" }}>← Voltar</button>
@@ -3908,7 +3861,7 @@ function SuperManagerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, 
   }
 
   return (
-    <div style={{ minHeight:"100vh", background:"var(--bg)", fontFamily:"DM Mono,monospace" }}>
+    <div style={{ minHeight:"100vh", background:"var(--bg)", fontFamily:"'DM Mono',monospace" }}>
       <div style={{ background:"var(--bg1)", borderBottom:"1px solid var(--border)", padding:"14px 20px", display:"flex", justifyContent:"space-between", alignItems:"center" }}>
         <div style={{ display:"flex", alignItems:"center", gap:8 }}>
           <span style={{ fontSize:18 }}>⭐</span>
@@ -3922,7 +3875,7 @@ function SuperManagerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, 
       </div>
       <div style={{ display:"flex", borderBottom:"1px solid var(--border)", background:"var(--bg1)", overflowX:"auto" }}>
         {TABS.map(([id,lbl])=>(
-          <button key={id} onClick={()=>setTab(id)} style={{ padding:"12px 16px", background:"none", border:"none", borderBottom:`2px solid ${tab===id?ac:"transparent"}`, color:tab===id?ac:"#555", cursor:"pointer", fontSize:13, fontFamily:"DM Mono,monospace", fontWeight:tab===id?700:400, whiteSpace:"nowrap" }}>{lbl}</button>
+          <button key={id} onClick={()=>setTab(id)} style={{ padding:"12px 16px", background:"none", border:"none", borderBottom:`2px solid ${tab===id?ac:"transparent"}`, color:tab===id?ac:"#555", cursor:"pointer", fontSize:13, fontFamily:"'DM Mono',monospace", fontWeight:tab===id?700:400, whiteSpace:"nowrap" }}>{lbl}</button>
         ))}
       </div>
 
@@ -3966,7 +3919,7 @@ function SuperManagerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, 
                   <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
                     <div style={{flex:1}}>
                       <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:2}}>
-                        <span style={{color:ac,fontWeight:700,fontSize:13,background:"#f5c84222",borderRadius:6,padding:"2px 8px"}}>{r.shortCode||"—"}</span>
+                        <span style={{color:ac,fontWeight:700,fontSize:13,background:"var(--ac)22",borderRadius:6,padding:"2px 8px"}}>{r.shortCode||"—"}</span>
                         <span style={{color:"var(--text)",fontWeight:700,fontSize:16}}>{r.name}</span>
                         <span style={{background:atLimit?"#ef444422":"#10b98122",color:atLimit?"#ef4444":"#10b981",borderRadius:6,padding:"2px 8px",fontSize:11,fontWeight:700}}>{plano.label}</span>
                       </div>
@@ -4004,7 +3957,7 @@ function SuperManagerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, 
                         }
                         onUpdate("restaurants",restaurants.filter(x=>x.id!==r.id));
                         onUpdate("_toast","Restaurante excluído.");
-                      }} style={{background:"none",border:"1px solid #e74c3c33",borderRadius:8,color:"#e74c3c",cursor:"pointer",fontSize:12,padding:"6px 12px",fontFamily:"DM Mono,monospace"}}>✕</button>
+                      }} style={{background:"none",border:"1px solid #e74c3c33",borderRadius:8,color:"#e74c3c",cursor:"pointer",fontSize:12,padding:"6px 12px",fontFamily:"'DM Mono',monospace"}}>✕</button>
                     </div>
                   </div>
                 </div>
@@ -4034,7 +3987,7 @@ function SuperManagerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, 
                   </div>
                   <div style={{display:"flex",gap:8}}>
                     <button onClick={()=>{setEditMgrId(m.id);setMgrForm({name:m.name,cpf:m.cpf??"",pin:m.pin??"",restaurantIds:m.restaurantIds??[],perms:m.perms??{tips:true,schedule:true},isDP:m.isDP??false});setShowMgrModal(true);}} style={{...S.btnSecondary,fontSize:12}}>Editar</button>
-                    <button onClick={()=>onUpdate("managers",managers.filter(x=>x.id!==m.id))} style={{background:"none",border:"1px solid #e74c3c33",borderRadius:8,color:"#e74c3c",cursor:"pointer",fontSize:12,padding:"6px 12px",fontFamily:"DM Mono,monospace"}}>✕</button>
+                    <button onClick={()=>onUpdate("managers",managers.filter(x=>x.id!==m.id))} style={{background:"none",border:"1px solid #e74c3c33",borderRadius:8,color:"#e74c3c",cursor:"pointer",fontSize:12,padding:"6px 12px",fontFamily:"'DM Mono',monospace"}}>✕</button>
                   </div>
                 </div>
               </div>
@@ -4055,7 +4008,7 @@ function SuperManagerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, 
                 </div>
                 <div style={{display:"flex",gap:8}}>
                   <button onClick={()=>{setEditSuperId(s.id);setSuperForm({name:s.name,cpf:s.cpf??"",pin:s.pin??""});setShowSuperModal(true);}} style={{...S.btnSecondary,fontSize:12}}>Editar</button>
-                  {superManagers.length>1&&<button onClick={()=>onUpdate("superManagers",superManagers.filter(x=>x.id!==s.id))} style={{background:"none",border:"1px solid #e74c3c33",borderRadius:8,color:"#e74c3c",cursor:"pointer",fontSize:12,padding:"6px 12px",fontFamily:"DM Mono,monospace"}}>✕</button>}
+                  {superManagers.length>1&&<button onClick={()=>onUpdate("superManagers",superManagers.filter(x=>x.id!==s.id))} style={{background:"none",border:"1px solid #e74c3c33",borderRadius:8,color:"#e74c3c",cursor:"pointer",fontSize:12,padding:"6px 12px",fontFamily:"'DM Mono',monospace"}}>✕</button>}
                 </div>
               </div>
             ))}
@@ -4083,11 +4036,10 @@ function SuperManagerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, 
               <label style={S.label}>Plano contratado</label>
               <div style={{display:"flex",flexDirection:"column",gap:6}}>
                 {PLANOS.map(p=>{
-                  const sel = (restForm.planoId??p10) === p.id || (!restForm.planoId && p.id==="p10");
-                  const sel2 = restForm.planoId === p.id;
+                  const sel2 = restForm.planoId === p.id || (!restForm.planoId && p.id==="p10");
                   return (
                     <button key={p.id} onClick={()=>setRestForm({...restForm,planoId:p.id})}
-                      style={{padding:"10px 14px",borderRadius:10,border:`1px solid ${sel2?"#f5c842":"#2a2a2a"}`,background:sel2?"#f5c84222":"transparent",cursor:"pointer",fontFamily:"DM Mono,monospace",textAlign:"left",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                      style={{padding:"10px 14px",borderRadius:10,border:`1px solid ${sel2?"var(--ac)":"#2a2a2a"}`,background:sel2?"var(--ac)22":"transparent",cursor:"pointer",fontFamily:"'DM Mono',monospace",textAlign:"left",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
                       <span style={{color:sel2?ac:"var(--text2)",fontWeight:sel2?700:400}}>{sel2?"✓":"○"} {p.label} — até {p.empMax} emp.</span>
                       {p.mensal && <span style={{color:"var(--text3)",fontSize:12}}>R${p.mensal}/mês · R${p.anual}/mês anual</span>}
                       {!p.mensal && <span style={{color:"var(--text3)",fontSize:12}}>Sob consulta</span>}
@@ -4105,7 +4057,7 @@ function SuperManagerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, 
                   const sel = (restForm.tipoCobranca??"mensal")===v;
                   return (
                     <button key={v} onClick={()=>setRestForm({...restForm,tipoCobranca:v})}
-                      style={{flex:1,padding:"10px",borderRadius:10,border:`1px solid ${sel?"#10b981":"#2a2a2a"}`,background:sel?"#10b98122":"transparent",color:sel?"#10b981":"#555",cursor:"pointer",fontFamily:"DM Mono,monospace",fontSize:13,fontWeight:sel?700:400}}>
+                      style={{flex:1,padding:"10px",borderRadius:10,border:`1px solid ${sel?"#10b981":"#2a2a2a"}`,background:sel?"#10b98122":"transparent",color:sel?"#10b981":"#555",cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:13,fontWeight:sel?700:400}}>
                       {l}
                     </button>
                   );
@@ -4134,7 +4086,7 @@ function SuperManagerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, 
                   const on = mgrForm.perms?.[k] !== false;
                   return (
                     <button key={k} onClick={()=>setMgrForm({...mgrForm,perms:{...mgrForm.perms,[k]:!on}})}
-                      style={{padding:"10px",borderRadius:10,border:`1px solid ${on?"#10b981":"#2a2a2a"}`,background:on?"#10b98122":"transparent",color:on?"#10b981":"#555",cursor:"pointer",fontFamily:"DM Mono,monospace",fontSize:12,textAlign:"left"}}>
+                      style={{padding:"10px",borderRadius:10,border:`1px solid ${on?"#10b981":"#2a2a2a"}`,background:on?"#10b98122":"transparent",color:on?"#10b981":"#555",cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:12,textAlign:"left"}}>
                       {on?"✓":"✗"} {lbl}
                     </button>
                   );
@@ -4150,7 +4102,7 @@ function SuperManagerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, 
                   const sel = mgrForm.restaurantIds?.includes(r.id);
                   return (
                     <button key={r.id} onClick={()=>setMgrForm({...mgrForm,restaurantIds:sel?mgrForm.restaurantIds.filter(x=>x!==r.id):[...(mgrForm.restaurantIds??[]),r.id]})}
-                      style={{padding:"10px 14px",borderRadius:10,border:`1px solid ${sel?"#f5c842":"#2a2a2a"}`,background:sel?"#f5c84222":"transparent",color:sel?"#f5c842":"#555",cursor:"pointer",fontFamily:"DM Mono,monospace",fontSize:13,textAlign:"left"}}>
+                      style={{padding:"10px 14px",borderRadius:10,border:`1px solid ${sel?"var(--ac)":"#2a2a2a"}`,background:sel?"var(--ac)22":"transparent",color:sel?"var(--ac)":"#555",cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:13,textAlign:"left"}}>
                       {sel?"✓":"○"} {r.name}
                     </button>
                   );
@@ -4161,7 +4113,7 @@ function SuperManagerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, 
             <div style={{borderTop:"1px solid var(--border)",paddingTop:12}}>
               <label style={S.label}>Departamento Pessoal (DP)</label>
               <button onClick={()=>setMgrForm({...mgrForm,isDP:!mgrForm.isDP})}
-                style={{width:"100%",padding:"12px 14px",borderRadius:10,border:`1px solid ${mgrForm.isDP?"#3b82f6":"#2a2a2a"}`,background:mgrForm.isDP?"#3b82f622":"transparent",color:mgrForm.isDP?"#3b82f6":"#555",cursor:"pointer",fontFamily:"DM Mono,monospace",fontSize:13,textAlign:"left",display:"flex",alignItems:"center",gap:10}}>
+                style={{width:"100%",padding:"12px 14px",borderRadius:10,border:`1px solid ${mgrForm.isDP?"#3b82f6":"#2a2a2a"}`,background:mgrForm.isDP?"#3b82f622":"transparent",color:mgrForm.isDP?"#3b82f6":"#555",cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:13,textAlign:"left",display:"flex",alignItems:"center",gap:10}}>
                 <span style={{fontSize:18}}>📬</span>
                 <div>
                   <div style={{fontWeight:700}}>{mgrForm.isDP?"✓ É gestor do DP":"○ Não é gestor do DP"}</div>
@@ -4202,7 +4154,7 @@ function ManagerPortal({ manager, data, onUpdate, onBack, toggleTheme, theme }) 
     if (saved && myRestaurants.find(r => r.id === saved)) return saved;
     return null;
   });
-  const ac = "#f5c842";
+  const ac = "var(--ac)";
 
   // Persiste o restaurante selecionado
   useEffect(() => {
@@ -4213,7 +4165,7 @@ function ManagerPortal({ manager, data, onUpdate, onBack, toggleTheme, theme }) 
   const selRest = myRestaurants.find(r => r.id === selId);
 
   return (
-    <div style={{ minHeight:"100vh", background:"var(--bg)", fontFamily:"DM Mono,monospace" }}>
+    <div style={{ minHeight:"100vh", background:"var(--bg)", fontFamily:"'DM Mono',monospace" }}>
       <div style={{ background:"var(--bg1)", borderBottom:"1px solid var(--border)", padding:"14px 20px", display:"flex", justifyContent:"space-between", alignItems:"center" }}>
         <div style={{ display:"flex", alignItems:"center", gap:8 }}>
           <span style={{fontSize:18}}>📊</span>
@@ -4262,37 +4214,18 @@ function ManagerPortal({ manager, data, onUpdate, onBack, toggleTheme, theme }) 
 //
 // LOGIN
 //
-function LoginScreen({ superManagers, managers, onLoginSuper, onLoginManager, onBack, onSetupFirst }) {
-  const [cpf, setCpf] = useState("");
+function UnifiedLogin({ superManagers, managers, employees, onLoginSuper, onLoginManager, onLoginEmployee, onSetupFirst, toggleTheme, theme }) {
+  const [credential, setCredential] = useState(""); // CPF ou ID do empregado
   const [pin, setPin] = useState("");
   const [err, setErr] = useState("");
   const [attempts, setAttempts] = useState(0);
   const [blockedUntil, setBlockedUntil] = useState(null);
-  const ac = "#f5c842";
+  const [termsAccepted, setTermsAccepted] = useState(() => localStorage.getItem("apptip_terms") === "1");
 
   const isBlocked = blockedUntil && new Date() < blockedUntil;
-  const secondsLeft = isBlocked ? Math.ceil((blockedUntil - new Date()) / 1000) : 0;
+  const isEmpId = /^[A-Za-z]{2,4}\d+$/.test(credential.trim()); // ex: LBZ0001
+  const isCpf = credential.replace(/\D/g,"").length >= 11;
 
-  function tryLogin() {
-    if (isBlocked) return;
-    const clean = cpf.replace(/\D/g,"");
-    const superUser = superManagers.find(s => s.cpf?.replace(/\D/g,"")===clean && String(s.pin)===String(pin));
-    if (superUser) { setErr(""); setAttempts(0); onLoginSuper(superUser); return; }
-    const mgr = managers.find(m => m.cpf?.replace(/\D/g,"")===clean && String(m.pin)===String(pin));
-    if (mgr) { setErr(""); setAttempts(0); onLoginManager(mgr); return; }
-    const newAttempts = attempts + 1;
-    setAttempts(newAttempts);
-    if (newAttempts >= 5) {
-      const until = new Date(Date.now() + 30000);
-      setBlockedUntil(until);
-      setAttempts(0);
-      setErr("Muitas tentativas. Aguarde 30 segundos.");
-    } else {
-      setErr(`CPF ou PIN incorretos. ${5 - newAttempts} tentativa${5-newAttempts!==1?"s":""} restante${5-newAttempts!==1?"s":""}.`);
-    }
-  }
-
-  // Contador regressivo
   useEffect(() => {
     if (!blockedUntil) return;
     const t = setInterval(() => {
@@ -4302,28 +4235,155 @@ function LoginScreen({ superManagers, managers, onLoginSuper, onLoginManager, on
     return () => clearInterval(t);
   }, [blockedUntil]);
 
+  function tryLogin() {
+    if (isBlocked || !termsAccepted) return;
+    const clean = credential.trim();
+    const cleanCpf = clean.replace(/\D/g,"");
+    const cleanPin = pin.trim();
+
+    // 1. Tenta supergestor (só por CPF)
+    if (!isEmpId) {
+      const superUser = superManagers.find(s => s.cpf?.replace(/\D/g,"") === cleanCpf && String(s.pin) === cleanPin);
+      if (superUser) { setErr(""); setAttempts(0); onLoginSuper(superUser); return; }
+
+      // 2. Tenta gestor (só por CPF)
+      const mgr = managers.find(m => m.cpf?.replace(/\D/g,"") === cleanCpf && String(m.pin) === cleanPin);
+      if (mgr) { setErr(""); setAttempts(0); onLoginManager(mgr); return; }
+    }
+
+    // 3. Tenta empregado (por CPF ou ID)
+    const emp = employees.find(e => {
+      if (isEmpId) return e.empCode?.toUpperCase() === clean.toUpperCase() && String(e.pin) === cleanPin;
+      return e.cpf?.replace(/\D/g,"") === cleanCpf && String(e.pin) === cleanPin;
+    });
+    if (emp) {
+      if (emp.inactive && emp.inactiveFrom && emp.inactiveFrom <= today()) {
+        setErr("Acesso desativado. Fale com o departamento pessoal.");
+        return;
+      }
+      localStorage.setItem("apptip_empid", emp.id);
+      setErr(""); setAttempts(0); onLoginEmployee(emp); return;
+    }
+
+    // Falhou
+    const na = attempts + 1;
+    setAttempts(na);
+    if (na >= 5) {
+      setBlockedUntil(new Date(Date.now() + 30000));
+      setAttempts(0);
+      setErr("Muitas tentativas. Aguarde 30 segundos.");
+    } else {
+      setErr(`Credenciais incorretas. ${5-na} tentativa${5-na!==1?"s":""} restante${5-na!==1?"s":""}.`);
+    }
+  }
+
   return (
-    <div style={{minHeight:"100vh",background:"var(--bg)",display:"flex",alignItems:"center",justifyContent:"center",fontFamily:"DM Mono,monospace",padding:24}}>
-      <div style={{...S.card,maxWidth:360,width:"100%"}}>
-        <div style={{textAlign:"center",marginBottom:20}}>
-          <div style={{fontSize:32}}>📊</div>
-          <h2 style={{color:ac,margin:"8px 0 4px"}}>Área de Gestão</h2>
-          <p style={{color:"var(--text3)",fontSize:12,margin:0}}>Acesso para gestores e super gestores</p>
+    <div style={{minHeight:"100vh",background:"var(--bg)",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:24,fontFamily:"'DM Sans',sans-serif"}}>
+
+      {/* Botão de tema */}
+      <div style={{position:"fixed",top:16,right:16}}>
+        <button onClick={toggleTheme} style={{background:"var(--bg1)",border:"1px solid var(--border)",borderRadius:20,padding:"8px 14px",cursor:"pointer",fontSize:16,color:"var(--text2)"}}>
+          {theme==="dark"?"☀️":"🌙"}
+        </button>
+      </div>
+
+      <div style={{width:"100%",maxWidth:380}}>
+        {/* Logo */}
+        <div style={{textAlign:"center",marginBottom:32}}>
+          <div style={{fontSize:40,marginBottom:12}}>🍽️</div>
+          <h1 style={{fontSize:28,fontWeight:800,color:"var(--text)",margin:"0 0 6px",letterSpacing:-0.5}}>
+            App<span style={{color:ac}}>Tip</span>
+          </h1>
+          <p style={{color:"var(--text3)",fontSize:14}}>Gestão de gorjetas para restaurantes</p>
         </div>
-        <div style={{display:"flex",flexDirection:"column",gap:10,marginBottom:14}}>
-          <div><label style={S.label}>CPF</label><input value={cpf} onChange={e=>setCpf(maskCpf(e.target.value))} placeholder="000.000.000-00" style={S.input} inputMode="numeric" disabled={isBlocked}/></div>
-          <div><label style={S.label}>PIN</label><input type="password" inputMode="numeric" maxLength={6} value={pin} onChange={e=>setPin(e.target.value)} placeholder="••••" style={{...S.input,letterSpacing:6,fontSize:18,textAlign:"center"}} onKeyDown={e=>e.key==="Enter"&&tryLogin()} disabled={isBlocked}/></div>
+
+        {/* Card de login */}
+        <div style={{background:"var(--card-bg)",borderRadius:20,padding:"28px 24px",border:"1px solid var(--border)",boxShadow:"0 4px 24px rgba(0,0,0,0.06)"}}>
+          <div style={{display:"flex",flexDirection:"column",gap:14}}>
+
+            <div>
+              <label style={S.label}>CPF ou ID do empregado</label>
+              <input
+                value={credential}
+                onChange={e => {
+                  const v = e.target.value;
+                  // Se parece CPF (só números), aplica máscara
+                  if (/^\d/.test(v)) setCredential(maskCpf(v));
+                  else setCredential(v.toUpperCase());
+                }}
+                placeholder="000.000.000-00 ou LBZ0001"
+                style={{...S.input}}
+                disabled={isBlocked}
+                autoComplete="username"
+              />
+              {credential.length > 2 && (
+                <div style={{fontSize:11,color:"var(--text3)",marginTop:4}}>
+                  {isEmpId ? "👤 Acesso de empregado" : isCpf ? "🔐 Verificando gestor e empregado" : ""}
+                </div>
+              )}
+            </div>
+
+            <div>
+              <label style={S.label}>PIN</label>
+              <input
+                type="password"
+                inputMode="numeric"
+                maxLength={6}
+                value={pin}
+                onChange={e => setPin(e.target.value)}
+                placeholder="••••"
+                style={{...S.input, letterSpacing:8, fontSize:20, textAlign:"center", fontFamily:"'DM Mono',monospace"}}
+                onKeyDown={e => e.key==="Enter" && tryLogin()}
+                disabled={isBlocked}
+                autoComplete="current-password"
+              />
+            </div>
+
+            {/* Aceite de termos */}
+            {!termsAccepted && (
+              <label style={{display:"flex",alignItems:"flex-start",gap:10,cursor:"pointer"}}>
+                <input type="checkbox" checked={termsAccepted}
+                  onChange={e=>{setTermsAccepted(e.target.checked);if(e.target.checked)localStorage.setItem("apptip_terms","1");}}
+                  style={{width:16,height:16,marginTop:2,accentColor:ac,flexShrink:0}}/>
+                <span style={{color:"var(--text3)",fontSize:12,lineHeight:1.5}}>
+                  Li e aceito a{" "}
+                  <button onClick={e=>{e.preventDefault();document.getElementById("apptip-privacy").style.display="flex";}}
+                    style={{background:"none",border:"none",color:ac,cursor:"pointer",fontFamily:"'DM Sans',sans-serif",fontSize:12,padding:0,textDecoration:"underline"}}>
+                    Política de Privacidade
+                  </button>
+                </span>
+              </label>
+            )}
+
+            {err && (
+              <div style={{background:isBlocked?"#f59e0b12":"var(--red-bg)",border:`1px solid ${isBlocked?"#f59e0b33":"var(--red)33"}`,borderRadius:8,padding:"10px 12px",color:isBlocked?"#d97706":"var(--red)",fontSize:13,fontWeight:500}}>
+                {err}
+              </div>
+            )}
+
+            <button onClick={tryLogin}
+              disabled={isBlocked || !termsAccepted || !credential.trim() || !pin.trim()}
+              style={{...S.btnPrimary, opacity:(isBlocked||!termsAccepted||!credential.trim()||!pin.trim())?0.5:1, cursor:(isBlocked||!termsAccepted||!credential.trim()||!pin.trim())?"not-allowed":"pointer", marginTop:4}}>
+              Entrar →
+            </button>
+
+            {superManagers.length === 0 && (
+              <button onClick={onSetupFirst} style={{...S.btnSecondary,width:"100%",textAlign:"center"}}>
+                Criar primeiro Super Gestor
+              </button>
+            )}
+          </div>
         </div>
-        {err && <p style={{color:isBlocked?"#f59e0b":"#e74c3c",fontSize:13,marginBottom:10}}>{err}</p>}
-        <button onClick={tryLogin} disabled={isBlocked} style={{...S.btnPrimary,marginBottom:10,opacity:isBlocked?0.5:1,cursor:isBlocked?"not-allowed":"pointer"}}>Entrar</button>
-        {superManagers.length===0&&<button onClick={onSetupFirst} style={{...S.btnSecondary,width:"100%",textAlign:"center",marginBottom:10}}>Criar primeiro Super Gestor</button>}
-        <button onClick={onBack} style={{...S.btnSecondary,width:"100%",textAlign:"center",marginBottom:14}}>← Voltar</button>
-        <p style={{color:"var(--text3)",fontSize:10,textAlign:"center",margin:0}}>
-          Ao entrar você concorda com nossa{" "}
-          <button onClick={()=>document.getElementById("apptip-privacy").style.display="flex"} style={{background:"none",border:"none",color:ac,cursor:"pointer",fontFamily:"DM Mono,monospace",fontSize:10,padding:0,textDecoration:"underline"}}>
-            Política de Privacidade
-          </button>
-        </p>
+
+        {/* Links */}
+        <div style={{textAlign:"center",marginTop:20,display:"flex",gap:16,justifyContent:"center"}}>
+          {termsAccepted && (
+            <button onClick={()=>document.getElementById("apptip-privacy").style.display="flex"}
+              style={{background:"none",border:"none",color:"var(--text3)",cursor:"pointer",fontFamily:"'DM Sans',sans-serif",fontSize:12,padding:0}}>
+              Política de Privacidade
+            </button>
+          )}
+        </div>
       </div>
     </div>
   );
@@ -4343,11 +4403,11 @@ function FirstSetup({ onDone }) {
     onDone({ id: Date.now().toString(), name: form.name.trim(), cpf: form.cpf.trim(), pin: form.pin });
   }
   return (
-    <div style={{minHeight:"100vh",background:"var(--bg)",display:"flex",alignItems:"center",justifyContent:"center",fontFamily:"DM Mono,monospace",padding:24}}>
+    <div style={{minHeight:"100vh",background:"var(--bg)",display:"flex",alignItems:"center",justifyContent:"center",fontFamily:"'DM Mono',monospace",padding:24}}>
       <div style={{...S.card,maxWidth:360,width:"100%"}}>
         <div style={{textAlign:"center",marginBottom:20}}>
           <div style={{fontSize:40}}>🍽️</div>
-          <h2 style={{color:"#f5c842",margin:"8px 0 4px"}}>Bem-vindo!</h2>
+          <h2 style={{color:"var(--ac)",margin:"8px 0 4px"}}>Bem-vindo!</h2>
           <p style={{color:"var(--text3)",fontSize:13}}>Cadastre o primeiro Super Gestor para começar.</p>
         </div>
         <div style={{display:"flex",flexDirection:"column",gap:10}}>
@@ -4370,7 +4430,7 @@ function Home({ onManager, onEmployee }) {
   const [formData, setFormData] = useState({ nome:"", email:"", restaurante:"", mensagem:"" });
   const [formSent, setFormSent] = useState(false);
   const [formSending, setFormSending] = useState(false);
-  const ac = "#f5c842";
+  const ac = "var(--ac)";
 
   async function sendForm() {
     if (!formData.nome.trim() || !formData.email.trim()) return;
@@ -4411,15 +4471,15 @@ function Home({ onManager, onEmployee }) {
           <a href="#funcionalidades" style={{color:"#555",fontSize:13,textDecoration:"none"}}>Funcionalidades</a>
           <a href="#precos" style={{color:"#555",fontSize:13,textDecoration:"none"}}>Preços</a>
           <a href="#contato" style={{color:"#555",fontSize:13,textDecoration:"none"}}>Contato</a>
-          <button onClick={onEmployee} style={{padding:"8px 16px",borderRadius:20,border:"1px solid #ddd",background:"transparent",color:"#555",cursor:"pointer",fontFamily:"DM Mono,monospace",fontSize:12}}>Área do Empregado</button>
-          <button onClick={onManager} style={{padding:"8px 20px",borderRadius:20,border:"none",background:ac,color:"#111",fontWeight:700,cursor:"pointer",fontFamily:"DM Mono,monospace",fontSize:12}}>Acessar →</button>
+          <button onClick={onEmployee} style={{padding:"8px 16px",borderRadius:20,border:"1px solid #ddd",background:"transparent",color:"#555",cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:12}}>Área do Empregado</button>
+          <button onClick={onManager} style={{padding:"8px 20px",borderRadius:20,border:"none",background:ac,color:"#111",fontWeight:700,cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:12}}>Acessar →</button>
         </div>
       </nav>
 
       {/* HERO */}
       <section style={{background:"linear-gradient(135deg,#0f0f0f 0%,#1a1a1a 100%)",padding:"100px 24px",textAlign:"center"}}>
         <div style={{maxWidth:700,margin:"0 auto"}}>
-          <div style={{display:"inline-flex",alignItems:"center",gap:8,background:"#f5c84222",border:"1px solid #f5c84244",borderRadius:20,padding:"6px 16px",marginBottom:28}}>
+          <div style={{display:"inline-flex",alignItems:"center",gap:8,background:"var(--ac)22",border:"1px solid var(--ac)44",borderRadius:20,padding:"6px 16px",marginBottom:28}}>
             <span style={{color:ac,fontSize:12,fontWeight:700}}>🚀 Novo — gestão completa para restaurantes</span>
           </div>
           <h1 style={{color:"#fff",fontSize:"clamp(32px,6vw,56px)",fontWeight:700,lineHeight:1.15,margin:"0 0 20px",letterSpacing:-1}}>
@@ -4468,7 +4528,7 @@ function Home({ onManager, onEmployee }) {
       </section>
 
       {/* COMO FUNCIONA */}
-      <section style={{padding:"80px 24px",background:"#0f0f0f"}}>
+      <section style={{padding:"80px 24px",background:"var(--bg5)"}}>
         <div style={{maxWidth:800,margin:"0 auto",textAlign:"center"}}>
           <h2 style={{color:"#fff",fontSize:"clamp(24px,4vw,36px)",fontWeight:700,margin:"0 0 12px"}}>Como funciona</h2>
           <p style={{color:"#666",fontSize:16,marginBottom:56}}>Em 3 passos simples</p>
@@ -4497,7 +4557,7 @@ function Home({ onManager, onEmployee }) {
           </div>
           <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(210px,1fr))",gap:20,marginTop:40}}>
             {PLANOS.map(p=>(
-              <div key={p.nome} style={{borderRadius:16,border:p.destaque?`2px solid ${ac}`:"1px solid #f0f0f0",padding:"28px 24px",background:p.destaque?"#0f0f0f":"#fff",position:"relative",boxShadow:p.destaque?"0 8px 32px rgba(245,200,66,0.15)":"0 2px 12px rgba(0,0,0,0.04)"}}>
+              <div key={p.nome} style={{borderRadius:16,border:p.destaque?`2px solid ${ac}`:"1px solid #f0f0f0",padding:"28px 24px",background:p.destaque?"var(--bg5)":"#fff",position:"relative",boxShadow:p.destaque?"0 8px 32px rgba(245,200,66,0.15)":"0 2px 12px rgba(0,0,0,0.04)"}}>
                 {p.destaque && <div style={{position:"absolute",top:-12,left:"50%",transform:"translateX(-50%)",background:ac,color:"#111",fontSize:11,fontWeight:700,padding:"4px 14px",borderRadius:20,whiteSpace:"nowrap"}}>Mais popular</div>}
                 <div style={{color:p.destaque?"#fff":"#111",fontWeight:700,fontSize:18,marginBottom:4}}>{p.nome}</div>
                 <div style={{color:"#777",fontSize:13,marginBottom:20}}>{p.emp} empregados</div>
@@ -4540,22 +4600,22 @@ function Home({ onManager, onEmployee }) {
               <div style={{display:"flex",flexDirection:"column",gap:14}}>
                 <div>
                   <label style={{display:"block",fontSize:13,color:"#555",marginBottom:6,fontWeight:600}}>Nome *</label>
-                  <input value={formData.nome} onChange={e=>setFormData({...formData,nome:e.target.value})} placeholder="Seu nome" style={{width:"100%",padding:"12px 14px",borderRadius:10,border:"1px solid #e0e0e0",fontFamily:"DM Mono,monospace",fontSize:14,outline:"none",boxSizing:"border-box"}}/>
+                  <input value={formData.nome} onChange={e=>setFormData({...formData,nome:e.target.value})} placeholder="Seu nome" style={{width:"100%",padding:"12px 14px",borderRadius:10,border:"1px solid #e0e0e0",fontFamily:"'DM Mono',monospace",fontSize:14,outline:"none",boxSizing:"border-box"}}/>
                 </div>
                 <div>
                   <label style={{display:"block",fontSize:13,color:"#555",marginBottom:6,fontWeight:600}}>Email *</label>
-                  <input value={formData.email} onChange={e=>setFormData({...formData,email:e.target.value})} type="email" placeholder="seu@email.com" style={{width:"100%",padding:"12px 14px",borderRadius:10,border:"1px solid #e0e0e0",fontFamily:"DM Mono,monospace",fontSize:14,outline:"none",boxSizing:"border-box"}}/>
+                  <input value={formData.email} onChange={e=>setFormData({...formData,email:e.target.value})} type="email" placeholder="seu@email.com" style={{width:"100%",padding:"12px 14px",borderRadius:10,border:"1px solid #e0e0e0",fontFamily:"'DM Mono',monospace",fontSize:14,outline:"none",boxSizing:"border-box"}}/>
                 </div>
                 <div>
                   <label style={{display:"block",fontSize:13,color:"#555",marginBottom:6,fontWeight:600}}>Nome do restaurante</label>
-                  <input value={formData.restaurante} onChange={e=>setFormData({...formData,restaurante:e.target.value})} placeholder="Ex: Restaurante do João" style={{width:"100%",padding:"12px 14px",borderRadius:10,border:"1px solid #e0e0e0",fontFamily:"DM Mono,monospace",fontSize:14,outline:"none",boxSizing:"border-box"}}/>
+                  <input value={formData.restaurante} onChange={e=>setFormData({...formData,restaurante:e.target.value})} placeholder="Ex: Restaurante do João" style={{width:"100%",padding:"12px 14px",borderRadius:10,border:"1px solid #e0e0e0",fontFamily:"'DM Mono',monospace",fontSize:14,outline:"none",boxSizing:"border-box"}}/>
                 </div>
                 <div>
                   <label style={{display:"block",fontSize:13,color:"#555",marginBottom:6,fontWeight:600}}>Mensagem</label>
-                  <textarea value={formData.mensagem} onChange={e=>setFormData({...formData,mensagem:e.target.value})} placeholder="Conte um pouco sobre seu restaurante e o que precisa..." rows={4} style={{width:"100%",padding:"12px 14px",borderRadius:10,border:"1px solid #e0e0e0",fontFamily:"DM Mono,monospace",fontSize:14,outline:"none",resize:"vertical",boxSizing:"border-box"}}/>
+                  <textarea value={formData.mensagem} onChange={e=>setFormData({...formData,mensagem:e.target.value})} placeholder="Conte um pouco sobre seu restaurante e o que precisa..." rows={4} style={{width:"100%",padding:"12px 14px",borderRadius:10,border:"1px solid #e0e0e0",fontFamily:"'DM Mono',monospace",fontSize:14,outline:"none",resize:"vertical",boxSizing:"border-box"}}/>
                 </div>
                 <button onClick={sendForm} disabled={!formData.nome.trim()||!formData.email.trim()||formSending}
-                  style={{padding:"14px",borderRadius:12,border:"none",background:(!formData.nome.trim()||!formData.email.trim())?"#e0e0e0":ac,color:(!formData.nome.trim()||!formData.email.trim())?"#999":"#111",fontWeight:700,fontSize:16,cursor:(!formData.nome.trim()||!formData.email.trim())?"not-allowed":"pointer",fontFamily:"DM Mono,monospace"}}>
+                  style={{padding:"14px",borderRadius:12,border:"none",background:(!formData.nome.trim()||!formData.email.trim())?"#e0e0e0":ac,color:(!formData.nome.trim()||!formData.email.trim())?"#999":"#111",fontWeight:700,fontSize:16,cursor:(!formData.nome.trim()||!formData.email.trim())?"not-allowed":"pointer",fontFamily:"'DM Mono',monospace"}}>
                   {formSending?"Enviando...":"Enviar mensagem →"}
                 </button>
               </div>
@@ -4565,16 +4625,16 @@ function Home({ onManager, onEmployee }) {
       </section>
 
       {/* FOOTER */}
-      <footer style={{background:"#0f0f0f",padding:"40px 24px",textAlign:"center"}}>
+      <footer style={{background:"var(--bg5)",padding:"40px 24px",textAlign:"center"}}>
         <div style={{marginBottom:16}}>
           <span style={{fontSize:20}}>🍽️</span>
           <span style={{fontWeight:700,fontSize:18,color:"#fff",marginLeft:8}}>App<span style={{color:ac}}>Tip</span></span>
         </div>
         <p style={{color:"#555",fontSize:13,marginBottom:20}}>Transparência e eficiência para equipes de restaurantes</p>
         <div style={{display:"flex",gap:20,justifyContent:"center",flexWrap:"wrap",marginBottom:20}}>
-          <button onClick={onEmployee} style={{background:"none",border:"none",color:"#555",cursor:"pointer",fontFamily:"DM Mono,monospace",fontSize:13}}>Área do Empregado</button>
-          <button onClick={onManager} style={{background:"none",border:"none",color:"#555",cursor:"pointer",fontFamily:"DM Mono,monospace",fontSize:13}}>Área de Gestão</button>
-          <button onClick={()=>document.getElementById("apptip-privacy").style.display="flex"} style={{background:"none",border:"none",color:"#555",cursor:"pointer",fontFamily:"DM Mono,monospace",fontSize:13}}>Política de Privacidade</button>
+          <button onClick={onEmployee} style={{background:"none",border:"none",color:"#555",cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:13}}>Área do Empregado</button>
+          <button onClick={onManager} style={{background:"none",border:"none",color:"#555",cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:13}}>Área de Gestão</button>
+          <button onClick={()=>document.getElementById("apptip-privacy").style.display="flex"} style={{background:"none",border:"none",color:"#555",cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:13}}>Política de Privacidade</button>
         </div>
         <p style={{color:"#333",fontSize:12}}>© {new Date().getFullYear()} AppTip. Todos os direitos reservados.</p>
       </footer>
@@ -4586,34 +4646,32 @@ function Home({ onManager, onEmployee }) {
 // APP ROOT
 //
 export default function App() {
-  const [theme, setTheme] = useState(() => localStorage.getItem("theme") || "dark");
+  const [theme, setTheme] = useState(() => localStorage.getItem("apptip_theme") || "light");
 
   useEffect(() => {
-    document.body.classList.toggle("light-mode", theme === "light");
-    localStorage.setItem("theme", theme);
+    document.body.classList.toggle("dark-mode", theme === "dark");
+    localStorage.setItem("apptip_theme", theme);
   }, [theme]);
 
   function toggleTheme() { setTheme(t => t === "dark" ? "light" : "dark"); }
 
-  // URL-based routing
-  const isAdm = window.location.pathname.startsWith("/adm");
+  // Login unificado — uma única tela para todos
   const [view, setView] = useState(() => {
     const role = localStorage.getItem("apptip_role");
-    if (!isAdm) return "employee";
     if (role === "super") return "super";
     if (role === "manager") return "manager";
+    if (role === "employee") return "employee";
     return "login";
   });
   const [loaded, setLoaded] = useState(false);
   const [toast, setToast] = useState("");
-  // currentUser: restaurado por ID após dados carregarem, nunca armazenamos o objeto completo
   const [currentUser, setCurrentUser] = useState(null);
   const [currentUserId] = useState(() => {
     try { return localStorage.getItem("apptip_userid") || null; } catch { return null; }
   });
   const [userRole, setUserRole] = useState(() => localStorage.getItem("apptip_role") || null);
 
-  // Persist session — salva apenas IDs, nunca dados sensíveis
+  // Persist session
   useEffect(() => {
     if (currentUser) localStorage.setItem("apptip_userid", currentUser.id);
     else localStorage.removeItem("apptip_userid");
@@ -4641,25 +4699,26 @@ export default function App() {
   const [noTipDays,     setNoTipDays]     = useState({});
 
   useEffect(() => {
-    const savedId = currentUserId; // captura no mount, não precisa ser dependência
+    const savedId = currentUserId;
     (async () => {
       const vals = await Promise.all(Object.values(K).map(load));
       const keys = Object.keys(K);
       const map = { superManagers:setSuperManagers, managers:setManagers, restaurants:setRestaurants, employees:setEmployees, roles:setRoles, tips:setTips, splits:setSplits, schedules:setSchedules, communications:setCommunications, commAcks:setCommAcks, faq:setFaq, dpMessages:setDpMessages, workSchedules:setWorkSchedules, notifications:setNotifications, noTipDays:setNoTipDays };
       const loaded_data = {};
       keys.forEach((k, i) => { if (k !== "receipts" && vals[i]) { map[k]?.(vals[i]); loaded_data[k] = vals[i]; } });
-      // Restaurar currentUser por ID (nunca armazenamos o objeto completo)
       if (savedId) {
         const role = localStorage.getItem("apptip_role");
         if (role === "super") {
           const u = (loaded_data.superManagers ?? []).find(s => s.id === savedId);
-          if (u) setCurrentUser(u); else { localStorage.removeItem("apptip_userid"); localStorage.removeItem("apptip_role"); }
+          if (u) setCurrentUser(u); else { localStorage.removeItem("apptip_userid"); localStorage.removeItem("apptip_role"); setView("login"); }
         } else if (role === "manager") {
           const u = (loaded_data.managers ?? []).find(m => m.id === savedId);
-          if (u) setCurrentUser(u); else { localStorage.removeItem("apptip_userid"); localStorage.removeItem("apptip_role"); }
+          if (u) setCurrentUser(u); else { localStorage.removeItem("apptip_userid"); localStorage.removeItem("apptip_role"); setView("login"); }
+        } else if (role === "employee") {
+          const u = (loaded_data.employees ?? []).find(e => e.id === savedId);
+          if (!u || (u.inactive && u.inactiveFrom && u.inactiveFrom <= today())) { localStorage.removeItem("apptip_userid"); localStorage.removeItem("apptip_role"); setView("login"); }
         }
       }
-      // Load receipts from separate collection
       const recs = await loadReceipts();
       if (recs.length) setReceipts(recs);
       setLoaded(true);
@@ -4671,20 +4730,11 @@ export default function App() {
   async function handleUpdate(field, value) {
     if (field === "_toast") { setToast(value); return; }
     if (field === "receipts") {
-      // Save each receipt as separate Firestore document
       const prev = receipts;
       setReceipts(value);
-      // Find new/updated receipts
-      const prevIds = new Set(prev.map(r => r.id));
-      const newOnes = value.filter(r => !prevIds.has(r.id));
-      // Find deleted receipts
-      const newIds = new Set(value.map(r => r.id));
-      const deleted = prev.filter(r => !newIds.has(r.id));
-      // Find updated (empId changed - manual assignment)
-      const updated = value.filter(r => {
-        const old = prev.find(p => p.id === r.id);
-        return old && old.empId !== r.empId;
-      });
+      const newOnes = value.filter(r => !prev.find(p => p.id === r.id));
+      const updated = value.filter(r => { const old = prev.find(p => p.id === r.id); return old && old.empId !== r.empId; });
+      const deleted = prev.filter(p => !value.find(r => r.id === p.id));
       await Promise.all([
         ...newOnes.map(r => saveReceipt(r)),
         ...updated.map(r => saveReceipt(r)),
@@ -4705,64 +4755,59 @@ export default function App() {
     setCurrentUser(null);
     setUserRole(null);
     localStorage.removeItem("apptip_selrest");
-    if (isAdm) {
-      setView("login");
-    } else {
-      setView("employee");
-    }
+    localStorage.removeItem("apptip_userid");
+    localStorage.removeItem("apptip_role");
+    setView("login");
   }
 
-  if (!loaded) return <div style={{minHeight:"100vh",background:"var(--bg)",display:"flex",alignItems:"center",justifyContent:"center",color:"#f5c842",fontFamily:"DM Mono,monospace",fontSize:18}}>Carregando…</div>;
+  if (!loaded) return (
+    <div style={{minHeight:"100vh",background:"var(--bg)",display:"flex",alignItems:"center",justifyContent:"center",flexDirection:"column",gap:16}}>
+      <div style={{fontSize:32}}>🍽️</div>
+      <div style={{color:"var(--text3)",fontFamily:"'DM Sans',sans-serif",fontSize:15}}>Carregando…</div>
+    </div>
+  );
 
   return (
     <>
-      {/* / → employee login */}
-      {!isAdm && view === "employee" && <EmployeePortal employees={employees} roles={roles} tips={tips} schedules={schedules} restaurants={restaurants} communications={communications} commAcks={commAcks} faq={faq} dpMessages={dpMessages} receipts={receipts} workSchedules={workSchedules} onBack={()=>setView("employee")} onUpdateEmployee={emp=>{const next=employees.map(e=>e.id===emp.id?emp:e);handleUpdate("employees",next);}} onUpdate={handleUpdate} toggleTheme={toggleTheme} theme={theme} />}
-
-      {/* /adm → management */}
-      {isAdm && view === "login"   && (
-        <LoginScreen
-          superManagers={superManagers} managers={managers}
+      {view === "login" && (
+        <UnifiedLogin
+          superManagers={superManagers} managers={managers} employees={employees}
           onLoginSuper={u=>{setCurrentUser(u);setUserRole("super");setView("super");}}
           onLoginManager={u=>{setCurrentUser(u);setUserRole("manager");setView("manager");}}
-          onBack={()=>setView("login")}
+          onLoginEmployee={u=>{setUserRole("employee");setView("employee");}}
           onSetupFirst={()=>setView("setup")}
+          toggleTheme={toggleTheme} theme={theme}
         />
       )}
-      {isAdm && view === "setup"   && <FirstSetup onDone={sm=>{handleUpdate("superManagers",[sm]);setCurrentUser(sm);setUserRole("super");setView("super");}} />}
-      {isAdm && view === "super"   && <SuperManagerPortal data={data} onUpdate={handleUpdate} onBack={doLogout} currentUser={currentUser} toggleTheme={toggleTheme} theme={theme} />}
-      {isAdm && view === "manager" && <ManagerPortal manager={currentUser} data={data} onUpdate={handleUpdate} onBack={doLogout} toggleTheme={toggleTheme} theme={theme} />}
+      {view === "setup" && <FirstSetup onDone={sm=>{handleUpdate("superManagers",[sm]);setCurrentUser(sm);setUserRole("super");setView("super");}} />}
+      {view === "super" && <SuperManagerPortal data={data} onUpdate={handleUpdate} onBack={doLogout} currentUser={currentUser} toggleTheme={toggleTheme} theme={theme} />}
+      {view === "manager" && <ManagerPortal manager={currentUser} data={data} onUpdate={handleUpdate} onBack={doLogout} toggleTheme={toggleTheme} theme={theme} />}
+      {view === "employee" && <EmployeePortal employees={employees} roles={roles} tips={tips} schedules={schedules} restaurants={restaurants} communications={communications} commAcks={commAcks} faq={faq} dpMessages={dpMessages} receipts={receipts} workSchedules={workSchedules} onBack={doLogout} onUpdateEmployee={emp=>{const next=employees.map(e=>e.id===emp.id?emp:e);handleUpdate("employees",next);}} onUpdate={handleUpdate} toggleTheme={toggleTheme} theme={theme} />}
+      {view === "home" && <Home onManager={()=>setView("login")} onEmployee={()=>setView("login")} />}
       <Toast msg={toast} onClose={()=>setToast("")} />
 
-      {/* Modal de Política de Privacidade — acessível de qualquer tela */}
-      <div id="apptip-privacy" style={{display:"none",position:"fixed",inset:0,background:"rgba(0,0,0,0.85)",zIndex:9999,alignItems:"center",justifyContent:"center",padding:20}} onClick={e=>{if(e.target===e.currentTarget)e.currentTarget.style.display="none";}}>
-        <div style={{background:"var(--card-bg)",borderRadius:16,padding:28,maxWidth:480,width:"100%",maxHeight:"85vh",overflowY:"auto",border:"1px solid var(--border)",fontFamily:"DM Mono,monospace"}}>
+      {/* Modal Política de Privacidade */}
+      <div id="apptip-privacy" style={{display:"none",position:"fixed",inset:0,background:"rgba(0,0,0,0.5)",zIndex:9999,alignItems:"center",justifyContent:"center",padding:20}} onClick={e=>{if(e.target===e.currentTarget)e.currentTarget.style.display="none";}}>
+        <div style={{background:"var(--card-bg)",borderRadius:16,padding:28,maxWidth:480,width:"100%",maxHeight:"85vh",overflowY:"auto",border:"1px solid var(--border)",fontFamily:"'DM Sans',sans-serif",boxShadow:"0 20px 60px rgba(0,0,0,.2)"}}>
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20}}>
-            <h2 style={{color:"#f5c842",margin:0,fontSize:18}}>🔒 Política de Privacidade</h2>
+            <h2 style={{color:"var(--text)",margin:0,fontSize:18,fontWeight:700}}>🔒 Política de Privacidade</h2>
             <button onClick={()=>document.getElementById("apptip-privacy").style.display="none"} style={{background:"none",border:"none",color:"var(--text3)",cursor:"pointer",fontSize:20}}>✕</button>
           </div>
-          <div style={{color:"var(--text2)",fontSize:13,lineHeight:1.8}}>
-            <p style={{color:"var(--text3)",fontSize:11,marginTop:0}}>Última atualização: {new Date().toLocaleDateString("pt-BR")}</p>
-
+          <div style={{color:"var(--text2)",fontSize:13,lineHeight:1.8,display:"flex",flexDirection:"column",gap:12}}>
+            <p style={{color:"var(--text3)",fontSize:11}}>Última atualização: {new Date().toLocaleDateString("pt-BR")}</p>
             <p><strong style={{color:"var(--text)"}}>1. Quem somos</strong><br/>O AppTip é uma plataforma de gestão de gorjetas para restaurantes, operada pelo estabelecimento ao qual você está vinculado.</p>
-
             <p><strong style={{color:"var(--text)"}}>2. Dados coletados</strong><br/>Coletamos: nome completo, CPF, cargo, data de admissão e PIN de acesso. Esses dados são necessários para identificação e distribuição de gorjetas.</p>
-
             <p><strong style={{color:"var(--text)"}}>3. Finalidade</strong><br/>Seus dados são usados exclusivamente para: controle de acesso ao sistema, cálculo e distribuição de gorjetas, gestão de escala e comunicados internos.</p>
-
             <p><strong style={{color:"var(--text)"}}>4. Armazenamento</strong><br/>Os dados são armazenados no Google Firebase (servidores na América do Sul) com acesso restrito ao seu restaurante. Não compartilhamos seus dados com terceiros.</p>
-
             <p><strong style={{color:"var(--text)"}}>5. Seus direitos (LGPD)</strong><br/>Você tem direito a: acessar seus dados, corrigir informações incorretas, solicitar a exclusão dos seus dados e revogar o consentimento a qualquer momento.</p>
-
             <p><strong style={{color:"var(--text)"}}>6. Solicitação de exclusão</strong><br/>Para solicitar a exclusão dos seus dados, entre em contato com o gestor do seu restaurante através da função "Fale com DP" no aplicativo.</p>
-
             <p><strong style={{color:"var(--text)"}}>7. Contato</strong><br/>Dúvidas sobre privacidade devem ser direcionadas ao gestor responsável pelo restaurante.</p>
-
-            <p style={{color:"var(--text3)",fontSize:11,borderTop:"1px solid var(--border)",paddingTop:12,marginTop:20}}>Esta política está em conformidade com a Lei Geral de Proteção de Dados (LGPD — Lei nº 13.709/2018).</p>
+            <p style={{color:"var(--text3)",fontSize:11,borderTop:"1px solid var(--border)",paddingTop:12}}>Esta política está em conformidade com a Lei Geral de Proteção de Dados (LGPD — Lei nº 13.709/2018).</p>
           </div>
-          <button onClick={()=>document.getElementById("apptip-privacy").style.display="none"} style={{...S.btnPrimary,marginTop:8}}>Entendi</button>
+          <button onClick={()=>document.getElementById("apptip-privacy").style.display="none"} style={{...S.btnPrimary,marginTop:16}}>Entendi</button>
         </div>
       </div>
     </>
   );
 }
+
