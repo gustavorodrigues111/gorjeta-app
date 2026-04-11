@@ -2510,7 +2510,7 @@ function EmpRowLine({ emp, isNew, row, restRoles, isSaved, isOwner, onChange, on
   );
 }
 
-function EmployeeSpreadsheet({ restEmps, restRoles, rid, employees, onUpdate, restCode: restCode_, isOwner, restaurant }) {
+function EmployeeSpreadsheet({ restEmps, restRoles, rid, employees, onUpdate, restCode: restCode_, isOwner, restaurant, notifications }) {
   const PLANOS = [
     { id:"p10",  empMax:10  },
     { id:"p20",  empMax:20  },
@@ -2611,9 +2611,42 @@ function EmployeeSpreadsheet({ restEmps, restRoles, rid, employees, onUpdate, re
       )}
 
       {activeCount >= plano.empMax && (
-        <div style={{background:"#ef444411",border:"1px solid #ef444433",borderRadius:10,padding:"10px 14px",marginBottom:12,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-          <span style={{color:"var(--red)",fontSize:13,fontWeight:600}}>⚠️ Limite do plano atingido — {activeCount}/{plano.empMax} empregados ativos</span>
-          <span style={{color:"var(--text3)",fontSize:11}}>Fale com seu administrador para fazer upgrade</span>
+        <div style={{background:"var(--red-bg)",border:"1px solid var(--red)33",borderRadius:12,padding:"14px 16px",marginBottom:12}}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:10}}>
+            <div>
+              <div style={{color:"var(--red)",fontSize:13,fontWeight:700,marginBottom:2}}>⚠️ Limite do plano atingido — {activeCount}/{plano.empMax} empregados</div>
+              <div style={{color:"var(--text3)",fontSize:12}}>Para adicionar mais empregados, solicite upgrade do plano.</div>
+            </div>
+            <button onClick={()=>{
+              const PLANOS_LABEL = { p10:"Starter (10 emp.)", p20:"Básico (20 emp.)", p50:"Profissional (50 emp.)", p999:"Enterprise" };
+              const PROXIMO = { p10:"p20", p20:"p50", p50:"p999" };
+              const planoAtual = PLANOS_LABEL[restaurant?.planoId??"p10"] ?? "Starter";
+              const planoProx = PLANOS_LABEL[PROXIMO[restaurant?.planoId??"p10"]] ?? "Enterprise";
+              const restNome = restaurant?.name ?? "Restaurante";
+
+              // 1. Notificação na caixa do Admin
+              if (onUpdate) {
+                const notif = {
+                  id: Date.now().toString(),
+                  restaurantId: rid,
+                  type: "upgrade_request",
+                  body: `📦 Solicitação de upgrade — ${restNome}: plano atual ${planoAtual} → solicitado ${planoProx}. Empregados ativos: ${activeCount}/${plano.empMax}.`,
+                  date: new Date().toISOString(),
+                  read: false,
+                  targetRole: "admin",
+                };
+                onUpdate("notifications", [...(notifications ?? []), notif]);
+              }
+
+              // 2. WhatsApp
+              const msg = encodeURIComponent(`Olá! Sou gestor do restaurante *${restNome}*.\n\nGostaria de solicitar upgrade do plano:\n• Plano atual: *${planoAtual}*\n• Plano desejado: *${planoProx}*\n• Empregados ativos: ${activeCount}/${plano.empMax}\n\nAguardo retorno. Obrigado!`);
+              window.open(`https://wa.me/5511985499821?text=${msg}`, "_blank");
+
+              onUpdate("_toast", "✅ Solicitação enviada!");
+            }} style={{padding:"10px 18px",borderRadius:10,border:"none",background:"var(--red)",color:"#fff",fontWeight:700,cursor:"pointer",fontFamily:"'DM Sans',sans-serif",fontSize:13,whiteSpace:"nowrap"}}>
+              📲 Solicitar upgrade
+            </button>
+          </div>
         </div>
       )}
       {activeCount > 0 && activeCount < plano.empMax && activeCount >= plano.empMax * 0.8 && (
@@ -3328,6 +3361,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
             restRoles={restRoles} rid={rid}
             employees={employees} onUpdate={onUpdate} restCode={restaurant.shortCode}
             isOwner={isOwner} restaurant={restaurant}
+            notifications={data?.notifications??[]}
           />
         )}
 
