@@ -4331,18 +4331,17 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }
                       const v = parseFloat(cobValor) || valorTotal || 0;
                       return (
                         <div style={{fontFamily:"'DM Sans',sans-serif",fontSize:13,color:"#1a1a1a",lineHeight:1.7,whiteSpace:"pre-wrap"}}>
-{`🍽️ *Olá, ${rest?.name}!*
+{`Ola, *${rest?.name}*! 👋
 
-Segue sua fatura *AppTip* referente a *${periodoLabel}*.
+Segue sua fatura *AppTip* referente a *${periodoLabel}*. 🍽️
 
-━━━━━━━━━━━━━━━━━━
-📦 *Plano:* ${plano.label}${isEnterprise?` • ${empMax} empregados`:""}
+📦 *Plano:* ${plano.label}${isEnterprise?` (${empMax} emp.)`:""}
 💰 *Valor:* R$ ${v.toLocaleString("pt-BR",{minimumFractionDigits:2})}${vencLabel?`\n📅 *Vencimento:* ${vencLabel}`:""}
-━━━━━━━━━━━━━━━━━━
+
 ${cobForma==="pix"?`💠 *Pagamento via PIX*\nChave: *${cobChave||PIX_PADRAO}*\nFavorecido: ${PIX_NOME}`:`🔗 *Link de pagamento:*\n${cobLink||"(link será adicionado)"}`}
 
-Qualquer dúvida estamos à disposição! 😊
-*Equipe AppTip* 🍽️`}
+Qualquer duvida estamos a disposicao! 😊
+*Equipe AppTip*`}
                         </div>
                       );
                     })()}
@@ -4359,7 +4358,7 @@ Qualquer dúvida estamos à disposição! 😊
                   const periodoLabel = `${mesesNome[parseInt(mes)-1]}/${ano}`;
                   const vencLabel = cobVenc ? new Date(cobVenc+"T12:00:00").toLocaleDateString("pt-BR") : "";
                   const chaveUsada = cobForma==="pix" ? (cobChave||PIX_PADRAO) : cobLink;
-                  const msg = `🍽️ *Olá, ${rest?.name}!*\n\nSegue sua fatura *AppTip* referente a *${periodoLabel}*.\n\n━━━━━━━━━━━━━━━━━━\n📦 *Plano:* ${plano.label}${isEnterprise?` • ${empMax} empregados`:""}\n💰 *Valor:* R$ ${valor.toLocaleString("pt-BR",{minimumFractionDigits:2})}${vencLabel?`\n📅 *Vencimento:* ${vencLabel}`:""}\n━━━━━━━━━━━━━━━━━━\n${cobForma==="pix"?`💠 *Pagamento via PIX*\nChave: *${chaveUsada}*\nFavorecido: ${PIX_NOME}`:`🔗 *Link de pagamento:*\n${chaveUsada}`}\n\nQualquer dúvida estamos à disposição! 😊\n*Equipe AppTip* 🍽️`;
+                  const msg = `Ola, *${rest?.name}*! 👋\n\nSegue sua fatura *AppTip* referente a *${periodoLabel}*. 🍽️\n\n📦 *Plano:* ${plano.label}${isEnterprise?` (${empMax} emp.)`:""})\n💰 *Valor:* R$ ${valor.toLocaleString("pt-BR",{minimumFractionDigits:2})}${vencLabel?`\n📅 *Vencimento:* ${vencLabel}`:""}\n\n${cobForma==="pix"?`💠 *Pagamento via PIX*\nChave: *${chaveUsada}*\nFavorecido: ${PIX_NOME}`:`🔗 *Link de pagamento:*\n${chaveUsada}`}\n\nQualquer duvida estamos a disposicao! 😊\n*Equipe AppTip*`;
                   const cob = { id:Date.now().toString(), periodo:cobPeriodo, periodoLabel, venc:cobVenc, valor, forma:cobForma==="pix"?"PIX":"Link", chave:chaveUsada, criadaEm:new Date().toISOString(), status:"pendente" };
                   saveFinanceiro({ cobrancas:[...(fin.cobrancas??[]), cob] });
                   const numero = rest.whatsappFin.replace(/\D/g,"");
