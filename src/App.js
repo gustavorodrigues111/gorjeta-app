@@ -4491,15 +4491,16 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }
                         <div style={{fontFamily:"'DM Sans',sans-serif",fontSize:13,color:"#1a1a1a",lineHeight:1.7,whiteSpace:"pre-wrap"}}>
 {`Ola, *${rest?.name}*! 👋
 
-Segue sua fatura *AppTip* referente a *${periodoLabel}*. 🍽️
+Segue sua fatura *AppTip* - ${periodoLabel}
 
-📦 *Plano:* ${plano.label}${isEnterprise?` (${empMax} emp.)`:""}
-💰 *Valor:* R$ ${v.toLocaleString("pt-BR",{minimumFractionDigits:2})}${vencLabel?`\n📅 *Vencimento:* ${vencLabel}`:""}
+*Plano:* ${plano.label}${isEnterprise?` (${empMax} emp.)`:""}
+*Valor:* R$ ${v.toLocaleString("pt-BR",{minimumFractionDigits:2})}${vencLabel?`\n*Vencimento:* ${vencLabel}`:""}
 
-${cobForma==="pix"?`💠 *Pagamento via PIX*\nChave: *${cobChave||PIX_PADRAO}*\nFavorecido: ${PIX_NOME}`:`🔗 *Link de pagamento:*\n${cobLink||"(link será adicionado)"}`}
+*Pagamento via ${cobForma==="pix"?"PIX":"Link"}*
+${cobForma==="pix"?`Chave: *${cobChave||PIX_PADRAO}*\nFavorecido: ${PIX_NOME}`:`Link: ${cobLink||"(link será adicionado)"}`}
 
-Qualquer duvida estamos a disposicao! 😊
-*Equipe AppTip*`}
+Qualquer duvida estamos a disposicao!
+*Equipe AppTip* 🍽️`}
                         </div>
                       );
                     })()}
@@ -4516,18 +4517,18 @@ Qualquer duvida estamos a disposicao! 😊
                   const periodoLabel = `${mesesNome[parseInt(mes)-1]}/${ano}`;
                   const vencLabel = cobVenc ? new Date(cobVenc+"T12:00:00").toLocaleDateString("pt-BR") : "";
                   const chaveUsada = cobForma==="pix" ? (cobChave||PIX_PADRAO) : cobLink;
-                  const msg = `Ola, *${rest?.name}*! 👋\n\nSegue sua fatura *AppTip* referente a *${periodoLabel}*. 🍽️\n\n📦 *Plano:* ${plano.label}${isEnterprise?` (${empMax} emp.)`:""})\n💰 *Valor:* R$ ${valor.toLocaleString("pt-BR",{minimumFractionDigits:2})}${vencLabel?`\n📅 *Vencimento:* ${vencLabel}`:""}\n\n${cobForma==="pix"?`💠 *Pagamento via PIX*\nChave: *${chaveUsada}*\nFavorecido: ${PIX_NOME}`:`🔗 *Link de pagamento:*\n${chaveUsada}`}\n\nQualquer duvida estamos a disposicao! 😊\n*Equipe AppTip*`;
+                  const msg = `Ola, *${rest?.name}*! 👋\n\nSegue sua fatura *AppTip* - ${periodoLabel}\n\n*Plano:* ${plano.label}${isEnterprise?` (${empMax} emp.)`:""}\n*Valor:* R$ ${valor.toLocaleString("pt-BR",{minimumFractionDigits:2})}${vencLabel?`\n*Vencimento:* ${vencLabel}`:""}\n\n*Pagamento via ${cobForma==="pix"?"PIX":"Link"}*\n${cobForma==="pix"?`Chave: *${chaveUsada}*\nFavorecido: Gustavo Rodrigues da Silva`:`Link: ${chaveUsada}`}\n\nQualquer duvida estamos a disposicao!\n*Equipe AppTip* 🍽️`;
+                  const cob = { id:Date.now().toString(), periodo:cobPeriodo, periodoLabel, venc:cobVenc, valor, forma:cobForma==="pix"?"PIX":"Link", chave:chaveUsada, criadaEm:new Date().toISOString(), status:"pendente" };
+                  saveFinanceiro({ cobrancas:[...(fin.cobrancas??[]), cob] });
+
+                  const faturaUrl = `https://apptip.app/fatura/${cob.id}`;
+                  const msg = `Ola, *${rest?.name}*!\n\nSegue o link da sua fatura *AppTip* referente a *${periodoLabel}*:\n\n${faturaUrl}\n\nQualquer duvida estamos a disposicao!\n*Equipe AppTip*`;
                   const numero = rest.whatsappFin.replace(/\D/g,"");
                   const urlWpp = `https://wa.me/55${numero}?text=${encodeURIComponent(msg)}`;
 
-                  // Salva cobrança
-                  const cob = { id:Date.now().toString(), periodo:cobPeriodo, periodoLabel, venc:cobVenc, valor, forma:cobForma==="pix"?"PIX":"Link", chave:chaveUsada, criadaEm:new Date().toISOString(), status:"pendente" };
-                  saveFinanceiro({ cobrancas:[...(fin.cobrancas??[]), cob] });
+                  setTimeout(() => { window.location.href = urlWpp; }, 300);
                   setCobValor(""); setCobVenc(""); setCobLink("");
                   onUpdate("_toast","📲 Cobrança gerada! Abrindo WhatsApp...");
-
-                  // Abre WhatsApp — usa location.href que Safari nunca bloqueia
-                  setTimeout(() => { window.location.href = urlWpp; }, 300);
                 }} disabled={!rest?.whatsappFin}
                   style={{...S.btnPrimary,opacity:rest?.whatsappFin?1:0.5,cursor:rest?.whatsappFin?"pointer":"not-allowed"}}>
                   📲 Gerar e enviar cobrança via WhatsApp
@@ -4816,6 +4817,65 @@ Qualquer duvida estamos a disposicao! 😊
                   })}
                 </div>
               </div>
+
+              {/* Alertas de pagamentos aguardando confirmação */}
+              {(() => {
+                const aguardando = restaurants.flatMap(r =>
+                  (r.financeiro?.cobrancas??[])
+                    .filter(c => c.status === "aguardando_confirmacao")
+                    .map(c => ({ ...c, restName: r.name, restId: r.id }))
+                );
+                if (aguardando.length === 0) return null;
+                return (
+                  <div style={{...S.card,marginBottom:16,border:"1px solid #f59e0b44",background:"#fffbeb"}}>
+                    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
+                      <span style={{color:"#92400e",fontWeight:700,fontSize:14}}>💬 {aguardando.length} pagamento{aguardando.length>1?"s":""} aguardando confirmação</span>
+                    </div>
+                    {aguardando.map(c=>(
+                      <div key={c.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"10px 12px",borderRadius:10,background:"#fff",border:"1px solid #fde68a",marginBottom:8}}>
+                        <div>
+                          <div style={{color:"var(--text)",fontWeight:700,fontSize:13}}>{c.restName}</div>
+                          <div style={{color:"var(--text3)",fontSize:12}}>
+                            {c.periodoLabel} · R$ {c.valor?.toLocaleString("pt-BR",{minimumFractionDigits:2})} · Cliente confirmou em {c.clienteConfirmouEm ? new Date(c.clienteConfirmouEm).toLocaleDateString("pt-BR") : "—"}
+                          </div>
+                        </div>
+                        <div style={{display:"flex",gap:6,flexShrink:0}}>
+                          <button onClick={()=>{
+                            // Confirma — chama confirmarPagamento indiretamente via update
+                            const r = restaurants.find(x=>x.id===c.restId);
+                            if (!r) return;
+                            const dataPag = c.clienteConfirmouEm?.slice(0,10) ?? today();
+                            const cicloEnd = (() => {
+                              const d = new Date(dataPag+"T12:00:00");
+                              if ((r.tipoCobranca??"mensal") === "anual") d.setFullYear(d.getFullYear()+1);
+                              else d.setDate(d.getDate()+30);
+                              return d.toISOString().slice(0,10);
+                            })();
+                            const [ano,mes] = cicloEnd.split("-");
+                            const mesesNome = ["Janeiro","Fevereiro","Março","Abril","Maio","Junho","Julho","Agosto","Setembro","Outubro","Novembro","Dezembro"];
+                            const proxLabel = `${mesesNome[parseInt(mes)-1]}/${ano}`;
+                            const proxCob = { id:(Date.now()).toString(), periodo:cicloEnd.slice(0,7), periodoLabel:proxLabel, venc:cicloEnd, valor:c.valor, forma:c.forma, chave:c.chave, criadaEm:new Date().toISOString(), status:"pendente", autoGerada:true };
+                            const updatedCobs = (r.financeiro?.cobrancas??[]).map(x=>x.id===c.id?{...x,status:"pago",pagoEm:new Date().toISOString()}:x);
+                            const novoPag = { id:(Date.now()+1).toString(), data:dataPag, valor:c.valor, forma:c.forma, obs:`Ref. ${c.periodoLabel}`, registradoEm:new Date().toISOString() };
+                            const updated = restaurants.map(x=>x.id===c.restId?{...x,financeiro:{...x.financeiro,cobrancas:[...updatedCobs,proxCob],pagamentos:[novoPag,...(x.financeiro?.pagamentos??[])],status:"ativo",cicloInicio:dataPag,cicloFim:cicloEnd,proximoVencimento:cicloEnd}}:x);
+                            onUpdate("restaurants",updated);
+                            onUpdate("_toast",`✅ Pagamento de ${c.restName} confirmado!`);
+                          }} style={{padding:"6px 12px",borderRadius:8,border:"1px solid var(--green)44",background:"var(--green-bg)",color:"var(--green)",cursor:"pointer",fontFamily:"'DM Sans',sans-serif",fontSize:12,fontWeight:700}}>
+                            ✅ Confirmar
+                          </button>
+                          <button onClick={()=>{
+                            const updated = restaurants.map(r=>r.id===c.restId?{...r,financeiro:{...r.financeiro,cobrancas:(r.financeiro?.cobrancas??[]).map(x=>x.id===c.id?{...x,status:"pendente",clienteConfirmou:false}:x),status:"inadimplente"}}:r);
+                            onUpdate("restaurants",updated);
+                            onUpdate("_toast",`🔴 ${c.restName} marcado como inadimplente.`);
+                          }} style={{padding:"6px 12px",borderRadius:8,border:"1px solid var(--red)33",background:"transparent",color:"var(--red)",cursor:"pointer",fontFamily:"'DM Sans',sans-serif",fontSize:12,fontWeight:600}}>
+                            ✕ Negar
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                );
+              })()}
 
               {/* Notificações recentes */}
               {unreadNotifs > 0 && (
@@ -6038,6 +6098,170 @@ function Home({ onLogin }) {
 
 
 //
+
+//
+// FATURA PAGE — página pública de cobrança
+//
+function FaturaPage({ faturaId, restaurants, onUpdate, loaded }) {
+  const [confirmado, setConfirmado] = useState(false);
+
+  if (!loaded) return (
+    <div style={{minHeight:"100vh",background:"#faf8f4",display:"flex",alignItems:"center",justifyContent:"center",flexDirection:"column",gap:16,fontFamily:"'DM Sans',sans-serif"}}>
+      <div style={{fontSize:32}}>🍽️</div>
+      <div style={{color:"#8c7a5e",fontSize:15}}>Carregando fatura...</div>
+    </div>
+  );
+
+  // Busca a cobrança pelo ID em todos os restaurantes
+  let cobFound = null;
+  let restFound = null;
+  for (const r of restaurants) {
+    const cob = (r.financeiro?.cobrancas??[]).find(c => c.id === faturaId);
+    if (cob) { cobFound = cob; restFound = r; break; }
+  }
+
+  if (!cobFound || !restFound) return (
+    <div style={{minHeight:"100vh",background:"#faf8f4",display:"flex",alignItems:"center",justifyContent:"center",fontFamily:"'DM Sans',sans-serif"}}>
+      <div style={{textAlign:"center",padding:40}}>
+        <div style={{fontSize:48,marginBottom:16}}>🔍</div>
+        <h2 style={{color:"#1c1208",fontSize:20,fontWeight:700,margin:"0 0 8px"}}>Fatura não encontrada</h2>
+        <p style={{color:"#8c7a5e",fontSize:14}}>O link pode ter expirado ou ser inválido.</p>
+      </div>
+    </div>
+  );
+
+  const ac = "#d4a017";
+  const isPago = cobFound.status === "pago";
+  const isClienteConfirmou = cobFound.clienteConfirmou;
+  const vencLabel = cobFound.venc ? new Date(cobFound.venc+"T12:00:00").toLocaleDateString("pt-BR") : null;
+
+  function clienteConfirmarPagamento() {
+    const updated = restaurants.map(r => {
+      if (r.id !== restFound.id) return r;
+      const novasCobs = (r.financeiro?.cobrancas??[]).map(c =>
+        c.id === faturaId ? {...c, clienteConfirmou:true, clienteConfirmouEm:new Date().toISOString(), status:"aguardando_confirmacao"} : c
+      );
+      // Libera acesso provisoriamente
+      return {...r, financeiro:{...r.financeiro, cobrancas:novasCobs, status:"ativo"}};
+    });
+    onUpdate("restaurants", updated);
+    setConfirmado(true);
+  }
+
+  return (
+    <div style={{minHeight:"100vh",background:"#faf8f4",fontFamily:"'DM Sans',sans-serif"}}>
+      {/* Header */}
+      <div style={{background:"#1c1208",padding:"18px 24px",display:"flex",alignItems:"center",gap:10}}>
+        <span style={{fontSize:22}}>🍽️</span>
+        <span style={{fontWeight:800,fontSize:18,color:"#fff",letterSpacing:-0.5}}>App<span style={{color:ac}}>Tip</span></span>
+        <span style={{color:"#6b5a3e",fontSize:13,marginLeft:8}}>· Fatura</span>
+      </div>
+
+      <div style={{maxWidth:480,margin:"0 auto",padding:"32px 20px"}}>
+
+        {/* Status */}
+        {isPago && (
+          <div style={{background:"#f0fdf4",border:"1px solid #86efac",borderRadius:12,padding:"14px 18px",marginBottom:20,display:"flex",alignItems:"center",gap:10}}>
+            <span style={{fontSize:24}}>✅</span>
+            <div>
+              <div style={{color:"#166534",fontWeight:700,fontSize:15}}>Pagamento confirmado</div>
+              <div style={{color:"#16a34a",fontSize:13}}>Esta fatura já foi paga. Obrigado!</div>
+            </div>
+          </div>
+        )}
+        {isClienteConfirmou && !isPago && (
+          <div style={{background:"#fffbeb",border:"1px solid #fde68a",borderRadius:12,padding:"14px 18px",marginBottom:20,display:"flex",alignItems:"center",gap:10}}>
+            <span style={{fontSize:24}}>⏳</span>
+            <div>
+              <div style={{color:"#92400e",fontWeight:700,fontSize:15}}>Pagamento em verificação</div>
+              <div style={{color:"#a16207",fontSize:13}}>Você confirmou o pagamento. Aguardando validação.</div>
+            </div>
+          </div>
+        )}
+
+        {/* Card da fatura */}
+        <div style={{background:"#fff",borderRadius:16,border:"1px solid #ede8df",boxShadow:"0 4px 24px rgba(0,0,0,0.06)",overflow:"hidden",marginBottom:20}}>
+          {/* Cabeçalho da fatura */}
+          <div style={{background:"#1c1208",padding:"24px",textAlign:"center"}}>
+            <div style={{color:"#8c7a5e",fontSize:12,fontWeight:600,textTransform:"uppercase",letterSpacing:1,marginBottom:8}}>Fatura AppTip</div>
+            <div style={{color:"#fff",fontSize:22,fontWeight:800,marginBottom:4}}>{restFound.name}</div>
+            <div style={{color:"#d4c4a0",fontSize:14}}>{cobFound.periodoLabel}</div>
+          </div>
+
+          {/* Detalhes */}
+          <div style={{padding:"24px"}}>
+            <div style={{display:"flex",flexDirection:"column",gap:14,marginBottom:24}}>
+              {[
+                ["Plano", cobFound.forma === "PIX" || cobFound.forma === "Link" ? (restFound.planoId === "p10"?"Starter":restFound.planoId === "p20"?"Básico":restFound.planoId === "p50"?"Profissional":restFound.planoId === "p999"?"Enterprise":"On Demand") : cobFound.forma],
+                ["Valor", `R$ ${cobFound.valor?.toLocaleString("pt-BR",{minimumFractionDigits:2})}`],
+                ...(vencLabel ? [["Vencimento", vencLabel]] : []),
+              ].map(([k,v])=>(
+                <div key={k} style={{display:"flex",justifyContent:"space-between",alignItems:"center",paddingBottom:14,borderBottom:"1px solid #f5f0e8"}}>
+                  <span style={{color:"#8c7a5e",fontSize:14}}>{k}</span>
+                  <span style={{color:"#1c1208",fontWeight:700,fontSize:15}}>{v}</span>
+                </div>
+              ))}
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                <span style={{color:"#1c1208",fontWeight:700,fontSize:16}}>Total</span>
+                <span style={{color:ac,fontWeight:800,fontSize:22,fontFamily:"'DM Mono',monospace"}}>R$ {cobFound.valor?.toLocaleString("pt-BR",{minimumFractionDigits:2})}</span>
+              </div>
+            </div>
+
+            {/* Dados de pagamento */}
+            {cobFound.chave && (
+              <div style={{background:"#faf8f4",borderRadius:12,padding:"16px",border:"1px solid #ede8df",marginBottom:20}}>
+                <div style={{color:"#8c7a5e",fontSize:12,fontWeight:700,textTransform:"uppercase",letterSpacing:0.5,marginBottom:10}}>
+                  {cobFound.forma === "Link" ? "Link de pagamento" : "Pagamento via PIX"}
+                </div>
+                {cobFound.forma === "Link" ? (
+                  <a href={cobFound.chave} target="_blank" rel="noreferrer"
+                    style={{color:ac,fontWeight:700,fontSize:14,wordBreak:"break-all"}}>
+                    {cobFound.chave}
+                  </a>
+                ) : (
+                  <>
+                    <div style={{display:"flex",justifyContent:"space-between",marginBottom:6}}>
+                      <span style={{color:"#8c7a5e",fontSize:13}}>Chave PIX</span>
+                      <span style={{color:"#1c1208",fontWeight:700,fontSize:14,fontFamily:"'DM Mono',monospace"}}>{cobFound.chave}</span>
+                    </div>
+                    <div style={{display:"flex",justifyContent:"space-between"}}>
+                      <span style={{color:"#8c7a5e",fontSize:13}}>Favorecido</span>
+                      <span style={{color:"#1c1208",fontSize:13}}>Gustavo Rodrigues da Silva</span>
+                    </div>
+                  </>
+                )}
+              </div>
+            )}
+
+            {/* Botão confirmar */}
+            {!isPago && !isClienteConfirmou && !confirmado && (
+              <button onClick={clienteConfirmarPagamento}
+                style={{width:"100%",padding:"16px",borderRadius:12,border:"none",background:ac,color:"#fff",fontWeight:700,fontSize:16,cursor:"pointer",fontFamily:"'DM Sans',sans-serif",boxShadow:"0 4px 16px #d4a01744"}}>
+                Já efetuei o pagamento ✓
+              </button>
+            )}
+            {(confirmado || isClienteConfirmou) && !isPago && (
+              <div style={{textAlign:"center",padding:"16px",borderRadius:12,background:"#f0fdf4",border:"1px solid #86efac"}}>
+                <div style={{fontSize:32,marginBottom:8}}>✅</div>
+                <div style={{color:"#166534",fontWeight:700,fontSize:15,marginBottom:4}}>Confirmação recebida!</div>
+                <div style={{color:"#16a34a",fontSize:13}}>Aguarde a validação do pagamento. Seu acesso continua liberado.</div>
+              </div>
+            )}
+            {isPago && (
+              <div style={{textAlign:"center",padding:"16px",borderRadius:12,background:"#f0fdf4"}}>
+                <div style={{color:"#166534",fontWeight:700,fontSize:15}}>Esta fatura foi paga e confirmada. Obrigado!</div>
+              </div>
+            )}
+          </div>
+        </div>
+
+        <p style={{color:"#b0996e",fontSize:12,textAlign:"center"}}>Duvidas? Entre em contato via WhatsApp: (11) 98549-9821</p>
+      </div>
+    </div>
+  );
+}
+
+//
 // APP ROOT
 //
 export default function App() {
@@ -6052,8 +6276,12 @@ export default function App() {
 
   // Login unificado — uma única tela para todos
   const isSetupUrl = window.location.pathname.startsWith("/setup");
+  const isFaturaUrl = window.location.pathname.startsWith("/fatura/");
+  const faturaId = isFaturaUrl ? window.location.pathname.split("/fatura/")[1] : null;
+
   const [view, setView] = useState(() => {
-    if (isSetupUrl) return "setup"; // protegido por senha de convite no FirstSetup
+    if (isSetupUrl) return "setup";
+    if (isFaturaUrl) return "fatura";
     const role = localStorage.getItem("apptip_role");
     if (role === "super") return "super";
     if (role === "manager") return "manager";
@@ -6237,6 +6465,7 @@ export default function App() {
       {view === "super" && <OwnerPortal data={data} onUpdate={handleUpdate} onBack={doLogout} currentUser={currentUser} toggleTheme={toggleTheme} theme={theme} />}
       {view === "manager" && <ManagerPortal manager={currentUser} data={data} onUpdate={handleUpdate} onBack={doLogout} toggleTheme={toggleTheme} theme={theme} />}
       {view === "employee" && <EmployeePortal employees={employees} roles={roles} tips={tips} schedules={schedules} restaurants={restaurants} communications={communications} commAcks={commAcks} faq={faq} dpMessages={dpMessages} receipts={receipts} workSchedules={workSchedules} onBack={doLogout} onUpdateEmployee={emp=>{const next=employees.map(e=>e.id===emp.id?emp:e);handleUpdate("employees",next);}} onUpdate={handleUpdate} toggleTheme={toggleTheme} theme={theme} />}
+      {view === "fatura" && <FaturaPage faturaId={faturaId} restaurants={restaurants} onUpdate={handleUpdate} loaded={loaded} />}
       {view === "home" && <Home onLogin={()=>setView("login")} />}
       <Toast msg={toast} onClose={()=>setToast("")} />
 
