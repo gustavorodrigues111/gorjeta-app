@@ -4150,7 +4150,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                   const daysInMonth = new Date(year, month+1, 0).getDate();
                   const empList = areaEmps.map(e => {
                     const role = restRoles.find(r => r.id === e.roleId);
-                    return `- "${e.name}" → id: ${e.id} (cargo: ${role?.name??"—"})`;
+                    return `- ID_EXATO: "${e.id}" | Nome: "${e.name}" | Cargo: ${role?.name??"—"}`;
                   }).join("\n");
 
                   const diaSemana1 = ["Domingo","Segunda","Terça","Quarta","Quinta","Sexta","Sábado"][new Date(`${year}-${String(month+1).padStart(2,"0")}-01T12:00:00`).getDay()];
@@ -4165,8 +4165,9 @@ MÊS: ${mesLabel} de ${year} — ${daysInMonth} dias. Dia 1 cai numa ${diaSemana
 INSTRUÇÃO DO GESTOR:
 "${aiSchedInput.trim()}"
 
-REGRAS:
-- Use EXATAMENTE os IDs fornecidos acima
+REGRAS CRÍTICAS:
+- Use EXATAMENTE o valor do campo ID_EXATO como chave no JSON de saída
+- NÃO use o nome do empregado como chave, use sempre o ID_EXATO
 - Status: "off"=folga, "vac"=férias, "faultj"=falta justificada, "faultu"=falta injustificada, "comp"=compensação
 - Inclua APENAS dias com status especial. Dias normais de trabalho NÃO devem aparecer
 - Datas no formato YYYY-MM-DD usando o mês ${String(month+1).padStart(2,"0")} e ano ${year}
@@ -4205,7 +4206,22 @@ Responda SOMENTE com o JSON abaixo, sem texto adicional, sem markdown:
               function confirmarEscala() {
                 if (!aiSchedPreview) return;
                 let newSched = { ...schedules };
-                Object.entries(aiSchedPreview.escala).forEach(([empId, days]) => {
+
+                // Mapa de nome → id para fallback caso IA retorne nome em vez de id
+                const nomeParaId = {};
+                areaEmps.forEach(e => {
+                  nomeParaId[e.name.toLowerCase().trim()] = e.id;
+                  // também tenta primeiro nome
+                  nomeParaId[e.name.split(" ")[0].toLowerCase().trim()] = e.id;
+                });
+
+                Object.entries(aiSchedPreview.escala).forEach(([empKey, days]) => {
+                  // Tenta o id direto, senão tenta por nome
+                  const empId = areaEmps.find(e => e.id === empKey)?.id
+                    ?? nomeParaId[empKey.toLowerCase().trim()]
+                    ?? null;
+                  if (!empId) { console.warn("Empregado não encontrado:", empKey); return; }
+
                   newSched = {
                     ...newSched,
                     [rid]: {
