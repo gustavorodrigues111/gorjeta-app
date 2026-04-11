@@ -2147,15 +2147,19 @@ function EmployeeSpreadsheet({ restEmps, restRoles, rid, employees, onUpdate, re
     return editRows[e.id] ?? { name:e.name, cpf:e.cpf??"", admission:e.admission??"", pin:e.pin??"", roleId:e.roleId??"", inactiveFrom:e.inactiveFrom??"" };
   }
   function setRow(id, field, val) {
-    setEditRows(prev => ({ ...prev, [id]: { ...(prev[id] ?? getRow({id,name:"",cpf:"",admission:"",pin:"",roleId:"",inactiveFrom:""})), [field]: val } }));
+    setEditRows(prev => ({ ...prev, [id]: { ...(prev[id] ?? { name:"",cpf:"",admission:"",pin:"",roleId:"",inactiveFrom:"" }), [field]: val } }));
   }
 
   function saveEmp(e) {
-    const row = getRow(e);
-    if (!row.name.trim()) return;
-    onUpdate("employees", employees.map(x => x.id===e.id ? {...e, name:row.name.trim(), cpf:row.cpf, admission:row.admission, pin:row.pin, roleId:row.roleId, inactiveFrom:row.inactiveFrom} : x));
-    setSaved(p=>({...p,[e.id]:true}));
-    setTimeout(()=>setSaved(p=>({...p,[e.id]:false})),1500);
+    // Read directly from editRows state to avoid stale closure
+    setEditRows(prev => {
+      const row = prev[e.id] ?? { name:e.name, cpf:e.cpf??"", admission:e.admission??"", pin:e.pin??"", roleId:e.roleId??"", inactiveFrom:e.inactiveFrom??"" };
+      if (!row.name.trim()) return prev;
+      onUpdate("employees", employees.map(x => x.id===e.id ? {...e, name:row.name.trim(), cpf:row.cpf, admission:row.admission, pin:row.pin, roleId:row.roleId, inactiveFrom:row.inactiveFrom} : x));
+      setSaved(p=>({...p,[e.id]:true}));
+      setTimeout(()=>setSaved(p=>({...p,[e.id]:false})),1500);
+      return prev;
+    });
   }
 
   function saveNew() {
@@ -2195,9 +2199,15 @@ function EmployeeSpreadsheet({ restEmps, restRoles, rid, employees, onUpdate, re
     const isInactive = !isNew && e?.inactive && e?.inactiveFrom <= today();
     const onChange = isNew
       ? (f,v) => setNewRow(p=>({...p,[f]:v}))
-      : (f,v) => {
-          setRow(e.id, f, v);
-          // For roleId changes, also immediately update editRows so save picks it up
+      : (f,v) => setRow(e.id, f, v);
+
+    // Save role immediately on select change — avoids re-render losing state
+    const onRoleChange = isNew
+      ? (v) => setNewRow(p=>({...p,roleId:v}))
+      : (v) => {
+          const current = editRows[e.id] ?? { name:e.name, cpf:e.cpf??"", admission:e.admission??"", pin:e.pin??"", roleId:e.roleId??"", inactiveFrom:e.inactiveFrom??"" };
+          const updated = {...current, roleId:v};
+          setEditRows(prev=>({...prev,[e.id]:updated}));
         };
 
     return (
@@ -2206,7 +2216,7 @@ function EmployeeSpreadsheet({ restEmps, restRoles, rid, employees, onUpdate, re
         <input value={row.cpf} onChange={ev=>onChange("cpf",ev.target.value)} placeholder="000.000.000-00" style={inS} inputMode="numeric"/>
         <input type="date" value={row.admission} onChange={ev=>onChange("admission",ev.target.value)} style={inS}/>
         <input type="password" value={row.pin} onChange={ev=>onChange("pin",ev.target.value)} maxLength={6} placeholder="••••" style={inS}/>
-        <select value={row.roleId} onChange={ev=>onChange("roleId",ev.target.value)} style={{...inS,cursor:"pointer"}}>
+        <select value={row.roleId} onChange={ev=>onRoleChange(ev.target.value)} style={{...inS,cursor:"pointer"}}>
           <option value="">Selecionar…</option>
           {AREAS.map(a=>(
             <optgroup key={a} label={a}>
