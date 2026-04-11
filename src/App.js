@@ -4128,6 +4128,9 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }
           }
 
           // Ao confirmar pagamento — calcula próximo ciclo e gera próxima cobrança
+          // Helper para formatar data br
+          const fmtBr = (d) => d ? new Date(d+"T12:00:00").toLocaleDateString("pt-BR") : "—";
+
           function confirmarPagamento(cob) {
             const dataPag = today();
             const cicloIni = dataPag;
@@ -4135,20 +4138,35 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }
               const d = new Date(dataPag+"T12:00:00");
               if (tipoCobranca === "anual") d.setFullYear(d.getFullYear()+1);
               else d.setDate(d.getDate()+30);
+              // Subtrai 1 dia para o fim do ciclo (ex: 11/04 a 10/05)
+              d.setDate(d.getDate()-1);
               return d.toISOString().slice(0,10);
             })();
 
-            // Próxima cobrança pré-gerada com vencimento = último dia do ciclo
-            const [ano,mes] = cicloEnd.split("-");
-            const mesesNome = ["Janeiro","Fevereiro","Março","Abril","Maio","Junho","Julho","Agosto","Setembro","Outubro","Novembro","Dezembro"];
-            const proximoPeriodoLabel = tipoCobranca === "anual"
-              ? `${mesesNome[parseInt(mes)-1]}/${ano} (Anual)`
-              : `${mesesNome[parseInt(mes)-1]}/${ano}`;
+            // Próximo ciclo começa no dia seguinte ao fim deste
+            const proximoIni = (() => {
+              const d = new Date(cicloEnd+"T12:00:00");
+              d.setDate(d.getDate()+1);
+              return d.toISOString().slice(0,10);
+            })();
+            const proximoEnd = (() => {
+              const d = new Date(proximoIni+"T12:00:00");
+              if (tipoCobranca === "anual") d.setFullYear(d.getFullYear()+1);
+              else d.setDate(d.getDate()+30);
+              d.setDate(d.getDate()-1);
+              return d.toISOString().slice(0,10);
+            })();
+
+            const periodoAtualLabel = `${fmtBr(dataPag)} a ${fmtBr(cicloEnd)}`;
+            const proximoPeriodoLabel = `${fmtBr(proximoIni)} a ${fmtBr(proximoEnd)}`;
+
             const proximaCob = {
               id: Date.now().toString(),
-              periodo: cicloEnd.slice(0,7),
+              periodo: proximoIni.slice(0,7),
               periodoLabel: proximoPeriodoLabel,
-              venc: cicloEnd,
+              periodoInicio: proximoIni,
+              periodoFim: proximoEnd,
+              venc: proximoEnd,
               valor: valorTotal ?? cob.valor,
               forma: cob.forma ?? "PIX",
               chave: cob.chave ?? PIX_PADRAO,
@@ -4158,17 +4176,24 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }
             };
 
             const updatedCobs = (fin.cobrancas??[]).map(x=>x.id===cob.id?{...x,status:"pago",pagoEm:new Date().toISOString()}:x);
-            const novoPag = { id:(Date.now()+1).toString(), data:dataPag, valor:cob.valor, forma:cob.forma, obs:`Ref. ${cob.periodoLabel}`, registradoEm:new Date().toISOString() };
+            const novoPag = {
+              id:(Date.now()+1).toString(),
+              data:dataPag,
+              valor:cob.valor,
+              forma:cob.forma,
+              obs:`Período: ${periodoAtualLabel}`,
+              registradoEm:new Date().toISOString()
+            };
 
             saveFinanceiro({
               cobrancas: [...updatedCobs, proximaCob],
               pagamentos: [novoPag,...pagamentos],
               status: "ativo",
-              cicloInicio: cicloIni,
+              cicloInicio: dataPag,
               cicloFim: cicloEnd,
               proximoVencimento: cicloEnd,
             });
-            onUpdate("_toast", `✅ Pago! Próximo ciclo até ${new Date(cicloEnd+"T12:00:00").toLocaleDateString("pt-BR")} — nova cobrança gerada automaticamente`);
+            onUpdate("_toast", `✅ Pago! Ciclo ${fmtBr(dataPag)} a ${fmtBr(cicloEnd)}`);
           }
 
           return (
@@ -4393,47 +4418,63 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }
 
                 {/* Próximo ciclo calculado automaticamente */}
                 {(()=>{
-                  // Calcula próximo período com base no ciclo atual
-                  const mesesNome = ["Janeiro","Fevereiro","Março","Abril","Maio","Junho","Julho","Agosto","Setembro","Outubro","Novembro","Dezembro"];
+                  const fmtBrLocal = (d) => d ? new Date(d+"T12:00:00").toLocaleDateString("pt-BR") : "—";
 
-                  // Vencimento do próximo ciclo
-                  const proximoVenc = (() => {
+                  // Próximo ciclo começa no dia seguinte ao fim do ciclo atual
+                  const proximoIni = (() => {
                     if (cicloFim) {
-                      // Próximo vencimento = fim do ciclo atual (cliente paga antes de vencer)
-                      return cicloFim;
+                      const d = new Date(cicloFim+"T12:00:00"); d.setDate(d.getDate()+1);
+                      return d.toISOString().slice(0,10);
                     }
-                    if (trialFim) return trialFim;
-                    // Sem ciclo — sugere 7 dias a partir de hoje
-                    const d = new Date(); d.setDate(d.getDate()+7);
+                    if (trialFim) {
+                      const d = new Date(trialFim+"T12:00:00"); d.setDate(d.getDate()+1);
+                      return d.toISOString().slice(0,10);
+                    }
+                    return today();
+                  })();
+
+                  const proximoFim = (() => {
+                    const d = new Date(proximoIni+"T12:00:00");
+                    if (tipoCobranca === "anual") d.setFullYear(d.getFullYear()+1);
+                    else d.setDate(d.getDate()+30);
+                    d.setDate(d.getDate()-1);
                     return d.toISOString().slice(0,10);
                   })();
 
-                  // Período de referência = mês do próximo vencimento
-                  const proximoPeriodo = proximoVenc.slice(0,7);
-                  const [pAno, pMes] = proximoPeriodo.split("-");
-                  const proximoPeriodoLabel = `${mesesNome[parseInt(pMes)-1]}/${pAno}`;
-
-                  // Valor do plano atual
+                  const proximoVenc = proximoFim;
+                  const proximoPeriodo = proximoIni.slice(0,7);
+                  const proximoPeriodoLabel = `${fmtBrLocal(proximoIni)} a ${fmtBrLocal(proximoFim)}`;
                   const valorSugerido = cobValor ? parseFloat(cobValor) : (valorTotal ?? 0);
-                  const chaveUsada = cobForma==="pix" ? (cobChave||PIX_PADRAO) : cobLink;
 
                   return (
                     <div>
                       {/* Card do próximo ciclo */}
                       <div style={{background:"var(--bg2)",borderRadius:12,padding:"16px",marginBottom:16,border:"1px solid var(--border)"}}>
                         <div style={{color:"var(--text3)",fontSize:11,fontWeight:700,textTransform:"uppercase",letterSpacing:0.5,marginBottom:12}}>Próxima cobrança</div>
+
+                        {/* Período calculado */}
+                        <div style={{padding:"10px 14px",borderRadius:10,background:"var(--card-bg)",border:"1px solid var(--border)",marginBottom:12}}>
+                          <div style={{color:"var(--text3)",fontSize:11,marginBottom:4}}>Período</div>
+                          <div style={{color:"var(--text)",fontWeight:700,fontSize:14,fontFamily:"'DM Mono',monospace"}}>
+                            {fmtBrLocal(proximoIni)} a {fmtBrLocal(proximoFim)}
+                          </div>
+                          <div style={{color:"var(--text3)",fontSize:11,marginTop:2}}>
+                            {tipoCobranca==="anual"?"Ciclo anual":"Ciclo mensal (30 dias)"} · Vencimento: {fmtBrLocal(proximoVenc)}
+                          </div>
+                        </div>
+
                         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:12}}>
                           <div>
-                            <div style={{color:"var(--text3)",fontSize:11,marginBottom:4}}>Período</div>
-                            <input type="month" value={cobPeriodo||proximoPeriodo}
+                            <div style={{color:"var(--text3)",fontSize:11,marginBottom:4}}>Início do ciclo</div>
+                            <input type="date" value={cobPeriodo||proximoIni}
                               onChange={e=>setCobPeriodo(e.target.value)}
-                              style={{...S.input,fontFamily:"'DM Mono',monospace",fontSize:14}}/>
+                              style={{...S.input,fontFamily:"'DM Mono',monospace",fontSize:13}}/>
                           </div>
                           <div>
                             <div style={{color:"var(--text3)",fontSize:11,marginBottom:4}}>Vencimento</div>
                             <input type="date" value={cobVenc||proximoVenc}
                               onChange={e=>setCobVenc(e.target.value)}
-                              style={{...S.input,fontFamily:"'DM Mono',monospace",fontSize:14}}/>
+                              style={{...S.input,fontFamily:"'DM Mono',monospace",fontSize:13}}/>
                           </div>
                           <div style={{gridColumn:"1/-1"}}>
                             <div style={{color:"var(--text3)",fontSize:11,marginBottom:4}}>Valor (R$)</div>
@@ -4472,7 +4513,7 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }
                       <div style={{background:"#f0fdf4",borderRadius:10,padding:"12px 14px",marginBottom:14,border:"1px solid #86efac"}}>
                         <div style={{color:"#166534",fontSize:11,fontWeight:700,marginBottom:6}}>📱 Mensagem que será enviada</div>
                         <div style={{color:"#166534",fontSize:13,lineHeight:1.6}}>
-                          Ola, <strong>{rest?.name}</strong>! Segue o link da sua fatura AppTip referente a <strong>{(()=>{const [a,m]=(cobPeriodo||proximoPeriodo).split("-");return `${mesesNome[parseInt(m)-1]}/${a}`;})()}</strong>: apptip.app/fatura/(link gerado)
+                          Ola, <strong>{rest?.name}</strong>! Segue o link da sua fatura AppTip referente ao período <strong>{fmtBrLocal(cobPeriodo||proximoIni)} a {fmtBrLocal(cobVenc||proximoFim)}</strong>: apptip.app/fatura/(link gerado)
                         </div>
                       </div>
 
@@ -4481,10 +4522,11 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }
                         const valor = parseFloat(cobValor) || valorSugerido;
                         if (!valor) { alert("Verifique o valor da cobrança."); return; }
                         if (cobForma==="link" && !cobLink.trim()) { alert("Cole o link de pagamento."); return; }
-                        const periodo = cobPeriodo || proximoPeriodo;
+                        const periodo = cobPeriodo || proximoIni;
                         const venc = cobVenc || proximoVenc;
+                        const periodoFimCalc = cobVenc || proximoFim;
                         const [a,m] = periodo.split("-");
-                        const periodoLabel = `${mesesNome[parseInt(m)-1]}/${a}`;
+                        const periodoLabel = `${fmtBrLocal(periodo)} a ${fmtBrLocal(periodoFimCalc)}`;
                         const chave = cobForma==="pix"?(cobChave||PIX_PADRAO):cobLink;
                         const cob = { id:Date.now().toString(), periodo, periodoLabel, venc, valor, forma:cobForma==="pix"?"PIX":"Link", chave, criadaEm:new Date().toISOString(), status:"pendente" };
                         saveFinanceiro({ cobrancas:[...(fin.cobrancas??[]).filter(c=>!(c.autoGerada&&c.status==="pendente")), cob] });
