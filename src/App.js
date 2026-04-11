@@ -3060,33 +3060,29 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                 <button onClick={() => { const n = calcTipForDate(tipDate, tipTotal, tipNote); if (n > 0) { setTipTotal(""); setTipNote(""); onUpdate("_toast", `✅ Distribuído para ${n} empregados!`); } }} style={S.btnPrimary}>Calcular e Distribuir</button>
               </div>
               ) : (
-              /* MODO TABELA — um lançamento por dia, editável */
+              /* MODO TABELA */
               (() => {
                 const daysInMonth = new Date(year, month+1, 0).getDate();
+                const taxRate = restaurant.taxRate ?? TAX;
+                const tSplit = splits?.[rid]?.[mk] ?? DEFAULT_SPLIT;
+                const mode = restaurant.divisionMode ?? MODE_AREA_POINTS;
+                const noTipDays = data?.noTipDays?.[rid] ?? [];
+
                 const allDays = Array.from({length: daysInMonth}, (_, i) => {
                   const d = i+1;
                   return `${year}-${String(month+1).padStart(2,"0")}-${String(d).padStart(2,"0")}`;
                 });
-                const taxRate = restaurant.taxRate ?? TAX;
-                const tSplit = splits?.[rid]?.[mk] ?? DEFAULT_SPLIT;
-                const mode = restaurant.divisionMode ?? MODE_AREA_POINTS;
 
-                const getActiveEmps = (date) => restEmps.filter(emp => {
-                  const r = restRoles.find(r=>r.id===emp.roleId);
-                  if (!r || (emp.admission && emp.admission > date)) return false;
-                  const status = schedules?.[rid]?.[mk]?.[emp.id]?.[date];
-                  if (!status) return true;
-                  if (status === DAY_COMP) return true;
-                  if (status === DAY_FAULT_J || status === DAY_FAULT_U || status === DAY_VACATION) return false;
-                  if (r.area === "Produção") return true;
-                  return false;
-                });
-
-                // Dias não lançados com valor preenchido no tipRows
                 const pendingRows = tipRows.filter(r => {
                   const v = parseFloat(r.total);
-                  return v > 0 && !isNaN(v) && !monthTips.some(t=>t.date===r.date);
+                  return v > 0 && !isNaN(v) && !monthTips.some(t=>t.date===r.date) && !noTipDays.includes(r.date);
                 });
+
+                const setNoTip = (date, checked) => {
+                  const updated = { ...(data?.noTipDays??{}), [rid]: checked ? [...noTipDays.filter(d=>d!==date), date] : noTipDays.filter(d=>d!==date) };
+                  onUpdate("noTipDays", updated);
+                  if (checked) setTipRows(prev => prev.filter(r => r.date !== date));
+                };
 
                 return (
                   <div>
@@ -3095,184 +3091,128 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                       <MonthNav year={year} month={month} onChange={(y,m)=>{setYear(y);setMonth(m);}} />
                     </div>
 
-                    {allDays.map(date => {
-                      // Dias sem gorjeta marcados explicitamente
-                      const restNoTipDays = data?.noTipDays?.[rid] ?? [];
-                      const isNoTip = restNoTipDays.includes(date);
+                    {/* Cabeçalho */}
+                    <div style={{display:"grid",gridTemplateColumns:"46px 1fr 1fr 100px 90px",gap:6,padding:"0 8px 4px",marginBottom:2}}>
+                      {["","Valor (R$)","Observação","Sem gorjeta",""].map((h,i)=>(
+                        <div key={i} style={{color:"var(--text3)",fontSize:10,fontWeight:700,textAlign:i===3?"center":"left"}}>{h}</div>
+                      ))}
+                    </div>
 
-                      // Pega tips já lançados para esse dia
-                      const dayTips = monthTips.filter(t=>t.date===date);
+                    {allDays.map(date => {
+                      const isNoTip    = noTipDays.includes(date);
+                      const dayTips    = monthTips.filter(t => t.date === date);
                       const isLaunched = dayTips.length > 0;
                       const launchedPool = isLaunched ? dayTips[0].poolTotal : null;
-                      const launchedNote = isLaunched ? (dayTips[0].note ?? "") : "";
 
-                      // Estado de edição local (tipRows) — inicializa com valor lançado se existir
-                      const row = tipRows.find(r=>r.date===date) ?? {
+                      const row = tipRows.find(r => r.date === date) ?? {
                         date,
                         total: launchedPool != null ? String(launchedPool) : "",
-                        note: launchedNote
+                        note:  isLaunched ? (dayTips[0].note ?? "") : ""
                       };
-                      const val = parseFloat(row.total);
+                      const val    = parseFloat(row.total);
                       const hasVal = val > 0 && !isNaN(val);
+                      const isDirty = isLaunched && launchedPool != null && hasVal && val !== launchedPool;
 
-                      // Detecta se usuário alterou o valor em relação ao lançado
-                      const isDirty = isLaunched && launchedPool != null && val !== launchedPool;
-                      const isCleared = isLaunched && (!row.total || row.total === "0" || row.total === "");
-
-                      const weekday = new Date(date+"T12:00:00").toLocaleDateString("pt-BR",{weekday:"short"});
+                      const weekday  = new Date(date+"T12:00:00").toLocaleDateString("pt-BR",{weekday:"short"});
                       const isWeekend = [0,6].includes(new Date(date+"T12:00:00").getDay());
 
-                      // Cores do card
-                      let cardBorder = "#222";
-                      let cardBg = "#111";
-                      if (isNoTip)                              { cardBorder = "#6366f166"; cardBg = "#13103a"; }
-                      else if (isLaunched && !isDirty)          { cardBorder = "#10b98133"; cardBg = "#0a1a0a"; }
-                      else if (isDirty)                         { cardBorder = "#f59e0b55"; cardBg = "#1a1200"; }
-                      else if (hasVal)                          { cardBorder = "#f5c84233"; cardBg = "#1a1a0a"; }
-
-                      const toggleNoTip = (checked) => {
-                        const days = data?.noTipDays?.[rid] ?? [];
-                        const updated = { ...(data?.noTipDays??{}), [rid]: checked ? [...days.filter(d=>d!==date), date] : days.filter(d=>d!==date) };
-                        onUpdate("noTipDays", updated);
-                        if (checked) setTipRows(prev=>prev.filter(r=>r.date!==date));
-                        onUpdate("_toast", checked ? `🚫 ${fmtDate(date)}: sem gorjeta` : `✅ ${fmtDate(date)}: disponível`);
-                      };
+                      let bg = "#111", border = "#1e1e1e";
+                      if      (isNoTip)               { bg = "#0f0d1f"; border = "#6366f166"; }
+                      else if (isLaunched && !isDirty) { bg = "#0a1a0a"; border = "#10b98133"; }
+                      else if (isDirty)                { bg = "#1a1200"; border = "#f59e0b55"; }
+                      else if (hasVal)                 { bg = "#1a1a0a"; border = "#f5c84233"; }
 
                       return (
-                        <div key={date} style={{marginBottom:5,borderRadius:10,border:`1px solid ${cardBorder}`,background:cardBg,overflow:"hidden"}}>
-                          <div style={{display:"grid",gridTemplateColumns:"44px 1fr 1fr auto",gap:8,padding:"7px 10px",alignItems:"center"}}>
+                        <div key={date} style={{display:"grid",gridTemplateColumns:"46px 1fr 1fr 100px 90px",gap:6,padding:"5px 8px",marginBottom:4,borderRadius:10,background:bg,border:`1px solid ${border}`,alignItems:"center"}}>
 
-                            {/* Data */}
-                            <div style={{textAlign:"center"}}>
-                              <div style={{color:isWeekend?"#f59e0b":isNoTip?"#6366f1":"#aaa",fontSize:13,fontWeight:700}}>{parseInt(date.slice(-2))}</div>
-                              <div style={{color:"var(--text3)",fontSize:9}}>{weekday}</div>
-                            </div>
-
-                            {/* Valor — bloqueado se sem gorjeta */}
-                            <input
-                              type="number" min="0" step="0.01"
-                              value={isNoTip ? "" : row.total}
-                              disabled={isNoTip || isLaunched}
-                              onChange={e=>{ const nr=tipRows.filter(r=>r.date!==date); setTipRows([...nr,{...row,total:e.target.value}]); }}
-                              placeholder={isNoTip ? "bloqueado" : "R$ 0,00"}
-                              style={{...S.input,fontSize:13,padding:"6px 8px",
-                                background: isNoTip?"#1a1535": isDirty?"#221500": isLaunched?"#0d1a0d":"#1a1a1a",
-                                color: isNoTip?"#4a4480": isDirty?"#f59e0b": isLaunched?"#10b981":"#fff",
-                                borderColor: isNoTip?"#6366f133": isDirty?"#f59e0b44": isLaunched?"#10b98133":"transparent",
-                                cursor: isNoTip?"not-allowed":"text",
-                              }}
-                            />
-
-                            {/* Observação — substituída por label se sem gorjeta */}
-                            {isNoTip ? (
-                              <div style={{display:"flex",alignItems:"center",gap:8,padding:"6px 8px",background:"#1a1535",borderRadius:8,border:"1px solid #6366f133"}}>
-                                <span style={{fontSize:15}}>🚫</span>
-                                <span style={{color:"#818cf8",fontSize:12,fontWeight:700}}>Sem gorjeta neste dia</span>
-                              </div>
-                            ) : (
-                              <input
-                                value={row.note}
-                                onChange={e=>{ const nr=tipRows.filter(r=>r.date!==date); setTipRows([...nr,{...row,note:e.target.value}]); }}
-                                placeholder="Observação"
-                                style={{...S.input,fontSize:12,padding:"6px 8px"}}
-                              />
-                            )}
-
-                            {/* Ações */}
-                            <div style={{display:"flex",gap:6,alignItems:"center"}}>
-
-                              {/* Checkbox sem gorjeta — só para dias não lançados */}
-                              {!isLaunched && (
-                                <label style={{display:"flex",flexDirection:"column",alignItems:"center",gap:2,cursor:"pointer",userSelect:"none",padding:"6px 10px",borderRadius:8,border:`1px solid ${isNoTip?"#6366f1":"#333"}`,background:isNoTip?"#6366f122":"transparent",minWidth:54,textAlign:"center"}}>
-                                  <input type="checkbox" checked={isNoTip}
-                                    onChange={e=>toggleNoTip(e.target.checked)}
-                                    style={{width:16,height:16,cursor:"pointer",accentColor:"#6366f1",margin:0}}
-                                  />
-                                  <span style={{color:isNoTip?"#818cf8":"#555",fontSize:9,whiteSpace:"nowrap",marginTop:1}}>Sem gorj.</span>
-                                </label>
-                              )}
-
-                              {/* Lançar */}
-                              {!isLaunched && !isNoTip && hasVal && (
-                                <button onClick={()=>{
-                                  const n=calcTipForDate(date,val,row.note);
-                                  if(n>0){setTipRows(prev=>prev.filter(r=>r.date!==date));onUpdate("_toast",`✅ ${fmtDate(date)}: ${n} empregados`);}
-                                }} style={{padding:"6px 12px",borderRadius:8,border:"none",background:ac,color:"#111",fontWeight:700,cursor:"pointer",fontFamily:"DM Mono,monospace",fontSize:11,whiteSpace:"nowrap"}}>
-                                  Lançar
-                                </button>
-                              )}
-
-                              {/* Salvar */}
-                              {isLaunched && isDirty && hasVal && (
-                                <button onClick={()=>{
-                                  const n=calcTipForDate(date,val,row.note);
-                                  if(n>0){setTipRows(prev=>prev.filter(r=>r.date!==date));onUpdate("_toast",`✏️ ${fmtDate(date)}: atualizado`);}
-                                }} style={{padding:"6px 10px",borderRadius:8,border:"none",background:"#f59e0b",color:"#111",fontWeight:700,cursor:"pointer",fontFamily:"DM Mono,monospace",fontSize:11,whiteSpace:"nowrap"}}>
-                                  Salvar
-                                </button>
-                              )}
-
-                              {/* Check lançado */}
-                              {isLaunched && !isDirty && !isCleared && (
-                                <span style={{color:"#10b981",fontSize:15,padding:"0 4px"}}>✓</span>
-                              )}
-
-                              {/* Zerar */}
-                              {isLaunched && (
-                                <button onClick={()=>{
-                                  if(!window.confirm(`Zerar gorjeta de ${fmtDate(date)}?`)) return;
-                                  onUpdate("tips",tips.filter(t=>!(t.restaurantId===rid&&t.date===date)));
-                                  setTipRows(prev=>prev.filter(r=>r.date!==date));
-                                  onUpdate("_toast",`🗑️ ${fmtDate(date)}: removido`);
-                                }} style={{padding:"5px 8px",borderRadius:8,border:"1px solid #ef444433",background:"transparent",color:"#ef4444",cursor:"pointer",fontFamily:"DM Mono,monospace",fontSize:11,whiteSpace:"nowrap"}}>
-                                  Zerar
-                                </button>
-                              )}
-                            </div>
+                          {/* Data */}
+                          <div style={{textAlign:"center"}}>
+                            <div style={{color:isWeekend?"#f59e0b":isNoTip?"#818cf8":"#aaa",fontSize:13,fontWeight:700}}>{parseInt(date.slice(-2))}</div>
+                            <div style={{color:"var(--text3)",fontSize:9}}>{weekday}</div>
                           </div>
 
-                          {/* Preview rateio */}
-                          {!isLaunched && !isNoTip && hasVal && (
-                            <div style={{padding:"5px 10px 7px",borderTop:"1px solid var(--border)",background:"#0d0d0d"}}>
-                              <div style={{display:"flex",justifyContent:"space-between",fontSize:11,color:"var(--text3)",marginBottom:3}}>
-                                <span>Pool: {fmt(val)} · Ret. {Math.round(taxRate*100)}%: -{fmt(val*taxRate)} · Dist.: {fmt(val*(1-taxRate))}</span>
-                                <span>{getActiveEmps(date).length} emp.</span>
-                              </div>
-                              {mode !== MODE_GLOBAL_POINTS && (
-                                <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
-                                  {AREAS.map(a=>{
-                                    const emps=getActiveEmps(date).filter(e=>restRoles.find(r=>r.id===e.roleId)?.area===a);
-                                    if(!emps.length) return null;
-                                    const pts=emps.reduce((s,e)=>s+(parseFloat(restRoles.find(r=>r.id===e.roleId)?.points)||0),0);
-                                    const aPool=val*(1-taxRate)*(tSplit[a]/100);
-                                    return <span key={a} style={{fontSize:10,color:AREA_COLORS[a]}}>{a}: {fmt(aPool)} ({emps.length}/{pts}pt)</span>;
-                                  })}
-                                </div>
-                              )}
-                            </div>
-                          )}
+                          {/* Valor */}
+                          <input
+                            type="number" min="0" step="0.01"
+                            value={isNoTip ? "" : row.total}
+                            disabled={isNoTip}
+                            onChange={e=>{ const nr=tipRows.filter(r=>r.date!==date); setTipRows([...nr,{...row,total:e.target.value}]); }}
+                            placeholder="0,00"
+                            style={{...S.input, fontSize:13, padding:"6px 8px",
+                              background:  isNoTip?"#1a1535"  : isDirty?"#221500" : isLaunched?"#0d1a0d" : "#1a1a1a",
+                              color:       isNoTip?"#3a3360"  : isDirty?"#f59e0b" : isLaunched?"#10b981" : "#fff",
+                              borderColor: isNoTip?"transparent": isDirty?"#f59e0b44": isLaunched?"#10b98133": "transparent",
+                              cursor:      isNoTip?"not-allowed" : "text",
+                            }}
+                          />
 
-                          {/* Info lançado */}
-                          {isLaunched && !isDirty && (
-                            <div style={{padding:"3px 10px 5px",borderTop:"1px solid #10b98122",background:"#081208"}}>
-                              <span style={{fontSize:11,color:"#10b98199"}}>Distribuído: {fmt(launchedPool)} → {dayTips.length} lançamentos</span>
-                            </div>
-                          )}
+                          {/* Observação */}
+                          <input
+                            value={isNoTip ? "" : row.note}
+                            disabled={isNoTip}
+                            onChange={e=>{ const nr=tipRows.filter(r=>r.date!==date); setTipRows([...nr,{...row,note:e.target.value}]); }}
+                            placeholder={isNoTip ? "—" : "Observação"}
+                            style={{...S.input, fontSize:12, padding:"6px 8px",
+                              background: isNoTip?"#1a1535":"var(--input-bg)",
+                              color:      isNoTip?"#3a3360":"var(--text)",
+                              cursor:     isNoTip?"not-allowed":"text",
+                            }}
+                          />
+
+                          {/* Checkbox sem gorjeta */}
+                          <label style={{display:"flex",flexDirection:"column",alignItems:"center",gap:3,cursor:isLaunched?"default":"pointer",userSelect:"none",opacity:isLaunched?0.3:1}}>
+                            <input
+                              type="checkbox"
+                              checked={isNoTip}
+                              disabled={isLaunched}
+                              onChange={e=>setNoTip(date, e.target.checked)}
+                              style={{width:18,height:18,cursor:isLaunched?"default":"pointer",accentColor:"#6366f1"}}
+                            />
+                            <span style={{fontSize:9,color:isNoTip?"#818cf8":"#555",fontFamily:"DM Mono,monospace"}}>Sem gorjeta</span>
+                          </label>
+
+                          {/* Ação */}
+                          <div style={{display:"flex",justifyContent:"center",gap:4,alignItems:"center"}}>
+                            {!isLaunched && !isNoTip && hasVal && (
+                              <button onClick={()=>{
+                                const n=calcTipForDate(date,val,row.note);
+                                if(n>0){setTipRows(prev=>prev.filter(r=>r.date!==date));onUpdate("_toast",`✅ ${fmtDate(date)}: ${n} emp.`);}
+                              }} style={{padding:"5px 12px",borderRadius:8,border:"none",background:ac,color:"#111",fontWeight:700,cursor:"pointer",fontFamily:"DM Mono,monospace",fontSize:11,whiteSpace:"nowrap"}}>
+                                Lançar
+                              </button>
+                            )}
+                            {isLaunched && isDirty && hasVal && (
+                              <button onClick={()=>{
+                                const n=calcTipForDate(date,val,row.note);
+                                if(n>0){setTipRows(prev=>prev.filter(r=>r.date!==date));onUpdate("_toast",`✏️ atualizado`);}
+                              }} style={{padding:"5px 10px",borderRadius:8,border:"none",background:"#f59e0b",color:"#111",fontWeight:700,cursor:"pointer",fontFamily:"DM Mono,monospace",fontSize:11,whiteSpace:"nowrap"}}>
+                                Salvar
+                              </button>
+                            )}
+                            {isLaunched && !isDirty && <span style={{color:"#10b981",fontSize:16}}>✓</span>}
+                            {isLaunched && (
+                              <button onClick={()=>{
+                                if(!window.confirm(`Zerar gorjeta de ${fmtDate(date)}?`)) return;
+                                onUpdate("tips",tips.filter(t=>!(t.restaurantId===rid&&t.date===date)));
+                                setTipRows(prev=>prev.filter(r=>r.date!==date));
+                                onUpdate("_toast",`🗑️ ${fmtDate(date)}: removido`);
+                              }} style={{padding:"4px 7px",borderRadius:7,border:"1px solid #ef444433",background:"transparent",color:"#ef4444",cursor:"pointer",fontFamily:"DM Mono,monospace",fontSize:12}}>
+                                ✕
+                              </button>
+                            )}
+                          </div>
                         </div>
                       );
                     })}
 
-                    {/* Lançar todos pendentes */}
                     {pendingRows.length > 0 && (
                       <button onClick={()=>{
-                        let count = 0;
-                        pendingRows.forEach(row=>{
-                          count += calcTipForDate(row.date, parseFloat(row.total), row.note);
-                        });
-                        setTipRows(prev => prev.filter(r => !pendingRows.some(p=>p.date===r.date)));
+                        let count=0;
+                        pendingRows.forEach(row=>{ count+=calcTipForDate(row.date,parseFloat(row.total),row.note); });
+                        setTipRows(prev=>prev.filter(r=>!pendingRows.some(p=>p.date===r.date)));
                         if(count>0) onUpdate("_toast",`✅ ${pendingRows.length} dias lançados!`);
                       }} style={{...S.btnPrimary,marginTop:8}}>
-                        Lançar Todos os Dias Preenchidos ({pendingRows.length})
+                        Lançar Todos Preenchidos ({pendingRows.length})
                       </button>
                     )}
                   </div>
