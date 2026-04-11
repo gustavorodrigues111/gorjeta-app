@@ -3830,7 +3830,10 @@ export default function App() {
   }, [theme]);
 
   function toggleTheme() { setTheme(t => t === "dark" ? "light" : "dark"); }
-  const [view, setView] = useState("home");
+
+  // URL-based routing
+  const isAdm = window.location.pathname.startsWith("/adm");
+  const [view, setView] = useState(isAdm ? "login" : "employee");
   const [loaded, setLoaded] = useState(false);
   const [toast, setToast] = useState("");
   const [currentUser, setCurrentUser] = useState(null);
@@ -3901,26 +3904,36 @@ export default function App() {
     setToast(labels[field] ?? "Salvo!");
   }
 
-  function doLogout() { setCurrentUser(null); setUserRole(null); setView("home"); }
+  function doLogout() {
+    setCurrentUser(null);
+    setUserRole(null);
+    if (isAdm) {
+      setView("login");
+    } else {
+      setView("employee");
+    }
+  }
 
   if (!loaded) return <div style={{minHeight:"100vh",background:"var(--bg)",display:"flex",alignItems:"center",justifyContent:"center",color:"#f5c842",fontFamily:"DM Mono,monospace",fontSize:18}}>Carregando…</div>;
 
   return (
     <>
-      {view === "home"     && <Home onManager={()=>setView("login")} onEmployee={()=>setView("employee")} />}
-      {view === "setup"    && <FirstSetup onDone={sm=>{handleUpdate("superManagers",[sm]);setCurrentUser(sm);setUserRole("super");setView("super");}} />}
-      {view === "login"    && (
+      {/* / → employee login */}
+      {!isAdm && view === "employee" && <EmployeePortal employees={employees} roles={roles} tips={tips} schedules={schedules} restaurants={restaurants} communications={communications} commAcks={commAcks} faq={faq} dpMessages={dpMessages} receipts={receipts} workSchedules={workSchedules} onBack={()=>setView("employee")} onUpdateEmployee={emp=>{const next=employees.map(e=>e.id===emp.id?emp:e);handleUpdate("employees",next);}} onUpdate={handleUpdate} toggleTheme={toggleTheme} theme={theme} />}
+
+      {/* /adm → management */}
+      {isAdm && view === "login"   && (
         <LoginScreen
           superManagers={superManagers} managers={managers}
           onLoginSuper={u=>{setCurrentUser(u);setUserRole("super");setView("super");}}
           onLoginManager={u=>{setCurrentUser(u);setUserRole("manager");setView("manager");}}
-          onBack={()=>setView("home")}
+          onBack={()=>setView("login")}
           onSetupFirst={()=>setView("setup")}
         />
       )}
-      {view === "super"    && <SuperManagerPortal data={data} onUpdate={handleUpdate} onBack={doLogout} currentUser={currentUser} toggleTheme={toggleTheme} theme={theme} />}
-      {view === "manager"  && <ManagerPortal manager={currentUser} data={data} onUpdate={handleUpdate} onBack={doLogout} toggleTheme={toggleTheme} theme={theme} />}
-      {view === "employee" && <EmployeePortal employees={employees} roles={roles} tips={tips} schedules={schedules} restaurants={restaurants} communications={communications} commAcks={commAcks} faq={faq} dpMessages={dpMessages} receipts={receipts} workSchedules={workSchedules} onBack={()=>setView("home")} onUpdateEmployee={emp=>{const next=employees.map(e=>e.id===emp.id?emp:e);handleUpdate("employees",next);}} onUpdate={handleUpdate} toggleTheme={toggleTheme} theme={theme} />}
+      {isAdm && view === "setup"   && <FirstSetup onDone={sm=>{handleUpdate("superManagers",[sm]);setCurrentUser(sm);setUserRole("super");setView("super");}} />}
+      {isAdm && view === "super"   && <SuperManagerPortal data={data} onUpdate={handleUpdate} onBack={doLogout} currentUser={currentUser} toggleTheme={toggleTheme} theme={theme} />}
+      {isAdm && view === "manager" && <ManagerPortal manager={currentUser} data={data} onUpdate={handleUpdate} onBack={doLogout} toggleTheme={toggleTheme} theme={theme} />}
       <Toast msg={toast} onClose={()=>setToast("")} />
     </>
   );
