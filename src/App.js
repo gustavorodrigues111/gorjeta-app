@@ -3899,6 +3899,7 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }
   const trash = data?.trash ?? { restaurants:[], managers:[], employees:[] };
   const trashCount = (trash.restaurants?.length??0) + (trash.managers?.length??0) + (trash.employees?.length??0);
   const [restTab, setRestTab] = useState("operacional");
+  const [filtroFinanceiro, setFiltroFinanceiro] = useState("todos");
 
   // Soft delete helpers
   function softDelete(type, item) {
@@ -4560,7 +4561,7 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }
           const vencendo = rows.filter(x => x.status !== "inadimplente" && x.diasParaVencer !== null && x.diasParaVencer <= 7 && x.diasParaVencer >= 0).length;
           const vencidos = rows.filter(x => x.status !== "inadimplente" && x.diasParaVencer !== null && x.diasParaVencer < 0).length;
 
-          const [filtro, setFiltro] = useState("todos");
+          const [filtro, setFiltro] = [filtroFinanceiro, setFiltroFinanceiro];
           const rowsFiltrados = rows.filter(x => {
             if (filtro === "inadimplente") return x.status === "inadimplente";
             if (filtro === "vencido") return x.status !== "inadimplente" && x.diasParaVencer !== null && x.diasParaVencer < 0;
