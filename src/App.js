@@ -39,6 +39,7 @@ const fmt = (v) => new Intl.NumberFormat("pt-BR", { style: "currency", currency:
 const fmtBR = (v) => new Intl.NumberFormat("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(v ?? 0);
 const fmtDate = (d) => d ? new Date(d + "T12:00:00").toLocaleDateString("pt-BR") : "—";
 const today = () => new Date().toISOString().slice(0, 10);
+const maskCpf = (v) => { const d = (v ?? "").replace(/\D/g,"").slice(0,11); if(d.length<=3) return d; if(d.length<=6) return `${d.slice(0,3)}.${d.slice(3)}`; if(d.length<=9) return `${d.slice(0,3)}.${d.slice(3,6)}.${d.slice(6)}`; return `${d.slice(0,3)}.${d.slice(3,6)}.${d.slice(6,9)}-${d.slice(9,11)}`; };
 const monthKey = (y, m) => `${y}-${String(m + 1).padStart(2, "0")}`;
 const monthLabel = (y, m) => new Date(y, m, 1).toLocaleDateString("pt-BR", { month: "long", year: "numeric" });
 const WEEKDAYS = ["Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb"];
@@ -1671,7 +1672,7 @@ function ReceibosManagerTab({ restaurantId, employees, roles, restaurants, recei
                       </div>
                       <div>
                         <label style={S.label}>CPF</label>
-                        <input value={form.cpf} onChange={e=>setNewEmpForm(p=>({...p,[r.id]:{...form,cpf:e.target.value}}))} placeholder="000.000.000-00" style={S.input}/>
+                        <input value={form.cpf} onChange={e=>setNewEmpForm(p=>({...p,[r.id]:{...form,cpf:maskCpf(e.target.value)}}))} placeholder="000.000.000-00" style={S.input}/>
                       </div>
                       <div>
                         <label style={S.label}>Data de admissão</label>
@@ -1900,7 +1901,7 @@ function EmployeePortal({ employees, roles, tips, schedules, restaurants, commun
   const emp = employees.find(e => e.id === empId);
   const role = emp ? roles.find(r => r.id === emp.roleId) : null;
   const restaurant = emp ? restaurants.find(r => r.id === emp.restaurantId) : null;
-  const isFirstAccess = emp && (String(emp.pin) === String(emp.empCode?.slice(-4)) || String(emp.pin) === String(emp.empCode));
+  const isFirstAccess = emp && (emp.mustChangePin || String(emp.pin) === String(emp.empCode?.slice(-4)) || String(emp.pin) === String(emp.empCode));
   const needsCpf = emp && !emp.cpf;
 
   const mk = monthKey(year, month);
@@ -1961,7 +1962,7 @@ function EmployeePortal({ employees, roles, tips, schedules, restaurants, commun
     if (needsCpf && !firstCpf.trim()) { setFirstErr("Informe seu CPF."); return; }
     if (firstPin.length !== 4 || !/^\d{4}$/.test(firstPin)) { setFirstErr("PIN deve ter exatamente 4 dígitos numéricos."); return; }
     if (firstPin !== firstPin2) { setFirstErr("PINs não coincidem."); return; }
-    const updated = { ...emp, pin: firstPin, cpf: firstCpf.trim() || emp.cpf };
+    const updated = { ...emp, pin: firstPin, cpf: firstCpf.trim() || emp.cpf, mustChangePin: false };
     onUpdateEmployee(updated);
   }
 
@@ -1988,10 +1989,10 @@ function EmployeePortal({ employees, roles, tips, schedules, restaurants, commun
         <div style={{ textAlign:"center", marginBottom:20 }}>
           <div style={{ fontSize:32 }}>🔑</div>
           <h2 style={{ color:ac, margin:"8px 0 4px" }}>Primeiro Acesso</h2>
-          <p style={{ color:"var(--text3)", fontSize:13 }}>Bem-vindo, {emp?.name}!{needsCpf?" Complete seu cadastro e defina seu PIN.":" Defina seu PIN de acesso."}</p>
+          <p style={{ color:"var(--text3)", fontSize:13 }}>{emp?.mustChangePin ? `PIN resetado pelo gestor. Defina um novo PIN, ${emp?.name}.` : `Bem-vindo, ${emp?.name}!${needsCpf?" Complete seu cadastro e defina seu PIN.":" Defina seu PIN de acesso."}`}</p>
         </div>
         <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
-          {needsCpf && <div><label style={S.label}>Seu CPF</label><input value={firstCpf} onChange={e=>setFirstCpf(e.target.value)} placeholder="000.000.000-00" style={S.input} inputMode="numeric"/></div>}
+          {needsCpf && <div><label style={S.label}>Seu CPF</label><input value={firstCpf} onChange={e=>setFirstCpf(maskCpf(e.target.value))} placeholder="000.000.000-00" style={S.input} inputMode="numeric"/></div>}
           <div><label style={S.label}>Novo PIN (4 dígitos)</label><input type="password" inputMode="numeric" maxLength={4} value={firstPin} onChange={e=>setFirstPin(e.target.value)} placeholder="••••" style={{ ...S.input, letterSpacing:6, fontSize:20, textAlign:"center" }}/></div>
           <div><label style={S.label}>Confirmar PIN</label><input type="password" inputMode="numeric" maxLength={4} value={firstPin2} onChange={e=>setFirstPin2(e.target.value)} placeholder="••••" style={{ ...S.input, letterSpacing:6, fontSize:20, textAlign:"center" }} onKeyDown={e=>e.key==="Enter"&&completeFirstAccess()}/></div>
           {firstErr && <p style={{ color:"#e74c3c", fontSize:13, margin:0 }}>{firstErr}</p>}
@@ -2296,10 +2297,11 @@ function RoleSpreadsheet({ restRoles, rid, roles, onUpdate }) {
 
 
 // ─── EmpRowLine definido FORA do EmployeeSpreadsheet para evitar re-mount ───
-const EMP_COLS = "2fr 1.2fr 100px 80px 1.5fr 100px auto";
+const EMP_COLS        = "80px 2fr 1.2fr 100px auto 1.5fr auto";
+const EMP_COLS_HEADER = "80px 2fr 1.2fr 100px auto 1.5fr auto";
 const empInS2 = { background:"var(--bg1)", border:"1px solid var(--border)", borderRadius:6, color:"var(--text)", fontFamily:"DM Mono,monospace", fontSize:12, padding:"6px 8px", outline:"none", width:"100%", boxSizing:"border-box" };
 
-function EmpRowLine({ emp, isNew, row, restRoles, isSaved, isSuperManager, onChange, onSave, onToggleInactive, onDelete, onAdd }) {
+function EmpRowLine({ emp, isNew, row, restRoles, isSaved, isSuperManager, onChange, onSave, onToggleInactive, onDelete, onAdd, onResetPin, employees }) {
   const ac = "#f5c842";
   const isInactive = !isNew && emp?.inactive && emp?.inactiveFrom <= today();
   return (
@@ -2307,10 +2309,28 @@ function EmpRowLine({ emp, isNew, row, restRoles, isSaved, isSuperManager, onCha
       background:isNew?"#0d1a0d":isInactive?"#1a1a2a":"var(--card-bg)",borderRadius:10,
       border:`1px solid ${isSaved?"#10b98166":isNew?"#10b98144":isInactive?"#8b5cf644":"var(--border)"}`,
       alignItems:"center",opacity:isInactive?0.75:1}}>
+
+      {/* ID / código */}
+      <div style={{color:"var(--text3)",fontSize:11,fontFamily:"DM Mono,monospace",textAlign:"center"}}>
+        {isNew ? <span style={{color:"#555",fontSize:10}}>Auto</span> : <span style={{color:ac,fontWeight:700}}>{emp?.empCode ?? "—"}</span>}
+      </div>
+
       <input value={row.name||""} onChange={ev=>onChange("name",ev.target.value)} placeholder="Nome completo" style={empInS2}/>
-      <input value={row.cpf||""} onChange={ev=>onChange("cpf",ev.target.value)} placeholder="000.000.000-00" style={empInS2} inputMode="numeric"/>
+      <input value={row.cpf||""} onChange={ev=>onChange("cpf",maskCpf(ev.target.value))} placeholder="000.000.000-00" style={empInS2} inputMode="numeric"/>
       <input type="date" value={row.admission||""} onChange={ev=>onChange("admission",ev.target.value)} style={empInS2}/>
-      <input type="password" value={row.pin||""} onChange={ev=>onChange("pin",ev.target.value)} maxLength={6} placeholder="••••" style={empInS2}/>
+
+      {/* PIN — campo + botão resetar */}
+      <div style={{display:"flex",gap:4,alignItems:"center"}}>
+        <input type="password" value={row.pin||""} onChange={ev=>onChange("pin",ev.target.value)} maxLength={6} placeholder="••••"
+          style={{...empInS2,width:70,flexShrink:0}}/>
+        {!isNew && isSuperManager && (
+          <button onClick={()=>onResetPin(emp)} title="Resetar PIN para o código do empregado"
+            style={{padding:"5px 8px",borderRadius:6,border:"1px solid #f59e0b44",background:"transparent",color:"#f59e0b",cursor:"pointer",fontSize:10,fontFamily:"DM Mono,monospace",whiteSpace:"nowrap"}}>
+            🔑
+          </button>
+        )}
+      </div>
+
       <select value={row.roleId||""} onChange={ev=>onChange("roleId",ev.target.value)} style={{...empInS2,cursor:"pointer"}}>
         <option value="">Selecionar…</option>
         {AREAS.map(a=>(
@@ -2319,11 +2339,9 @@ function EmpRowLine({ emp, isNew, row, restRoles, isSaved, isSuperManager, onCha
           </optgroup>
         ))}
       </select>
-      {isNew
-        ? <div style={{fontSize:10,color:"var(--text3)"}}>Auto</div>
-        : <input type="date" value={row.inactiveFrom||""} onChange={ev=>onChange("inactiveFrom",ev.target.value)} style={empInS2}/>
-      }
-      <div style={{display:"flex",gap:4}}>
+
+      {/* Última coluna: ações */}
+      <div style={{display:"flex",gap:4,alignItems:"center"}}>
         {isNew
           ? <button onClick={onAdd} style={{padding:"6px 12px",borderRadius:8,border:"none",background:"#10b981",color:"#fff",fontWeight:700,cursor:"pointer",fontFamily:"DM Mono,monospace",fontSize:12,whiteSpace:"nowrap"}}>+ Add</button>
           : <>
@@ -2398,6 +2416,12 @@ function EmployeeSpreadsheet({ restEmps, restRoles, rid, employees, onUpdate, re
     onUpdate("employees", employees.filter(x => x.id !== emp.id));
   }
 
+  function resetPin(emp) {
+    if (!window.confirm(`Resetar PIN de "${emp.name}"?\n\nO PIN voltará para o código do empregado (${emp.empCode}) e ele será obrigado a trocar no próximo acesso.`)) return;
+    onUpdate("employees", employees.map(x => x.id===emp.id ? {...x, pin: emp.empCode, mustChangePin: true} : x));
+    onUpdate("_toast", `🔑 PIN de ${emp.name} resetado para ${emp.empCode}`);
+  }
+
   return (
     <div style={{fontFamily:"DM Mono,monospace"}}>
       <div style={{display:"flex",gap:8,marginBottom:16}}>
@@ -2408,34 +2432,54 @@ function EmployeeSpreadsheet({ restEmps, restRoles, rid, employees, onUpdate, re
           Inativos ({inactiveEmps.length}){isSuperManager && inactiveEmps.length>0 && " · clique ✕ p/ excluir"}
         </button>
       </div>
+
+      {/* Cabeçalho */}
       <div style={{display:"grid",gridTemplateColumns:EMP_COLS,gap:6,padding:"4px 8px",marginBottom:4}}>
-        {["Nome","CPF","Admissão","PIN","Cargo","Inativo desde",""].map(h=>(
+        {["ID","Nome","CPF","Admissão","PIN","Cargo",""].map(h=>(
           <div key={h} style={{color:"var(--text3)",fontSize:10,fontWeight:700}}>{h}</div>
         ))}
       </div>
+
+      {/* Linha de novo empregado */}
       {!showInactive && (
         <EmpRowLine isNew emp={null} row={newRow} restRoles={restRoles}
           isSaved={false} isSuperManager={isSuperManager}
           onChange={(f,v)=>setNewRow(p=>({...p,[f]:v}))}
-          onAdd={saveNew} onSave={null} onToggleInactive={null} onDelete={null}/>
+          onAdd={saveNew} onSave={null} onToggleInactive={null} onDelete={null} onResetPin={null} employees={employees}/>
       )}
+
       {list.length===0 && <p style={{color:"var(--text3)",textAlign:"center",marginTop:16}}>Nenhum empregado {showInactive?"inativo":"ativo"}.</p>}
-      {list.map(emp => {
-        const role = restRoles.find(r=>r.id===emp.roleId);
-        const row = getRow(emp);
-        return (
-          <div key={emp.id}>
-            {role && <div style={{color:AREA_COLORS[role.area]??"#555",fontSize:10,fontWeight:700,padding:"6px 8px 2px"}}>{role.area} · {emp.empCode}</div>}
-            <EmpRowLine isNew={false} emp={emp} row={row} restRoles={restRoles}
-              isSaved={saved[emp.id]} isSuperManager={isSuperManager}
-              onChange={(f,v)=>setField(emp.id,f,v)}
-              onSave={()=>saveEmp(emp)}
-              onToggleInactive={()=>toggleInactive(emp)}
-              onDelete={()=>deleteEmp(emp)}
-              onAdd={null}/>
+
+      {/* Agrupado por área */}
+      {(() => {
+        const groups = {};
+        list.forEach(emp => {
+          const role = restRoles.find(r=>r.id===emp.roleId);
+          const area = role?.area ?? "Sem área";
+          if (!groups[area]) groups[area] = [];
+          groups[area].push(emp);
+        });
+        return Object.entries(groups).map(([area, emps]) => (
+          <div key={area} style={{marginBottom:12}}>
+            <div style={{color:AREA_COLORS[area]??"#888",fontSize:11,fontWeight:700,padding:"8px 8px 4px",borderBottom:`1px solid ${AREA_COLORS[area]??"#333"}33`,marginBottom:4,letterSpacing:1}}>
+              {area.toUpperCase()} · {emps.length} empregado{emps.length!==1?"s":""}
+            </div>
+            {emps.map(emp => {
+              const row = getRow(emp);
+              return (
+                <EmpRowLine key={emp.id} isNew={false} emp={emp} row={row} restRoles={restRoles}
+                  isSaved={saved[emp.id]} isSuperManager={isSuperManager}
+                  onChange={(f,v)=>setField(emp.id,f,v)}
+                  onSave={()=>saveEmp(emp)}
+                  onToggleInactive={()=>toggleInactive(emp)}
+                  onDelete={()=>deleteEmp(emp)}
+                  onResetPin={resetPin}
+                  employees={employees}/>
+              );
+            })}
           </div>
-        );
-      })}
+        ));
+      })()}
     </div>
   );
 }
@@ -3635,7 +3679,7 @@ function SuperManagerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, 
           <div style={{display:"flex",flexDirection:"column",gap:12}}>
             <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
               <div><label style={S.label}>Nome completo</label><input value={mgrForm.name} onChange={e=>setMgrForm({...mgrForm,name:e.target.value})} style={S.input}/></div>
-              <div><label style={S.label}>CPF (opcional)</label><input value={mgrForm.cpf} onChange={e=>setMgrForm({...mgrForm,cpf:e.target.value})} placeholder="000.000.000-00" style={S.input} inputMode="numeric"/></div>
+              <div><label style={S.label}>CPF (opcional)</label><input value={mgrForm.cpf} onChange={e=>setMgrForm({...mgrForm,cpf:maskCpf(e.target.value)})} placeholder="000.000.000-00" style={S.input} inputMode="numeric"/></div>
             </div>
             <div><label style={S.label}>PIN (4–6 dígitos)</label><input type="password" value={mgrForm.pin} onChange={e=>setMgrForm({...mgrForm,pin:e.target.value})} maxLength={6} style={S.input}/></div>
 
@@ -3691,7 +3735,7 @@ function SuperManagerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, 
         <Modal title={editSuperId?"Editar Super Gestor":"Novo Super Gestor"} onClose={()=>setShowSuperModal(false)}>
           <div style={{display:"flex",flexDirection:"column",gap:10}}>
             <div><label style={S.label}>Nome completo</label><input value={superForm.name} onChange={e=>setSuperForm({...superForm,name:e.target.value})} style={S.input}/></div>
-            <div><label style={S.label}>CPF</label><input value={superForm.cpf} onChange={e=>setSuperForm({...superForm,cpf:e.target.value})} placeholder="000.000.000-00" style={S.input} inputMode="numeric"/></div>
+            <div><label style={S.label}>CPF</label><input value={superForm.cpf} onChange={e=>setSuperForm({...superForm,cpf:maskCpf(e.target.value)})} placeholder="000.000.000-00" style={S.input} inputMode="numeric"/></div>
             <div><label style={S.label}>PIN (4–6 dígitos)</label><input type="password" value={superForm.pin} onChange={e=>setSuperForm({...superForm,pin:e.target.value})} maxLength={6} style={S.input}/></div>
             <button onClick={saveSuper} style={S.btnPrimary}>{editSuperId?"Salvar":"Criar"}</button>
           </div>
@@ -3795,7 +3839,7 @@ function LoginScreen({ superManagers, managers, onLoginSuper, onLoginManager, on
           ))}
         </div>
         <div style={{display:"flex",flexDirection:"column",gap:10,marginBottom:14}}>
-          <div><label style={S.label}>CPF</label><input value={cpf} onChange={e=>setCpf(e.target.value)} placeholder="000.000.000-00" style={S.input} inputMode="numeric"/></div>
+          <div><label style={S.label}>CPF</label><input value={cpf} onChange={e=>setCpf(maskCpf(e.target.value))} placeholder="000.000.000-00" style={S.input} inputMode="numeric"/></div>
           <div><label style={S.label}>PIN</label><input type="password" inputMode="numeric" maxLength={6} value={pin} onChange={e=>setPin(e.target.value)} placeholder="••••" style={{...S.input,letterSpacing:6,fontSize:18,textAlign:"center"}} onKeyDown={e=>e.key==="Enter"&&tryLogin()}/></div>
         </div>
         {err && <p style={{color:"#e74c3c",fontSize:13,marginBottom:10}}>{err}</p>}
@@ -3830,7 +3874,7 @@ function FirstSetup({ onDone }) {
         </div>
         <div style={{display:"flex",flexDirection:"column",gap:10}}>
           <div><label style={S.label}>Nome completo</label><input value={form.name} onChange={e=>setForm({...form,name:e.target.value})} style={S.input}/></div>
-          <div><label style={S.label}>CPF</label><input value={form.cpf} onChange={e=>setForm({...form,cpf:e.target.value})} placeholder="000.000.000-00" style={S.input} inputMode="numeric"/></div>
+          <div><label style={S.label}>CPF</label><input value={form.cpf} onChange={e=>setForm({...form,cpf:maskCpf(e.target.value)})} placeholder="000.000.000-00" style={S.input} inputMode="numeric"/></div>
           <div><label style={S.label}>PIN (4–6 dígitos)</label><input type="password" maxLength={6} value={form.pin} onChange={e=>setForm({...form,pin:e.target.value})} style={S.input}/></div>
           <div><label style={S.label}>Confirmar PIN</label><input type="password" maxLength={6} value={form.pin2} onChange={e=>setForm({...form,pin2:e.target.value})} style={S.input} onKeyDown={e=>e.key==="Enter"&&submit()}/></div>
           {err && <p style={{color:"#e74c3c",fontSize:13,margin:0}}>{err}</p>}
