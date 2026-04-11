@@ -4174,8 +4174,7 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }
                     {!inadimplente && emTrial && <>
                       <div style={{color:"#92400e",fontWeight:700,fontSize:16,marginBottom:4}}>🎯 Período de teste</div>
                       <div style={{color:"#92400e",fontSize:13}}>{diasTrial} dia{diasTrial!==1?"s":""} restante{diasTrial!==1?"s":""} — até {fmt(trialFim)}</div>
-                    </>}
-                    {!inadimplente && trialVencido && <>
+                    </>}                    {!inadimplente && trialVencido && <>
                       <div style={{color:"var(--red)",fontWeight:700,fontSize:16,marginBottom:4}}>⏰ Trial encerrado</div>
                       <div style={{color:"var(--red)",fontSize:13}}>Gere a 1ª cobrança para ativar o acesso pago.</div>
                     </>}
@@ -4196,7 +4195,43 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }
                   </div>
                   <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
                     {inadimplente && <button onClick={()=>saveFin({status:"ativo"})} style={{padding:"8px 16px",borderRadius:8,border:"1px solid var(--green)44",background:"var(--green-bg)",color:"var(--green)",cursor:"pointer",fontFamily:"'DM Sans',sans-serif",fontSize:13,fontWeight:700}}>✅ Liberar acesso</button>}
+
+                    {/* Trial ativo — estender ou suspender */}
+                    {!inadimplente && emTrial && <>
+                      <button onClick={()=>{
+                        const maxDias = 30 - Math.ceil((new Date(trialFim+"T12:00:00")-new Date(trialIni+"T12:00:00"))/(1000*60*60*24));
+                        const diasExtra = parseInt(window.prompt(`Quantos dias a mais de trial? (máximo ${maxDias} dias adicionais, total máximo 30 dias)`));
+                        if (!diasExtra || isNaN(diasExtra) || diasExtra <= 0) return;
+                        const novoFim = addDays(trialFim, Math.min(diasExtra, maxDias));
+                        saveFin({ trialFim: novoFim });
+                        onUpdate("_toast", `✅ Trial estendido até ${fmt(novoFim)}`);
+                      }} style={{padding:"8px 16px",borderRadius:8,border:"1px solid #f59e0b44",background:"#fffbeb",color:"#92400e",cursor:"pointer",fontFamily:"'DM Sans',sans-serif",fontSize:13,fontWeight:600}}>
+                        ⏰ Estender trial
+                      </button>
+                      <button onClick={()=>{
+                        if(!window.confirm("Suspender o período de teste e bloquear o acesso?")) return;
+                        saveFin({ trialFim: addDays(hoje, -1), status:"inadimplente" });
+                        onUpdate("_toast","🔴 Trial suspenso. Acesso bloqueado.");
+                      }} style={{padding:"8px 16px",borderRadius:8,border:"1px solid var(--red)33",background:"transparent",color:"var(--red)",cursor:"pointer",fontFamily:"'DM Sans',sans-serif",fontSize:13,fontWeight:600}}>
+                        🚫 Suspender trial
+                      </button>
+                    </>}
+
                     {!inadimplente && cicloIni && <button onClick={()=>{if(!window.confirm("Marcar como inadimplente e bloquear acesso?"))return; saveFin({status:"inadimplente"});}} style={{padding:"8px 16px",borderRadius:8,border:"1px solid var(--red)33",background:"transparent",color:"var(--red)",cursor:"pointer",fontFamily:"'DM Sans',sans-serif",fontSize:13,fontWeight:600}}>🔴 Inadimplente</button>}
+
+                    {/* Trial vencido — bloquear ou reativar */}
+                    {!inadimplente && trialVencido && <>
+                      <button onClick={()=>{
+                        const novoFim = addDays(hoje, 7);
+                        saveFin({ trialFim: novoFim, status:"ativo" });
+                        onUpdate("_toast",`🎯 Trial reativado até ${fmt(novoFim)}`);
+                      }} style={{padding:"8px 16px",borderRadius:8,border:"1px solid #f59e0b44",background:"#fffbeb",color:"#92400e",cursor:"pointer",fontFamily:"'DM Sans',sans-serif",fontSize:13,fontWeight:600}}>
+                        🔄 Reativar trial
+                      </button>
+                      <button onClick={()=>saveFin({status:"inadimplente"})} style={{padding:"8px 16px",borderRadius:8,border:"1px solid var(--red)33",background:"transparent",color:"var(--red)",cursor:"pointer",fontFamily:"'DM Sans',sans-serif",fontSize:13,fontWeight:600}}>
+                        🔴 Bloquear acesso
+                      </button>
+                    </>}
                   </div>
                 </div>
               </div>
