@@ -2695,7 +2695,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                 <div><label style={S.label}>Data</label><input type="date" value={tipDate} onChange={e => setTipDate(e.target.value)} style={S.input} /></div>
                 <div><label style={S.label}>Valor Total (R$)</label><input type="number" min="0" step="0.01" value={tipTotal} onChange={e => setTipTotal(e.target.value)} placeholder="Ex: 1500.00" style={S.input} /></div>
                 <div><label style={S.label}>Observação</label><input value={tipNote} onChange={e => setTipNote(e.target.value)} placeholder="Ex: Sábado à noite" style={S.input} /></div>
-                <button onClick={() => { const n = calcTip(); if (n > 0) onUpdate("_toast", `✅ Distribuído para ${n} empregados!`); }} style={S.btnPrimary}>Calcular e Distribuir</button>
+                <button onClick={() => { const n = calcTipForDate(tipDate, tipTotal, tipNote); if (n > 0) { setTipTotal(""); setTipNote(""); onUpdate("_toast", `✅ Distribuído para ${n} empregados!`); } }} style={S.btnPrimary}>Calcular e Distribuir</button>
               </div>
               ) : (
               /* MODO TABELA — pré-carregado com todos os dias do mês */
