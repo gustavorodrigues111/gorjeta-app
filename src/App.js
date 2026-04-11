@@ -2816,8 +2816,8 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
   const canSched = perms.schedule || isSuperManager;
   const isDP     = perms.isDP === true;
 
-  // Abas opcionais por restaurante — supergestor sempre vê tudo
-  const tabVisible = (key) => isSuperManager || (restaurant.tabsConfig?.[key] !== false);
+  // Abas opcionais — seguem config do restaurante (supergestor também oculta se desativou)
+  const tabVisible = (key) => restaurant.tabsConfig?.[key] !== false;
 
   const inboxUnread = ((data?.notifications??[]).filter(n=>n.restaurantId===rid&&!n.read).length + (data?.dpMessages??[]).filter(m=>m.restaurantId===rid&&!m.read).length);
 
@@ -2872,7 +2872,6 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
             return s + (dt[0]?.poolTotal ?? 0);
           }, 0);
           const diasLancados = [...new Set(monthTips.map(t=>t.date))].length;
-          // Dias úteis passados (seg-sex) até hoje ou fim do mês
           const limitDay = isCurrentMonth ? parseInt(todayStr.slice(-2)) : dim;
           let diasUteisPassados = 0;
           for (let d=1; d<=limitDay; d++) {
@@ -2881,47 +2880,46 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
           }
           const diasSemLancamento = Math.max(0, diasUteisPassados - diasLancados);
 
-          // — Escala —
-          const schedMonth = schedules?.[rid]?.[mk] ?? {};
-          let totalFolgas=0, totalFaltasU=0, totalFaltasJ=0, totalComp=0, totalFerias=0;
-          restEmps.forEach(emp => {
-            const dm = schedMonth[emp.id] ?? {};
-            Object.values(dm).forEach(v => {
-              if(v===DAY_OFF) totalFolgas++;
-              else if(v===DAY_FAULT_U) totalFaltasU++;
-              else if(v===DAY_FAULT_J) totalFaltasJ++;
-              else if(v===DAY_COMP) totalComp++;
-              else if(v===DAY_VACATION) totalFerias++;
-            });
-          });
-
-          // — Equipe —
+          // — Pendências —
           const semCargo = restEmps.filter(e=>!restRoles.find(r=>r.id===e.roleId)).length;
           const semHorario = restEmps.filter(e=>!(data?.workSchedules?.[rid]?.[e.id]?.length)).length;
+          const schedMonth = schedules?.[rid]?.[mk] ?? {};
+          let totalFaltasU = 0;
+          restEmps.forEach(emp => { Object.values(schedMonth[emp.id]??{}).forEach(v=>{ if(v===DAY_FAULT_U) totalFaltasU++; }); });
+          const dpNaoLidas = (data?.dpMessages??[]).filter(m=>m.restaurantId===rid&&!m.read).length;
+          const commsSemCiencia = (data?.communications??[]).filter(c=>
+            c.restaurantId===rid && !c.autoSchedule &&
+            restEmps.some(e=>!(data?.commAcks??{})[`${c.id}_${e.id}`])
+          ).length;
 
-          // — Pendências —
           const alerts = [];
           if (diasSemLancamento > 0)
-            alerts.push({ icon:"💸", color:"#f59e0b", msg:`${diasSemLancamento} dia${diasSemLancamento>1?"s":""} útil${diasSemLancamento>1?"":"is"} sem gorjeta lançada`, tab:"tips" });
+            alerts.push({ icon:"💸", color:"#f59e0b", msg:`${diasSemLancamento} dia${diasSemLancamento>1?"s":""} útil${diasSemLancamento>1?"eis":""} sem gorjeta lançada`, tab:"tips" });
           if (semCargo > 0)
             alerts.push({ icon:"👤", color:"#ef4444", msg:`${semCargo} empregado${semCargo>1?"s":""} sem cargo definido`, tab:"employees" });
           if (semHorario > 0)
             alerts.push({ icon:"🕐", color:"#8b5cf6", msg:`${semHorario} empregado${semHorario>1?"s":""} sem horário cadastrado`, tab:"horarios" });
           if (totalFaltasU > 0)
             alerts.push({ icon:"⚠️", color:"#ef4444", msg:`${totalFaltasU} falta${totalFaltasU>1?"s":""} injustificada${totalFaltasU>1?"s":""} este mês`, tab:"schedule" });
-          const dpNaoLidas = (data?.dpMessages??[]).filter(m=>m.restaurantId===rid&&!m.read).length;
           if (dpNaoLidas > 0)
             alerts.push({ icon:"💬", color:"#3b82f6", msg:`${dpNaoLidas} mensagem${dpNaoLidas>1?"ns":""} não lida${dpNaoLidas>1?"s":""} no Fale com DP`, tab:"dp" });
-          const commsSemCiencia = (data?.communications??[]).filter(c=>
-            c.restaurantId===rid && !c.autoSchedule &&
-            restEmps.some(e=>!(data?.commAcks??{})[`${c.id}_${e.id}`])
-          ).length;
           if (commsSemCiencia > 0)
             alerts.push({ icon:"📢", color:"#f59e0b", msg:`${commsSemCiencia} comunicado${commsSemCiencia>1?"s":""} aguardando ciência`, tab:"comunicados" });
 
+          // — Mensagens / Notificações recentes —
+          const recentDp = (data?.dpMessages??[])
+            .filter(m=>m.restaurantId===rid)
+            .sort((a,b)=>b.date.localeCompare(a.date))
+            .slice(0,4);
+          const recentNotifs = (data?.notifications??[])
+            .filter(n=>n.restaurantId===rid)
+            .sort((a,b)=>b.date.localeCompare(a.date))
+            .slice(0,3);
+          const CATS = { sugestao:"💡", elogio:"👏", reclamacao:"⚠️", denuncia:"🚨" };
+
           return (
             <div>
-              {/* Linha 1 — Gorjetas do mês */}
+              {/* Gorjetas */}
               <div style={{...S.card, marginBottom:14}}>
                 <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
                   <span style={{color:ac,fontWeight:700,fontSize:13}}>💸 Gorjetas — {monthLabel(year,month)}</span>
@@ -2929,9 +2927,9 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                 </div>
                 <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr 1fr",gap:8}}>
                   {[
-                    ["Pool total", fmt(tipPoolTotal), "#fff"],
-                    ["Retenção",   fmt(totalTax),     "#e74c3c"],
-                    ["Distribuído",fmt(totalNet),      ac],
+                    ["Pool total",    fmt(tipPoolTotal), "#fff"],
+                    ["Retenção",      fmt(totalTax),     "#e74c3c"],
+                    ["Distribuído",   fmt(totalNet),     ac],
                     ["Dias lançados", `${diasLancados}/${dim}`, diasLancados===dim?"#10b981":"#f59e0b"],
                   ].map(([lbl,val,col])=>(
                     <div key={lbl} style={{background:"var(--bg1)",borderRadius:10,padding:"10px 8px",textAlign:"center"}}>
@@ -2941,7 +2939,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                   ))}
                 </div>
                 {(restaurant.divisionMode ?? MODE_AREA_POINTS) === MODE_AREA_POINTS && totalNet > 0 && (
-                  <div style={{marginTop:12,display:"flex",flexDirection:"column",gap:6}}>
+                  <div style={{marginTop:12,display:"flex",flexDirection:"column",gap:5}}>
                     {AREAS.map(a=>{
                       const aNet = monthTips.filter(t=>t.area===a).reduce((s,t)=>s+t.myNet,0);
                       if(!aNet) return null;
@@ -2959,77 +2957,58 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                 )}
               </div>
 
-              {/* Linha 2 — Escala e Equipe lado a lado */}
-              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:14}}>
-                {/* Escala */}
-                <div style={{...S.card}}>
-                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
-                    <span style={{color:ac,fontWeight:700,fontSize:12}}>📅 Escala</span>
-                    <button onClick={()=>setTab("schedule")} style={{...S.btnSecondary,fontSize:10,padding:"3px 8px"}}>→</button>
-                  </div>
-                  {[
-                    ["Folgas",    totalFolgas,  "#e74c3c"],
-                    ["F.Injust.", totalFaltasU, "#ef4444"],
-                    ["F.Just.",   totalFaltasJ, "#f59e0b"],
-                    ["Comp.",     totalComp,    "#3b82f6"],
-                    ["Férias",    totalFerias,  "#8b5cf6"],
-                  ].map(([lbl,val,col])=>(
-                    <div key={lbl} style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:5}}>
-                      <span style={{color:"var(--text3)",fontSize:11}}>{lbl}</span>
-                      <span style={{color:val>0?col:"var(--text3)",fontWeight:val>0?700:400,fontSize:12}}>{val}</span>
-                    </div>
-                  ))}
-                </div>
-
-                {/* Equipe */}
-                <div style={{...S.card}}>
-                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
-                    <span style={{color:ac,fontWeight:700,fontSize:12}}>👥 Equipe</span>
-                    <button onClick={()=>setTab("employees")} style={{...S.btnSecondary,fontSize:10,padding:"3px 8px"}}>→</button>
-                  </div>
-                  {[
-                    ["Ativos",       restEmps.length,  "#10b981"],
-                    ["Sem cargo",    semCargo,         semCargo>0?"#ef4444":"var(--text3)"],
-                    ["Sem horário",  semHorario,       semHorario>0?"#8b5cf6":"var(--text3)"],
-                  ].map(([lbl,val,col])=>(
-                    <div key={lbl} style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:5}}>
-                      <span style={{color:"var(--text3)",fontSize:11}}>{lbl}</span>
-                      <span style={{color:val>0?col:"var(--text3)",fontWeight:700,fontSize:12}}>{val}</span>
-                    </div>
-                  ))}
-                  <div style={{borderTop:"1px solid var(--border)",marginTop:8,paddingTop:8}}>
-                    {AREAS.map(a=>{
-                      const n = restEmps.filter(e=>restRoles.find(r=>r.id===e.roleId)?.area===a).length;
-                      if(!n) return null;
-                      return (
-                        <div key={a} style={{display:"flex",justifyContent:"space-between",marginBottom:3}}>
-                          <span style={{color:AREA_COLORS[a],fontSize:10}}>{a}</span>
-                          <span style={{color:"var(--text2)",fontSize:10}}>{n}</span>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              </div>
-
-              {/* Pendências / Alertas */}
-              {alerts.length > 0 && (
+              {/* Pendências */}
+              {alerts.length > 0 ? (
                 <div style={{...S.card,marginBottom:14,border:"1px solid #f59e0b33",background:"#1a1400"}}>
                   <span style={{color:"#f59e0b",fontWeight:700,fontSize:13,display:"block",marginBottom:10}}>⚡ Pendências</span>
                   {alerts.map((a,i)=>(
                     <div key={i} onClick={()=>setTab(a.tab)} style={{display:"flex",alignItems:"center",gap:10,padding:"8px 10px",borderRadius:8,cursor:"pointer",marginBottom:4,background:"var(--bg1)",border:`1px solid ${a.color}22`}}>
-                      <span style={{fontSize:16}}>{a.icon}</span>
+                      <span style={{fontSize:15}}>{a.icon}</span>
                       <span style={{color:"var(--text2)",fontSize:12,flex:1}}>{a.msg}</span>
                       <span style={{color:a.color,fontSize:11}}>→</span>
                     </div>
                   ))}
                 </div>
+              ) : (
+                <div style={{...S.card,marginBottom:14,border:"1px solid #10b98133",background:"#0a1a0a",textAlign:"center",padding:"14px"}}>
+                  <span style={{fontSize:22}}>✅</span>
+                  <p style={{color:"#10b981",fontSize:13,margin:"4px 0 0",fontWeight:600}}>Tudo em dia!</p>
+                  <p style={{color:"var(--text3)",fontSize:11,margin:"2px 0 0"}}>Nenhuma pendência para {monthLabel(year,month)}</p>
+                </div>
               )}
-              {alerts.length === 0 && (
-                <div style={{...S.card,marginBottom:14,border:"1px solid #10b98133",background:"#0a1a0a",textAlign:"center",padding:"16px"}}>
-                  <span style={{fontSize:24}}>✅</span>
-                  <p style={{color:"#10b981",fontSize:13,margin:"6px 0 0",fontWeight:600}}>Tudo em dia!</p>
-                  <p style={{color:"var(--text3)",fontSize:11,margin:"4px 0 0"}}>Nenhuma pendência encontrada para {monthLabel(year,month)}</p>
+
+              {/* Mensagens e Notificações recentes */}
+              {(recentDp.length > 0 || recentNotifs.length > 0) && (
+                <div style={{...S.card,marginBottom:14}}>
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
+                    <span style={{color:ac,fontWeight:700,fontSize:13}}>📬 Recentes</span>
+                    <button onClick={()=>setTab("notificacoes")} style={{...S.btnSecondary,fontSize:11,padding:"4px 10px"}}>Ver tudo →</button>
+                  </div>
+                  {recentDp.map(m=>(
+                    <div key={m.id} style={{display:"flex",gap:10,padding:"8px 0",borderBottom:"1px solid var(--border)",alignItems:"flex-start"}}>
+                      <span style={{fontSize:14,flexShrink:0}}>{CATS[m.category]??"💬"}</span>
+                      <div style={{flex:1,minWidth:0}}>
+                        <div style={{display:"flex",justifyContent:"space-between",gap:6}}>
+                          <span style={{color:m.read?"var(--text3)":"var(--text)",fontSize:12,fontWeight:m.read?400:600,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{m.empName}</span>
+                          <span style={{color:"var(--text3)",fontSize:10,flexShrink:0}}>{new Date(m.date).toLocaleDateString("pt-BR")}</span>
+                        </div>
+                        <p style={{color:"var(--text3)",fontSize:11,margin:"2px 0 0",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{m.body}</p>
+                      </div>
+                      {!m.read && <span style={{background:"#3b82f6",borderRadius:4,padding:"1px 5px",fontSize:9,color:"#fff",fontWeight:700,flexShrink:0}}>Novo</span>}
+                    </div>
+                  ))}
+                  {recentNotifs.map(n=>(
+                    <div key={n.id} style={{display:"flex",gap:10,padding:"8px 0",borderBottom:"1px solid var(--border)",alignItems:"flex-start"}}>
+                      <span style={{fontSize:14,flexShrink:0}}>📋</span>
+                      <div style={{flex:1,minWidth:0}}>
+                        <div style={{display:"flex",justifyContent:"space-between",gap:6}}>
+                          <span style={{color:n.read?"var(--text3)":"var(--text)",fontSize:12,fontWeight:n.read?400:600,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{n.body?.split("\n")[0]?.replace("📋 ","")}</span>
+                          <span style={{color:"var(--text3)",fontSize:10,flexShrink:0}}>{new Date(n.date).toLocaleDateString("pt-BR")}</span>
+                        </div>
+                      </div>
+                      {!n.read && <span style={{background:"#f59e0b",borderRadius:4,padding:"1px 5px",fontSize:9,color:"#111",fontWeight:700,flexShrink:0}}>Novo</span>}
+                    </div>
+                  ))}
                 </div>
               )}
 
@@ -3042,7 +3021,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                     ["📅 Ver escala",     "schedule"],
                     ["👥 Equipe",         "employees"],
                     ["📢 Comunicados",    "comunicados"],
-                  ].filter(([,t])=>TABS.some(tab=>tab[0]===t)).map(([lbl,t])=>(
+                  ].filter(([,t])=>TABS.some(tb=>tb[0]===t)).map(([lbl,t])=>(
                     <button key={t} onClick={()=>setTab(t)} style={{padding:"10px",borderRadius:10,border:"1px solid var(--border)",background:"var(--bg1)",color:"var(--text2)",cursor:"pointer",fontFamily:"DM Mono,monospace",fontSize:12,textAlign:"left",fontWeight:500}}>
                       {lbl}
                     </button>
