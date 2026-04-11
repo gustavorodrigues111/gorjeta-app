@@ -1938,12 +1938,13 @@ function EmployeePortal({ employees, roles, tips, schedules, restaurants, commun
   // Verificação em tempo real — empregado inativado ou não encontrado → logout
   useEffect(() => {
     if (!empId) return;
+    if (employees.length === 0) return; // dados ainda não carregaram
     if (!emp) { onBack(); return; } // empregado não existe mais
     if (emp.inactive && emp.inactiveFrom && emp.inactiveFrom <= today()) {
       alert("Seu acesso foi desativado. Entre em contato com o gestor.");
       onBack();
     }
-  }, [emp, empId]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [emp, empId, employees.length]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const mk = monthKey(year, month);
   const myTips = tips.filter(t => t.employeeId === empId && t.monthKey === mk);
@@ -4126,7 +4127,7 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }
             onUpdate("restaurants", updated);
           }
 
-          // Ao confirmar pagamento — calcula próximo ciclo automaticamente
+          // Ao confirmar pagamento — calcula próximo ciclo e gera próxima cobrança
           function confirmarPagamento(cob) {
             const dataPag = today();
             const cicloIni = dataPag;
@@ -4136,17 +4137,38 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }
               else d.setDate(d.getDate()+30);
               return d.toISOString().slice(0,10);
             })();
-            const updated = (fin.cobrancas??[]).map(x=>x.id===cob.id?{...x,status:"pago",pagoEm:new Date().toISOString()}:x);
-            const novoPag = { id:Date.now().toString(), data:dataPag, valor:cob.valor, forma:cob.forma, obs:`Ref. ${cob.periodoLabel}`, registradoEm:new Date().toISOString() };
+
+            // Próxima cobrança pré-gerada com vencimento = último dia do ciclo
+            const [ano,mes] = cicloEnd.split("-");
+            const mesesNome = ["Janeiro","Fevereiro","Março","Abril","Maio","Junho","Julho","Agosto","Setembro","Outubro","Novembro","Dezembro"];
+            const proximoPeriodoLabel = tipoCobranca === "anual"
+              ? `${mesesNome[parseInt(mes)-1]}/${ano} (Anual)`
+              : `${mesesNome[parseInt(mes)-1]}/${ano}`;
+            const proximaCob = {
+              id: Date.now().toString(),
+              periodo: cicloEnd.slice(0,7),
+              periodoLabel: proximoPeriodoLabel,
+              venc: cicloEnd,
+              valor: valorTotal ?? cob.valor,
+              forma: cob.forma ?? "PIX",
+              chave: cob.chave ?? PIX_PADRAO,
+              criadaEm: new Date().toISOString(),
+              status: "pendente",
+              autoGerada: true,
+            };
+
+            const updatedCobs = (fin.cobrancas??[]).map(x=>x.id===cob.id?{...x,status:"pago",pagoEm:new Date().toISOString()}:x);
+            const novoPag = { id:(Date.now()+1).toString(), data:dataPag, valor:cob.valor, forma:cob.forma, obs:`Ref. ${cob.periodoLabel}`, registradoEm:new Date().toISOString() };
+
             saveFinanceiro({
-              cobrancas: updated,
+              cobrancas: [...updatedCobs, proximaCob],
               pagamentos: [novoPag,...pagamentos],
               status: "ativo",
               cicloInicio: cicloIni,
               cicloFim: cicloEnd,
               proximoVencimento: cicloEnd,
             });
-            onUpdate("_toast","✅ Pagamento confirmado! Ciclo ativo até "+new Date(cicloEnd+"T12:00:00").toLocaleDateString("pt-BR"));
+            onUpdate("_toast", `✅ Pago! Próximo ciclo até ${new Date(cicloEnd+"T12:00:00").toLocaleDateString("pt-BR")} — nova cobrança gerada automaticamente`);
           }
 
           return (
@@ -4227,8 +4249,30 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }
                   <p style={{color:"var(--text3)",fontSize:13,margin:"0 0 16px"}}>7 dias gratuitos para o cliente experimentar o sistema</p>
                   <button onClick={()=>{
                     const d = new Date(); d.setDate(d.getDate()+7);
-                    saveFinanceiro({ trialInicio:today(), trialFim:d.toISOString().slice(0,10), status:"ativo" });
-                    onUpdate("_toast","🎯 Trial iniciado! Válido até "+d.toLocaleDateString("pt-BR"));
+                    const trialFimDate = d.toISOString().slice(0,10);
+                    // Gera cobrança automática com vencimento no último dia do trial
+                    const [ano,mes] = today().split("-");
+                    const mesesNome = ["Janeiro","Fevereiro","Março","Abril","Maio","Junho","Julho","Agosto","Setembro","Outubro","Novembro","Dezembro"];
+                    const periodoLabel = `${mesesNome[parseInt(mes)-1]}/${ano} (Trial)`;
+                    const cobTrial = {
+                      id: Date.now().toString(),
+                      periodo: today().slice(0,7),
+                      periodoLabel,
+                      venc: trialFimDate,
+                      valor: valorTotal ?? 0,
+                      forma: "PIX",
+                      chave: PIX_PADRAO,
+                      criadaEm: new Date().toISOString(),
+                      status: "pendente",
+                      isTrial: true,
+                    };
+                    saveFinanceiro({
+                      trialInicio: today(),
+                      trialFim: trialFimDate,
+                      status: "ativo",
+                      cobrancas: [...(fin.cobrancas??[]), cobTrial],
+                    });
+                    onUpdate("_toast","🎯 Trial iniciado! Cobrança gerada com vencimento em "+d.toLocaleDateString("pt-BR"));
                   }} style={{...S.btnPrimary,width:"auto",padding:"10px 28px"}}>
                     Iniciar trial agora
                   </button>
@@ -4339,7 +4383,33 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }
               </div>
               <div style={{...S.card,marginBottom:20}}>
                 <h4 style={{color:"var(--text)",fontWeight:700,fontSize:14,margin:"0 0 4px"}}>📲 Gerar cobrança</h4>
-                <p style={{color:"var(--text3)",fontSize:12,margin:"0 0 16px"}}>Envia a cobrança via WhatsApp para o contato financeiro do restaurante</p>
+                <p style={{color:"var(--text3)",fontSize:12,margin:"0 0 12px"}}>Envia a cobrança via WhatsApp para o contato financeiro do restaurante</p>
+
+                {/* Cobrança auto-gerada pendente */}
+                {(()=>{
+                  const autoGerada = (fin.cobrancas??[]).find(c=>c.status==="pendente"&&c.autoGerada);
+                  if (!autoGerada) return null;
+                  return (
+                    <div style={{padding:"12px 14px",borderRadius:10,background:"var(--ac-bg)",border:`1px solid ${ac}33`,marginBottom:14}}>
+                      <div style={{color:"var(--ac-text)",fontSize:13,fontWeight:700,marginBottom:6}}>✨ Próxima cobrança pronta!</div>
+                      <div style={{color:"var(--text2)",fontSize:12,marginBottom:10}}>
+                        {autoGerada.periodoLabel} · R$ {autoGerada.valor?.toLocaleString("pt-BR",{minimumFractionDigits:2})} · Venc. {autoGerada.venc?new Date(autoGerada.venc+"T12:00:00").toLocaleDateString("pt-BR"):"—"}
+                      </div>
+                      <button onClick={()=>{
+                        setCobPeriodo(autoGerada.periodo??cobPeriodo);
+                        setCobVenc(autoGerada.venc??"");
+                        setCobValor(autoGerada.valor?.toFixed(2)??"");
+                        setCobForma(autoGerada.forma?.toLowerCase()==="pix"?"pix":"link");
+                        setCobChave(autoGerada.chave??PIX_PADRAO);
+                        // Remove flag autoGerada para não mostrar duplo
+                        saveFinanceiro({ cobrancas:(fin.cobrancas??[]).map(c=>c.id===autoGerada.id?{...c,autoGerada:false}:c) });
+                      }} style={{padding:"6px 14px",borderRadius:8,border:`1px solid ${ac}`,background:"transparent",color:"var(--ac-text)",cursor:"pointer",fontFamily:"'DM Sans',sans-serif",fontSize:12,fontWeight:700}}>
+                        Usar estes dados →
+                      </button>
+                    </div>
+                  );
+                })()}
+
                 {!rest?.whatsappFin && (
                   <div style={{padding:"10px 14px",borderRadius:10,background:"var(--red-bg)",border:"1px solid var(--red)33",marginBottom:12}}>
                     <p style={{color:"var(--red)",fontSize:12,margin:0}}>⚠️ WhatsApp financeiro não cadastrado. Edite o restaurante para adicionar.</p>
@@ -6048,7 +6118,7 @@ export default function App() {
         }
       }
 
-      if (savedId) {
+      if (savedId || localStorage.getItem("apptip_empid")) {
         const role = localStorage.getItem("apptip_role");
         if (role === "super") {
           const u = (loaded_data.owners ?? []).find(s => s.id === savedId);
@@ -6067,8 +6137,11 @@ export default function App() {
             localStorage.removeItem("apptip_role");
             localStorage.removeItem("apptip_empid");
             setView("login");
+          } else {
+            // Garante que userid está salvo
+            localStorage.setItem("apptip_userid", empIdSaved);
+            // sessão válida — view já está como "employee" pelo useState inicial
           }
-          // sessão válida — view já está como "employee" pelo useState inicial
         }
       }
       const recs = await loadReceipts();
