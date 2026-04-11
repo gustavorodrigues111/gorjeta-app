@@ -4133,48 +4133,78 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }
                 </div>
               </div>
 
-              {/* Plano e valor */}
+              {/* Plano e cobrança — editável aqui */}
               <div style={{...S.card,marginBottom:20}}>
                 <h4 style={{color:"var(--text)",fontWeight:700,fontSize:14,margin:"0 0 16px"}}>📦 Plano contratado</h4>
-                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:16}}>
-                  <div style={{padding:"12px 14px",borderRadius:10,background:"var(--bg2)"}}>
-                    <div style={{color:"var(--text3)",fontSize:11,fontWeight:600,marginBottom:4}}>PLANO</div>
-                    <div style={{color:"var(--text)",fontWeight:700,fontSize:15}}>{plano.label}</div>
-                  </div>
-                  <div style={{padding:"12px 14px",borderRadius:10,background:"var(--bg2)"}}>
-                    <div style={{color:"var(--text3)",fontSize:11,fontWeight:600,marginBottom:4}}>COBRANÇA</div>
-                    <div style={{color:"var(--text)",fontWeight:700,fontSize:15}}>{tipoCobranca === "anual" ? "Anual (12x)" : "Mensal"}</div>
-                  </div>
-                  <div style={{padding:"12px 14px",borderRadius:10,background:"var(--bg2)"}}>
-                    <div style={{color:"var(--text3)",fontSize:11,fontWeight:600,marginBottom:4}}>EMPREGADOS ATIVOS</div>
-                    <div style={{color:"var(--text)",fontWeight:700,fontSize:15}}>{empAtivos} / {empMax}</div>
-                  </div>
-                  <div style={{padding:"12px 14px",borderRadius:10,background:"var(--ac-bg)",border:`1px solid var(--ac)33`}}>
-                    <div style={{color:"var(--text3)",fontSize:11,fontWeight:600,marginBottom:4}}>VALOR MENSAL</div>
-                    <div style={{color:"var(--ac-text)",fontWeight:800,fontSize:18,fontFamily:"'DM Mono',monospace"}}>
-                      {valorTotal ? `R$ ${valorTotal.toLocaleString("pt-BR",{minimumFractionDigits:2})}` : "Sob consulta"}
-                    </div>
-                    {valorAdicionais > 0 && (
-                      <div style={{color:"var(--text3)",fontSize:11,marginTop:2}}>Base R${valorBase} + {empMax-50} emp. × R$7,99</div>
-                    )}
-                  </div>
+                <div style={{display:"flex",flexDirection:"column",gap:8,marginBottom:14}}>
+                  {PLANOS.map(p=>{
+                    const sel = (rest?.planoId??"p10") === p.id;
+                    return (
+                      <button key={p.id} onClick={()=>{
+                        const updated = restaurants.map(r=>r.id===selRestaurant?{...r,planoId:p.id}:r);
+                        onUpdate("restaurants",updated);
+                      }}
+                        style={{padding:"10px 14px",borderRadius:10,border:`1px solid ${sel?ac:"var(--border)"}`,background:sel?"var(--ac-bg)":"transparent",cursor:"pointer",fontFamily:"'DM Sans',sans-serif",textAlign:"left",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                        <span style={{color:sel?"var(--ac-text)":"var(--text2)",fontWeight:sel?700:400}}>{sel?"✓":"○"} {p.label} — até {p.empMax === 999 ? "ilimitado" : p.empMax} emp.</span>
+                        {p.mensal
+                          ? <span style={{color:"var(--text3)",fontSize:12}}>R${p.mensal}/mês · R${p.anual}/mês anual</span>
+                          : <span style={{color:"var(--text3)",fontSize:12}}>Sob consulta + R$7,99/emp. acima de 50</span>}
+                      </button>
+                    );
+                  })}
                 </div>
 
-                {/* Limite personalizado para Enterprise */}
+                <label style={S.label}>Tipo de cobrança</label>
+                <div style={{display:"flex",gap:8,marginBottom:14}}>
+                  {[["mensal","Mensal"],["anual","Anual (−10%)"]].map(([v,l])=>{
+                    const sel = (rest?.tipoCobranca??"mensal")===v;
+                    return (
+                      <button key={v} onClick={()=>{
+                        const updated = restaurants.map(r=>r.id===selRestaurant?{...r,tipoCobranca:v}:r);
+                        onUpdate("restaurants",updated);
+                      }}
+                        style={{flex:1,padding:"10px",borderRadius:10,border:`1px solid ${sel?"var(--green)":"var(--border)"}`,background:sel?"var(--green-bg)":"transparent",color:sel?"var(--green)":"var(--text3)",cursor:"pointer",fontFamily:"'DM Sans',sans-serif",fontSize:13,fontWeight:sel?700:400}}>
+                        {sel?"✓":""} {l}
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {/* Limite Enterprise */}
                 {rest?.planoId === "p999" && (
                   <div style={{display:"flex",alignItems:"center",gap:10}}>
-                    <label style={{color:"var(--text3)",fontSize:13}}>Limite de empregados contratado:</label>
+                    <label style={{...S.label,marginBottom:0}}>Empregados contratados:</label>
                     <input type="number" min="51" defaultValue={rest?.empMaxCustom??51}
                       onBlur={e=>{
                         const v = parseInt(e.target.value);
                         if(v>0){const updated=restaurants.map(r=>r.id===selRestaurant?{...r,empMaxCustom:v}:r);onUpdate("restaurants",updated);}
                       }}
                       style={{...S.input,width:80,textAlign:"center",fontFamily:"'DM Mono',monospace"}}/>
+                    <span style={{color:"var(--text3)",fontSize:12}}>empregados</span>
                   </div>
                 )}
               </div>
 
-              {/* Registrar pagamento */}
+              {/* Resumo do valor */}
+              <div style={{...S.card,marginBottom:20,background:"var(--ac-bg)",border:"1px solid var(--ac)33"}}>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:10}}>
+                  <div>
+                    <div style={{color:"var(--text3)",fontSize:11,fontWeight:600,textTransform:"uppercase",letterSpacing:0.5,marginBottom:4}}>Valor a cobrar</div>
+                    <div style={{color:"var(--ac-text)",fontWeight:800,fontSize:22,fontFamily:"'DM Mono',monospace"}}>
+                      {valorTotal ? `R$ ${valorTotal.toLocaleString("pt-BR",{minimumFractionDigits:2})}` : "Sob consulta"}
+                      <span style={{color:"var(--text3)",fontSize:13,fontWeight:400}}>/mês</span>
+                    </div>
+                    {valorAdicionais > 0 && (
+                      <div style={{color:"var(--text3)",fontSize:12,marginTop:2}}>
+                        Base R${valorBase?.toFixed(2)} + {empMax-50} emp. adicionais × R$7,99
+                      </div>
+                    )}
+                  </div>
+                  <div style={{color:"var(--text3)",fontSize:13}}>
+                    {empAtivos}/{empMax} empregados ativos
+                  </div>
+                </div>
+              </div>
               <div style={{...S.card,marginBottom:20}}>
                 <h4 style={{color:"var(--text)",fontWeight:700,fontSize:14,margin:"0 0 16px"}}>➕ Registrar pagamento</h4>
                 <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:10}}>
@@ -4693,6 +4723,7 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }
                     </div>
                     <div style={{display:"flex",gap:8,flexWrap:"wrap",justifyContent:"flex-end"}}>
                       <button onClick={()=>setSelRestaurant(r.id)} style={{...S.btnSecondary,fontSize:12,color:ac,borderColor:ac}}>Abrir →</button>
+                      <button onClick={()=>{setSelRestaurant(r.id);setRestTab("financeiro");}} style={{...S.btnSecondary,fontSize:12,color:"var(--green)",borderColor:"var(--green)"}}>💳</button>
                       <button onClick={()=>{setEditRestId(r.id);setRestForm({name:r.name,shortCode:r.shortCode??"",cnpj:r.cnpj??"",address:r.address??""});setShowRestModal(true);}} style={{...S.btnSecondary,fontSize:12}}>Editar</button>
                       <button onClick={()=>{
                         if(!window.confirm(`Mover "${r.name}" para a lixeira? Você poderá restaurar depois.`)) return;
@@ -4861,41 +4892,11 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }
             </div>
             <div><label style={S.label}>CNPJ (opcional)</label><input value={restForm.cnpj} onChange={e=>setRestForm({...restForm,cnpj:e.target.value})} placeholder="00.000.000/0000-00" style={S.input}/></div>
             <div><label style={S.label}>Endereço (opcional)</label><input value={restForm.address} onChange={e=>setRestForm({...restForm,address:e.target.value})} style={S.input}/></div>
-
-            {/* Plano */}
-            <div>
-              <label style={S.label}>Plano contratado</label>
-              <div style={{display:"flex",flexDirection:"column",gap:6}}>
-                {PLANOS.map(p=>{
-                  const sel2 = restForm.planoId === p.id || (!restForm.planoId && p.id==="p10");
-                  return (
-                    <button key={p.id} onClick={()=>setRestForm({...restForm,planoId:p.id})}
-                      style={{padding:"10px 14px",borderRadius:10,border:`1px solid ${sel2?"var(--ac)":"var(--border)"}`,background:sel2?"var(--ac)22":"transparent",cursor:"pointer",fontFamily:"'DM Mono',monospace",textAlign:"left",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-                      <span style={{color:sel2?ac:"var(--text2)",fontWeight:sel2?700:400}}>{sel2?"✓":"○"} {p.label} — até {p.empMax} emp.</span>
-                      {p.mensal && <span style={{color:"var(--text3)",fontSize:12}}>R${p.mensal}/mês · R${p.anual}/mês anual</span>}
-                      {!p.mensal && <span style={{color:"var(--text3)",fontSize:12}}>Sob consulta</span>}
-                    </button>
-                  );
-                })}
+            {!editRestId && (
+              <div style={{padding:"10px 14px",borderRadius:10,background:"var(--bg2)",border:"1px solid var(--border)"}}>
+                <p style={{color:"var(--text3)",fontSize:12,margin:0}}>💡 Plano e cobrança podem ser definidos na aba <strong>💳 Financeiro</strong> do restaurante após o cadastro.</p>
               </div>
-            </div>
-
-            {/* Tipo de cobrança */}
-            <div>
-              <label style={S.label}>Tipo de cobrança</label>
-              <div style={{display:"flex",gap:8}}>
-                {[["mensal","Mensal"],["anual","Anual (−10%)"]].map(([v,l])=>{
-                  const sel = (restForm.tipoCobranca??"mensal")===v;
-                  return (
-                    <button key={v} onClick={()=>setRestForm({...restForm,tipoCobranca:v})}
-                      style={{flex:1,padding:"10px",borderRadius:10,border:`1px solid ${sel?"var(--green)":"var(--border)"}`,background:sel?"#10b98122":"transparent",color:sel?"var(--green)":"#555",cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:13,fontWeight:sel?700:400}}>
-                      {l}
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-
+            )}
             <button onClick={saveRest} style={S.btnPrimary}>{editRestId?"Salvar":"Cadastrar"}</button>
           </div>
         </Modal>
