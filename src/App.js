@@ -5354,15 +5354,22 @@ function ManagerPortal({ manager, data, onUpdate, onBack, toggleTheme, theme }) 
               <p style={{color:"var(--text3)",fontSize:14,lineHeight:1.6}}>Seu acesso ainda não foi configurado.<br/>Entre em contato com o administrador do AppTip.</p>
             </div>
           )}
-          {myRestaurants.map(r=>(
-            <button key={r.id} onClick={()=>setSelId(r.id)} style={{...S.card,width:"100%",cursor:"pointer",textAlign:"left",display:"block",marginBottom:10,border:"1px solid var(--border)"}}>
-              <div style={{color:"var(--text)",fontWeight:600,fontSize:15}}>{r.name}</div>
-              {r.address&&<div style={{color:"var(--text3)",fontSize:12}}>{r.address}</div>}
-              <div style={{marginTop:6,display:"flex",gap:6}}>
-                {[["tips","Gorjetas"],["schedule","Escala"],["comunicados","Comuns."],["faq","FAQ"],["dp","DP"]].map(([k,lbl])=><PermBadge key={k} label={lbl} on={manager.perms?.[k]!==false}/>)}
-              </div>
-            </button>
-          ))}
+          {myRestaurants.map(r=>{
+            const inad = r.financeiro?.status === "inadimplente";
+            return (
+              <button key={r.id} onClick={()=>setSelId(r.id)}
+                style={{...S.card,width:"100%",cursor:"pointer",textAlign:"left",display:"block",marginBottom:10,border:`1px solid ${inad?"var(--red)44":"var(--border)"}`,background:inad?"var(--red-bg)":"var(--card-bg)",opacity:inad?0.8:1}}>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:4}}>
+                  <div style={{color:"var(--text)",fontWeight:600,fontSize:15}}>{r.name}</div>
+                  {inad && <span style={{color:"var(--red)",fontSize:12,fontWeight:700}}>🔒 Suspenso</span>}
+                </div>
+                {r.address&&<div style={{color:"var(--text3)",fontSize:12,marginBottom:6}}>{r.address}</div>}
+                <div style={{display:"flex",gap:6}}>
+                  {[["tips","Gorjetas"],["schedule","Escala"],["comunicados","Comuns."],["faq","FAQ"],["dp","DP"]].map(([k,lbl])=><PermBadge key={k} label={lbl} on={manager.perms?.[k]!==false}/>)}
+                </div>
+              </button>
+            );
+          })}
         </div>
       )}
 
@@ -5373,7 +5380,32 @@ function ManagerPortal({ manager, data, onUpdate, onBack, toggleTheme, theme }) 
               <button onClick={()=>setSelId(null)} style={{...S.btnSecondary,fontSize:12,padding:"4px 12px"}}>← Trocar restaurante</button>
             </div>
           )}
-          <RestaurantPanel restaurant={selRest} restaurants={restaurants} employees={employees} roles={roles} tips={tips} splits={splits} schedules={schedules} onUpdate={onUpdate} perms={{...(manager.perms ?? {tips:true,schedule:true}), isDP: manager.isDP ?? false}} isOwner={false} data={data} currentUser={manager}/>
+
+          {/* Bloqueia restaurante inadimplente */}
+          {selRest.financeiro?.status === "inadimplente" ? (
+            <div style={{minHeight:"60vh",display:"flex",alignItems:"center",justifyContent:"center",padding:32}}>
+              <div style={{maxWidth:400,textAlign:"center"}}>
+                <div style={{fontSize:56,marginBottom:20}}>🔒</div>
+                <h2 style={{color:"var(--text)",fontSize:22,fontWeight:800,margin:"0 0 12px"}}>Acesso suspenso</h2>
+                <p style={{color:"var(--text3)",fontSize:15,lineHeight:1.6,margin:"0 0 20px"}}>
+                  O acesso ao <strong>{selRest.name}</strong> está temporariamente suspenso por pendência financeira.
+                </p>
+                <p style={{color:"var(--text3)",fontSize:13,lineHeight:1.6}}>
+                  Entre em contato com o administrador do AppTip para regularizar a situação.
+                </p>
+                <div style={{marginTop:24,padding:"14px 18px",borderRadius:12,background:"var(--bg2)",border:"1px solid var(--border)",fontSize:13,color:"var(--text3)"}}>
+                  📱 WhatsApp: <strong style={{color:"var(--text)"}}>+55 11 98549-9821</strong>
+                </div>
+                {myRestaurants.filter(r=>r.financeiro?.status!=="inadimplente").length > 0 && (
+                  <button onClick={()=>setSelId(null)} style={{...S.btnSecondary,marginTop:16,width:"100%",textAlign:"center"}}>
+                    ← Ver outros restaurantes
+                  </button>
+                )}
+              </div>
+            </div>
+          ) : (
+            <RestaurantPanel restaurant={selRest} restaurants={restaurants} employees={employees} roles={roles} tips={tips} splits={splits} schedules={schedules} onUpdate={onUpdate} perms={{...(manager.perms ?? {tips:true,schedule:true}), isDP: manager.isDP ?? false}} isOwner={false} data={data} currentUser={manager}/>
+          )}
         </div>
       )}
     </div>
@@ -5423,13 +5455,7 @@ function UnifiedLogin({ owners, managers, employees, restaurants, onLoginOwner, 
       const empByCpf = employees.find(e => e.cpf?.replace(/\D/g,"") === cleanCpf);
       const mgr = managers.find(m => m.cpf?.replace(/\D/g,"") === cleanCpf && (String(m.pin) === cleanPin || (empByCpf && String(empByCpf.pin) === cleanPin)));
       if (mgr) {
-        // Verifica se TODOS os restaurantes do gestor estão inadimplentes
-        const restsMgr = restaurants.filter(r=>mgr.restaurantIds?.includes(r.id));
-        const todosInadimplentes = restsMgr.length > 0 && restsMgr.every(r=>r.financeiro?.status==="inadimplente");
-        if (todosInadimplentes) {
-          setErr("⚠️ O acesso ao sistema está suspenso. Entre em contato com o administrador AppTip.");
-          return;
-        }
+        // Gestor sempre consegue logar — bloqueio por inadimplência acontece dentro do portal
         found.push({ label:"Gestor", icon:"📊", action:()=>{ setChoices(null); onLoginManager(mgr); } });
       }
 
