@@ -4517,7 +4517,6 @@ Qualquer duvida estamos a disposicao!
                   const periodoLabel = `${mesesNome[parseInt(mes)-1]}/${ano}`;
                   const vencLabel = cobVenc ? new Date(cobVenc+"T12:00:00").toLocaleDateString("pt-BR") : "";
                   const chaveUsada = cobForma==="pix" ? (cobChave||PIX_PADRAO) : cobLink;
-                  const msg = `Ola, *${rest?.name}*! 👋\n\nSegue sua fatura *AppTip* - ${periodoLabel}\n\n*Plano:* ${plano.label}${isEnterprise?` (${empMax} emp.)`:""}\n*Valor:* R$ ${valor.toLocaleString("pt-BR",{minimumFractionDigits:2})}${vencLabel?`\n*Vencimento:* ${vencLabel}`:""}\n\n*Pagamento via ${cobForma==="pix"?"PIX":"Link"}*\n${cobForma==="pix"?`Chave: *${chaveUsada}*\nFavorecido: Gustavo Rodrigues da Silva`:`Link: ${chaveUsada}`}\n\nQualquer duvida estamos a disposicao!\n*Equipe AppTip* 🍽️`;
                   const cob = { id:Date.now().toString(), periodo:cobPeriodo, periodoLabel, venc:cobVenc, valor, forma:cobForma==="pix"?"PIX":"Link", chave:chaveUsada, criadaEm:new Date().toISOString(), status:"pendente" };
                   saveFinanceiro({ cobrancas:[...(fin.cobrancas??[]), cob] });
 
