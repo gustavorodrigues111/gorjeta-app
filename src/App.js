@@ -4215,15 +4215,16 @@ function ManagerPortal({ manager, data, onUpdate, onBack, toggleTheme, theme }) 
 // LOGIN
 //
 function UnifiedLogin({ superManagers, managers, employees, onLoginSuper, onLoginManager, onLoginEmployee, onSetupFirst, toggleTheme, theme }) {
-  const [credential, setCredential] = useState(""); // CPF ou ID do empregado
+  const [credential, setCredential] = useState("");
   const [pin, setPin] = useState("");
   const [err, setErr] = useState("");
   const [attempts, setAttempts] = useState(0);
   const [blockedUntil, setBlockedUntil] = useState(null);
   const [termsAccepted, setTermsAccepted] = useState(() => localStorage.getItem("apptip_terms") === "1");
+  const [choices, setChoices] = useState(null); // { name, options: [{label, icon, action}] }
 
   const isBlocked = blockedUntil && new Date() < blockedUntil;
-  const isEmpId = /^[A-Za-z]{2,4}\d+$/.test(credential.trim()); // ex: LBZ0001
+  const isEmpId = /^[A-Za-z]{2,4}\d+$/.test(credential.trim());
   const isCpf = credential.replace(/\D/g,"").length >= 11;
 
   useEffect(() => {
@@ -4241,28 +4242,48 @@ function UnifiedLogin({ superManagers, managers, employees, onLoginSuper, onLogi
     const cleanCpf = clean.replace(/\D/g,"");
     const cleanPin = pin.trim();
 
-    // 1. Tenta supergestor (só por CPF)
-    if (!isEmpId) {
-      const superUser = superManagers.find(s => s.cpf?.replace(/\D/g,"") === cleanCpf && String(s.pin) === cleanPin);
-      if (superUser) { setErr(""); setAttempts(0); onLoginSuper(superUser); return; }
+    // Coletar todos os papéis que batem com CPF/PIN
+    const found = [];
 
-      // 2. Tenta gestor (só por CPF)
-      const mgr = managers.find(m => m.cpf?.replace(/\D/g,"") === cleanCpf && String(m.pin) === cleanPin);
-      if (mgr) { setErr(""); setAttempts(0); onLoginManager(mgr); return; }
+    if (!isEmpId) {
+      // Supergestor
+      const superUser = superManagers.find(s => s.cpf?.replace(/\D/g,"") === cleanCpf && String(s.pin) === cleanPin);
+      if (superUser) found.push({ label:"Super Gestor", icon:"⭐", action:()=>{ setChoices(null); onLoginSuper(superUser); } });
+
+      // Gestor (aceita PIN do gestor OU PIN do empregado com mesmo CPF)
+      const empByCpf = employees.find(e => e.cpf?.replace(/\D/g,"") === cleanCpf);
+      const mgr = managers.find(m => m.cpf?.replace(/\D/g,"") === cleanCpf && (String(m.pin) === cleanPin || (empByCpf && String(empByCpf.pin) === cleanPin)));
+      if (mgr) found.push({ label:"Gestor", icon:"📊", action:()=>{ setChoices(null); onLoginManager(mgr); } });
+
+      // Empregado por CPF (aceita PIN do empregado OU PIN do gestor com mesmo CPF)
+      const mgrByCpf = managers.find(m => m.cpf?.replace(/\D/g,"") === cleanCpf);
+      const emp = employees.find(e => e.cpf?.replace(/\D/g,"") === cleanCpf && (String(e.pin) === cleanPin || (mgrByCpf && String(mgrByCpf.pin) === cleanPin)));
+      if (emp && !(emp.inactive && emp.inactiveFrom && emp.inactiveFrom <= today())) {
+        found.push({ label:"Empregado", icon:"👤", action:()=>{ setChoices(null); localStorage.setItem("apptip_empid", emp.id); onLoginEmployee(emp); } });
+      }
+    } else {
+      // Por ID — sempre empregado
+      const emp = employees.find(e => e.empCode?.toUpperCase() === clean.toUpperCase() && String(e.pin) === cleanPin);
+      if (emp) {
+        if (emp.inactive && emp.inactiveFrom && emp.inactiveFrom <= today()) {
+          setErr("Acesso desativado. Fale com o departamento pessoal."); return;
+        }
+        localStorage.setItem("apptip_empid", emp.id);
+        setErr(""); setAttempts(0); onLoginEmployee(emp); return;
+      }
     }
 
-    // 3. Tenta empregado (por CPF ou ID)
-    const emp = employees.find(e => {
-      if (isEmpId) return e.empCode?.toUpperCase() === clean.toUpperCase() && String(e.pin) === cleanPin;
-      return e.cpf?.replace(/\D/g,"") === cleanCpf && String(e.pin) === cleanPin;
-    });
-    if (emp) {
-      if (emp.inactive && emp.inactiveFrom && emp.inactiveFrom <= today()) {
-        setErr("Acesso desativado. Fale com o departamento pessoal.");
-        return;
-      }
-      localStorage.setItem("apptip_empid", emp.id);
-      setErr(""); setAttempts(0); onLoginEmployee(emp); return;
+    if (found.length === 1) {
+      // Só um papel — vai direto
+      setErr(""); setAttempts(0); found[0].action(); return;
+    }
+
+    if (found.length > 1) {
+      // Múltiplos papéis — mostra escolha
+      const name = found[0].label === "Super Gestor"
+        ? superManagers.find(s=>s.cpf?.replace(/\D/g,"")=== credential.replace(/\D/g,""))?.name
+        : managers.find(m=>m.cpf?.replace(/\D/g,"")=== credential.replace(/\D/g,""))?.name ?? "Usuário";
+      setErr(""); setAttempts(0); setChoices({ name, options: found }); return;
     }
 
     // Falhou
@@ -4276,6 +4297,42 @@ function UnifiedLogin({ superManagers, managers, employees, onLoginSuper, onLogi
       setErr(`Credenciais incorretas. ${5-na} tentativa${5-na!==1?"s":""} restante${5-na!==1?"s":""}.`);
     }
   }
+
+  // Tela de escolha de papel
+  if (choices) return (
+    <div style={{minHeight:"100vh",background:"var(--bg)",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:24,fontFamily:"'DM Sans',sans-serif"}}>
+      <div style={{width:"100%",maxWidth:380}}>
+        <div style={{textAlign:"center",marginBottom:32}}>
+          <div style={{fontSize:40,marginBottom:12}}>🍽️</div>
+          <h1 style={{fontSize:22,fontWeight:800,color:"var(--text)",margin:"0 0 6px"}}>Olá, {choices.name}!</h1>
+          <p style={{color:"var(--text3)",fontSize:14}}>Como deseja entrar?</p>
+        </div>
+        <div style={{display:"flex",flexDirection:"column",gap:12}}>
+          {choices.options.map(opt=>(
+            <button key={opt.label} onClick={opt.action}
+              style={{display:"flex",alignItems:"center",gap:16,padding:"20px 24px",borderRadius:16,border:`1px solid var(--border)`,background:"var(--card-bg)",cursor:"pointer",fontFamily:"'DM Sans',sans-serif",textAlign:"left",boxShadow:"0 2px 8px rgba(0,0,0,0.05)",transition:"all 0.15s"}}
+              onMouseEnter={e=>e.currentTarget.style.borderColor=ac}
+              onMouseLeave={e=>e.currentTarget.style.borderColor="var(--border)"}>
+              <span style={{fontSize:32}}>{opt.icon}</span>
+              <div>
+                <div style={{color:"var(--text)",fontWeight:700,fontSize:16}}>{opt.label}</div>
+                <div style={{color:"var(--text3)",fontSize:13,marginTop:2}}>
+                  {opt.label==="Super Gestor"&&"Gerenciar restaurantes e equipes"}
+                  {opt.label==="Gestor"&&"Gerenciar gorjetas, escala e equipe"}
+                  {opt.label==="Empregado"&&"Ver meu extrato, escala e comunicados"}
+                </div>
+              </div>
+              <span style={{marginLeft:"auto",color:"var(--text3)",fontSize:18}}>›</span>
+            </button>
+          ))}
+          <button onClick={()=>{setChoices(null);setPin("");}}
+            style={{...S.btnSecondary,width:"100%",textAlign:"center",marginTop:4}}>
+            ← Voltar
+          </button>
+        </div>
+      </div>
+    </div>
+  );
 
   return (
     <div style={{minHeight:"100vh",background:"var(--bg)",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:24,fontFamily:"'DM Sans',sans-serif"}}>
@@ -4307,7 +4364,6 @@ function UnifiedLogin({ superManagers, managers, employees, onLoginSuper, onLogi
                 value={credential}
                 onChange={e => {
                   const v = e.target.value;
-                  // Se parece CPF (só números), aplica máscara
                   if (/^\d/.test(v)) setCredential(maskCpf(v));
                   else setCredential(v.toUpperCase());
                 }}
@@ -4318,7 +4374,7 @@ function UnifiedLogin({ superManagers, managers, employees, onLoginSuper, onLogi
               />
               {credential.length > 2 && (
                 <div style={{fontSize:11,color:"var(--text3)",marginTop:4}}>
-                  {isEmpId ? "👤 Acesso de empregado" : isCpf ? "🔐 Verificando gestor e empregado" : ""}
+                  {isEmpId ? "👤 Acesso de empregado" : isCpf ? "🔐 Verificando perfis disponíveis" : ""}
                 </div>
               )}
             </div>
@@ -4326,9 +4382,7 @@ function UnifiedLogin({ superManagers, managers, employees, onLoginSuper, onLogi
             <div>
               <label style={S.label}>PIN</label>
               <input
-                type="password"
-                inputMode="numeric"
-                maxLength={6}
+                type="password" inputMode="numeric" maxLength={6}
                 value={pin}
                 onChange={e => setPin(e.target.value)}
                 placeholder="••••"
@@ -4339,7 +4393,6 @@ function UnifiedLogin({ superManagers, managers, employees, onLoginSuper, onLogi
               />
             </div>
 
-            {/* Aceite de termos */}
             {!termsAccepted && (
               <label style={{display:"flex",alignItems:"flex-start",gap:10,cursor:"pointer"}}>
                 <input type="checkbox" checked={termsAccepted}
@@ -4375,8 +4428,7 @@ function UnifiedLogin({ superManagers, managers, employees, onLoginSuper, onLogi
           </div>
         </div>
 
-        {/* Links */}
-        <div style={{textAlign:"center",marginTop:20,display:"flex",gap:16,justifyContent:"center"}}>
+        <div style={{textAlign:"center",marginTop:20}}>
           {termsAccepted && (
             <button onClick={()=>document.getElementById("apptip-privacy").style.display="flex"}
               style={{background:"none",border:"none",color:"var(--text3)",cursor:"pointer",fontFamily:"'DM Sans',sans-serif",fontSize:12,padding:0}}>
