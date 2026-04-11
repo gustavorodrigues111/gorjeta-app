@@ -2698,7 +2698,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                 <button onClick={() => { const n = calcTipForDate(tipDate, tipTotal, tipNote); if (n > 0) { setTipTotal(""); setTipNote(""); onUpdate("_toast", `✅ Distribuído para ${n} empregados!`); } }} style={S.btnPrimary}>Calcular e Distribuir</button>
               </div>
               ) : (
-              /* MODO TABELA — pré-carregado com todos os dias do mês */
+              /* MODO TABELA — um lançamento por dia, editável */
               (() => {
                 const daysInMonth = new Date(year, month+1, 0).getDate();
                 const allDays = Array.from({length: daysInMonth}, (_, i) => {
@@ -2708,10 +2708,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                 const taxRate = restaurant.taxRate ?? TAX;
                 const tSplit = splits?.[rid]?.[mk] ?? DEFAULT_SPLIT;
                 const mode = restaurant.divisionMode ?? MODE_AREA_POINTS;
-                // Already-launched dates this month
-                const launchedDates = new Set(tipDates);
 
-                // Helper: get active emps for a date
                 const getActiveEmps = (date) => restEmps.filter(emp => {
                   const r = restRoles.find(r=>r.id===emp.roleId);
                   if (!r || (emp.admission && emp.admission > date)) return false;
@@ -2723,6 +2720,12 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                   return false;
                 });
 
+                // Dias não lançados com valor preenchido no tipRows
+                const pendingRows = tipRows.filter(r => {
+                  const v = parseFloat(r.total);
+                  return v > 0 && !isNaN(v) && !monthTips.some(t=>t.date===r.date);
+                });
+
                 return (
                   <div>
                     <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
@@ -2730,35 +2733,47 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                       <MonthNav year={year} month={month} onChange={(y,m)=>{setYear(y);setMonth(m);}} />
                     </div>
 
-                    {/* Day rows */}
                     {allDays.map(date => {
-                      // Get the already-launched poolTotal for this date
-                      const launchedTips = monthTips.filter(t=>t.date===date);
-                      const launchedPoolTotal = launchedTips.length > 0 ? launchedTips[0].poolTotal : null;
-                      const launchedNote = launchedTips.length > 0 ? (launchedTips[0].note ?? "") : "";
+                      // Pega tips já lançados para esse dia
+                      const dayTips = monthTips.filter(t=>t.date===date);
+                      const isLaunched = dayTips.length > 0;
+                      const launchedPool = isLaunched ? dayTips[0].poolTotal : null;
+                      const launchedNote = isLaunched ? (dayTips[0].note ?? "") : "";
 
+                      // Estado de edição local (tipRows) — inicializa com valor lançado se existir
                       const row = tipRows.find(r=>r.date===date) ?? {
                         date,
-                        total: launchedPoolTotal != null ? String(launchedPoolTotal) : "",
+                        total: launchedPool != null ? String(launchedPool) : "",
                         note: launchedNote
                       };
                       const val = parseFloat(row.total);
                       const hasVal = val > 0 && !isNaN(val);
-                      const launched = launchedDates.has(date);
-                      const activeEmps = getActiveEmps(date);
+
+                      // Detecta se usuário alterou o valor em relação ao lançado
+                      const isDirty = isLaunched && launchedPool != null && val !== launchedPool;
+                      const isCleared = isLaunched && (!row.total || row.total === "0" || row.total === "");
+
                       const weekday = new Date(date+"T12:00:00").toLocaleDateString("pt-BR",{weekday:"short"});
                       const isWeekend = [0,6].includes(new Date(date+"T12:00:00").getDay());
-                      // Check if value was edited vs original launched value
-                      const isEdited = launched && launchedPoolTotal != null && val !== launchedPoolTotal;
+
+                      // Cores do card
+                      let cardBorder = "#1a1a1a";
+                      let cardBg = "#111";
+                      if (isLaunched && !isDirty && !isCleared) { cardBorder = "#10b98133"; cardBg = "#0a1a0a"; }
+                      else if (isDirty) { cardBorder = "#f59e0b55"; cardBg = "#1a1200"; }
+                      else if (isCleared) { cardBorder = "#ef444455"; cardBg = "#1a0a0a"; }
+                      else if (hasVal) { cardBorder = "#f5c84233"; cardBg = "#1a1a0a"; }
 
                       return (
-                        <div key={date} style={{marginBottom:8,borderRadius:10,border:`1px solid ${launched?"#10b98133":hasVal?"#f5c84233":"#1a1a1a"}`,background:launched?"#0a1a0a":hasVal?"#1a1a0a":"#111",overflow:"hidden"}}>
-                          {/* Row header */}
+                        <div key={date} style={{marginBottom:8,borderRadius:10,border:`1px solid ${cardBorder}`,background:cardBg,overflow:"hidden"}}>
                           <div style={{display:"grid",gridTemplateColumns:"50px 1fr 1.5fr auto",gap:8,padding:"8px 10px",alignItems:"center"}}>
+                            {/* Data */}
                             <div style={{textAlign:"center"}}>
                               <div style={{color:isWeekend?"#f59e0b":"#aaa",fontSize:13,fontWeight:700}}>{parseInt(date.slice(-2))}</div>
                               <div style={{color:"var(--text3)",fontSize:10}}>{weekday}</div>
                             </div>
+
+                            {/* Valor */}
                             <input
                               type="number" min="0" step="0.01"
                               value={row.total}
@@ -2768,11 +2783,13 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                               }}
                               placeholder="R$ 0,00"
                               style={{...S.input,fontSize:13,padding:"6px 8px",
-                                background:launched?(isEdited?"#1a1200":"#0d1a0d"):"#1a1a1a",
-                                color:launched?(isEdited?"#f59e0b":"#10b981"):"#fff",
-                                borderColor:launched?(isEdited?"#f59e0b44":"#10b98133"):"transparent"
+                                background: isDirty?"#221500": isLaunched?"#0d1a0d":"#1a1a1a",
+                                color: isDirty?"#f59e0b": isLaunched?"#10b981":"#fff",
+                                borderColor: isDirty?"#f59e0b44": isLaunched?"#10b98133":"transparent"
                               }}
                             />
+
+                            {/* Observação */}
                             <input
                               value={row.note}
                               onChange={e=>{
@@ -2782,42 +2799,72 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                               placeholder="Observação"
                               style={{...S.input,fontSize:12,padding:"6px 8px"}}
                             />
-                            {hasVal && !launched && (
-                              <button onClick={()=>{
-                                const n = calcTipForDate(date, val, row.note);
-                                if(n>0) onUpdate("_toast",`✅ ${fmtDate(date)}: ${n} empregados`);
-                              }} style={{padding:"6px 12px",borderRadius:8,border:"none",background:ac,color:"#111",fontWeight:700,cursor:"pointer",fontFamily:"DM Mono,monospace",fontSize:12,whiteSpace:"nowrap"}}>
-                                Lançar
-                              </button>
-                            )}
-                            {launched && !isEdited && <span style={{color:"#10b981",fontSize:11,whiteSpace:"nowrap"}}>✓</span>}
-                            {launched && isEdited && (
-                              <button onClick={()=>{
-                                const n = calcTipForDate(date, val, row.note);
-                                if(n>0) onUpdate("_toast",`🔄 ${fmtDate(date)}: relançado para ${n} empregados`);
-                              }} style={{padding:"6px 10px",borderRadius:8,border:"none",background:"#f59e0b",color:"#111",fontWeight:700,cursor:"pointer",fontFamily:"DM Mono,monospace",fontSize:11,whiteSpace:"nowrap"}}>
-                                Relançar
-                              </button>
-                            )}
+
+                            {/* Ações */}
+                            <div style={{display:"flex",gap:4,alignItems:"center"}}>
+                              {/* Não lançado + tem valor → Lançar */}
+                              {!isLaunched && hasVal && (
+                                <button onClick={()=>{
+                                  const n = calcTipForDate(date, val, row.note);
+                                  if(n>0) {
+                                    setTipRows(prev=>prev.filter(r=>r.date!==date));
+                                    onUpdate("_toast",`✅ ${fmtDate(date)}: ${n} empregados`);
+                                  }
+                                }} style={{padding:"6px 10px",borderRadius:8,border:"none",background:ac,color:"#111",fontWeight:700,cursor:"pointer",fontFamily:"DM Mono,monospace",fontSize:11,whiteSpace:"nowrap"}}>
+                                  Lançar
+                                </button>
+                              )}
+
+                              {/* Lançado + valor alterado → Salvar alteração */}
+                              {isLaunched && isDirty && hasVal && (
+                                <button onClick={()=>{
+                                  const n = calcTipForDate(date, val, row.note);
+                                  if(n>0) {
+                                    setTipRows(prev=>prev.filter(r=>r.date!==date));
+                                    onUpdate("_toast",`✏️ ${fmtDate(date)}: atualizado para ${n} empregados`);
+                                  }
+                                }} style={{padding:"6px 10px",borderRadius:8,border:"none",background:"#f59e0b",color:"#111",fontWeight:700,cursor:"pointer",fontFamily:"DM Mono,monospace",fontSize:11,whiteSpace:"nowrap"}}>
+                                  Salvar
+                                </button>
+                              )}
+
+                              {/* Lançado + sem alteração → check verde */}
+                              {isLaunched && !isDirty && !isCleared && (
+                                <span style={{color:"#10b981",fontSize:13,whiteSpace:"nowrap"}}>✓</span>
+                              )}
+
+                              {/* Lançado → botão Zerar */}
+                              {isLaunched && (
+                                <button onClick={()=>{
+                                  if(!window.confirm(`Zerar gorjeta de ${fmtDate(date)}? Isso remove todos os lançamentos do dia.`)) return;
+                                  const newTips = tips.filter(t=>!(t.restaurantId===rid && t.date===date));
+                                  onUpdate("tips", newTips);
+                                  setTipRows(prev=>prev.filter(r=>r.date!==date));
+                                  onUpdate("_toast",`🗑️ ${fmtDate(date)}: lançamentos removidos`);
+                                }} style={{padding:"6px 8px",borderRadius:8,border:"1px solid #ef444433",background:"transparent",color:"#ef4444",cursor:"pointer",fontFamily:"DM Mono,monospace",fontSize:11,whiteSpace:"nowrap"}}>
+                                  Zerar
+                                </button>
+                              )}
+                            </div>
                           </div>
 
-                          {/* Rateio preview */}
-                          {hasVal && !launched && (
+                          {/* Preview rateio — só para dias não lançados com valor */}
+                          {!isLaunched && hasVal && (
                             <div style={{padding:"6px 10px 8px",borderTop:"1px solid var(--border)",background:"#0d0d0d"}}>
                               <div style={{display:"flex",justifyContent:"space-between",fontSize:11,color:"var(--text3)",marginBottom:4}}>
                                 <span>Pool: {fmt(val)} → Retenção {Math.round(taxRate*100)}%: -{fmt(val*taxRate)} → Distribuir: {fmt(val*(1-taxRate))}</span>
-                                <span>{activeEmps.length} empregados</span>
+                                <span>{getActiveEmps(date).length} empregados</span>
                               </div>
                               {mode === MODE_GLOBAL_POINTS ? (
                                 <div style={{fontSize:11,color:"var(--text3)"}}>
-                                  {activeEmps.length > 0 && `Cada ponto vale: ${fmt(val*(1-taxRate)/(activeEmps.reduce((s,e)=>s+(parseFloat(restRoles.find(r=>r.id===e.roleId)?.points) || 0),0)||1))}`}
+                                  {getActiveEmps(date).length > 0 && `Cada ponto vale: ${fmt(val*(1-taxRate)/(getActiveEmps(date).reduce((s,e)=>s+(parseFloat(restRoles.find(r=>r.id===e.roleId)?.points)||0),0)||1))}`}
                                 </div>
                               ) : (
                                 <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
                                   {AREAS.map(a => {
-                                    const emps = activeEmps.filter(e=>restRoles.find(r=>r.id===e.roleId)?.area===a);
+                                    const emps = getActiveEmps(date).filter(e=>restRoles.find(r=>r.id===e.roleId)?.area===a);
                                     if(!emps.length) return null;
-                                    const pts = emps.reduce((s,e)=>s+(parseFloat(restRoles.find(r=>r.id===e.roleId)?.points) || 0),0);
+                                    const pts = emps.reduce((s,e)=>s+(parseFloat(restRoles.find(r=>r.id===e.roleId)?.points)||0),0);
                                     const aPool = val*(1-taxRate)*(tSplit[a]/100);
                                     return <span key={a} style={{fontSize:11,color:AREA_COLORS[a]}}>{a}: {fmt(aPool)} ({emps.length}emp/{pts}pt)</span>;
                                   })}
@@ -2825,20 +2872,30 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                               )}
                             </div>
                           )}
+
+                          {/* Info do lançado — mostra valor atual distribuído */}
+                          {isLaunched && !isDirty && (
+                            <div style={{padding:"4px 10px 6px",borderTop:"1px solid #10b98122",background:"#081208"}}>
+                              <span style={{fontSize:11,color:"#10b98199"}}>
+                                Distribuído: {fmt(launchedPool)} → {dayTips.length} lançamentos
+                              </span>
+                            </div>
+                          )}
                         </div>
                       );
                     })}
 
-                    {/* Lançar todos button */}
-                    {tipRows.filter(r=>parseFloat(r.total)>0&&!launchedDates.has(r.date)).length > 0 && (
+                    {/* Lançar todos pendentes */}
+                    {pendingRows.length > 0 && (
                       <button onClick={()=>{
                         let count = 0;
-                        tipRows.filter(r=>parseFloat(r.total)>0&&!launchedDates.has(r.date)).forEach(row=>{
+                        pendingRows.forEach(row=>{
                           count += calcTipForDate(row.date, parseFloat(row.total), row.note);
                         });
-                        if(count>0) onUpdate("_toast",`✅ ${tipRows.filter(r=>parseFloat(r.total)>0).length} dias distribuídos!`);
+                        setTipRows(prev => prev.filter(r => !pendingRows.some(p=>p.date===r.date)));
+                        if(count>0) onUpdate("_toast",`✅ ${pendingRows.length} dias lançados!`);
                       }} style={{...S.btnPrimary,marginTop:8}}>
-                        Lançar Todos os Dias Preenchidos
+                        Lançar Todos os Dias Preenchidos ({pendingRows.length})
                       </button>
                     )}
                   </div>
