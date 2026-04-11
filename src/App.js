@@ -593,7 +593,11 @@ Exemplo (gorjeta R$${fmtR(EX)}, ${totalPontos}pt no total):
       q:"🔐 O que é o PIN e como trocar?",
       a:"O PIN é sua senha de acesso — um código de 4 a 6 dígitos.\n\nPara fazer login use:\n• Seu ID de empregado (ex: LBZ0005) ou CPF\n• Seu PIN\n\nPara trocar, acesse Configurações no aplicativo. Nunca compartilhe seu PIN. Em caso de esquecimento, fale com o gestor.",
     },
-  ].filter(item => !item.tabKey || (rest?.tabsConfig?.[item.tabKey] !== false && rest?.tabsGestor?.[item.tabKey] !== false));
+  ].filter(item => {
+    if (item.tabKey && (rest?.tabsConfig?.[item.tabKey]===false || rest?.tabsGestor?.[item.tabKey]===false)) return false;
+    if (rest?.tabsGestor?.faqAuto?.[item.id] === false) return false;
+    return true;
+  });
 
   return (
     <div style={{paddingBottom:20}}>
@@ -4054,33 +4058,103 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
               }} style={{...S.btnSecondary,fontSize:12,color:"var(--red)",borderColor:"var(--red)44"}}>🗑️ Resetar FAQ</button>
             </div>}
 
-            {/* Prévia das FAQs automáticas */}
-            <div style={{padding:"16px 16px 0"}}>
-              <div style={{padding:"12px 14px",borderRadius:10,background:"var(--ac-bg)",border:"1px solid var(--ac)33",marginBottom:16}}>
-                <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:6}}>
-                  <span style={{fontSize:14}}>📐</span>
-                  <span style={{color:"var(--ac-text)",fontWeight:700,fontSize:13}}>FAQs automáticas do sistema</span>
-                </div>
-                <p style={{color:"var(--text2)",fontSize:12,margin:"0 0 8px",lineHeight:1.6}}>
-                  O AppTip gera automaticamente as seguintes perguntas para seus empregados, baseadas nas regras do restaurante. Elas aparecem na seção "Regras do sistema" do FAQ do empregado e se atualizam sozinhas.
-                </p>
-                <div style={{display:"flex",flexDirection:"column",gap:4}}>
-                  {[
-                    "💸 Como é calculada a minha gorjeta?",
-                    restaurant?.splitType==="area" ? "🏢 Como funciona a divisão por área e pontos?" : "📊 Como funciona a tabela de pontos?",
-                    "📅 Como funciona a escala e por que ela importa?",
-                    "📄 Como acesso meus recibos de gorjeta?",
-                    "💬 Para que serve o Fale com DP?",
-                    "📢 Como funcionam os comunicados?",
-                    "🔐 O que é o PIN e como trocar?",
-                  ].map((q,i) => (
-                    <div key={i} style={{fontSize:12,color:"var(--text2)",padding:"5px 8px",borderRadius:6,background:"var(--card-bg)",border:"1px solid var(--ac)22"}}>
-                      {q}
+            {/* FAQs automáticas — expansíveis e com toggle */}
+            {(()=>{
+              const ac = "var(--ac)";
+              const splitType = restaurant?.splitType ?? "points";
+              const taxRate = restaurant?.taxRate ?? 0.33;
+              const taxLabel = taxRate===0.20?"20% (Simples Nacional)":"33% (Lucro Real/Presumido)";
+              const restRolesCom = (data?.roles??[]).filter(r=>r.restaurantId===rid&&!r.inactive&&!r.noTip);
+              const restRolesSem = (data?.roles??[]).filter(r=>r.restaurantId===rid&&!r.inactive&&r.noTip);
+              const totalPts = restRolesCom.reduce((s,r)=>s+(parseFloat(r.points)||0),0);
+              const now2 = new Date();
+              const mk2 = `${now2.getFullYear()}-${String(now2.getMonth()+1).padStart(2,"0")}`;
+              const curSplit2 = splits?.[rid]?.[mk2] ?? {Bar:12,Cozinha:35,Salão:35,Limpeza:8,"Produção":10};
+              const EX = 1000;
+              const fmtR2 = n=>n.toLocaleString("pt-BR",{minimumFractionDigits:2,maximumFractionDigits:2});
+
+              const FAQS_AUTO = [
+                {
+                  id:"__gorjeta__",
+                  tabKey: null,
+                  q:"💸 Como é calculada a minha gorjeta?",
+                  a:`A gorjeta é distribuída entre todos que trabalharam no dia conforme os pontos do cargo e a escala.\n\nDedução aplicada: ${taxLabel}\n\nPasso a passo:\n1. Gestor lança o valor total do dia\n2. Sistema soma pontos de quem trabalhou\n3. Divide o total pelos pontos → valor por ponto\n4. Multiplica pelos pontos do cargo → bruto\n5. Deduz ${(taxRate*100).toFixed(0)}% → líquido\n\nExemplo (gorjeta R$${fmtR2(EX)}, ${totalPts}pt totais):\n• Valor por ponto: R$${totalPts>0?fmtR2(EX/totalPts):"—"}\n• Cargo com 6pt → R$${totalPts>0?fmtR2(EX/totalPts*6):"—"} bruto → R$${totalPts>0?fmtR2(EX/totalPts*6*(1-taxRate)):"—"} líquido`,
+                },
+                {
+                  id:"__sistema__",
+                  tabKey: null,
+                  q: splitType==="area"?"🏢 Como funciona a divisão por área e pontos?":"📊 Como funciona a tabela de pontos?",
+                  a: splitType==="area" ? (()=>{
+                    const AREAS2=["Bar","Cozinha","Salão","Limpeza","Produção"];
+                    const ativas=AREAS2.filter(a=>(curSplit2[a]??0)>0);
+                    const linhas=ativas.map(a=>{
+                      const pct=curSplit2[a]??0;
+                      const cargos=restRolesCom.filter(r=>r.area===a);
+                      const pts=cargos.reduce((s,r)=>s+(parseFloat(r.points)||0),0);
+                      return `${a} — ${pct}%\n${cargos.map(r=>`   • ${r.name}: ${r.points}pt`).join("\n")}\n   Total: ${pts}pt`;
+                    }).join("\n\n");
+                    return `Sistema: Área + Pontos\nA gorjeta é dividida primeiro por área (%), depois por pontos internamente.\n\nDistribuição:\n${linhas}${restRolesSem.length>0?"\n\nSem gorjeta: "+restRolesSem.map(r=>r.name).join(", "):""}`;
+                  })() : (()=>{
+                    const linhas=restRolesCom.sort((a,b)=>(parseFloat(b.points)||0)-(parseFloat(a.points)||0)).map(r=>{
+                      const pct=totalPts>0?((parseFloat(r.points)||0)/totalPts*100).toFixed(1):"0";
+                      return `• ${r.name}: ${r.points}pt (${pct}%)`;
+                    }).join("\n");
+                    return `Sistema: Pontos Global\nTodos que trabalharam dividem a gorjeta proporcionalmente aos pontos do cargo.\n\nTabela de cargos:\n${linhas}${restRolesSem.length>0?"\n\nSem gorjeta: "+restRolesSem.map(r=>r.name).join(", "):""}`;
+                  })(),
+                },
+                { id:"__escala__", tabKey:null, q:"📅 Como funciona a escala e por que ela importa?", a:"A escala define em quais dias o empregado trabalhou. Apenas empregados na escala do dia recebem gorjeta daquele dia.\n\n• Falta injustificada (F) → não recebe gorjeta\n• Atestado (A) / Falta justificada (FJ) → tratamento diferente\n• Férias (V) → não recebe gorjeta\n\nErros na escala afetam diretamente o recebimento." },
+                { id:"__recibos__", tabKey:"recibos", q:"📄 Como acesso meus recibos de gorjeta?", a:"Na aba Recibos do aplicativo o empregado encontra todos os recibos mensais. O gestor faz upload dos PDFs e o empregado acessa direto pelo app, sem envio individual." },
+                { id:"__dp__", tabKey:"dp", q:"💬 Para que serve o Fale com DP?", a:"Canal direto entre empregados e o departamento pessoal. Use para:\n• Dúvidas trabalhistas (férias, horas extras, INSS...)\n• Atestados e ausências\n• Solicitações de documentos\n\nEmpregados podem enviar anonimamente. O gestor do DP responde pelo app." },
+                { id:"__comunicados__", tabKey:"comunicados", q:"📢 Como funcionam os comunicados?", a:"Avisos enviados pelo gestor para a equipe. O empregado recebe notificação, lê e confirma com \"Li e entendi\". O gestor acompanha quem confirmou." },
+                { id:"__pin__", tabKey:null, q:"🔐 O que é o PIN e como trocar?", a:"O PIN é a senha de acesso — código de 4 a 6 dígitos. Para login, use o ID de empregado (ex: LBZ0005) ou CPF + PIN. Para trocar, acesse Configurações no app." },
+              ];
+
+              // Estado local simulado via dataset (sem useState fora de componente)
+              return (
+                <div style={{padding:"16px 16px 0"}}>
+                  <div style={{padding:"14px",borderRadius:12,background:"var(--ac-bg)",border:"1px solid var(--ac)33",marginBottom:16}}>
+                    <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:4}}>
+                      <span style={{fontSize:14}}>📐</span>
+                      <span style={{color:"var(--ac-text)",fontWeight:700,fontSize:13}}>FAQs automáticas do sistema</span>
                     </div>
-                  ))}
+                    <p style={{color:"var(--text2)",fontSize:12,margin:"0 0 12px",lineHeight:1.5}}>
+                      Geradas automaticamente com as regras do restaurante. Aparecem na seção "Regras do sistema" do FAQ do empregado. Use o toggle para mostrar ou ocultar cada uma.
+                    </p>
+                    <div style={{display:"flex",flexDirection:"column",gap:6}}>
+                      {FAQS_AUTO.map((item) => {
+                        const adminOk = item.tabKey ? restaurant?.tabsConfig?.[item.tabKey] !== false : true;
+                        const gestorOk = (restaurant?.tabsGestor?.faqAuto?.[item.id]) !== false;
+                        const visivel = adminOk && gestorOk;
+                        return (
+                          <details key={item.id} style={{borderRadius:10,background:"var(--card-bg)",border:`1px solid ${visivel?"var(--ac)22":"var(--border)"}`,overflow:"hidden",opacity:visivel?1:0.6}}>
+                            <summary style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"10px 12px",cursor:"pointer",listStyle:"none",gap:8}}>
+                              <span style={{fontSize:13,fontWeight:600,color:visivel?"var(--text)":"var(--text3)",flex:1}}>{item.q}</span>
+                              <div style={{display:"flex",alignItems:"center",gap:6,flexShrink:0}}>
+                                {!adminOk && <span style={{fontSize:10,color:"var(--text3)",background:"var(--bg2)",padding:"2px 7px",borderRadius:10,border:"1px solid var(--border)"}}>aba bloqueada pelo admin</span>}
+                                {adminOk && (
+                                  <button onClick={e=>{
+                                    e.preventDefault(); e.stopPropagation();
+                                    const cur = restaurant?.tabsGestor?.faqAuto ?? {};
+                                    const updated = restaurants.map(r=>r.id===rid?{...r,tabsGestor:{...(r.tabsGestor??{}),faqAuto:{...cur,[item.id]:!gestorOk}}}:r);
+                                    onUpdate("restaurants",updated);
+                                  }} style={{padding:"3px 10px",borderRadius:20,border:"none",background:visivel?"var(--green)":"var(--border)",color:visivel?"#fff":"var(--text3)",fontWeight:700,cursor:"pointer",fontFamily:"'DM Sans',sans-serif",fontSize:11,whiteSpace:"nowrap"}}>
+                                    {visivel?"👁 Exibindo":"🚫 Oculto"}
+                                  </button>
+                                )}
+                                <span style={{color:"var(--text3)",fontSize:12}}>▾</span>
+                              </div>
+                            </summary>
+                            <div style={{padding:"10px 12px 12px",color:"var(--text2)",fontSize:12,lineHeight:1.7,borderTop:"1px solid var(--ac)22",whiteSpace:"pre-wrap",fontFamily:"'DM Mono',monospace"}}>
+                              {item.a}
+                            </div>
+                          </details>
+                        );
+                      })}
+                    </div>
+                  </div>
                 </div>
-              </div>
-            </div>
+              );
+            })()}
 
             <FaqManagerTab restaurantId={rid} faq={data?.faq ?? {}} onUpdate={onUpdate} restaurant={restaurant} />
           </div>
