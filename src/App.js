@@ -2630,7 +2630,7 @@ function EmployeeSpreadsheet({ restEmps, restRoles, rid, employees, onUpdate, re
               <div style={{color:"var(--text3)",fontSize:12}}>Para adicionar mais empregados, solicite upgrade do plano.</div>
             </div>
             <button onClick={()=>{
-              const PLANOS_LABEL = { p10:"Starter (10 emp.)", p20:"Básico (20 emp.)", p50:"Profissional (50 emp.)", p999:"Enterprise (51-100 emp.)", pOrc:"Orçamento (+100 emp.)" };
+              const PLANOS_LABEL = { p10:"Starter (10 emp.)", p20:"Básico (20 emp.)", p50:"Profissional (50 emp.)", p999:"Enterprise (51-100 emp.)", pOrc:"On Demand (+100 emp.)" };
               const PROXIMO = { p10:"p20", p20:"p50", p50:"p999", p999:"pOrc" };
               const planoAtual = PLANOS_LABEL[restaurant?.planoId??"p10"] ?? "Starter";
               const planoProx = PLANOS_LABEL[PROXIMO[restaurant?.planoId??"p10"]] ?? "Enterprise";
@@ -3891,7 +3891,7 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }
     { id:"p20",  label:"Básico",      empMax:20,  mensal:187,   anual:168.30 },
     { id:"p50",  label:"Profissional",empMax:50,  mensal:397,   anual:357.30 },
     { id:"p999", label:"Enterprise",  empMax:100, mensal:null,  anual:null   },
-    { id:"pOrc", label:"Orçamento",    empMax:999, mensal:null,  anual:null   },
+    { id:"pOrc", label:"On Demand",    empMax:999, mensal:null,  anual:null   },
   ];
   function getPlano(r) { return PLANOS.find(p=>p.id===(r.planoId??"p10")) ?? PLANOS[0]; }
 
@@ -4163,7 +4163,7 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }
                         {p.id==="p20"&&<span style={{color:"var(--text3)",fontSize:12}}>R$187/mês · R$168,30/mês anual</span>}
                         {p.id==="p50"&&<span style={{color:"var(--text3)",fontSize:12}}>R$397/mês · R$357,30/mês anual</span>}
                         {p.id==="p999"&&<span style={{color:"var(--text3)",fontSize:12}}>R$7,99/emp./mês</span>}
-                        {p.id==="pOrc"&&<span style={{color:"var(--text3)",fontSize:12}}>Sob orçamento</span>}
+                        {p.id==="pOrc"&&<span style={{color:"var(--text3)",fontSize:12}}>On Demand</span>}
                       </button>
                     );
                   })}
@@ -4219,7 +4219,7 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }
                     <div style={{color:"var(--text3)",fontSize:11,fontWeight:600,textTransform:"uppercase",letterSpacing:0.5,marginBottom:4}}>Valor a cobrar</div>
                     {isOrcamento ? (
                       <div>
-                        <div style={{color:"var(--ac-text)",fontWeight:800,fontSize:18,fontFamily:"'DM Sans',sans-serif"}}>Sob orçamento</div>
+                        <div style={{color:"var(--ac-text)",fontWeight:800,fontSize:18,fontFamily:"'DM Sans',sans-serif"}}>On Demand</div>
                         <div style={{color:"var(--text3)",fontSize:12,marginTop:4}}>Acima de 100 empregados — entre em contato para definir valor</div>
                       </div>
                     ) : (
