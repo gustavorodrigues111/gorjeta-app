@@ -2815,27 +2815,27 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
   const canTips  = perms.tips     || isSuperManager;
   const canSched = perms.schedule || isSuperManager;
   const isDP     = perms.isDP === true;
-  const canComms = perms.comunicados !== false || isSuperManager;
-  const canFaq   = perms.faq   !== false || isSuperManager;
-  const canDp    = perms.dp    !== false || isSuperManager;
 
-  const dpUnread = ((data?.notifications??[]).filter(n=>n.restaurantId===rid&&!n.read).length + (data?.dpMessages??[]).filter(m=>m.restaurantId===rid&&!m.read).length);
+  // Abas opcionais por restaurante — supergestor sempre vê tudo
+  const tabVisible = (key) => isSuperManager || (restaurant.tabsConfig?.[key] !== false);
+
+  const inboxUnread = ((data?.notifications??[]).filter(n=>n.restaurantId===rid&&!n.read).length + (data?.dpMessages??[]).filter(m=>m.restaurantId===rid&&!m.read).length);
 
   const TABS = [
-    canTips   && ["dashboard",    "📊 Dashboard"],
-    isDP      && ["notificacoes", `📬 Caixa de Entrada${dpUnread>0?` (${dpUnread})`:""}`],
-    canTips   && ["tips",         "💸 Gorjetas"],
-    (canTips || isSuperManager) && ["employees", "👥 Equipe"],
-    isSuperManager && ["roles",   "🏷️ Cargos"],
-    canSched  && ["schedule",     "📅 Escala"],
-    canComms  && ["comunicados",  "📢 Comunicados"],
-    canFaq    && ["faq",          "❓ FAQ"],
-    canDp     && ["dp",           "💬 Fale com DP"],
-    (perms.horarios !== false || isSuperManager) && ["horarios", "🕐 Horários"],
-    (canTips || isSuperManager) && ["recibos", "📄 Recibos"],
+    canTips                                       && ["dashboard",   "📊 Dashboard"],
+    canTips                                       && ["tips",        "💸 Gorjetas"],
+    canSched                                      && ["schedule",    "📅 Escala"],
+    isSuperManager                                && ["roles",       "🏷️ Cargos"],
+    (canTips || isSuperManager)                   && ["employees",   "👥 Equipe"],
+    tabVisible("horarios")                        && ["horarios",    "🕐 Horários"],
+    tabVisible("recibos")                         && ["recibos",     "📄 Recibos"],
+    tabVisible("faq")                             && ["faq",         "❓ FAQ"],
+    tabVisible("comunicados")                     && ["comunicados", "📢 Comunicados"],
+    tabVisible("dp")                              && ["dp",          "💬 Fale com DP"],
+    (isSuperManager || isDP)                      && ["notificacoes",`📬 Caixa${inboxUnread>0?` (${inboxUnread})`:""}`],
   ].filter(Boolean);
 
-  const [tab, setTab] = useState(isDP ? "notificacoes" : (perms.tips ? "dashboard" : "schedule"));
+  const [tab, setTab] = useState(isSuperManager ? "dashboard" : isDP ? "notificacoes" : (perms.tips ? "dashboard" : "schedule"));
 
   return (
     <div style={{ fontFamily: "DM Mono,monospace" }}>
@@ -3525,7 +3525,35 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
         {/* CONFIG */}
         {tab === "config" && (
           <div>
-            {/* Tax Rate */}
+            {/* Abas opcionais — só supergestor */}
+            {isSuperManager && (
+              <div style={{...S.card,marginBottom:20}}>
+                <p style={{color:ac,fontSize:14,fontWeight:700,margin:"0 0 4px"}}>📋 Abas Visíveis</p>
+                <p style={{color:"var(--text3)",fontSize:12,marginBottom:14}}>Escolha quais abas aparecem para gestores e empregados deste restaurante.</p>
+                <div style={{display:"flex",flexDirection:"column",gap:10}}>
+                  {[
+                    ["horarios",    "🕐 Horários"],
+                    ["recibos",     "📄 Recibos"],
+                    ["faq",         "❓ FAQ"],
+                    ["comunicados", "📢 Comunicados"],
+                    ["dp",          "💬 Fale com DP"],
+                  ].map(([key, label]) => {
+                    const isOn = restaurant.tabsConfig?.[key] !== false;
+                    return (
+                      <div key={key} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"10px 14px",background:"var(--bg1)",borderRadius:10,border:`1px solid ${isOn?"#10b98133":"#2a2a2a"}`}}>
+                        <span style={{color:isOn?"var(--text)":"var(--text3)",fontSize:13,fontWeight:isOn?600:400}}>{label}</span>
+                        <button onClick={()=>{
+                          const updated = restaurants.map(r=>r.id===rid?{...r,tabsConfig:{...(r.tabsConfig??{}),[key]:!isOn}}:r);
+                          onUpdate("restaurants",updated);
+                        }} style={{padding:"5px 14px",borderRadius:20,border:"none",background:isOn?"#10b981":"#2a2a2a",color:isOn?"#fff":"#555",fontWeight:700,cursor:"pointer",fontFamily:"DM Mono,monospace",fontSize:12}}>
+                          {isOn?"Ativa":"Inativa"}
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
             <div style={{...S.card,marginBottom:20}}>
               <p style={{color:ac,fontSize:14,fontWeight:700,margin:"0 0 8px"}}>Retenção Fiscal</p>
               <p style={{color:"var(--text3)",fontSize:12,marginBottom:14}}>Percentual retido do pool total antes da distribuição.</p>
@@ -3955,36 +3983,29 @@ function ManagerPortal({ manager, data, onUpdate, onBack, toggleTheme, theme }) 
 // LOGIN
 //
 function LoginScreen({ superManagers, managers, onLoginSuper, onLoginManager, onBack, onSetupFirst }) {
-  const [role, setRole] = useState("manager"); // "manager" | "super"
-  const [cpf, setCpf]   = useState("");
-  const [pin, setPin]   = useState("");
-  const [err, setErr]   = useState("");
+  const [cpf, setCpf] = useState("");
+  const [pin, setPin] = useState("");
+  const [err, setErr] = useState("");
   const ac = "#f5c842";
 
   function tryLogin() {
     const clean = cpf.replace(/\D/g,"");
-    if (role === "super") {
-      const u = superManagers.find(s => s.cpf?.replace(/\D/g,"")===clean && String(s.pin)===String(pin));
-      if (u) { setErr(""); onLoginSuper(u); }
-      else setErr("CPF ou PIN incorretos.");
-    } else {
-      const u = managers.find(m => m.cpf?.replace(/\D/g,"")===clean && String(m.pin)===String(pin));
-      if (u) { setErr(""); onLoginManager(u); }
-      else setErr("CPF ou PIN incorretos.");
-    }
+    // Tenta supergestor primeiro
+    const superUser = superManagers.find(s => s.cpf?.replace(/\D/g,"")===clean && String(s.pin)===String(pin));
+    if (superUser) { setErr(""); onLoginSuper(superUser); return; }
+    // Tenta gestor
+    const mgr = managers.find(m => m.cpf?.replace(/\D/g,"")===clean && String(m.pin)===String(pin));
+    if (mgr) { setErr(""); onLoginManager(mgr); return; }
+    setErr("CPF ou PIN incorretos.");
   }
 
   return (
     <div style={{minHeight:"100vh",background:"var(--bg)",display:"flex",alignItems:"center",justifyContent:"center",fontFamily:"DM Mono,monospace",padding:24}}>
       <div style={{...S.card,maxWidth:360,width:"100%"}}>
         <div style={{textAlign:"center",marginBottom:20}}>
-          <div style={{fontSize:32}}>{role==="super"?"⭐":"📊"}</div>
-          <h2 style={{color:ac,margin:"8px 0 4px"}}>{role==="super"?"Super Gestor":"Gestor"}</h2>
-        </div>
-        <div style={{display:"flex",gap:8,marginBottom:20}}>
-          {[["manager","Gestor"],["super","Super Gestor"]].map(([r,lbl])=>(
-            <button key={r} onClick={()=>{setRole(r);setErr("");}} style={{flex:1,padding:"8px",borderRadius:10,border:`1px solid ${role===r?ac:"#2a2a2a"}`,background:role===r?ac+"22":"transparent",color:role===r?ac:"#555",cursor:"pointer",fontFamily:"DM Mono,monospace",fontSize:12,fontWeight:role===r?700:400}}>{lbl}</button>
-          ))}
+          <div style={{fontSize:32}}>📊</div>
+          <h2 style={{color:ac,margin:"8px 0 4px"}}>Área de Gestão</h2>
+          <p style={{color:"var(--text3)",fontSize:12,margin:0}}>Acesso para gestores e super gestores</p>
         </div>
         <div style={{display:"flex",flexDirection:"column",gap:10,marginBottom:14}}>
           <div><label style={S.label}>CPF</label><input value={cpf} onChange={e=>setCpf(maskCpf(e.target.value))} placeholder="000.000.000-00" style={S.input} inputMode="numeric"/></div>
