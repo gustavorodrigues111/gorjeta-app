@@ -3208,11 +3208,11 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                       const weekday  = new Date(date+"T12:00:00").toLocaleDateString("pt-BR",{weekday:"short"});
                       const isWeekend = [0,6].includes(new Date(date+"T12:00:00").getDay());
 
-                      let bg = "#111", border = "#1e1e1e";
+                      let bg = "#fff", border = "var(--border)";
                       if      (isNoTip)               { bg = "#f5f0ff"; border = "#6366f133"; }
                       else if (isLaunched && !isDirty) { bg = "#f0fdf4"; border = "#10b98133"; }
                       else if (isDirty)                { bg = "#fffbeb"; border = "#f59e0b44"; }
-                      else if (hasVal)                 { bg = "#1a1a0a"; border = "var(--ac)33"; }
+                      else if (hasVal)                 { bg = "#faf8f4"; border = "var(--ac)33"; }
 
                       return (
                         <div key={date} style={{display:"grid",gridTemplateColumns:"46px 1fr 1fr 100px 90px",gap:6,padding:"5px 8px",marginBottom:4,borderRadius:10,background:bg,border:`1px solid ${border}`,alignItems:"center"}}>
