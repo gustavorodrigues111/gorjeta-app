@@ -3952,7 +3952,7 @@ function SuperManagerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, 
                     <div style={{color:"var(--text)",fontWeight:600,fontSize:15}}>{m.name}</div>
                     <div style={{color:"var(--text3)",fontSize:12}}>CPF: {m.cpf||"—"}</div>
                     <div style={{marginTop:6,display:"flex",gap:6,flexWrap:"wrap"}}>
-      {[["tips","Gorjetas"],["schedule","Escala"],["comunicados","Comuns."],["faq","FAQ"],["dp","DP"],["horarios","Horários"]].map(([k,lbl])=><PermBadge key={k} label={lbl} on={m.perms?.[k]!==false}/>)}{m.isDP&&<span style={{background:"#3b82f622",color:"#3b82f6",borderRadius:6,padding:"2px 10px",fontSize:11,fontWeight:700}}>📬 DP</span>}
+      {[["tips","Gorjetas"],["schedule","Escala"],["roles","Cargos"],["employees","Equipe"],["comunicados","Comuns."],["faq","FAQ"],["dp","DP"],["horarios","Horários"]].map(([k,lbl])=><PermBadge key={k} label={lbl} on={m.perms?.[k]!==false}/>)}{m.isDP&&<span style={{background:"#3b82f622",color:"#3b82f6",borderRadius:6,padding:"2px 10px",fontSize:11,fontWeight:700}}>📬 DP</span>}
                     </div>
                     <div style={{marginTop:6,display:"flex",gap:4,flexWrap:"wrap"}}>
                       {(m.restaurantIds??[]).map(rid=>{const r=restaurants.find(x=>x.id===rid);return r?<span key={rid} style={{background:"var(--bg4)",color:"var(--text2)",borderRadius:6,padding:"2px 8px",fontSize:11}}>{r.name}</span>:null;})}
@@ -4021,7 +4021,7 @@ function SuperManagerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, 
             <div>
               <label style={S.label}>Permissões de acesso às abas</label>
               <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
-                {[["tips","💸 Gorjetas"],["schedule","📅 Escala"],["comunicados","📢 Comunicados"],["faq","❓ FAQ"],["dp","💬 Fale c/ DP"],["horarios","🕐 Horários"]].map(([k,lbl])=>{
+                {[["tips","💸 Gorjetas"],["schedule","📅 Escala"],["roles","🏷️ Cargos"],["employees","👥 Equipe"],["comunicados","📢 Comunicados"],["faq","❓ FAQ"],["dp","💬 Fale c/ DP"],["horarios","🕐 Horários"]].map(([k,lbl])=>{
                   const on = mgrForm.perms?.[k] !== false;
                   return (
                     <button key={k} onClick={()=>setMgrForm({...mgrForm,perms:{...mgrForm.perms,[k]:!on}})}
