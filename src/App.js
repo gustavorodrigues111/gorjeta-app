@@ -4309,15 +4309,14 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                     ["faq",         "❓ FAQ"],
                     ["comunicados", "📢 Comunicados"],
                     ["dp",          "💬 Fale com DP"],
-                  ].map(([key, label]) => {
-                    const adminOk  = restaurant.tabsConfig?.[key] !== false;
+                  ].filter(([key]) => restaurant.tabsConfig?.[key] !== false)
+                  .map(([key, label]) => {
                     const gestorOn = restaurant.tabsGestor?.[key] !== false;
-                    const isOn     = adminOk && gestorOn;
+                    const isOn     = gestorOn;
                     return (
-                      <div key={key} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"10px 14px",background:"var(--bg1)",borderRadius:10,border:`1px solid ${!adminOk?"var(--border)":isOn?"#10b98133":"var(--border)"}`,opacity:adminOk?1:0.5}}>
+                      <div key={key} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"10px 14px",background:"var(--bg1)",borderRadius:10,border:`1px solid ${isOn?"#10b98133":"var(--border)"}`}}>
                         <div>
                           <span style={{color:isOn?"var(--text)":"var(--text3)",fontSize:13,fontWeight:isOn?600:400}}>{label}</span>
-                          {!adminOk && <span style={{color:"var(--text3)",fontSize:11,marginLeft:8}}>(não autorizado pelo admin)</span>}
                         </div>
                         <button disabled={!adminOk} onClick={()=>{
                           if(!adminOk) return;
@@ -6460,7 +6459,7 @@ function Home({ onLogin }) {
     { icon:"❓", title:"FAQ com assistente de IA", desc:"Base de perguntas e respostas para sua equipe. Perguntas automáticas sobre gorjetas e regras, mais IA (Gemini) para ajudar o gestor a redigir." },
     { icon:"📢", title:"Comunicados com IA", desc:"Envie avisos para toda a equipe ou áreas específicas. Assistente de IA ajuda a redigir. Acompanhe quem leu e confirmou." },
     { icon:"💬", title:"Canal com o DP", desc:"Canal direto, inclusive anônimo, para comunicação entre equipe e departamento pessoal. Sugestões, denúncias, atestados e dúvidas trabalhistas." },
-    { icon:"📄", title:"Recibos digitais", desc:"Gorjeta, adiantamento, férias e 13º — tudo disponível direto no app do empregado assim que o gestor faz o upload." },
+
     { icon:"🔒", title:"Gestão financeira integrada", desc:"Controle de ciclos, cobranças e pagamentos. Página de fatura para o cliente confirmar o pagamento com um clique." },
     { icon:"📱", title:"100% no celular", desc:"Sem app para instalar. Acessa pelo navegador em qualquer smartphone. Gestor e empregado com portais distintos e seguros." },
   ];
@@ -6557,7 +6556,7 @@ function Home({ onLogin }) {
               ["1","Configure o restaurante","Cadastre áreas, cargos com pontos, empregados e regras fiscais. Pronto para operar."],
               ["2","Lance as gorjetas","Informe o valor diário. O sistema distribui automaticamente por cargo, área e escala."],
               ["3","Comunique a equipe","Envie comunicados com IA, gerencie o FAQ automático e mantenha todos informados."],
-              ["4","Equipe acompanha tudo","Cada empregado vê extrato, escala, recibos e comunicados direto pelo celular."],
+              ["4","Equipe acompanha tudo","Cada empregado vê extrato, escala e comunicados direto pelo celular."],
             ].map(([n,t,d])=>(
               <div key={n}>
                 <div style={{width:52,height:52,borderRadius:"50%",background:ac,color:"#fff",fontSize:22,fontWeight:800,display:"flex",alignItems:"center",justifyContent:"center",margin:"0 auto 16px",fontFamily:"'DM Mono',monospace"}}>{n}</div>
@@ -6944,7 +6943,6 @@ hr{border:none;border-top:1px solid var(--border);margin:24px 0}
   <a href="#cargos"><span class="ic">🏷️</span> Cargos</a>
   <a href="#equipe"><span class="ic">👥</span> Equipe</a>
   <a href="#horarios"><span class="ic">🕐</span> Horários</a>
-  <a href="#recibos"><span class="ic">📄</span> Recibos</a>
   <a href="#comunicados"><span class="ic">📢</span> Comunicados</a>
   <a href="#faq"><span class="ic">❓</span> FAQ com IA</a>
   <a href="#dp"><span class="ic">💬</span> Fale com DP</a>
@@ -7101,9 +7099,6 @@ hr{border:none;border-top:1px solid var(--border);margin:24px 0}
       <div class="card"><h3>Para que serve?</h3><p>Registra o horário contratual (entrada, saída, intervalo) de cada empregado. Usado para controle interno e geração automática da escala base.</p></div>
       <div class="card"><h3>Aprovação de alterações</h3><p>Empregados podem solicitar alterações pelo app. As solicitações chegam como notificações na Caixa para o gestor de DP aprovar ou recusar.</p></div>
     </div>
-
-    <div class="sec" id="recibos">
-      <div class="sh"><div class="iw">📄</div><div><h2>Recibos</h2><p>Recibos mensais de gorjeta</p></div></div>
       <div class="card"><h3>Como funciona?</h3><p>O gestor faz upload dos recibos em PDF. Cada empregado acessa o próprio recibo diretamente pelo app, sem necessidade de envio individual.</p>
         <div class="steps">
           <div class="step"><div class="sn">1</div><div class="sc"><strong>Selecione mês e empregado</strong><p>Escolha o mês de competência e a quem pertence.</p></div></div>
@@ -7139,12 +7134,11 @@ hr{border:none;border-top:1px solid var(--border);margin:24px 0}
           <li>💸 Como é calculada a minha gorjeta?</li>
           <li>📊 Como funciona a tabela de pontos? (ou por área)</li>
           <li>📅 Como funciona a escala e por que ela importa?</li>
-          <li>📄 Como acesso meus recibos de gorjeta?</li>
-          <li>💬 Para que serve o Fale com DP?</li>
+                    <li>💬 Para que serve o Fale com DP?</li>
           <li>📢 Como funcionam os comunicados?</li>
           <li>🔐 O que é o PIN e como trocar?</li>
         </ul>
-        <div class="ib tip"><span class="ico">💡</span><span>As perguntas sobre recibos, DP e comunicados só aparecem para o empregado se essas abas estiverem ativas nas suas configurações.</span></div>
+        <div class="ib tip"><span class="ico">💡</span><span>As perguntas sobre DP e comunicados só aparecem para o empregado se essas abas estiverem ativas nas suas configurações.</span></div>
       </div>
       <div class="card"><h3>✨ Assistente de IA (Gemini) <span class="new">NOVO</span></h3>
         <p>Ao criar uma nova pergunta, um campo de assistente IA aparece no formulário. Descreva informalmente o que quer comunicar e a IA redige uma versão profissional e editável.</p>
@@ -7243,19 +7237,15 @@ hr{border:none;border-top:1px solid var(--border);margin:24px 0}
     <div style="text-align:center;padding:20px 0 40px;color:var(--t3);font-size:13px">
       <div style="font-size:28px;margin-bottom:8px">🍽️</div>
       <div>AppTip · Guia do Gestor · v4.6 · Abril 2026</div>
-      <div style="margin-top:4px">Dúvidas? <a href="mailto:contato@apptip.app" style="color:var(--ac)">contato@apptip.app</a> · Clientes: <strong style="color:var(--t2)">(11) 98549-9821</strong></div>
+      <div style="margin-top:4px">Dúvidas? <a href="/cdn-cgi/l/email-protection#9bf8f4f5effaeff4dbfaebebeff2ebb5faebeb" style="color:var(--ac)"><span class="__cf_email__" data-cfemail="3a5955544e5b4e557a5b4a4a4e534a145b4a4a">[email&#160;protected]</span></a> · Clientes: <strong style="color:var(--t2)">(11) 98549-9821</strong></div>
     </div>
 
   </div>
 </div>
 </div>
-<script>
+<script data-cfasync="false" src="/cdn-cgi/scripts/5c5dd728/cloudflare-static/email-decode.min.js"></script><script>
 const secs=document.querySelectorAll('.sec'),links=document.querySelectorAll('.sidebar a');
-const obs=new IntersectionObserver(e=>{e.forEach(en=>{if(en.isIntersecting){links.forEach(l=>l.classList.remove('active'));const a=document.querySelector('.sidebar a[href="#'+en.target.id+'"]');if(a)a.classList.add('active');}});},{threshold:0.2,rootMargin:'-80px 0px -60% 0px'});
-secs.forEach(s=>obs.observe(s));
-</script>
-</body>
-</html>`;
+const obs=new IntersectionObserver(e=>{e.forEach(en=>{if(en.isIntersecting){links.forEach(l=>l.cla`;
   return (
     <iframe
       srcDoc={html}
