@@ -2195,15 +2195,18 @@ function EmployeeSpreadsheet({ restEmps, restRoles, rid, employees, onUpdate, re
     const isInactive = !isNew && e?.inactive && e?.inactiveFrom <= today();
     const onChange = isNew
       ? (f,v) => setNewRow(p=>({...p,[f]:v}))
-      : (f,v) => setRow(e.id, f, v);
+      : (f,v) => {
+          setRow(e.id, f, v);
+          // For roleId changes, also immediately update editRows so save picks it up
+        };
 
     return (
       <div style={{display:"grid",gridTemplateColumns:cols,gap:6,padding:"6px 8px",marginBottom:4,background:isNew?"#0d1a0d":isInactive?"#1a1a2a":"var(--card-bg)",borderRadius:10,border:`1px solid ${isSaved?"#10b98166":isNew?"#10b98144":isInactive?"#8b5cf644":"var(--border)"}`,alignItems:"center",opacity:isInactive?0.75:1}}>
-        <input value={row.name} onChange={e=>onChange("name",e.target.value)} placeholder="Nome completo" style={inS}/>
-        <input value={row.cpf} onChange={e=>onChange("cpf",e.target.value)} placeholder="000.000.000-00" style={inS} inputMode="numeric"/>
-        <input type="date" value={row.admission} onChange={e=>onChange("admission",e.target.value)} style={inS}/>
-        <input type="password" value={row.pin} onChange={e=>onChange("pin",e.target.value)} maxLength={6} placeholder="••••" style={inS}/>
-        <select value={row.roleId} onChange={e=>onChange("roleId",e.target.value)} style={{...inS,cursor:"pointer"}}>
+        <input value={row.name} onChange={ev=>onChange("name",ev.target.value)} placeholder="Nome completo" style={inS}/>
+        <input value={row.cpf} onChange={ev=>onChange("cpf",ev.target.value)} placeholder="000.000.000-00" style={inS} inputMode="numeric"/>
+        <input type="date" value={row.admission} onChange={ev=>onChange("admission",ev.target.value)} style={inS}/>
+        <input type="password" value={row.pin} onChange={ev=>onChange("pin",ev.target.value)} maxLength={6} placeholder="••••" style={inS}/>
+        <select value={row.roleId} onChange={ev=>onChange("roleId",ev.target.value)} style={{...inS,cursor:"pointer"}}>
           <option value="">Selecionar…</option>
           {AREAS.map(a=>(
             <optgroup key={a} label={a}>
@@ -2213,7 +2216,7 @@ function EmployeeSpreadsheet({ restEmps, restRoles, rid, employees, onUpdate, re
         </select>
         {isNew
           ? <div style={{fontSize:10,color:"var(--text3)"}}>Auto</div>
-          : <input type="date" value={row.inactiveFrom??""} onChange={e=>onChange("inactiveFrom",e.target.value)} style={inS}/>
+          : <input type="date" value={row.inactiveFrom??""} onChange={ev=>onChange("inactiveFrom",ev.target.value)} style={inS}/>
         }
         <div style={{display:"flex",gap:4}}>
           {isNew
