@@ -4531,25 +4531,54 @@ Qualquer duvida estamos a disposicao!
               </div>
 
               {/* Cobranças pendentes */}
-              {(fin.cobrancas??[]).filter(c=>c.status==="pendente").length > 0 && (
+              {(fin.cobrancas??[]).filter(c=>c.status==="pendente"||c.status==="aguardando_confirmacao").length > 0 && (
                 <div style={{...S.card,marginBottom:20,border:"1px solid #f59e0b33",background:"#fffbeb"}}>
-                  <h4 style={{color:"#92400e",fontWeight:700,fontSize:14,margin:"0 0 12px"}}>⏳ Aguardando confirmação de pagamento</h4>
+                  <h4 style={{color:"#92400e",fontWeight:700,fontSize:14,margin:"0 0 12px"}}>⏳ Cobranças em aberto</h4>
                   <div style={{display:"flex",flexDirection:"column",gap:8}}>
-                    {(fin.cobrancas??[]).filter(c=>c.status==="pendente").map(c=>(
-                      <div key={c.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"12px 14px",borderRadius:10,background:"#fff",border:"1px solid #fde68a"}}>
-                        <div>
-                          <div style={{color:"var(--text)",fontWeight:700,fontSize:14}}>R$ {c.valor?.toLocaleString("pt-BR",{minimumFractionDigits:2})} — {c.periodoLabel}</div>
-                          <div style={{color:"var(--text3)",fontSize:12}}>{c.forma}{c.venc?` · Venc. ${new Date(c.venc+"T12:00:00").toLocaleDateString("pt-BR")}`:""} · Enviada em {new Date(c.criadaEm).toLocaleDateString("pt-BR")}</div>
-                        </div>
-                        <div style={{display:"flex",gap:8}}>
-                          <button onClick={()=>confirmarPagamento(c)}
-                            style={{padding:"7px 14px",borderRadius:8,border:"1px solid var(--green)44",background:"var(--green-bg)",color:"var(--green)",cursor:"pointer",fontFamily:"'DM Sans',sans-serif",fontSize:13,fontWeight:700}}>
-                            ✅ Confirmar pago
-                          </button>
-                          <button onClick={()=>{
-                            if(!window.confirm("Cancelar esta cobrança?")) return;
-                            saveFinanceiro({ cobrancas:(fin.cobrancas??[]).map(x=>x.id===c.id?{...x,status:"cancelada"}:x) });
-                          }} style={{padding:"7px 10px",borderRadius:8,border:"1px solid var(--border)",background:"transparent",color:"var(--text3)",cursor:"pointer",fontFamily:"'DM Sans',sans-serif",fontSize:12}}>✕</button>
+                    {(fin.cobrancas??[]).filter(c=>c.status==="pendente"||c.status==="aguardando_confirmacao").map(c=>(
+                      <div key={c.id} style={{padding:"12px 14px",borderRadius:10,background:"#fff",border:`1px solid ${c.status==="aguardando_confirmacao"?"#86efac":"#fde68a"}`}}>
+                        <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:8}}>
+                          <div>
+                            <div style={{color:"var(--text)",fontWeight:700,fontSize:14,marginBottom:2}}>
+                              R$ {c.valor?.toLocaleString("pt-BR",{minimumFractionDigits:2})} — {c.periodoLabel}
+                            </div>
+                            <div style={{color:"var(--text3)",fontSize:12,marginBottom:6}}>
+                              {c.forma} · {c.venc?`Venc. ${new Date(c.venc+"T12:00:00").toLocaleDateString("pt-BR")}`:""} · Enviada em {new Date(c.criadaEm).toLocaleDateString("pt-BR")}
+                            </div>
+                            {c.status==="aguardando_confirmacao" && (
+                              <div style={{color:"#166534",fontSize:12,fontWeight:600,background:"#f0fdf4",padding:"4px 10px",borderRadius:6,display:"inline-block"}}>
+                                ✅ Cliente informou que pagou em {c.clienteConfirmouEm?new Date(c.clienteConfirmouEm).toLocaleDateString("pt-BR"):"—"} — aguarda sua confirmação
+                              </div>
+                            )}
+                          </div>
+                          <div style={{display:"flex",gap:6,flexShrink:0}}>
+                            {c.status==="aguardando_confirmacao" && (
+                              <button onClick={()=>confirmarPagamento(c)}
+                                style={{padding:"7px 14px",borderRadius:8,border:"1px solid var(--green)44",background:"var(--green-bg)",color:"var(--green)",cursor:"pointer",fontFamily:"'DM Sans',sans-serif",fontSize:13,fontWeight:700}}>
+                                ✅ Confirmar
+                              </button>
+                            )}
+                            {c.status==="aguardando_confirmacao" && (
+                              <button onClick={()=>{
+                                if(!window.confirm("Negar pagamento e marcar como inadimplente?")) return;
+                                saveFinanceiro({
+                                  cobrancas:(fin.cobrancas??[]).map(x=>x.id===c.id?{...x,status:"pendente",clienteConfirmou:false}:x),
+                                  status:"inadimplente"
+                                });
+                                onUpdate("_toast","🔴 Marcado como inadimplente.");
+                              }} style={{padding:"7px 12px",borderRadius:8,border:"1px solid var(--red)33",background:"transparent",color:"var(--red)",cursor:"pointer",fontFamily:"'DM Sans',sans-serif",fontSize:12}}>
+                                ✕ Negar
+                              </button>
+                            )}
+                            {c.status==="pendente" && (
+                              <button onClick={()=>{
+                                if(!window.confirm("Cancelar esta cobrança?")) return;
+                                saveFinanceiro({cobrancas:(fin.cobrancas??[]).map(x=>x.id===c.id?{...x,status:"cancelada"}:x)});
+                              }} style={{padding:"7px 12px",borderRadius:8,border:"1px solid var(--border)",background:"transparent",color:"var(--text3)",cursor:"pointer",fontFamily:"'DM Sans',sans-serif",fontSize:12}}>
+                                ✕ Cancelar
+                              </button>
+                            )}
+                          </div>
                         </div>
                       </div>
                     ))}
@@ -4557,74 +4586,26 @@ Qualquer duvida estamos a disposicao!
                 </div>
               )}
 
-              <div style={{...S.card,marginBottom:20}}>
-                <h4 style={{color:"var(--text)",fontWeight:700,fontSize:14,margin:"0 0 16px"}}>➕ Registrar pagamento</h4>
-                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:10}}>
-                  <div>
-                    <label style={S.label}>Data do pagamento</label>
-                    <input type="date" id="fin-data" defaultValue={today()} style={S.input}/>
-                  </div>
-                  <div>
-                    <label style={S.label}>Valor pago (R$)</label>
-                    <input type="number" id="fin-valor" placeholder={valorTotal?.toFixed(2)??"0,00"} style={S.input}/>
-                  </div>
-                  <div>
-                    <label style={S.label}>Forma de pagamento</label>
-                    <select id="fin-forma" style={S.input}>
-                      <option value="pix">PIX</option>
-                      <option value="boleto">Boleto</option>
-                      <option value="cartao">Cartão</option>
-                      <option value="transferencia">Transferência</option>
-                      <option value="outro">Outro</option>
-                    </select>
-                  </div>
-                  <div>
-                    <label style={S.label}>Próximo vencimento</label>
-                    <input type="date" id="fin-venc" style={S.input}/>
-                  </div>
-                </div>
-                <div style={{marginBottom:10}}>
-                  <label style={S.label}>Observação</label>
-                  <input id="fin-obs" placeholder="Ex: Pagou com desconto, mês de teste grátis..." style={S.input}/>
-                </div>
-                <button onClick={()=>{
-                  const data_ = document.getElementById("fin-data")?.value;
-                  const valor = parseFloat(document.getElementById("fin-valor")?.value);
-                  const forma = document.getElementById("fin-forma")?.value;
-                  const venc  = document.getElementById("fin-venc")?.value;
-                  const obs   = document.getElementById("fin-obs")?.value;
-                  if(!data_||!valor) { alert("Preencha data e valor."); return; }
-                  const novo = { id:Date.now().toString(), data:data_, valor, forma, obs:obs||"", registradoEm:new Date().toISOString() };
-                  const novosPagementos = [novo, ...pagamentos];
-                  saveFinanceiro({ pagamentos:novosPagementos, proximoVencimento:venc||fin.proximoVencimento, obs:obs||fin.obs, status:"ativo" });
-                  onUpdate("_toast","✅ Pagamento registrado!");
-                }} style={{...S.btnPrimary,width:"auto",padding:"10px 24px"}}>
-                  Confirmar pagamento
-                </button>
-              </div>
-
-              {/* Histórico */}
+              {/* Histórico de pagamentos confirmados */}
               <div style={{...S.card}}>
                 <h4 style={{color:"var(--text)",fontWeight:700,fontSize:14,margin:"0 0 16px"}}>📋 Histórico de pagamentos</h4>
                 {pagamentos.length === 0 && (
-                  <p style={{color:"var(--text3)",fontSize:13,textAlign:"center",padding:"20px 0"}}>Nenhum pagamento registrado ainda.</p>
+                  <p style={{color:"var(--text3)",fontSize:13,textAlign:"center",padding:"20px 0"}}>Nenhum pagamento confirmado ainda.</p>
                 )}
                 <div style={{display:"flex",flexDirection:"column",gap:8}}>
                   {pagamentos.slice(0,12).map(p=>(
-                    <div key={p.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"10px 14px",borderRadius:10,background:"var(--bg2)"}}>
+                    <div key={p.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"12px 14px",borderRadius:10,background:"var(--bg2)"}}>
                       <div>
-                        <div style={{color:"var(--text)",fontWeight:600,fontSize:14,fontFamily:"'DM Mono',monospace"}}>
+                        <div style={{color:"var(--text)",fontWeight:700,fontSize:14,fontFamily:"'DM Mono',monospace",marginBottom:2}}>
                           R$ {p.valor?.toLocaleString("pt-BR",{minimumFractionDigits:2})}
                         </div>
                         <div style={{color:"var(--text3)",fontSize:12}}>
-                          {new Date(p.data+"T12:00:00").toLocaleDateString("pt-BR")} · {p.forma?.toUpperCase()}
-                          {p.obs && ` · ${p.obs}`}
+                          {p.data ? new Date(p.data+"T12:00:00").toLocaleDateString("pt-BR") : "—"} · {p.forma?.toUpperCase()} · {p.obs||""}
+                        </div>
+                        <div style={{color:"var(--green)",fontSize:11,marginTop:2,fontWeight:600}}>
+                          ✅ Confirmado pelo Admin
                         </div>
                       </div>
-                      <button onClick={()=>{
-                        if(!window.confirm("Remover este pagamento?")) return;
-                        saveFinanceiro({pagamentos:pagamentos.filter(x=>x.id!==p.id)});
-                      }} style={{background:"none",border:"none",color:"var(--text3)",cursor:"pointer",fontSize:14,padding:4}}>✕</button>
                     </div>
                   ))}
                 </div>
@@ -6136,8 +6117,8 @@ function FaturaPage({ faturaId, restaurants, onUpdate, loaded }) {
       const novasCobs = (r.financeiro?.cobrancas??[]).map(c =>
         c.id === faturaId ? {...c, clienteConfirmou:true, clienteConfirmouEm:new Date().toISOString(), status:"aguardando_confirmacao"} : c
       );
-      // Libera acesso provisoriamente
-      return {...r, financeiro:{...r.financeiro, cobrancas:novasCobs, status:"ativo"}};
+      // NÃO libera acesso — fica aguardando confirmação do admin
+      return {...r, financeiro:{...r.financeiro, cobrancas:novasCobs}};
     });
     onUpdate("restaurants", updated);
     setConfirmado(true);
