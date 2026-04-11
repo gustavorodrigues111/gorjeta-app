@@ -3202,15 +3202,13 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
   const [tipRows, setTipRows]   = useState([{date:today(),total:"",note:""}]);
   const [showRecalc, setShowRecalc] = useState(false);
   const [splitForm, setSplitForm]         = useState(null);
-  const [schedArea, setSchedArea]         = useState("Todos");
-  const [showAiSched, setShowAiSched]     = useState(false);
-  const [aiSchedStep, setAiSchedStep]     = useState(0); // 0=inicio 1=ferias 2=excecoes 3=preview
-  const [aiSchedInput, setAiSchedInput]   = useState("");
-  const [aiSchedFerias, setAiSchedFerias] = useState("");
-  const [aiSchedExcec, setAiSchedExcec]   = useState("");
+  const [schedArea, setSchedArea]           = useState("Todos");
+  const [showAiSched, setShowAiSched]       = useState(false);
+  const [aiSchedInput, setAiSchedInput]     = useState("");
   const [aiSchedLoading, setAiSchedLoading] = useState(false);
-  const [aiSchedError, setAiSchedError]   = useState("");
-  const [aiSchedPreview, setAiSchedPreview] = useState(null); // {schedules, resumo}
+  const [aiSchedError, setAiSchedError]     = useState("");
+  const [aiSchedPreview, setAiSchedPreview] = useState(null);
+  const [aiSchedListening, setAiSchedListening] = useState(false);
   const [showExport, setShowExport]       = useState(false);
 
   const empSummary = restEmps.map(e => {
@@ -4144,64 +4142,43 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
             {(()=>{
               const mesLabel = monthLabel(year, month);
               const mesKey = mk;
-              const prevMonth = month === 0 ? 11 : month - 1;
-              const prevYear  = month === 0 ? year - 1 : year;
-              const prevMk = `${prevYear}-${String(prevMonth+1).padStart(2,"0")}`;
-              const hasPrevSched = areaEmps.some(e => schedules?.[rid]?.[prevMk]?.[e.id]);
 
               async function gerarEscalaIA() {
-                setAiSchedLoading(true); setAiSchedError("");
+                setAiSchedLoading(true); setAiSchedError(""); setAiSchedPreview(null);
                 try {
                   const daysInMonth = new Date(year, month+1, 0).getDate();
                   const empList = areaEmps.map(e => {
                     const role = restRoles.find(r => r.id === e.roleId);
-                    return `${e.name} (id:${e.id}, cargo:${role?.name??"—"}, área:${role?.area??"—"})`;
+                    return `- ${e.name} (id:${e.id}, cargo:${role?.name??"—"}, área:${role?.area??"—"})`;
                   }).join("\n");
 
-                  // Mês anterior como base
-                  const prevSchedData = {};
-                  if (aiSchedInput === "anterior") {
-                    areaEmps.forEach(e => {
-                      const prev = schedules?.[rid]?.[prevMk]?.[e.id] ?? {};
-                      // Copia mas mantém só folgas/férias estruturais
-                      const copied = {};
-                      Object.entries(prev).forEach(([date, status]) => {
-                        // Ajusta para o novo mês — pega só o dia
-                        const day = date.slice(8);
-                        const newDate = `${year}-${String(month+1).padStart(2,"0")}-${day}`;
-                        const d = parseInt(day);
-                        if (d <= daysInMonth) copied[newDate] = status;
-                      });
-                      prevSchedData[e.id] = copied;
-                    });
-                  }
+                  const prompt = `Você é um assistente de gestão de escalas de restaurantes. O gestor deu as seguintes instruções para a escala de ${mesLabel}.
 
-                  const prompt = `Você é um assistente de gestão de escalas de restaurantes. Gere a escala do mês ${mesLabel} para os empregados abaixo.
-
-Empregados:
+Empregados disponíveis:
 ${empList}
 
-Mês: ${mesLabel} (${daysInMonth} dias)
-Dias da semana do dia 1: ${["Dom","Seg","Ter","Qua","Qui","Sex","Sáb"][new Date(`${year}-${String(month+1).padStart(2,"0")}-01T12:00:00`).getDay()]}
+Mês: ${mesLabel} (${daysInMonth} dias, primeiro dia: ${["Domingo","Segunda","Terça","Quarta","Quinta","Sexta","Sábado"][new Date(`${year}-${String(month+1).padStart(2,"0")}-01T12:00:00`).getDay()]})
+Ano: ${year}
 
-${aiSchedInput === "anterior" ? `Base: copiar mês anterior com ajustes` : `Base: gerar do zero`}
-${aiSchedFerias ? `Férias/ausências: ${aiSchedFerias}` : ""}
-${aiSchedExcec ? `Exceções e observações: ${aiSchedExcec}` : ""}
+Instrução do gestor: "${aiSchedInput.trim()}"
 
-Regras:
-- Status possíveis: "off" (folga), "comp" (compensação), "vac" (férias), "faultj" (falta justificada), "faultu" (falta injustificada)
+Interprete livremente o que o gestor pediu e aplique na escala. Status possíveis:
+- "off" = folga
+- "comp" = compensação de banco de horas
+- "vac" = férias
+- "faultj" = falta justificada
+- "faultu" = falta injustificada
 - Dias sem status = trabalhando normalmente
-- Empregados trabalham 5 ou 6 dias por semana tipicamente
-- Distribua folgas nos fins de semana de forma equilibrada
-- Se férias mencionadas, marque todos os dias do período como "vac"
 
 Responda APENAS com JSON válido:
 {
-  "resumo": "descrição breve do que foi gerado",
+  "resumo": "descrição do que foi aplicado",
   "escala": {
-    "empId": {"YYYY-MM-DD": "off", "YYYY-MM-DD": "vac"}
+    "id_do_empregado": {"YYYY-MM-DD": "status"}
   }
-}`;
+}
+
+Use os IDs exatos dos empregados fornecidos acima. Inclua apenas os dias com status não-padrão (folgas, férias, faltas). Dias de trabalho normal não precisam aparecer.`;
 
                   const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_KEY}`, {
                     method:"POST", headers:{"Content-Type":"application/json"},
@@ -4210,19 +4187,9 @@ Responda APENAS com JSON válido:
                   const data2 = await res.json();
                   const text = data2?.candidates?.[0]?.content?.parts?.[0]?.text ?? "";
                   const result = JSON.parse(text.replace(/```json|```/g,"").trim());
-
-                  // Mescla com base do mês anterior se solicitado
-                  const escalaFinal = {};
-                  areaEmps.forEach(e => {
-                    const base = aiSchedInput === "anterior" ? (prevSchedData[e.id] ?? {}) : {};
-                    const aiDays = result.escala?.[e.id] ?? {};
-                    escalaFinal[e.id] = { ...base, ...aiDays };
-                  });
-
-                  setAiSchedPreview({ escala: escalaFinal, resumo: result.resumo });
-                  setAiSchedStep(3);
+                  setAiSchedPreview({ escala: result.escala ?? {}, resumo: result.resumo });
                 } catch(e) {
-                  setAiSchedError("Erro ao gerar escala. Tente novamente.");
+                  setAiSchedError("Não foi possível interpretar. Tente reformular.");
                 }
                 setAiSchedLoading(false);
               }
@@ -4243,112 +4210,111 @@ Responda APENAS com JSON válido:
                   };
                 });
                 onUpdate("schedules", newSched);
-                onUpdate("_toast", "✨ Escala gerada pela IA aplicada!");
+                onUpdate("_toast", "✨ Escala atualizada pela IA!");
                 setShowAiSched(false);
-                setAiSchedStep(0);
                 setAiSchedPreview(null);
-                setAiSchedInput(""); setAiSchedFerias(""); setAiSchedExcec("");
+                setAiSchedInput("");
               }
 
               return (
                 <div style={{marginBottom:14}}>
-                  <button onClick={()=>{setShowAiSched(!showAiSched);setAiSchedStep(0);setAiSchedError("");setAiSchedPreview(null);}}
+                  <button onClick={()=>{setShowAiSched(!showAiSched);setAiSchedError("");setAiSchedPreview(null);setAiSchedInput("");}}
                     style={{...S.btnSecondary,fontSize:12,display:"inline-flex",alignItems:"center",gap:6,padding:"7px 14px",
                       background:showAiSched?"var(--ac-bg)":undefined,borderColor:showAiSched?"var(--ac)":undefined,color:showAiSched?"var(--ac-text)":undefined}}>
-                    ✨ Gerar escala com IA
+                    ✨ Assistente de escala
                   </button>
 
                   {showAiSched && (
                     <div style={{marginTop:10,padding:"16px",borderRadius:12,background:"var(--ac-bg)",border:"1px solid var(--ac)33"}}>
-                      <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:12}}>
+                      <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:8}}>
                         <span style={{fontSize:16}}>✨</span>
                         <span style={{color:"var(--ac-text)",fontWeight:700,fontSize:14}}>Assistente de Escala — {mesLabel}</span>
                       </div>
+                      <p style={{color:"var(--text3)",fontSize:12,margin:"0 0 12px",lineHeight:1.5}}>
+                        Fale ou escreva livremente. Exemplos: <em>"João folga segunda e quarta, Maria de férias do dia 5 ao 20, Pedro faltou hoje sem justificativa"</em>
+                      </p>
 
-                      {/* Passo 0 — base */}
-                      {aiSchedStep === 0 && (
-                        <div>
-                          <p style={{color:"var(--text2)",fontSize:13,margin:"0 0 14px"}}>Como quer gerar a escala de <strong>{mesLabel}</strong>?</p>
-                          <div style={{display:"flex",flexDirection:"column",gap:8}}>
-                            {hasPrevSched && (
-                              <button onClick={()=>{setAiSchedInput("anterior");setAiSchedStep(1);}}
-                                style={{padding:"12px 16px",borderRadius:10,border:"1px solid var(--ac)44",background:"var(--card-bg)",cursor:"pointer",textAlign:"left",fontFamily:"'DM Sans',sans-serif"}}>
-                                <div style={{fontWeight:700,fontSize:14,color:"var(--text)"}}>📋 Copiar mês anterior</div>
-                                <div style={{color:"var(--text3)",fontSize:12,marginTop:3}}>Usa a escala de {monthLabel(prevYear,prevMonth)} como base e permite ajustes</div>
-                              </button>
-                            )}
-                            <button onClick={()=>{setAiSchedInput("novo");setAiSchedStep(1);}}
-                              style={{padding:"12px 16px",borderRadius:10,border:"1px solid var(--border)",background:"var(--card-bg)",cursor:"pointer",textAlign:"left",fontFamily:"'DM Sans',sans-serif"}}>
-                              <div style={{fontWeight:700,fontSize:14,color:"var(--text)"}}>✨ Gerar do zero</div>
-                              <div style={{color:"var(--text3)",fontSize:12,marginTop:3}}>A IA distribui trabalho e folgas equilibradamente</div>
-                            </button>
-                          </div>
-                        </div>
-                      )}
+                      {/* Campo de texto + microfone */}
+                      <div style={{position:"relative",marginBottom:8}}>
+                        <textarea
+                          value={aiSchedInput}
+                          onChange={e=>setAiSchedInput(e.target.value)}
+                          placeholder="Descreva as instruções da escala aqui... ou use o microfone 🎤"
+                          rows={4}
+                          style={{...S.input,resize:"vertical",fontSize:13,paddingRight:48}}
+                        />
+                        <button
+                          onClick={()=>{
+                            if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
+                              setAiSchedError("Seu navegador não suporta reconhecimento de voz. Use Chrome ou Safari.");
+                              return;
+                            }
+                            if (aiSchedListening) return;
+                            const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+                            const rec = new SR();
+                            rec.lang = "pt-BR";
+                            rec.continuous = false;
+                            rec.interimResults = false;
+                            rec.onstart = () => setAiSchedListening(true);
+                            rec.onend   = () => setAiSchedListening(false);
+                            rec.onerror = () => { setAiSchedListening(false); setAiSchedError("Não foi possível capturar o áudio. Tente novamente."); };
+                            rec.onresult = (ev) => {
+                              const t = Array.from(ev.results).map(r=>r[0].transcript).join(" ");
+                              setAiSchedInput(p => p ? p + " " + t : t);
+                            };
+                            rec.start();
+                          }}
+                          title={aiSchedListening ? "Ouvindo..." : "Clique para falar"}
+                          style={{position:"absolute",right:8,bottom:10,width:34,height:34,borderRadius:"50%",border:"none",
+                            background:aiSchedListening?"var(--red)":"var(--ac)",color:"#fff",cursor:"pointer",
+                            display:"flex",alignItems:"center",justifyContent:"center",fontSize:16,
+                            boxShadow:aiSchedListening?"0 0 0 4px #ef444433":undefined,
+                            transition:"box-shadow 0.2s"}}>
+                          {aiSchedListening ? "⏹" : "🎤"}
+                        </button>
+                      </div>
+                      {aiSchedListening && <p style={{color:"var(--red)",fontSize:12,margin:"0 0 8px",fontWeight:600}}>🔴 Ouvindo... fale agora</p>}
+                      {aiSchedError && <p style={{color:"var(--red)",fontSize:12,margin:"0 0 8px"}}>{aiSchedError}</p>}
 
-                      {/* Passo 1 — férias/ausências */}
-                      {aiSchedStep === 1 && (
-                        <div>
-                          <p style={{color:"var(--text2)",fontSize:13,margin:"0 0 8px"}}>Algum empregado de férias ou com ausência prolongada em {mesLabel}?</p>
-                          <textarea value={aiSchedFerias} onChange={e=>setAiSchedFerias(e.target.value)}
-                            placeholder='Ex: "João de férias do dia 5 ao 20, Maria afastada a semana toda" — ou deixe em branco se não houver'
-                            rows={3} style={{...S.input,resize:"vertical",marginBottom:12,fontSize:13}}/>
-                          <div style={{display:"flex",gap:8}}>
-                            <button onClick={()=>setAiSchedStep(2)} style={{...S.btnPrimary,flex:1,fontSize:13}}>Próximo →</button>
-                            <button onClick={()=>setAiSchedStep(0)} style={S.btnSecondary}>← Voltar</button>
-                          </div>
-                        </div>
-                      )}
-
-                      {/* Passo 2 — exceções */}
-                      {aiSchedStep === 2 && (
-                        <div>
-                          <p style={{color:"var(--text2)",fontSize:13,margin:"0 0 8px"}}>Alguma outra observação ou exceção para este mês?</p>
-                          <textarea value={aiSchedExcec} onChange={e=>setAiSchedExcec(e.target.value)}
-                            placeholder='Ex: "Feriado dia 15, Pedro folga às segundas, Cozinha não trabalha domingo" — ou deixe em branco'
-                            rows={3} style={{...S.input,resize:"vertical",marginBottom:12,fontSize:13}}/>
-                          {aiSchedError && <p style={{color:"var(--red)",fontSize:12,margin:"0 0 8px"}}>{aiSchedError}</p>}
-                          <div style={{display:"flex",gap:8}}>
-                            <button onClick={gerarEscalaIA} disabled={aiSchedLoading}
-                              style={{...S.btnPrimary,flex:1,fontSize:13,opacity:aiSchedLoading?0.6:1}}>
-                              {aiSchedLoading?"✨ Gerando escala...":"✨ Gerar escala"}
-                            </button>
-                            <button onClick={()=>setAiSchedStep(1)} style={S.btnSecondary}>← Voltar</button>
-                          </div>
-                        </div>
-                      )}
-
-                      {/* Passo 3 — preview */}
-                      {aiSchedStep === 3 && aiSchedPreview && (
-                        <div>
-                          <div style={{padding:"12px 14px",borderRadius:10,background:"var(--card-bg)",border:"1px solid var(--green)33",marginBottom:12}}>
-                            <p style={{color:"var(--green)",fontWeight:700,fontSize:13,margin:"0 0 4px"}}>✅ Escala gerada!</p>
-                            <p style={{color:"var(--text2)",fontSize:13,margin:0,lineHeight:1.6}}>{aiSchedPreview.resumo}</p>
-                          </div>
-                          <div style={{padding:"10px 14px",borderRadius:10,background:"var(--bg2)",border:"1px solid var(--border)",marginBottom:12,maxHeight:200,overflowY:"auto"}}>
+                      {/* Preview */}
+                      {aiSchedPreview && (
+                        <div style={{padding:"12px 14px",borderRadius:10,background:"var(--card-bg)",border:"1px solid var(--green)33",marginBottom:12}}>
+                          <p style={{color:"var(--green)",fontWeight:700,fontSize:13,margin:"0 0 6px"}}>✅ Escala interpretada!</p>
+                          <p style={{color:"var(--text2)",fontSize:13,margin:"0 0 10px",lineHeight:1.6}}>{aiSchedPreview.resumo}</p>
+                          <div style={{maxHeight:180,overflowY:"auto"}}>
                             {areaEmps.map(e => {
                               const days = aiSchedPreview.escala[e.id] ?? {};
-                              const offs = Object.entries(days).filter(([,s])=>s===DAY_OFF).length;
-                              const vacs = Object.entries(days).filter(([,s])=>s===DAY_VACATION).length;
-                              const faultus = Object.entries(days).filter(([,s])=>s===DAY_FAULT_U).length;
+                              const entries = Object.entries(days);
+                              if (!entries.length) return null;
                               return (
-                                <div key={e.id} style={{display:"flex",justifyContent:"space-between",padding:"5px 0",borderBottom:"1px solid var(--border)",fontSize:12}}>
-                                  <span style={{color:"var(--text)"}}>{e.name}</span>
+                                <div key={e.id} style={{padding:"5px 0",borderBottom:"1px solid var(--border)",fontSize:12}}>
+                                  <span style={{color:"var(--text)",fontWeight:600}}>{e.name}:</span>{" "}
                                   <span style={{color:"var(--text3)"}}>
-                                    {offs>0?`${offs} folga${offs>1?"s":""} `:""}{vacs>0?`${vacs} dia${vacs>1?"s":""} férias `:""}{faultus>0?`${faultus} falta`:""}{offs===0&&vacs===0&&faultus===0?"normal":""}
+                                    {entries.map(([date,status])=>{
+                                      const labels = {off:"Folga",comp:"Comp.",vac:"Férias",faultj:"Falta Just.",faultu:"Falta Injust."};
+                                      return `${date.slice(8)}/${date.slice(5,7)} ${labels[status]??status}`;
+                                    }).join(" · ")}
                                   </span>
                                 </div>
                               );
                             })}
                           </div>
-                          <p style={{color:"var(--text3)",fontSize:12,margin:"0 0 12px",fontStyle:"italic"}}>⚠️ Revise a escala gerada antes de confirmar. Você pode ajustar manualmente após aplicar.</p>
-                          <div style={{display:"flex",gap:8}}>
-                            <button onClick={confirmarEscala} style={{...S.btnPrimary,flex:1,fontSize:13}}>✅ Aplicar escala</button>
-                            <button onClick={()=>{setAiSchedStep(2);setAiSchedPreview(null);}} style={S.btnSecondary}>← Refazer</button>
-                            <button onClick={()=>{setShowAiSched(false);setAiSchedStep(0);setAiSchedPreview(null);}} style={{...S.btnSecondary,color:"var(--red)"}}>Cancelar</button>
-                          </div>
                         </div>
                       )}
+
+                      <div style={{display:"flex",gap:8}}>
+                        <button onClick={gerarEscalaIA} disabled={!aiSchedInput.trim()||aiSchedLoading}
+                          style={{...S.btnPrimary,flex:1,fontSize:13,opacity:(!aiSchedInput.trim()||aiSchedLoading)?0.6:1}}>
+                          {aiSchedLoading?"✨ Interpretando...":"✨ Interpretar"}
+                        </button>
+                        {aiSchedPreview && (
+                          <button onClick={confirmarEscala} style={{...S.btnPrimary,flex:1,fontSize:13,background:"var(--green)"}}>
+                            ✅ Aplicar
+                          </button>
+                        )}
+                        <button onClick={()=>{setShowAiSched(false);setAiSchedPreview(null);setAiSchedInput("");}} style={S.btnSecondary}>Fechar</button>
+                      </div>
+                      <p style={{color:"var(--text3)",fontSize:11,margin:"10px 0 0",fontStyle:"italic"}}>Revise sempre antes de aplicar. Ajustes manuais podem ser feitos depois.</p>
                     </div>
                   )}
                 </div>
