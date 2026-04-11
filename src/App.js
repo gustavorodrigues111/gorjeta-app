@@ -941,7 +941,7 @@ function validateWeekSchedule(days) {
 }
 
 // ── Work Schedule Manager Tab ─────────────────────────────────────────────────
-function WorkScheduleManagerTab({ restaurantId, employees, workSchedules, notifications, managers, currentManagerName, onUpdate, communications }) {
+function WorkScheduleManagerTab({ restaurantId, employees, workSchedules, notifications, managers, currentManagerName, onUpdate, communications, isSuperManager }) {
   const ac = "#f5c842";
   const restEmps = employees.filter(e => e.restaurantId === restaurantId && !e.inactive);
   const [selEmpId, setSelEmpId] = useState(null);
@@ -949,6 +949,7 @@ function WorkScheduleManagerTab({ restaurantId, employees, workSchedules, notifi
   const [errors, setErrors] = useState([]);
   const [showValidFrom, setShowValidFrom] = useState(false);
   const [validFrom, setValidFrom] = useState(today());
+  const [selectedSchedIds, setSelectedSchedIds] = useState(new Set());
 
   const selEmp = restEmps.find(e => e.id === selEmpId);
   const empSchedules = workSchedules?.[restaurantId]?.[selEmpId] ?? [];
@@ -1075,11 +1076,40 @@ function WorkScheduleManagerTab({ restaurantId, employees, workSchedules, notifi
             📂 Histórico ({empSchedules.length} versões)
           </summary>
           <div style={{paddingTop:8}}>
+            {isSuperManager && (
+              <div style={{padding:"6px 12px 10px",display:"flex",alignItems:"center",gap:10,flexWrap:"wrap"}}>
+                <span style={{color:"var(--text3)",fontSize:11}}>Selecione versões para apagar (a versão atual não pode ser removida):</span>
+                {selectedSchedIds.size > 0 && (
+                  <button onClick={()=>{
+                    if(!window.confirm(`Apagar ${selectedSchedIds.size} versão(ões) do histórico de ${selEmp?.name}? Esta ação não pode ser desfeita.`)) return;
+                    const remaining = empSchedules.filter(s => !selectedSchedIds.has(s.id));
+                    onUpdate("workSchedules", {
+                      ...workSchedules,
+                      [restaurantId]: { ...(workSchedules?.[restaurantId]??{}), [selEmpId]: remaining }
+                    });
+                    setSelectedSchedIds(new Set());
+                    onUpdate("_toast", `🗑️ ${selectedSchedIds.size} versão(ões) apagada(s)`);
+                  }} style={{padding:"5px 12px",borderRadius:8,border:"none",background:"#ef4444",color:"#fff",fontWeight:700,cursor:"pointer",fontFamily:"DM Mono,monospace",fontSize:11}}>
+                    🗑️ Apagar selecionadas ({selectedSchedIds.size})
+                  </button>
+                )}
+              </div>
+            )}
             {[...empSchedules].reverse().slice(1).map(s => (
-              <div key={s.id} style={{padding:"6px 12px",borderBottom:"1px solid #1a1a1a",fontSize:12}}>
+              <div key={s.id} style={{padding:"6px 12px",borderBottom:"1px solid #1a1a1a",fontSize:12,display:"flex",alignItems:"center",gap:10,background:selectedSchedIds.has(s.id)?"#1a0a0a":"transparent"}}>
+                {isSuperManager && (
+                  <input type="checkbox" checked={selectedSchedIds.has(s.id)}
+                    onChange={e=>{
+                      const next = new Set(selectedSchedIds);
+                      e.target.checked ? next.add(s.id) : next.delete(s.id);
+                      setSelectedSchedIds(next);
+                    }}
+                    style={{accentColor:"#ef4444",cursor:"pointer",width:14,height:14}}
+                  />
+                )}
                 <span style={{color:"var(--text2)"}}>Vigente de {fmtDate(s.validFrom)}</span>
-                <span style={{color:"var(--text3)",marginLeft:12}}>por {s.createdBy}</span>
-                <span style={{color:"var(--text3)",marginLeft:12}}>{fmtHHMM(s.totalContract)}/sem</span>
+                <span style={{color:"var(--text3)",marginLeft:4}}>por {s.createdBy}</span>
+                <span style={{color:"var(--text3)",marginLeft:4}}>{fmtHHMM(s.totalContract)}/sem</span>
               </div>
             ))}
           </div>
@@ -1241,10 +1271,11 @@ function WorkScheduleEmployeeTab({ empId, restaurantId, workSchedules }) {
   );
 }
 
-function DpManagerTab({ restaurantId, dpMessages, onUpdate }) {
+function DpManagerTab({ restaurantId, dpMessages, onUpdate, isSuperManager }) {
   const msgs = dpMessages.filter(m => m.restaurantId === restaurantId)
     .sort((a, b) => b.date.localeCompare(a.date));
   const [filter, setFilter] = useState("all");
+  const [selectedIds, setSelectedIds] = useState(new Set());
   const CATS = { all: "Todos", sugestao: "💡 Sugestões", elogio: "👏 Elogios", reclamacao: "⚠️ Reclamações", denuncia: "🚨 Denúncias" };
   const filtered = filter === "all" ? msgs : msgs.filter(m => m.category === filter);
   const unread = msgs.filter(m => !m.read).length;
@@ -1254,19 +1285,46 @@ function DpManagerTab({ restaurantId, dpMessages, onUpdate }) {
     onUpdate("dpMessages", dpMessages.map(m => m.id === id ? { ...m, read: true } : m));
   }
 
+  function toggleSelect(id) {
+    const next = new Set(selectedIds);
+    next.has(id) ? next.delete(id) : next.add(id);
+    setSelectedIds(next);
+  }
+
+  function deleteSelected() {
+    if(!window.confirm(`Apagar ${selectedIds.size} mensagem(ns) permanentemente? Esta ação não pode ser desfeita.`)) return;
+    onUpdate("dpMessages", dpMessages.filter(m => !selectedIds.has(m.id)));
+    setSelectedIds(new Set());
+    onUpdate("_toast", `🗑️ ${selectedIds.size} mensagem(ns) apagada(s)`);
+  }
+
   return (
     <div>
       {unread > 0 && <div style={{ background: "#f5c84222", border: "1px solid #f5c84244", borderRadius: 10, padding: "8px 14px", marginBottom: 12, fontSize: 12, color: ac, fontFamily: "DM Mono,monospace" }}>📬 {unread} mensagem{unread > 1 ? "s" : ""} não lida{unread > 1 ? "s" : ""}</div>}
-      <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 16 }}>
-        {Object.entries(CATS).map(([val, lbl]) => (
-          <button key={val} onClick={() => setFilter(val)} style={{ padding: "6px 12px", borderRadius: 20, border: `1px solid ${filter === val ? ac : "#2a2a2a"}`, background: filter === val ? ac + "22" : "transparent", color: filter === val ? ac : "#555", cursor: "pointer", fontFamily: "DM Mono,monospace", fontSize: 11 }}>{lbl}</button>
-        ))}
+
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:8,marginBottom:16}}>
+        <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+          {Object.entries(CATS).map(([val, lbl]) => (
+            <button key={val} onClick={() => setFilter(val)} style={{ padding: "6px 12px", borderRadius: 20, border: `1px solid ${filter === val ? ac : "#2a2a2a"}`, background: filter === val ? ac + "22" : "transparent", color: filter === val ? ac : "#555", cursor: "pointer", fontFamily: "DM Mono,monospace", fontSize: 11 }}>{lbl}</button>
+          ))}
+        </div>
+        {isSuperManager && selectedIds.size > 0 && (
+          <button onClick={deleteSelected} style={{padding:"6px 14px",borderRadius:8,border:"none",background:"#ef4444",color:"#fff",fontWeight:700,cursor:"pointer",fontFamily:"DM Mono,monospace",fontSize:12}}>
+            🗑️ Apagar selecionadas ({selectedIds.size})
+          </button>
+        )}
       </div>
+
       {filtered.length === 0 && <p style={{ color: "var(--text3)", textAlign: "center" }}>Nenhuma mensagem.</p>}
       {filtered.map(m => (
-        <div key={m.id} style={{ ...S.card, marginBottom: 10, opacity: m.read ? 0.7 : 1, borderColor: m.read ? "#2a2a2a" : "#f5c84244" }}>
-          <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}>
+        <div key={m.id} style={{ ...S.card, marginBottom: 10, opacity: m.read ? 0.7 : 1, borderColor: selectedIds.has(m.id) ? "#ef444488" : m.read ? "#2a2a2a" : "#f5c84244", background: selectedIds.has(m.id) ? "#1a0808" : undefined }}>
+          <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8, alignItems:"flex-start" }}>
             <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+              {isSuperManager && (
+                <input type="checkbox" checked={selectedIds.has(m.id)} onChange={()=>toggleSelect(m.id)}
+                  style={{accentColor:"#ef4444",cursor:"pointer",width:14,height:14,flexShrink:0}}
+                />
+              )}
               <span style={{ color: "var(--text2)", fontSize: 12 }}>{CATS[m.category] ?? m.category}</span>
               {!m.read && <span style={{ background: ac, color: "#111", borderRadius: 4, padding: "1px 6px", fontSize: 10, fontWeight: 700 }}>Novo</span>}
             </div>
@@ -3254,12 +3312,12 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
 
         {/* FALE COM DP */}
         {tab === "dp" && (
-          <DpManagerTab restaurantId={rid} dpMessages={data?.dpMessages ?? []} onUpdate={onUpdate} />
+          <DpManagerTab restaurantId={rid} dpMessages={data?.dpMessages ?? []} onUpdate={onUpdate} isSuperManager={isSuperManager} />
         )}
 
         {/* HORARIOS */}
         {tab === "horarios" && (
-          <WorkScheduleManagerTab restaurantId={rid} employees={employees} workSchedules={data?.workSchedules??{}} notifications={data?.notifications??[]} managers={data?.managers??[]} currentManagerName={currentUser?.name ?? (isSuperManager?"Super Gestor":"Gestor")} onUpdate={onUpdate} communications={data?.communications??[]} />
+          <WorkScheduleManagerTab restaurantId={rid} employees={employees} workSchedules={data?.workSchedules??{}} notifications={data?.notifications??[]} managers={data?.managers??[]} currentManagerName={currentUser?.name ?? (isSuperManager?"Super Gestor":"Gestor")} onUpdate={onUpdate} communications={data?.communications??[]} isSuperManager={isSuperManager} />
         )}
 
         {/* NOTIFICAÇÕES */}
