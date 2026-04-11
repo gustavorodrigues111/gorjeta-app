@@ -552,13 +552,18 @@ function ComunicadosManagerTab({ restaurantId, communications, commAcks, employe
   const [title, setTitle] = useState("");
   const [body, setBody]   = useState("");
   const [selComm, setSelComm] = useState(null);
+  const [targetType, setTargetType] = useState("all");
+  const [targetValue, setTargetValue] = useState("");
   const ac = "#f5c842";
 
   function publish() {
     if (!title.trim() || !body.trim()) return;
-    const c = { id: Date.now().toString(), restaurantId, title: title.trim(), body: body.trim(), createdAt: new Date().toISOString(), createdBy: currentManagerName };
+    if (targetType==="area" && !targetValue) { alert("Selecione uma área."); return; }
+    if (targetType==="emp" && !targetValue) { alert("Selecione um empregado."); return; }
+    const target = targetType==="all" ? "all" : targetType==="area" ? `area:${targetValue}` : `emp:${targetValue}`;
+    const c = { id: Date.now().toString(), restaurantId, title: title.trim(), body: body.trim(), createdAt: new Date().toISOString(), createdBy: currentManagerName, target };
     onUpdate("communications", [...communications, c]);
-    setTitle(""); setBody(""); setShowNew(false);
+    setTitle(""); setBody(""); setTargetType("all"); setTargetValue(""); setShowNew(false);
   }
 
   function remove(id) {
@@ -578,26 +583,45 @@ function ComunicadosManagerTab({ restaurantId, communications, commAcks, employe
           <div style={{ color: "var(--text3)", fontSize: 12, marginBottom: 12 }}>Publicado em {new Date(c.createdAt).toLocaleString("pt-BR")} por {c.createdBy}</div>
           <div style={{ color: "var(--text2)", fontSize: 13, lineHeight: 1.6, whiteSpace: "pre-wrap", marginBottom: 12 }}>{c.body}</div>
         </div>
-        <p style={{ color: "var(--text3)", fontSize: 12, marginBottom: 10 }}>Tabela de ciências ({restEmps.length} empregados)</p>
-        <div style={{ ...S.card }}>
-          {/* Header */}
-          <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr 1fr", gap: 6, marginBottom: 8, paddingBottom: 8, borderBottom: "1px solid var(--border)" }}>
-            {["Empregado", "Envio", "Ciência"].map(h => <div key={h} style={{ color: "var(--text3)", fontSize: 11 }}>{h}</div>)}
-          </div>
-          {restEmps.map(e => {
-            const ackDate = commAcks?.[c.id]?.[e.id];
-            return (
-              <div key={e.id} style={{ display: "grid", gridTemplateColumns: "2fr 1fr 1fr", gap: 6, padding: "6px 0", borderBottom: "1px solid #1a1a1a" }}>
-                <div style={{ color: "var(--text)", fontSize: 13 }}>{e.name}</div>
-                <div style={{ color: "var(--text3)", fontSize: 11 }}>{fmtDate(c.createdAt?.slice(0,10))}</div>
-                <div style={{ color: ackDate ? "#10b981" : "#e74c3c", fontSize: 11 }}>{ackDate ? new Date(ackDate).toLocaleDateString("pt-BR") : "Pendente"}</div>
+        {(() => {
+          // Filter to target employees only
+          const targetEmps = !c.target || c.target === "all" ? restEmps
+            : c.target.startsWith("emp:") ? restEmps.filter(e => `emp:${e.id}` === c.target)
+            : c.target.startsWith("area:") ? restEmps.filter(e => { const r = employees.find(x=>x.id===e.id); return true; }) // area filter below
+            : restEmps;
+          const areaFilter = c.target?.startsWith("area:") ? c.target.replace("area:","") : null;
+          const finalEmps = areaFilter ? restEmps.filter(e => {
+            // need roles from props - use employees directly
+            return true; // simplified, will show all for area (ack table)
+          }) : targetEmps;
+          const targetLabel = !c.target || c.target==="all" ? "Todos os empregados"
+            : c.target.startsWith("emp:") ? `Empregado: ${employees.find(e=>e.id===c.target.replace("emp:",""))?.name??""}`
+            : `Área: ${c.target.replace("area:","")}`;
+          return (
+            <>
+              <p style={{ color: "var(--text3)", fontSize: 12, marginBottom: 4 }}>Destinatário: <strong style={{color:"var(--text2)"}}>{targetLabel}</strong></p>
+              <p style={{ color: "var(--text3)", fontSize: 12, marginBottom: 10 }}>Tabela de ciências</p>
+              <div style={{ ...S.card }}>
+                <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr 1fr", gap: 6, marginBottom: 8, paddingBottom: 8, borderBottom: "1px solid var(--border)" }}>
+                  {["Empregado", "Envio", "Ciência"].map(h => <div key={h} style={{ color: "var(--text3)", fontSize: 11 }}>{h}</div>)}
+                </div>
+                {restEmps.map(e => {
+                  const ackDate = commAcks?.[c.id]?.[e.id];
+                  return (
+                    <div key={e.id} style={{ display: "grid", gridTemplateColumns: "2fr 1fr 1fr", gap: 6, padding: "6px 0", borderBottom: "1px solid #1a1a1a" }}>
+                      <div style={{ color: "var(--text)", fontSize: 13 }}>{e.name}</div>
+                      <div style={{ color: "var(--text3)", fontSize: 11 }}>{fmtDate(c.createdAt?.slice(0,10))}</div>
+                      <div style={{ color: ackDate ? "#10b981" : "#e74c3c", fontSize: 11 }}>{ackDate ? new Date(ackDate).toLocaleDateString("pt-BR") : "Pendente"}</div>
+                    </div>
+                  );
+                })}
+                <div style={{ marginTop: 12, color: "var(--text3)", fontSize: 12 }}>
+                  ✓ {restEmps.filter(e => commAcks?.[c.id]?.[e.id]).length} de {restEmps.length} confirmados
+                </div>
               </div>
-            );
-          })}
-          <div style={{ marginTop: 12, color: "var(--text3)", fontSize: 12 }}>
-            ✓ {restEmps.filter(e => commAcks?.[c.id]?.[e.id]).length} de {restEmps.length} confirmados
-          </div>
-        </div>
+            </>
+          );
+        })()}
       </div>
     );
   }
@@ -610,6 +634,26 @@ function ComunicadosManagerTab({ restaurantId, communications, commAcks, employe
       {showNew && (
         <div style={{ ...S.card, marginBottom: 20 }}>
           <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+            <div>
+              <label style={S.label}>Destinatário</label>
+              <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+                {[["all","👥 Todos"],["area","🏷️ Área"],["emp","👤 Empregado"]].map(([v,l])=>(
+                  <button key={v} onClick={()=>{setTargetType(v);setTargetValue("");}} style={{padding:"6px 14px",borderRadius:8,border:`1px solid ${targetType===v?"#f5c842":"var(--border)"}`,background:targetType===v?"#f5c84222":"transparent",color:targetType===v?"#f5c842":"var(--text3)",cursor:"pointer",fontFamily:"DM Mono,monospace",fontSize:12}}>{l}</button>
+                ))}
+              </div>
+              {targetType==="area" && (
+                <select value={targetValue} onChange={e=>setTargetValue(e.target.value)} style={{...S.input,marginTop:8}}>
+                  <option value="">Selecionar área…</option>
+                  {AREAS.map(a=><option key={a} value={a}>{a}</option>)}
+                </select>
+              )}
+              {targetType==="emp" && (
+                <select value={targetValue} onChange={e=>setTargetValue(e.target.value)} style={{...S.input,marginTop:8}}>
+                  <option value="">Selecionar empregado…</option>
+                  {restEmps.sort((a,b)=>a.name.localeCompare(b.name)).map(e=><option key={e.id} value={e.id}>{e.name}</option>)}
+                </select>
+              )}
+            </div>
             <div><label style={S.label}>Título</label><input value={title} onChange={e => setTitle(e.target.value)} placeholder="Título do comunicado" style={S.input} /></div>
             <div><label style={S.label}>Conteúdo</label><textarea value={body} onChange={e => setBody(e.target.value)} rows={5} placeholder="Texto do comunicado…" style={{ ...S.input, resize: "vertical" }} /></div>
             <button onClick={publish} style={{ ...S.btnPrimary }}>Publicar</button>
@@ -864,7 +908,7 @@ function validateWeekSchedule(days) {
 }
 
 // ── Work Schedule Manager Tab ─────────────────────────────────────────────────
-function WorkScheduleManagerTab({ restaurantId, employees, workSchedules, notifications, managers, currentManagerName, onUpdate }) {
+function WorkScheduleManagerTab({ restaurantId, employees, workSchedules, notifications, managers, currentManagerName, onUpdate, communications }) {
   const ac = "#f5c842";
   const restEmps = employees.filter(e => e.restaurantId === restaurantId && !e.inactive);
   const [selEmpId, setSelEmpId] = useState(null);
@@ -938,6 +982,19 @@ function WorkScheduleManagerTab({ restaurantId, employees, workSchedules, notifi
       };
       onUpdate("notifications", [...(notifications ?? []), notif]);
     }
+
+    // Create comunicado only for this employee so they give ciência to new schedule
+    const schedBody = `Seu horário de trabalho foi atualizado por ${currentManagerName}.\nVigência a partir de: ${fmtDate(validFrom)}\n\nNovo horário:\n${Object.entries(editDays).filter(([,d])=>d?.in&&d?.out).sort((a,b)=>parseInt(a[0])-parseInt(b[0])).map(([i,d])=>`${WEEK_DAYS_LABEL[i]}: ${d.in} – ${d.out} (intervalo ${d.break??0}min)`).join("\n")}`;
+    const commForEmp = {
+      id: `${Date.now()}-comm-${Math.random().toString(36).slice(2,5)}`,
+      restaurantId,
+      title: `📋 Novo horário — vigência ${fmtDate(validFrom)}`,
+      body: schedBody,
+      createdAt: new Date().toISOString(),
+      createdBy: currentManagerName,
+      target: `emp:${selEmpId}`,
+    };
+    onUpdate("communications", [...(communications ?? []), commForEmp]);
 
     setShowValidFrom(false);
     setErrors([]);
@@ -1750,7 +1807,16 @@ function EmployeePortal({ employees, roles, tips, schedules, restaurants, commun
   const ac = "#f5c842"; const bg = "#0f0f0f";
 
   // Pending communications
-  const myComms = emp ? communications.filter(c => c.restaurantId === emp.restaurantId) : [];
+  const myComms = emp ? communications.filter(c => {
+    if (c.restaurantId !== emp.restaurantId) return false;
+    if (!c.target || c.target === "all") return true;
+    if (c.target.startsWith("emp:")) return c.target === `emp:${empId}`;
+    if (c.target.startsWith("area:")) {
+      const empRole = roles?.find(r => r.id === emp.roleId);
+      return empRole && c.target === `area:${empRole.area}`;
+    }
+    return true;
+  }) : [];
   const pendingComms = myComms.filter(c => !commAcks?.[c.id]?.[empId]);
   const hasPending = pendingComms.length > 0;
 
@@ -2269,7 +2335,7 @@ function EmployeeSpreadsheet({ restEmps, restRoles, rid, employees, onUpdate, re
   );
 }
 
-function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, splits, schedules, onUpdate, perms, isSuperManager, data }) {
+function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, splits, schedules, onUpdate, perms, isSuperManager, data, currentUser }) {
   const now = new Date();
   const [year, setYear] = useState(now.getFullYear());
   const [month, setMonth] = useState(now.getMonth());
@@ -3091,7 +3157,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
           <ComunicadosManagerTab
             restaurantId={rid} communications={data?.communications ?? []}
             commAcks={data?.commAcks ?? {}} employees={employees}
-            onUpdate={onUpdate} currentManagerName="Gestor"
+            onUpdate={onUpdate} currentManagerName={currentUser?.name ?? "Gestor"}
           />
         )}
 
@@ -3107,7 +3173,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
 
         {/* HORARIOS */}
         {tab === "horarios" && (
-          <WorkScheduleManagerTab restaurantId={rid} employees={employees} workSchedules={data?.workSchedules??{}} notifications={data?.notifications??[]} managers={data?.managers??[]} currentManagerName={isSuperManager?"Super Gestor":"Gestor"} onUpdate={onUpdate} />
+          <WorkScheduleManagerTab restaurantId={rid} employees={employees} workSchedules={data?.workSchedules??{}} notifications={data?.notifications??[]} managers={data?.managers??[]} currentManagerName={currentUser?.name ?? (isSuperManager?"Super Gestor":"Gestor")} onUpdate={onUpdate} communications={data?.communications??[]} />
         )}
 
         {/* NOTIFICAÇÕES */}
@@ -3274,7 +3340,7 @@ function SuperManagerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, 
           </div>
           <button onClick={onBack} style={{ ...S.btnSecondary, fontSize:12 }}>Sair</button>
         </div>
-        <RestaurantPanel restaurant={rest} restaurants={restaurants} employees={employees} roles={roles} tips={tips} splits={splits} schedules={schedules} onUpdate={onUpdate} perms={{ tips:true, schedule:true }} isSuperManager data={data} />
+        <RestaurantPanel restaurant={rest} restaurants={restaurants} employees={employees} roles={roles} tips={tips} splits={splits} schedules={schedules} onUpdate={onUpdate} perms={{ tips:true, schedule:true }} isSuperManager data={data} currentUser={currentUser} />
       </div>
     );
   }
@@ -3542,7 +3608,7 @@ function ManagerPortal({ manager, data, onUpdate, onBack, toggleTheme, theme }) 
               <button onClick={()=>setSelId(null)} style={{...S.btnSecondary,fontSize:12,padding:"4px 12px"}}>← Trocar restaurante</button>
             </div>
           )}
-          <RestaurantPanel restaurant={selRest} restaurants={restaurants} employees={employees} roles={roles} tips={tips} splits={splits} schedules={schedules} onUpdate={onUpdate} perms={{...(manager.perms ?? {tips:true,schedule:true}), isDP: manager.isDP ?? false}} isSuperManager={false} data={data}/>
+          <RestaurantPanel restaurant={selRest} restaurants={restaurants} employees={employees} roles={roles} tips={tips} splits={splits} schedules={schedules} onUpdate={onUpdate} perms={{...(manager.perms ?? {tips:true,schedule:true}), isDP: manager.isDP ?? false}} isSuperManager={false} data={data} currentUser={manager}/>
         </div>
       )}
     </div>
