@@ -4213,6 +4213,8 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }
             return hoje;
           })();
           const proxFim = tipo === "anual" ? addDays(addYear(proxIni), -1) : addDays(proxIni, 29);
+          // Vencimento = último dia do ciclo ATUAL (cliente paga antes do próximo começar)
+          const proxVenc = cicloFim ?? trialFim ?? proxFim;
           const proxLabel = `${fmt(proxIni)} a ${fmt(proxFim)}`;
 
           // ─── Helpers de persistência ────────────────────────────────
@@ -4415,7 +4417,7 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }
 
                   <div style={{marginBottom:12}}>
                     <div style={{color:"var(--text)",fontWeight:700,fontSize:15,marginBottom:2}}>{fmt(cobPeriodo||proxIni)} a {fmt(cobVenc||proxFim)}</div>
-                    <div style={{color:"var(--text3)",fontSize:12,marginBottom:10}}>{tipo==="anual"?"Ciclo anual":"Ciclo 30 dias"} · Venc. {fmt(cobVenc||proxFim)}</div>
+                    <div style={{color:"var(--text3)",fontSize:12,marginBottom:10}}>{tipo==="anual"?"Ciclo anual":"Ciclo 30 dias"} · Venc. {fmt(cobVenc||proxVenc)}</div>
                     <div style={{display:"flex",flexDirection:"column",gap:8}}>
                       <div style={{display:"flex",alignItems:"center",gap:8}}>
                         <span style={{color:"var(--text3)",fontSize:12,width:80,flexShrink:0}}>Início:</span>
@@ -4425,7 +4427,7 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }
                       </div>
                       <div style={{display:"flex",alignItems:"center",gap:8}}>
                         <span style={{color:"var(--text3)",fontSize:12,width:80,flexShrink:0}}>Vencimento:</span>
-                        <input key={`fim-${proxFim}`} type="date" defaultValue={cobVenc||proxFim}
+                        <input key={`fim-${proxVenc}`} type="date" defaultValue={cobVenc||proxVenc}
                           onChange={e=>setCobVenc(e.target.value)}
                           style={{...S.input,fontSize:13,flex:1,boxSizing:"border-box"}}/>
                       </div>
@@ -4472,9 +4474,10 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }
                   if(cobForma==="link"&&!cobLink.trim()){alert("Cole o link de pagamento.");return;}
                   const ini=cobPeriodo||proxIni;
                   const fim=cobVenc||proxFim;
+                  const venc=cobVenc||proxVenc;
                   const pLabel=`${fmt(ini)} a ${fmt(fim)}`;
                   const chave=cobForma==="pix"?(cobChave||PIX_PADRAO):cobLink;
-                  const cob={id:Date.now().toString(),periodoLabel:pLabel,periodoInicio:ini,periodoFim:fim,venc:fim,valor,forma:cobForma==="pix"?"PIX":"Link",chave,criadaEm:new Date().toISOString(),status:"pendente"};
+                  const cob={id:Date.now().toString(),periodoLabel:pLabel,periodoInicio:ini,periodoFim:fim,venc,valor,forma:cobForma==="pix"?"PIX":"Link",chave,criadaEm:new Date().toISOString(),status:"pendente"};
                   saveFin({cobrancas:[...(fin.cobrancas??[]).filter(c=>!(c.autoGerada&&c.status==="pendente")),cob]});
                   const faturaUrl=`https://apptip.app/fatura/${cob.id}`;
                   const msg=`Ola, *${rest?.name}*!\n\nSegue o link da sua fatura *AppTip* referente ao periodo *${pLabel}*:\n\n${faturaUrl}\n\nQualquer duvida estamos a disposicao!\n*Equipe AppTip*`;
@@ -5462,6 +5465,10 @@ function ManagerPortal({ manager, data, onUpdate, onBack, toggleTheme, theme }) 
           <button onClick={toggleTheme} style={{background:"none",border:"1px solid var(--border)",borderRadius:20,padding:"6px 10px",cursor:"pointer",fontSize:16,color:"var(--text2)"}}>
             {theme==="dark"?"☀️":"🌙"}
           </button>
+          <a href="/guia-gestor" target="_blank" rel="noreferrer"
+            style={{...S.btnSecondary,fontSize:12,textDecoration:"none",display:"flex",alignItems:"center",gap:4}}>
+            ❓ Ajuda
+          </a>
           <button onClick={onBack} style={{...S.btnSecondary,fontSize:12}}>Sair</button>
         </div>
       </div>
@@ -6251,6 +6258,1039 @@ function FaturaPage({ faturaId, restaurants, onUpdate, loaded }) {
 }
 
 //
+// GUIA DO GESTOR
+//
+function GuiaGestor() {
+  const html = `<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>AppTip — Guia do Gestor</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=DM+Sans:ital,wght@0,300;0,400;0,500;0,700;0,800;1,400&family=DM+Mono:wght@400;500&display=swap');
+
+  :root {
+    --ac: #d4a017;
+    --ac-light: #fef9ee;
+    --ac-border: #f0d080;
+    --text: #1c1208;
+    --text2: #4a3b1f;
+    --text3: #8c7a5e;
+    --bg: #faf8f4;
+    --card: #ffffff;
+    --border: #ede8df;
+    --green: #16a34a;
+    --green-bg: #f0fdf4;
+    --red: #dc2626;
+    --red-bg: #fef2f2;
+    --blue: #2563eb;
+    --blue-bg: #eff6ff;
+    --purple-bg: #f5f0ff;
+    --sidebar-w: 260px;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    font-family: 'DM Sans', sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.6;
+  }
+
+  /* Layout */
+  .layout { display: flex; min-height: 100vh; }
+
+  /* Sidebar */
+  .sidebar {
+    width: var(--sidebar-w);
+    background: var(--text);
+    position: fixed;
+    top: 0; left: 0; bottom: 0;
+    overflow-y: auto;
+    padding: 0 0 40px;
+    z-index: 100;
+  }
+
+  .sidebar-logo {
+    padding: 24px 20px;
+    border-bottom: 1px solid #2e2010;
+    display: flex; align-items: center; gap: 10px;
+  }
+  .sidebar-logo .icon { font-size: 22px; }
+  .sidebar-logo .name { font-weight: 800; font-size: 18px; color: #fff; letter-spacing: -0.5px; }
+  .sidebar-logo .name span { color: var(--ac); }
+  .sidebar-logo .badge {
+    font-size: 10px; background: var(--ac); color: #fff;
+    padding: 2px 7px; border-radius: 20px; font-weight: 700;
+    margin-left: auto;
+  }
+
+  .sidebar-section {
+    padding: 20px 16px 4px;
+    font-size: 10px; font-weight: 700;
+    text-transform: uppercase; letter-spacing: 1px;
+    color: #6b5a3e;
+  }
+
+  .sidebar a {
+    display: flex; align-items: center; gap: 10px;
+    padding: 9px 16px;
+    color: #c8b89a;
+    text-decoration: none;
+    font-size: 13px;
+    border-radius: 8px;
+    margin: 2px 8px;
+    transition: all 0.15s;
+  }
+  .sidebar a:hover, .sidebar a.active {
+    background: #2a1e0e;
+    color: #fff;
+  }
+  .sidebar a .icon { font-size: 15px; width: 20px; text-align: center; }
+
+  /* Main */
+  .main {
+    margin-left: var(--sidebar-w);
+    flex: 1;
+    max-width: calc(100% - var(--sidebar-w));
+  }
+
+  /* Header */
+  .topbar {
+    background: var(--card);
+    border-bottom: 1px solid var(--border);
+    padding: 20px 40px;
+    display: flex; align-items: center; justify-content: space-between;
+    position: sticky; top: 0; z-index: 50;
+  }
+  .topbar h1 { font-size: 22px; font-weight: 800; color: var(--text); }
+  .topbar .subtitle { font-size: 13px; color: var(--text3); margin-top: 2px; }
+  .topbar .version {
+    font-size: 11px; background: var(--ac-light); color: var(--ac);
+    border: 1px solid var(--ac-border); padding: 4px 12px; border-radius: 20px;
+    font-family: 'DM Mono', monospace; font-weight: 500;
+  }
+
+  /* Content */
+  .content { padding: 40px; max-width: 820px; }
+
+  /* Section */
+  .section {
+    margin-bottom: 56px;
+    scroll-margin-top: 80px;
+  }
+
+  .section-header {
+    display: flex; align-items: center; gap: 12px;
+    margin-bottom: 20px;
+    padding-bottom: 14px;
+    border-bottom: 2px solid var(--border);
+  }
+  .section-header .icon-wrap {
+    width: 40px; height: 40px; border-radius: 10px;
+    background: var(--ac-light); border: 1px solid var(--ac-border);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 20px; flex-shrink: 0;
+  }
+  .section-header h2 {
+    font-size: 20px; font-weight: 800; color: var(--text);
+  }
+  .section-header p {
+    font-size: 13px; color: var(--text3); margin-top: 2px;
+  }
+
+  /* Cards */
+  .card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 20px 24px;
+    margin-bottom: 16px;
+  }
+  .card h3 {
+    font-size: 15px; font-weight: 700; color: var(--text);
+    margin-bottom: 8px; display: flex; align-items: center; gap: 8px;
+  }
+  .card p { font-size: 14px; color: var(--text2); line-height: 1.65; }
+  .card p + p { margin-top: 8px; }
+
+  /* Steps */
+  .steps { display: flex; flex-direction: column; gap: 12px; margin-top: 12px; }
+  .step {
+    display: flex; gap: 14px; align-items: flex-start;
+  }
+  .step-num {
+    width: 26px; height: 26px; border-radius: 50%;
+    background: var(--ac); color: #fff;
+    font-size: 12px; font-weight: 700;
+    display: flex; align-items: center; justify-content: center;
+    flex-shrink: 0; margin-top: 1px;
+  }
+  .step-content { flex: 1; }
+  .step-content strong { color: var(--text); font-size: 14px; }
+  .step-content p { color: var(--text2); font-size: 13px; margin-top: 3px; }
+
+  /* Info boxes */
+  .info-box {
+    border-radius: 10px;
+    padding: 14px 16px;
+    margin-top: 14px;
+    font-size: 13px;
+    display: flex; gap: 10px; align-items: flex-start;
+  }
+  .info-box.tip { background: var(--ac-light); border: 1px solid var(--ac-border); color: var(--text2); }
+  .info-box.warning { background: #fffbeb; border: 1px solid #fde68a; color: #92400e; }
+  .info-box.green { background: var(--green-bg); border: 1px solid #86efac; color: #166534; }
+  .info-box.blue { background: var(--blue-bg); border: 1px solid #bfdbfe; color: #1d4ed8; }
+  .info-box .icon { font-size: 16px; flex-shrink: 0; margin-top: 1px; }
+
+  /* Tags */
+  .tag {
+    display: inline-flex; align-items: center; gap: 4px;
+    padding: 2px 10px; border-radius: 20px;
+    font-size: 11px; font-weight: 700;
+    background: var(--ac-light); color: var(--ac);
+    border: 1px solid var(--ac-border);
+    font-family: 'DM Mono', monospace;
+  }
+  .tag.green { background: var(--green-bg); color: var(--green); border-color: #86efac; }
+  .tag.red { background: var(--red-bg); color: var(--red); border-color: #fca5a5; }
+  .tag.blue { background: var(--blue-bg); color: var(--blue); border-color: #bfdbfe; }
+  .tag.gray { background: var(--bg); color: var(--text3); border-color: var(--border); }
+
+  /* Table */
+  table { width: 100%; border-collapse: collapse; font-size: 13px; margin-top: 12px; }
+  th {
+    text-align: left; padding: 10px 14px;
+    background: var(--bg); color: var(--text3);
+    font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px;
+    border-bottom: 1px solid var(--border);
+  }
+  td { padding: 11px 14px; border-bottom: 1px solid var(--border); color: var(--text2); vertical-align: top; }
+  tr:last-child td { border-bottom: none; }
+  tr:hover td { background: var(--bg); }
+
+  /* Permission grid */
+  .perm-grid {
+    display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+    gap: 10px; margin-top: 14px;
+  }
+  .perm-item {
+    padding: 12px 14px; border-radius: 10px;
+    border: 1px solid var(--border); background: var(--card);
+    display: flex; align-items: center; gap: 8px;
+  }
+  .perm-item .perm-icon { font-size: 18px; }
+  .perm-item .perm-label { font-size: 13px; font-weight: 600; color: var(--text); }
+  .perm-item .perm-sub { font-size: 11px; color: var(--text3); margin-top: 1px; }
+
+  /* Hero intro */
+  .hero {
+    background: var(--text);
+    padding: 40px;
+    border-radius: 16px;
+    margin-bottom: 40px;
+    position: relative;
+    overflow: hidden;
+  }
+  .hero::before {
+    content: '';
+    position: absolute; top: -40px; right: -40px;
+    width: 200px; height: 200px;
+    background: radial-gradient(circle, #d4a01733 0%, transparent 70%);
+    border-radius: 50%;
+  }
+  .hero h2 { font-size: 24px; font-weight: 800; color: #fff; margin-bottom: 8px; }
+  .hero p { font-size: 15px; color: #c8b89a; line-height: 1.6; max-width: 560px; }
+  .hero .hero-chips { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 20px; }
+  .hero .chip {
+    padding: 6px 14px; border-radius: 20px;
+    background: #2a1e0e; color: #c8b89a;
+    font-size: 12px; font-weight: 600;
+    display: flex; align-items: center; gap: 6px;
+  }
+
+  /* Divider */
+  hr { border: none; border-top: 1px solid var(--border); margin: 24px 0; }
+
+  /* Mono */
+  code {
+    font-family: 'DM Mono', monospace;
+    font-size: 12px; background: var(--bg);
+    border: 1px solid var(--border);
+    padding: 2px 7px; border-radius: 5px;
+    color: var(--text2);
+  }
+
+  /* Responsive */
+  @media (max-width: 768px) {
+    .sidebar { display: none; }
+    .main { margin-left: 0; max-width: 100%; }
+    .topbar { padding: 16px 20px; }
+    .content { padding: 24px 20px; }
+    .hero { padding: 24px; }
+  }
+</style>
+</head>
+<body>
+
+<div class="layout">
+  <!-- Sidebar -->
+  <nav class="sidebar">
+    <div class="sidebar-logo">
+      <span class="icon">🍽️</span>
+      <span class="name">App<span>Tip</span></span>
+      <span class="badge">Gestor</span>
+    </div>
+
+    <div class="sidebar-section">Visão Geral</div>
+    <a href="#intro"><span class="icon">📖</span> Introdução</a>
+    <a href="#acesso"><span class="icon">🔐</span> Acesso e Login</a>
+    <a href="#restaurante"><span class="icon">🏢</span> Selecionar Restaurante</a>
+
+    <div class="sidebar-section">Funcionalidades</div>
+    <a href="#dashboard"><span class="icon">📊</span> Dashboard</a>
+    <a href="#gorjetas"><span class="icon">💸</span> Gorjetas</a>
+    <a href="#escala"><span class="icon">📅</span> Escala</a>
+    <a href="#cargos"><span class="icon">🏷️</span> Cargos</a>
+    <a href="#equipe"><span class="icon">👥</span> Equipe</a>
+    <a href="#horarios"><span class="icon">🕐</span> Horários</a>
+    <a href="#recibos"><span class="icon">📄</span> Recibos</a>
+    <a href="#comunicados"><span class="icon">📢</span> Comunicados</a>
+    <a href="#faq"><span class="icon">❓</span> FAQ</a>
+    <a href="#dp"><span class="icon">💬</span> Fale com DP</a>
+    <a href="#caixa"><span class="icon">📬</span> Caixa</a>
+
+    <div class="sidebar-section">Referência</div>
+    <a href="#permissoes"><span class="icon">🔑</span> Permissões</a>
+    <a href="#bloqueio"><span class="icon">🔒</span> Acesso Suspenso</a>
+  </nav>
+
+  <!-- Main -->
+  <div class="main">
+    <div class="topbar">
+      <div>
+        <h1>Guia do Gestor</h1>
+        <div class="subtitle">Manual completo de uso do AppTip para gestores de restaurante</div>
+      </div>
+      <span class="version">v4.6 · 2026</span>
+    </div>
+
+    <div class="content">
+
+      <!-- Hero -->
+      <div class="hero">
+        <h2>Bem-vindo ao AppTip 🍽️</h2>
+        <p>O AppTip é o sistema de gestão de gorjetas do seu restaurante. Como gestor, você tem acesso a ferramentas para lançar gorjetas, gerenciar sua equipe, escala, comunicados e muito mais — tudo em um só lugar.</p>
+        <div class="hero-chips">
+          <span class="chip">💸 Gorjetas automáticas</span>
+          <span class="chip">📅 Escala de trabalho</span>
+          <span class="chip">👥 Gestão de equipe</span>
+          <span class="chip">📢 Comunicados</span>
+          <span class="chip">💬 Fale com DP</span>
+        </div>
+      </div>
+
+      <!-- INTRO -->
+      <div class="section" id="intro">
+        <div class="section-header">
+          <div class="icon-wrap">📖</div>
+          <div>
+            <h2>O que é o AppTip?</h2>
+            <p>Visão geral do sistema para gestores</p>
+          </div>
+        </div>
+
+        <div class="card">
+          <h3>🎯 Para que serve?</h3>
+          <p>O AppTip centraliza o processo de distribuição de gorjetas do restaurante. O gestor lança o valor total arrecadado por dia, o sistema distribui automaticamente entre os empregados conforme o cargo e os pontos de cada um.</p>
+          <p>Além da gorjeta, o sistema oferece controle de escala, equipe, comunicados internos, FAQ para empregados e canal de comunicação com o DP.</p>
+        </div>
+
+        <div class="card">
+          <h3>📱 Como acessar?</h3>
+          <p>O AppTip funciona pelo navegador em qualquer dispositivo — celular, tablet ou computador. Acesse em <code>apptip.app</code> e faça login com seu CPF e PIN.</p>
+          <div class="info-box tip">
+            <span class="icon">💡</span>
+            <span>Você pode adicionar o AppTip à tela inicial do seu celular para acesso rápido como se fosse um app nativo.</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- ACESSO -->
+      <div class="section" id="acesso">
+        <div class="section-header">
+          <div class="icon-wrap">🔐</div>
+          <div>
+            <h2>Acesso e Login</h2>
+            <p>Como entrar no sistema</p>
+          </div>
+        </div>
+
+        <div class="card">
+          <h3>Como fazer login</h3>
+          <div class="steps">
+            <div class="step">
+              <div class="step-num">1</div>
+              <div class="step-content">
+                <strong>Digite seu CPF</strong>
+                <p>Na tela inicial, insira seu CPF no campo "CPF ou ID do empregado".</p>
+              </div>
+            </div>
+            <div class="step">
+              <div class="step-num">2</div>
+              <div class="step-content">
+                <strong>Digite seu PIN</strong>
+                <p>Insira o PIN de 4 a 6 dígitos fornecido pelo administrador. Se você também for empregado do restaurante, pode usar o PIN do seu cadastro de empregado.</p>
+              </div>
+            </div>
+            <div class="step">
+              <div class="step-num">3</div>
+              <div class="step-content">
+                <strong>Selecione o perfil</strong>
+                <p>Se você tiver mais de um perfil (ex: gestor e empregado), o sistema mostrará as opções disponíveis. Selecione "Gestor".</p>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="card">
+          <h3>⚠️ Bloqueio por tentativas</h3>
+          <p>Após várias tentativas incorretas, o sistema bloqueia o acesso temporariamente por alguns segundos. Aguarde e tente novamente com as credenciais corretas.</p>
+        </div>
+
+        <div class="info-box warning">
+          <span class="icon">⚠️</span>
+          <span>Nunca compartilhe seu PIN com outras pessoas. Se acreditar que seu PIN foi comprometido, solicite a troca ao administrador AppTip.</span>
+        </div>
+      </div>
+
+      <!-- RESTAURANTE -->
+      <div class="section" id="restaurante">
+        <div class="section-header">
+          <div class="icon-wrap">🏢</div>
+          <div>
+            <h2>Selecionar Restaurante</h2>
+            <p>Navegar entre os restaurantes que você gerencia</p>
+          </div>
+        </div>
+
+        <div class="card">
+          <h3>Múltiplos restaurantes</h3>
+          <p>Se você for gestor de mais de um restaurante, após o login aparecerá uma tela para selecionar qual restaurante você quer acessar.</p>
+          <p>Restaurantes com acesso <span class="tag red">🔒 Suspenso</span> indicam pendência financeira — você pode entrar no sistema, mas o acesso àquele restaurante específico estará bloqueado até regularização.</p>
+        </div>
+
+        <div class="card">
+          <h3>Trocar de restaurante</h3>
+          <p>Enquanto estiver usando o sistema, clique em <strong>"← Trocar restaurante"</strong> no topo da tela para voltar à lista de seleção.</p>
+        </div>
+      </div>
+
+      <!-- DASHBOARD -->
+      <div class="section" id="dashboard">
+        <div class="section-header">
+          <div class="icon-wrap">📊</div>
+          <div>
+            <h2>Dashboard</h2>
+            <p>Visão geral do restaurante</p>
+          </div>
+        </div>
+
+        <div class="card">
+          <h3>O que você vê no Dashboard?</h3>
+          <p>O Dashboard é a tela inicial e mostra um resumo rápido do estado atual do restaurante:</p>
+          <div class="steps" style="margin-top:12px">
+            <div class="step">
+              <div class="step-num">📊</div>
+              <div class="step-content">
+                <strong>Gorjetas do mês</strong>
+                <p>Total bruto, líquido e imposto retido no mês atual.</p>
+              </div>
+            </div>
+            <div class="step">
+              <div class="step-num">👥</div>
+              <div class="step-content">
+                <strong>Empregados ativos</strong>
+                <p>Quantidade de empregados ativos versus o limite do plano contratado.</p>
+              </div>
+            </div>
+            <div class="step">
+              <div class="step-num">📅</div>
+              <div class="step-content">
+                <strong>Últimas gorjetas</strong>
+                <p>Dias mais recentes com gorjeta lançada e valor correspondente.</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- GORJETAS -->
+      <div class="section" id="gorjetas">
+        <div class="section-header">
+          <div class="icon-wrap">💸</div>
+          <div>
+            <h2>Gorjetas</h2>
+            <p>Lançamento e distribuição de gorjetas</p>
+          </div>
+        </div>
+
+        <div class="card">
+          <h3>Como funciona a distribuição?</h3>
+          <p>O gestor lança o valor total de gorjeta arrecadado em um dia. O sistema distribui automaticamente entre os empregados com base nos <strong>pontos de cada cargo</strong> e nos <strong>dias trabalhados</strong> (conforme a escala).</p>
+          <div class="info-box green">
+            <span class="icon">✅</span>
+            <span>O AppTip calcula e deduz automaticamente o imposto de 33% (INSS/IR) e apresenta o valor líquido para cada empregado.</span>
+          </div>
+        </div>
+
+        <div class="card">
+          <h3>🗂️ Modo Tabela — Lançamento por dia</h3>
+          <p>A forma principal de lançar gorjetas. Você vê todos os dias do mês em uma tabela e preenche o valor total do dia.</p>
+          <div class="steps">
+            <div class="step">
+              <div class="step-num">1</div>
+              <div class="step-content">
+                <strong>Navegue pelo mês</strong>
+                <p>Use as setas <code>‹ ›</code> para navegar entre os meses.</p>
+              </div>
+            </div>
+            <div class="step">
+              <div class="step-num">2</div>
+              <div class="step-content">
+                <strong>Preencha o valor</strong>
+                <p>No campo "Valor (R$)" de cada linha, digite o total de gorjeta do dia. Opcionalmente, adicione uma observação.</p>
+              </div>
+            </div>
+            <div class="step">
+              <div class="step-num">3</div>
+              <div class="step-content">
+                <strong>Marque "Sem gorjeta" quando necessário</strong>
+                <p>Para dias que o restaurante não operou ou não houve gorjeta, ative o toggle "Sem gorjeta". O dia ficará marcado em roxo.</p>
+              </div>
+            </div>
+            <div class="step">
+              <div class="step-num">4</div>
+              <div class="step-content">
+                <strong>Clique em Lançar</strong>
+                <p>O botão "Lançar gorjeta do mês" salva todos os dias preenchidos de uma vez. O sistema distribui automaticamente.</p>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="card">
+          <h3>Cores das linhas</h3>
+          <table>
+            <tr><th>Cor</th><th>Significado</th></tr>
+            <tr><td><span class="tag gray">Branco</span></td><td>Dia sem valor preenchido ainda</td></tr>
+            <tr><td><span class="tag green">Verde</span></td><td>Gorjeta já lançada e confirmada</td></tr>
+            <tr><td><span class="tag" style="background:#fffbeb;color:#92400e;border-color:#fde68a">Amarelo</span></td><td>Valor foi editado mas ainda não relançado</td></tr>
+            <tr><td><span class="tag" style="background:#f5f0ff;color:#6366f1;border-color:#c4b5fd">Roxo</span></td><td>Marcado como "sem gorjeta"</td></tr>
+          </table>
+        </div>
+
+        <div class="card">
+          <h3>📤 Exportar Gorjeta</h3>
+          <p>Clique em "Exportar Gorjeta" para baixar um relatório em Excel com todos os lançamentos do mês, incluindo o valor por empregado, cargo, bruto, líquido e imposto.</p>
+        </div>
+
+        <div class="info-box warning">
+          <span class="icon">⚠️</span>
+          <span>Apenas empregados com escala no dia recebem gorjeta daquele dia. Certifique-se de manter a escala atualizada para a distribuição ser correta.</span>
+        </div>
+      </div>
+
+      <!-- ESCALA -->
+      <div class="section" id="escala">
+        <div class="section-header">
+          <div class="icon-wrap">📅</div>
+          <div>
+            <h2>Escala</h2>
+            <p>Controle de dias trabalhados por empregado</p>
+          </div>
+        </div>
+
+        <div class="card">
+          <h3>Para que serve a escala?</h3>
+          <p>A escala define quais empregados trabalharam em cada dia do mês. Ela é usada diretamente no cálculo da gorjeta — somente empregados com presença na escala recebem gorjeta do dia correspondente.</p>
+        </div>
+
+        <div class="card">
+          <h3>Como preencher a escala</h3>
+          <div class="steps">
+            <div class="step">
+              <div class="step-num">1</div>
+              <div class="step-content">
+                <strong>Filtre por área</strong>
+                <p>Use os filtros no topo (Salão, Cozinha, Bar, etc.) para ver apenas os empregados de uma área específica.</p>
+              </div>
+            </div>
+            <div class="step">
+              <div class="step-num">2</div>
+              <div class="step-content">
+                <strong>Marque os dias</strong>
+                <p>Clique nas células da tabela para marcar <span class="tag green">✓ trabalhado</span> ou deixar em branco para folga. Você também pode marcar como <strong>F</strong> (falta) ou <strong>A</strong> (atestado).</p>
+              </div>
+            </div>
+            <div class="step">
+              <div class="step-num">3</div>
+              <div class="step-content">
+                <strong>Salvar</strong>
+                <p>A escala é salva automaticamente ao clicar nas células.</p>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="info-box tip">
+          <span class="icon">💡</span>
+          <span>Empregados com horário contratual definido na aba Horários têm sua escala base gerada automaticamente — você só precisa ajustar as exceções.</span>
+        </div>
+      </div>
+
+      <!-- CARGOS -->
+      <div class="section" id="cargos">
+        <div class="section-header">
+          <div class="icon-wrap">🏷️</div>
+          <div>
+            <h2>Cargos</h2>
+            <p>Configuração dos cargos e pontos</p>
+          </div>
+        </div>
+
+        <div class="card">
+          <h3>O que são pontos?</h3>
+          <p>Cada cargo tem uma quantidade de <strong>pontos</strong> que define quanto da gorjeta aquele empregado recebe em relação aos outros. Um Subchef com 9 pontos recebe mais do que um Garçom com 6 pontos, proporcionalmente.</p>
+          <div class="info-box blue">
+            <span class="icon">📐</span>
+            <span>Exemplo: se a gorjeta do dia é R$1.000 e há 10 pontos no total distribuídos, cada ponto vale R$100. Um empregado com 6 pontos recebe R$600 (antes do imposto).</span>
+          </div>
+        </div>
+
+        <div class="card">
+          <h3>Gerenciar cargos</h3>
+          <div class="steps">
+            <div class="step">
+              <div class="step-num">+</div>
+              <div class="step-content">
+                <strong>Criar cargo</strong>
+                <p>Preencha o nome, pontos e área (Bar, Cozinha, Salão...) e clique em "Add".</p>
+              </div>
+            </div>
+            <div class="step">
+              <div class="step-num">✏️</div>
+              <div class="step-content">
+                <strong>Editar cargo</strong>
+                <p>Edite o nome e pontos diretamente na linha e clique em "Salvar".</p>
+              </div>
+            </div>
+            <div class="step">
+              <div class="step-num">🚫</div>
+              <div class="step-content">
+                <strong>Cargo "Sem gorjeta"</strong>
+                <p>Marque a opção "Sem gorjeta" para cargos que não participam da distribuição (ex: sócios, administrativo).</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- EQUIPE -->
+      <div class="section" id="equipe">
+        <div class="section-header">
+          <div class="icon-wrap">👥</div>
+          <div>
+            <h2>Equipe</h2>
+            <p>Cadastro e gestão dos empregados</p>
+          </div>
+        </div>
+
+        <div class="card">
+          <h3>Cadastrar novo empregado</h3>
+          <div class="steps">
+            <div class="step">
+              <div class="step-num">1</div>
+              <div class="step-content">
+                <strong>Preencha os dados</strong>
+                <p>Nome completo, CPF (opcional), data de admissão e PIN inicial.</p>
+              </div>
+            </div>
+            <div class="step">
+              <div class="step-num">2</div>
+              <div class="step-content">
+                <strong>Selecione o cargo</strong>
+                <p>O cargo define os pontos de gorjeta do empregado.</p>
+              </div>
+            </div>
+            <div class="step">
+              <div class="step-num">3</div>
+              <div class="step-content">
+                <strong>Clique em Add</strong>
+                <p>O sistema gera um ID automático (ex: <code>LBZ0012</code>) que o empregado usa para fazer login.</p>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="card">
+          <h3>Inativar empregado</h3>
+          <p>Ao inativar um empregado, ele perde o acesso ao sistema imediatamente. Seus dados históricos são preservados. Empregados inativos aparecem na aba "Inativos" e podem ser reativados a qualquer momento.</p>
+          <div class="info-box warning">
+            <span class="icon">⚠️</span>
+            <span>Inativar um empregado não exclui seus dados de gorjeta do histórico. O histórico permanece intacto para consulta.</span>
+          </div>
+        </div>
+
+        <div class="card">
+          <h3>Limite do plano</h3>
+          <p>O número de empregados ativos é limitado pelo plano contratado. Quando atingir o limite, será necessário solicitar upgrade do plano ao administrador AppTip.</p>
+          <table>
+            <tr><th>Plano</th><th>Limite</th></tr>
+            <tr><td>Starter</td><td>10 empregados</td></tr>
+            <tr><td>Básico</td><td>20 empregados</td></tr>
+            <tr><td>Profissional</td><td>50 empregados</td></tr>
+            <tr><td>Enterprise</td><td>51 a 100 empregados</td></tr>
+          </table>
+        </div>
+      </div>
+
+      <!-- HORARIOS -->
+      <div class="section" id="horarios">
+        <div class="section-header">
+          <div class="icon-wrap">🕐</div>
+          <div>
+            <h2>Horários</h2>
+            <p>Controle de horários contratuais</p>
+          </div>
+        </div>
+
+        <div class="card">
+          <h3>Para que serve?</h3>
+          <p>A aba Horários registra o horário contratual de cada empregado (entrada, saída, intervalo). Isso serve para controle interno e base para geração automática de escala.</p>
+        </div>
+
+        <div class="card">
+          <h3>Aprovação de alterações</h3>
+          <p>Empregados podem solicitar alterações de horário pelo aplicativo. Essas solicitações aparecem como notificações para o gestor de DP, que pode aprovar ou recusar.</p>
+        </div>
+      </div>
+
+      <!-- RECIBOS -->
+      <div class="section" id="recibos">
+        <div class="section-header">
+          <div class="icon-wrap">📄</div>
+          <div>
+            <h2>Recibos</h2>
+            <p>Gestão de recibos de gorjeta</p>
+          </div>
+        </div>
+
+        <div class="card">
+          <h3>Como funciona?</h3>
+          <p>Na aba Recibos, o gestor pode fazer upload dos recibos mensais de gorjeta em PDF. Cada empregado tem acesso ao seu próprio recibo pelo aplicativo, sem precisar que o gestor envie individualmente.</p>
+        </div>
+
+        <div class="card">
+          <h3>Fazer upload de recibo</h3>
+          <div class="steps">
+            <div class="step">
+              <div class="step-num">1</div>
+              <div class="step-content">
+                <strong>Selecione o mês</strong>
+                <p>Escolha o mês de competência do recibo.</p>
+              </div>
+            </div>
+            <div class="step">
+              <div class="step-num">2</div>
+              <div class="step-content">
+                <strong>Selecione o empregado</strong>
+                <p>Escolha para qual empregado o recibo pertence.</p>
+              </div>
+            </div>
+            <div class="step">
+              <div class="step-num">3</div>
+              <div class="step-content">
+                <strong>Faça o upload</strong>
+                <p>Selecione o arquivo PDF e confirme. O empregado já terá acesso imediatamente.</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- COMUNICADOS -->
+      <div class="section" id="comunicados">
+        <div class="section-header">
+          <div class="icon-wrap">📢</div>
+          <div>
+            <h2>Comunicados</h2>
+            <p>Envio de avisos e comunicações à equipe</p>
+          </div>
+        </div>
+
+        <div class="card">
+          <h3>O que são comunicados?</h3>
+          <p>Comunicados são mensagens enviadas pelo gestor para toda a equipe ou para grupos específicos. Cada empregado vê e confirma o recebimento pelo aplicativo.</p>
+        </div>
+
+        <div class="card">
+          <h3>Criar comunicado</h3>
+          <div class="steps">
+            <div class="step">
+              <div class="step-num">1</div>
+              <div class="step-content">
+                <strong>Escreva o título e mensagem</strong>
+                <p>Seja claro e objetivo. O título aparece em destaque para os empregados.</p>
+              </div>
+            </div>
+            <div class="step">
+              <div class="step-num">2</div>
+              <div class="step-content">
+                <strong>Escolha o destinatário</strong>
+                <p>Envie para toda a equipe ou selecione áreas específicas (Bar, Cozinha, Salão).</p>
+              </div>
+            </div>
+            <div class="step">
+              <div class="step-num">3</div>
+              <div class="step-content">
+                <strong>Publique</strong>
+                <p>O comunicado aparece imediatamente para os empregados selecionados.</p>
+              </div>
+            </div>
+          </div>
+          <div class="info-box green">
+            <span class="icon">✅</span>
+            <span>Você pode acompanhar quem já leu e confirmou o comunicado diretamente na lista de envios.</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- FAQ -->
+      <div class="section" id="faq">
+        <div class="section-header">
+          <div class="icon-wrap">❓</div>
+          <div>
+            <h2>FAQ</h2>
+            <p>Base de perguntas e respostas para a equipe</p>
+          </div>
+        </div>
+
+        <div class="card">
+          <h3>Para que serve?</h3>
+          <p>O FAQ é uma base de conhecimento que o gestor monta com perguntas e respostas frequentes da equipe. Os empregados podem consultar a qualquer hora pelo aplicativo, sem precisar perguntar ao gestor.</p>
+          <p>Exemplos de conteúdo: "Como funciona o cálculo da gorjeta?", "Qual o prazo para pagamento?", "Como marcar férias?"</p>
+        </div>
+
+        <div class="card">
+          <h3>Adicionar pergunta/resposta</h3>
+          <p>Na aba FAQ, escreva a pergunta e a resposta e clique em adicionar. Você pode editar ou remover entradas a qualquer momento. As alterações são visíveis imediatamente para os empregados.</p>
+        </div>
+      </div>
+
+      <!-- DP -->
+      <div class="section" id="dp">
+        <div class="section-header">
+          <div class="icon-wrap">💬</div>
+          <div>
+            <h2>Fale com DP</h2>
+            <p>Canal de comunicação entre empregados e departamento pessoal</p>
+          </div>
+        </div>
+
+        <div class="card">
+          <h3>Como funciona?</h3>
+          <p>O canal "Fale com DP" permite que empregados enviem mensagens diretamente para o gestor responsável pelo departamento pessoal — sobre férias, atestados, dúvidas trabalhistas, etc.</p>
+          <div class="info-box blue">
+            <span class="icon">ℹ️</span>
+            <span>Somente gestores marcados como "Gestor do DP" recebem essas mensagens. Isso é configurado pelo administrador AppTip.</span>
+          </div>
+        </div>
+
+        <div class="card">
+          <h3>Responder mensagens</h3>
+          <p>As mensagens dos empregados aparecem na aba "Fale com DP". Clique em uma mensagem para ver o histórico e responder. As respostas são entregues diretamente no aplicativo do empregado.</p>
+        </div>
+      </div>
+
+      <!-- CAIXA -->
+      <div class="section" id="caixa">
+        <div class="section-header">
+          <div class="icon-wrap">📬</div>
+          <div>
+            <h2>Caixa</h2>
+            <p>Central de notificações do restaurante</p>
+          </div>
+        </div>
+
+        <div class="card">
+          <h3>O que aparece na Caixa?</h3>
+          <p>A Caixa reúne todas as notificações relevantes do restaurante em um só lugar:</p>
+          <div class="perm-grid" style="margin-top:12px">
+            <div class="perm-item">
+              <span class="perm-icon">🕐</span>
+              <div><div class="perm-label">Horários</div><div class="perm-sub">Solicitações de alteração</div></div>
+            </div>
+            <div class="perm-item">
+              <span class="perm-icon">💬</span>
+              <div><div class="perm-label">Mensagens DP</div><div class="perm-sub">Novas dúvidas dos empregados</div></div>
+            </div>
+            <div class="perm-item">
+              <span class="perm-icon">📢</span>
+              <div><div class="perm-label">Comunicados</div><div class="perm-sub">Confirmações de leitura</div></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="card">
+          <h3>Badge de notificações</h3>
+          <p>O número entre parênteses na aba "Caixa <code>(3)</code>" indica quantas notificações não lidas existem. Acesse a caixa regularmente para não perder nenhuma solicitação da equipe.</p>
+        </div>
+      </div>
+
+      <!-- PERMISSÕES -->
+      <div class="section" id="permissoes">
+        <div class="section-header">
+          <div class="icon-wrap">🔑</div>
+          <div>
+            <h2>Permissões</h2>
+            <p>O que cada gestor pode acessar</p>
+          </div>
+        </div>
+
+        <div class="card">
+          <h3>Permissões configuráveis</h3>
+          <p>O administrador AppTip define quais abas cada gestor pode ver e usar. As abas disponíveis dependem das permissões do seu perfil:</p>
+          <div class="perm-grid">
+            <div class="perm-item">
+              <span class="perm-icon">💸</span>
+              <div><div class="perm-label">Gorjetas</div><div class="perm-sub">Lançar e visualizar</div></div>
+            </div>
+            <div class="perm-item">
+              <span class="perm-icon">📅</span>
+              <div><div class="perm-label">Escala</div><div class="perm-sub">Gerenciar escala</div></div>
+            </div>
+            <div class="perm-item">
+              <span class="perm-icon">🏷️</span>
+              <div><div class="perm-label">Cargos</div><div class="perm-sub">Criar e editar cargos</div></div>
+            </div>
+            <div class="perm-item">
+              <span class="perm-icon">👥</span>
+              <div><div class="perm-label">Equipe</div><div class="perm-sub">Gerenciar empregados</div></div>
+            </div>
+            <div class="perm-item">
+              <span class="perm-icon">🕐</span>
+              <div><div class="perm-label">Horários</div><div class="perm-sub">Controle de horários</div></div>
+            </div>
+            <div class="perm-item">
+              <span class="perm-icon">📄</span>
+              <div><div class="perm-label">Recibos</div><div class="perm-sub">Upload de recibos</div></div>
+            </div>
+            <div class="perm-item">
+              <span class="perm-icon">📢</span>
+              <div><div class="perm-label">Comunicados</div><div class="perm-sub">Criar e enviar</div></div>
+            </div>
+            <div class="perm-item">
+              <span class="perm-icon">❓</span>
+              <div><div class="perm-label">FAQ</div><div class="perm-sub">Base de conhecimento</div></div>
+            </div>
+            <div class="perm-item">
+              <span class="perm-icon">💬</span>
+              <div><div class="perm-label">Fale com DP</div><div class="perm-sub">Canal de mensagens</div></div>
+            </div>
+          </div>
+          <div class="info-box tip" style="margin-top:16px">
+            <span class="icon">💡</span>
+            <span>Se alguma aba não aparece para você, é porque seu perfil não tem permissão para ela. Solicite ao administrador AppTip se precisar de acesso.</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- BLOQUEIO -->
+      <div class="section" id="bloqueio">
+        <div class="section-header">
+          <div class="icon-wrap">🔒</div>
+          <div>
+            <h2>Acesso Suspenso</h2>
+            <p>O que fazer quando o acesso está bloqueado</p>
+          </div>
+        </div>
+
+        <div class="card">
+          <h3>Por que o acesso pode ser suspenso?</h3>
+          <p>O acesso a um restaurante é suspenso quando há pendência financeira com o AppTip. Nesse caso, você consegue fazer login normalmente, mas ao tentar entrar no restaurante verá uma tela de acesso suspenso.</p>
+        </div>
+
+        <div class="card">
+          <h3>O que fazer?</h3>
+          <div class="steps">
+            <div class="step">
+              <div class="step-num">1</div>
+              <div class="step-content">
+                <strong>Entre em contato com o administrador AppTip</strong>
+                <p>O número de contato aparece na própria tela de bloqueio: <strong>(11) 98549-9821</strong></p>
+              </div>
+            </div>
+            <div class="step">
+              <div class="step-num">2</div>
+              <div class="step-content">
+                <strong>Regularize a pendência</strong>
+                <p>Após o pagamento ser confirmado pelo administrador, o acesso é liberado automaticamente.</p>
+              </div>
+            </div>
+          </div>
+          <div class="info-box warning">
+            <span class="icon">⚠️</span>
+            <span>Durante a suspensão, os empregados também perdem acesso ao sistema. Regularize o quanto antes para não impactar a operação.</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Footer -->
+      <hr>
+      <div style="text-align:center;padding:20px 0 40px;color:var(--text3);font-size:13px">
+        <div style="font-size:28px;margin-bottom:8px">🍽️</div>
+        <div>AppTip · Guia do Gestor · v4.6</div>
+        <div style="margin-top:4px">Dúvidas? Fale com o administrador: <strong style="color:var(--text2)">(11) 98549-9821</strong></div>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<script>
+  // Highlight active sidebar link on scroll
+  const sections = document.querySelectorAll('.section');
+  const links = document.querySelectorAll('.sidebar a');
+
+  const observer = new IntersectionObserver((entries) => {
+    entries.forEach(entry => {
+      if (entry.isIntersecting) {
+        links.forEach(l => l.classList.remove('active'));
+        const active = document.querySelector(\`.sidebar a[href="#\${entry.target.id}"]\`);
+        if (active) active.classList.add('active');
+      }
+    });
+  }, { threshold: 0.3, rootMargin: '-80px 0px -60% 0px' });
+
+  sections.forEach(s => observer.observe(s));
+</script>
+</body>
+</html>
+`;
+  return (
+    <iframe
+      srcDoc={html}
+      style={{width:"100%", height:"100vh", border:"none"}}
+      title="Guia do Gestor AppTip"
+    />
+  );
+}
+
+//
 // APP ROOT
 //
 export default function App() {
@@ -6266,11 +7306,13 @@ export default function App() {
   // Login unificado — uma única tela para todos
   const isSetupUrl = window.location.pathname.startsWith("/setup");
   const isFaturaUrl = window.location.pathname.startsWith("/fatura/");
+  const isGuiaGestor = window.location.pathname.startsWith("/guia-gestor");
   const faturaId = isFaturaUrl ? window.location.pathname.split("/fatura/")[1] : null;
 
   const [view, setView] = useState(() => {
     if (isSetupUrl) return "setup";
     if (isFaturaUrl) return "fatura";
+    if (isGuiaGestor) return "guia-gestor";
     const role = localStorage.getItem("apptip_role");
     if (role === "super") return "super";
     if (role === "manager") return "manager";
@@ -6455,6 +7497,7 @@ export default function App() {
       {view === "manager" && <ManagerPortal manager={currentUser} data={data} onUpdate={handleUpdate} onBack={doLogout} toggleTheme={toggleTheme} theme={theme} />}
       {view === "employee" && <EmployeePortal employees={employees} roles={roles} tips={tips} schedules={schedules} restaurants={restaurants} communications={communications} commAcks={commAcks} faq={faq} dpMessages={dpMessages} receipts={receipts} workSchedules={workSchedules} onBack={doLogout} onUpdateEmployee={emp=>{const next=employees.map(e=>e.id===emp.id?emp:e);handleUpdate("employees",next);}} onUpdate={handleUpdate} toggleTheme={toggleTheme} theme={theme} />}
       {view === "fatura" && <FaturaPage faturaId={faturaId} restaurants={restaurants} onUpdate={handleUpdate} loaded={loaded} />}
+      {view === "guia-gestor" && <GuiaGestor />}
       {view === "home" && <Home onLogin={()=>setView("login")} />}
       <Toast msg={toast} onClose={()=>setToast("")} />
 
