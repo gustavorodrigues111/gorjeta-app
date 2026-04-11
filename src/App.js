@@ -956,8 +956,8 @@ Sem markdown, sem explicações, apenas o JSON.`;
 //
 // FAQ MANAGER TAB
 //
-const GEMINI_KEY = "AIzaSyDWG0fc3j7QfG-k5xLJo3xc3v_KNC_uo90";
-const GROQ_KEY = "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";
+const GEMINI_KEY = process.env.REACT_APP_GEMINI_KEY ?? ""
+const GROQ_KEY = process.env.REACT_APP_GROQ_KEY ?? ""
 
 async function geminiSuggestFaq(input) {
   const prompt = `Você é um assistente especializado em restaurantes. O gestor de um restaurante descreveu informalmente uma pergunta e resposta para o FAQ dos seus empregados. Sua tarefa é reformular isso de forma clara, profissional e empática, adequada para empregados de restaurante lerem no app.
