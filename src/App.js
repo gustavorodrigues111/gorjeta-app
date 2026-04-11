@@ -2557,7 +2557,15 @@ function EmpRowLine({ emp, isNew, row, restRoles, isSaved, isSuperManager, onCha
   );
 }
 
-function EmployeeSpreadsheet({ restEmps, restRoles, rid, employees, onUpdate, restCode: restCode_, isSuperManager }) {
+function EmployeeSpreadsheet({ restEmps, restRoles, rid, employees, onUpdate, restCode: restCode_, isSuperManager, restaurant }) {
+  const PLANOS = [
+    { id:"p10",  empMax:10  },
+    { id:"p20",  empMax:20  },
+    { id:"p50",  empMax:50  },
+    { id:"p999", empMax:999 },
+  ];
+  const plano = PLANOS.find(p=>p.id===(restaurant?.planoId??"p10")) ?? PLANOS[0];
+  const activeCount = restEmps.filter(e=>!e.inactive).length;
   const blank = () => ({ name:"", cpf:"", admission:today(), pin:"", roleId:"", restaurantId:rid });
   const [newRow, setNewRow] = useState(blank());
   const [editRows, setEditRows] = useState({});
@@ -2594,6 +2602,10 @@ function EmployeeSpreadsheet({ restEmps, restRoles, rid, employees, onUpdate, re
 
   function saveNew() {
     if (!newRow.name.trim()) return;
+    if (activeCount >= plano.empMax) {
+      alert(`⚠️ Limite do plano atingido (${plano.empMax} empregados).\n\nPara adicionar mais empregados, faça upgrade do plano com seu administrador.`);
+      return;
+    }
     const restCode = restCode_ || "XXX";
     const seq = nextEmpSeq(employees, restCode);
     const empCode = makeEmpCode(restCode, seq);
@@ -2645,7 +2657,17 @@ function EmployeeSpreadsheet({ restEmps, restRoles, rid, employees, onUpdate, re
           onAdd={saveNew} onSave={null} onToggleInactive={null} onDelete={null} onResetPin={null} employees={employees}/>
       )}
 
-      {list.length===0 && <p style={{color:"var(--text3)",textAlign:"center",marginTop:16}}>Nenhum empregado {showInactive?"inativo":"ativo"}.</p>}
+      {activeCount >= plano.empMax && (
+        <div style={{background:"#ef444411",border:"1px solid #ef444433",borderRadius:10,padding:"10px 14px",marginBottom:12,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+          <span style={{color:"#ef4444",fontSize:13,fontWeight:600}}>⚠️ Limite do plano atingido — {activeCount}/{plano.empMax} empregados ativos</span>
+          <span style={{color:"var(--text3)",fontSize:11}}>Fale com seu administrador para fazer upgrade</span>
+        </div>
+      )}
+      {activeCount > 0 && activeCount < plano.empMax && activeCount >= plano.empMax * 0.8 && (
+        <div style={{background:"#f59e0b11",border:"1px solid #f59e0b33",borderRadius:10,padding:"8px 14px",marginBottom:12}}>
+          <span style={{color:"#f59e0b",fontSize:12}}>⚡ {activeCount}/{plano.empMax} empregados — próximo do limite do plano</span>
+        </div>
+      )}
 
       {/* Agrupado por área */}
       {(() => {
@@ -3352,7 +3374,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
             restEmps={employees.filter(e => e.restaurantId === rid)}
             restRoles={restRoles} rid={rid}
             employees={employees} onUpdate={onUpdate} restCode={restaurant.shortCode}
-            isSuperManager={isSuperManager}
+            isSuperManager={isSuperManager} restaurant={restaurant}
           />
         )}
 
@@ -3858,6 +3880,14 @@ function SuperManagerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, 
     setShowSuperModal(false);
   }
 
+  const PLANOS = [
+    { id:"p10",  label:"Starter",     empMax:10,  mensal:97,    anual:87.30  },
+    { id:"p20",  label:"Básico",      empMax:20,  mensal:187,   anual:168.30 },
+    { id:"p50",  label:"Profissional",empMax:50,  mensal:397,   anual:357.30 },
+    { id:"p999", label:"Enterprise",  empMax:999, mensal:null,  anual:null   },
+  ];
+  function getPlano(r) { return PLANOS.find(p=>p.id===(r.planoId??"p10")) ?? PLANOS[0]; }
+
   const ac = "#f5c842";
   const TABS = [["restaurants","🏢 Restaurantes"],["managers","👔 Gestores"],["superManagers","⭐ Super Gestores"]];
 
@@ -3903,20 +3933,54 @@ function SuperManagerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, 
           <div>
             <button onClick={()=>{setEditRestId(null);setRestForm({name:"",cnpj:"",address:""});setShowRestModal(true);}} style={{...S.btnPrimary,marginBottom:20}}>+ Novo Restaurante</button>
             {restaurants.length === 0 && <p style={{color:"var(--text3)",textAlign:"center"}}>Nenhum restaurante cadastrado.</p>}
+            {/* Export geral */}
+            {restaurants.length > 0 && (
+              <button onClick={()=>{
+                const exportData = {
+                  exportedAt: new Date().toISOString(),
+                  restaurantes: restaurants,
+                  empregados: employees,
+                  cargos: roles,
+                  gorjetas: tips,
+                  escalas: schedules,
+                  gestores: managers.map(m=>({...m,pin:"***"})),
+                };
+                const blob = new Blob([JSON.stringify(exportData,null,2)],{type:"application/json"});
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement("a");
+                a.href=url; a.download=`apptip_backup_${today()}.json`; a.click();
+                URL.revokeObjectURL(url);
+                onUpdate("_toast","✅ Backup exportado com sucesso!");
+              }} style={{...S.btnSecondary,marginBottom:16,fontSize:12,color:"#10b981",borderColor:"#10b981"}}>
+                💾 Exportar backup completo
+              </button>
+            )}
             {restaurants.map(r => {
-              const empCount = employees.filter(e=>e.restaurantId===r.id).length;
+              const empCount = employees.filter(e=>e.restaurantId===r.id&&!e.inactive).length;
               const mgrCount = managers.filter(m=>m.restaurantIds?.includes(r.id)).length;
+              const plano = getPlano(r);
+              const atLimit = empCount >= plano.empMax;
+              const pct = Math.min(100, Math.round((empCount/plano.empMax)*100));
               return (
                 <div key={r.id} style={{...S.card,marginBottom:10}}>
                   <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
-                    <div>
-                      <div style={{display:"flex",alignItems:"center",gap:8}}>
-                      <span style={{color:"#f5c842",fontWeight:700,fontSize:13,background:"#f5c84222",borderRadius:6,padding:"2px 8px"}}>{r.shortCode||"—"}</span>
-                      <span style={{color:"var(--text)",fontWeight:700,fontSize:16}}>{r.name}</span>
-                    </div>
+                    <div style={{flex:1}}>
+                      <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:2}}>
+                        <span style={{color:ac,fontWeight:700,fontSize:13,background:"#f5c84222",borderRadius:6,padding:"2px 8px"}}>{r.shortCode||"—"}</span>
+                        <span style={{color:"var(--text)",fontWeight:700,fontSize:16}}>{r.name}</span>
+                        <span style={{background:atLimit?"#ef444422":"#10b98122",color:atLimit?"#ef4444":"#10b981",borderRadius:6,padding:"2px 8px",fontSize:11,fontWeight:700}}>{plano.label}</span>
+                      </div>
                       {r.cnpj && <div style={{color:"var(--text3)",fontSize:12}}>CNPJ: {r.cnpj}</div>}
                       {r.address && <div style={{color:"var(--text3)",fontSize:12}}>{r.address}</div>}
-                      <div style={{marginTop:6,color:"var(--text3)",fontSize:12}}>{empCount} empregado{empCount!==1?"s":""} · {mgrCount} gestor{mgrCount!==1?"es":""}</div>
+                      <div style={{marginTop:8,display:"flex",alignItems:"center",gap:8}}>
+                        <div style={{flex:1,background:"var(--bg1)",borderRadius:4,height:6,overflow:"hidden",maxWidth:120}}>
+                          <div style={{width:`${pct}%`,height:"100%",background:atLimit?"#ef4444":pct>80?"#f59e0b":"#10b981",borderRadius:4}}/>
+                        </div>
+                        <span style={{color:atLimit?"#ef4444":"var(--text3)",fontSize:12,fontWeight:atLimit?700:400}}>
+                          {empCount}/{plano.empMax} emp. · {mgrCount} gestor{mgrCount!==1?"es":""}
+                        </span>
+                        {plano.mensal && <span style={{color:"var(--text3)",fontSize:11}}>R${plano.mensal}/mês</span>}
+                      </div>
                     </div>
                     <div style={{display:"flex",gap:8,flexWrap:"wrap",justifyContent:"flex-end"}}>
                       <button onClick={()=>setSelRestaurant(r.id)} style={{...S.btnSecondary,fontSize:12,color:ac,borderColor:ac}}>Abrir →</button>
@@ -4013,6 +4077,42 @@ function SuperManagerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, 
             </div>
             <div><label style={S.label}>CNPJ (opcional)</label><input value={restForm.cnpj} onChange={e=>setRestForm({...restForm,cnpj:e.target.value})} placeholder="00.000.000/0000-00" style={S.input}/></div>
             <div><label style={S.label}>Endereço (opcional)</label><input value={restForm.address} onChange={e=>setRestForm({...restForm,address:e.target.value})} style={S.input}/></div>
+
+            {/* Plano */}
+            <div>
+              <label style={S.label}>Plano contratado</label>
+              <div style={{display:"flex",flexDirection:"column",gap:6}}>
+                {PLANOS.map(p=>{
+                  const sel = (restForm.planoId??p10) === p.id || (!restForm.planoId && p.id==="p10");
+                  const sel2 = restForm.planoId === p.id;
+                  return (
+                    <button key={p.id} onClick={()=>setRestForm({...restForm,planoId:p.id})}
+                      style={{padding:"10px 14px",borderRadius:10,border:`1px solid ${sel2?"#f5c842":"#2a2a2a"}`,background:sel2?"#f5c84222":"transparent",cursor:"pointer",fontFamily:"DM Mono,monospace",textAlign:"left",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                      <span style={{color:sel2?ac:"var(--text2)",fontWeight:sel2?700:400}}>{sel2?"✓":"○"} {p.label} — até {p.empMax} emp.</span>
+                      {p.mensal && <span style={{color:"var(--text3)",fontSize:12}}>R${p.mensal}/mês · R${p.anual}/mês anual</span>}
+                      {!p.mensal && <span style={{color:"var(--text3)",fontSize:12}}>Sob consulta</span>}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Tipo de cobrança */}
+            <div>
+              <label style={S.label}>Tipo de cobrança</label>
+              <div style={{display:"flex",gap:8}}>
+                {[["mensal","Mensal"],["anual","Anual (−10%)"]].map(([v,l])=>{
+                  const sel = (restForm.tipoCobranca??"mensal")===v;
+                  return (
+                    <button key={v} onClick={()=>setRestForm({...restForm,tipoCobranca:v})}
+                      style={{flex:1,padding:"10px",borderRadius:10,border:`1px solid ${sel?"#10b981":"#2a2a2a"}`,background:sel?"#10b98122":"transparent",color:sel?"#10b981":"#555",cursor:"pointer",fontFamily:"DM Mono,monospace",fontSize:13,fontWeight:sel?700:400}}>
+                      {l}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
             <button onClick={saveRest} style={S.btnPrimary}>{editRestId?"Salvar":"Cadastrar"}</button>
           </div>
         </Modal>
@@ -4267,15 +4367,217 @@ function FirstSetup({ onDone }) {
 // HOME
 //
 function Home({ onManager, onEmployee }) {
+  const [formData, setFormData] = useState({ nome:"", email:"", restaurante:"", mensagem:"" });
+  const [formSent, setFormSent] = useState(false);
+  const [formSending, setFormSending] = useState(false);
+  const ac = "#f5c842";
+
+  async function sendForm() {
+    if (!formData.nome.trim() || !formData.email.trim()) return;
+    setFormSending(true);
+    // Envia via mailto (fallback simples sem backend)
+    const subject = encodeURIComponent(`AppTip — Interesse de ${formData.restaurante || formData.nome}`);
+    const body = encodeURIComponent(`Nome: ${formData.nome}\nEmail: ${formData.email}\nRestaurante: ${formData.restaurante}\n\nMensagem:\n${formData.mensagem}`);
+    window.open(`mailto:contato@apptip.app?subject=${subject}&body=${body}`);
+    setTimeout(() => { setFormSent(true); setFormSending(false); }, 800);
+  }
+
+  const FEATURES = [
+    { icon:"💸", title:"Gorjetas transparentes", desc:"Distribuição automática e justa por área e pontos. Cada empregado vê exatamente o que recebeu." },
+    { icon:"📅", title:"Escala inteligente", desc:"Controle de folgas, faltas, férias e compensações. Integrado com o cálculo de gorjetas." },
+    { icon:"👥", title:"Gestão de equipe", desc:"Cadastro completo, cargos por área, horários contratuais e histórico de alterações." },
+    { icon:"📄", title:"Recibos digitais", desc:"Upload e distribuição de holerites direto para o empregado, com confirmação de leitura." },
+    { icon:"💬", title:"Fale com o DP", desc:"Canal direto e anônimo para sugestões, elogios e denúncias. Conformidade com a LGPD." },
+    { icon:"📱", title:"100% mobile", desc:"Interface otimizada para celular. Empregados acessam pelo próprio smartphone, sem app para instalar." },
+  ];
+
+  const PLANOS = [
+    { nome:"Starter",      emp:"até 10",  mensal:97,   anual:87.30,  destaque:false },
+    { nome:"Básico",       emp:"até 20",  mensal:187,  anual:168.30, destaque:false },
+    { nome:"Profissional", emp:"até 50",  mensal:397,  anual:357.30, destaque:true  },
+    { nome:"Enterprise",   emp:"+50",     mensal:null, anual:null,   destaque:false },
+  ];
+
   return (
-    <div style={{minHeight:"100vh",background:"var(--bg)",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",fontFamily:"DM Mono,monospace",padding:24}}>
-      <div style={{fontSize:52,marginBottom:10}}>🍽️</div>
-      <h1 style={{color:"#f5c842",fontSize:32,fontWeight:700,margin:"0 0 6px",letterSpacing:-1}}>AppTip</h1>
-      <p style={{color:"var(--text3)",fontSize:13,marginBottom:48,textAlign:"center",lineHeight:1.6}}>Transparência e eficiência<br/>para equipes de restaurantes</p>
-      <div style={{display:"flex",flexDirection:"column",gap:14,width:"100%",maxWidth:300}}>
-        <button onClick={onManager} style={{...S.btnPrimary,padding:"18px",fontSize:16,display:"flex",alignItems:"center",justifyContent:"center",gap:10}}>📊 Área de Gestão</button>
-        <button onClick={onEmployee} style={{padding:"18px",borderRadius:16,border:"2px solid #2a2a2a",background:"transparent",color:"var(--text)",fontWeight:600,fontSize:16,cursor:"pointer",fontFamily:"DM Mono,monospace",display:"flex",alignItems:"center",justifyContent:"center",gap:10}}>👤 Área do Empregado</button>
-      </div>
+    <div style={{fontFamily:"'DM Mono',monospace",background:"#fff",color:"#111",minHeight:"100vh"}}>
+
+      {/* NAV */}
+      <nav style={{position:"sticky",top:0,zIndex:100,background:"rgba(255,255,255,0.95)",backdropFilter:"blur(10px)",borderBottom:"1px solid #f0f0f0",padding:"0 24px",display:"flex",justifyContent:"space-between",alignItems:"center",height:64}}>
+        <div style={{display:"flex",alignItems:"center",gap:8}}>
+          <span style={{fontSize:24}}>🍽️</span>
+          <span style={{fontWeight:700,fontSize:20,color:"#111"}}>App<span style={{color:ac}}>Tip</span></span>
+        </div>
+        <div style={{display:"flex",gap:12,alignItems:"center"}}>
+          <a href="#funcionalidades" style={{color:"#555",fontSize:13,textDecoration:"none"}}>Funcionalidades</a>
+          <a href="#precos" style={{color:"#555",fontSize:13,textDecoration:"none"}}>Preços</a>
+          <a href="#contato" style={{color:"#555",fontSize:13,textDecoration:"none"}}>Contato</a>
+          <button onClick={onEmployee} style={{padding:"8px 16px",borderRadius:20,border:"1px solid #ddd",background:"transparent",color:"#555",cursor:"pointer",fontFamily:"DM Mono,monospace",fontSize:12}}>Área do Empregado</button>
+          <button onClick={onManager} style={{padding:"8px 20px",borderRadius:20,border:"none",background:ac,color:"#111",fontWeight:700,cursor:"pointer",fontFamily:"DM Mono,monospace",fontSize:12}}>Acessar →</button>
+        </div>
+      </nav>
+
+      {/* HERO */}
+      <section style={{background:"linear-gradient(135deg,#0f0f0f 0%,#1a1a1a 100%)",padding:"100px 24px",textAlign:"center"}}>
+        <div style={{maxWidth:700,margin:"0 auto"}}>
+          <div style={{display:"inline-flex",alignItems:"center",gap:8,background:"#f5c84222",border:"1px solid #f5c84244",borderRadius:20,padding:"6px 16px",marginBottom:28}}>
+            <span style={{color:ac,fontSize:12,fontWeight:700}}>🚀 Novo — gestão completa para restaurantes</span>
+          </div>
+          <h1 style={{color:"#fff",fontSize:"clamp(32px,6vw,56px)",fontWeight:700,lineHeight:1.15,margin:"0 0 20px",letterSpacing:-1}}>
+            Gorjetas distribuídas<br/><span style={{color:ac}}>com transparência total</span>
+          </h1>
+          <p style={{color:"#aaa",fontSize:"clamp(14px,2vw,18px)",lineHeight:1.7,marginBottom:40,maxWidth:560,margin:"0 auto 40px"}}>
+            O AppTip automatiza o cálculo e distribuição de gorjetas, gestão de escala e comunicação com sua equipe — tudo num sistema simples, acessível pelo celular.
+          </p>
+          <div style={{display:"flex",gap:12,justifyContent:"center",flexWrap:"wrap"}}>
+            <a href="#contato" style={{padding:"16px 32px",borderRadius:12,background:ac,color:"#111",fontWeight:700,fontSize:16,textDecoration:"none",display:"inline-block"}}>Solicitar demonstração</a>
+            <a href="#funcionalidades" style={{padding:"16px 32px",borderRadius:12,border:"1px solid #333",color:"#fff",fontSize:16,textDecoration:"none",display:"inline-block"}}>Ver funcionalidades ↓</a>
+          </div>
+          <p style={{color:"#555",fontSize:12,marginTop:24}}>Sem taxa de adesão · Cancele quando quiser · Suporte incluso</p>
+        </div>
+      </section>
+
+      {/* STATS */}
+      <section style={{background:"#f9f9f9",padding:"48px 24px"}}>
+        <div style={{maxWidth:800,margin:"0 auto",display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:24,textAlign:"center"}}>
+          {[["100%","Mobile first"],["LGPD","Conformidade"],["0","Taxa de adesão"]].map(([n,l])=>(
+            <div key={l}>
+              <div style={{fontSize:36,fontWeight:700,color:ac,marginBottom:4}}>{n}</div>
+              <div style={{color:"#777",fontSize:13}}>{l}</div>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      {/* FUNCIONALIDADES */}
+      <section id="funcionalidades" style={{padding:"80px 24px",background:"#fff"}}>
+        <div style={{maxWidth:960,margin:"0 auto"}}>
+          <div style={{textAlign:"center",marginBottom:56}}>
+            <h2 style={{fontSize:"clamp(24px,4vw,36px)",fontWeight:700,margin:"0 0 12px"}}>Tudo que sua equipe precisa</h2>
+            <p style={{color:"#777",fontSize:16}}>Um sistema completo, sem complicação</p>
+          </div>
+          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(280px,1fr))",gap:24}}>
+            {FEATURES.map(f=>(
+              <div key={f.title} style={{padding:"28px",borderRadius:16,border:"1px solid #f0f0f0",background:"#fff",boxShadow:"0 2px 12px rgba(0,0,0,0.04)"}}>
+                <div style={{fontSize:32,marginBottom:14}}>{f.icon}</div>
+                <h3 style={{fontSize:16,fontWeight:700,margin:"0 0 8px"}}>{f.title}</h3>
+                <p style={{color:"#777",fontSize:14,lineHeight:1.6,margin:0}}>{f.desc}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      {/* COMO FUNCIONA */}
+      <section style={{padding:"80px 24px",background:"#0f0f0f"}}>
+        <div style={{maxWidth:800,margin:"0 auto",textAlign:"center"}}>
+          <h2 style={{color:"#fff",fontSize:"clamp(24px,4vw,36px)",fontWeight:700,margin:"0 0 12px"}}>Como funciona</h2>
+          <p style={{color:"#666",fontSize:16,marginBottom:56}}>Em 3 passos simples</p>
+          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(200px,1fr))",gap:32}}>
+            {[
+              ["1","Cadastre seu restaurante","Configure áreas, cargos e pontos de cada função em minutos"],
+              ["2","Adicione sua equipe","Cada empregado recebe um ID e acessa pelo celular"],
+              ["3","Lance as gorjetas","O sistema distribui automaticamente e todos veem sua parte"],
+            ].map(([n,t,d])=>(
+              <div key={n} style={{textAlign:"center"}}>
+                <div style={{width:48,height:48,borderRadius:"50%",background:ac,color:"#111",fontSize:20,fontWeight:700,display:"flex",alignItems:"center",justifyContent:"center",margin:"0 auto 16px"}}>{n}</div>
+                <h3 style={{color:"#fff",fontSize:15,fontWeight:700,margin:"0 0 8px"}}>{t}</h3>
+                <p style={{color:"#666",fontSize:13,lineHeight:1.6,margin:0}}>{d}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      {/* PREÇOS */}
+      <section id="precos" style={{padding:"80px 24px",background:"#fff"}}>
+        <div style={{maxWidth:960,margin:"0 auto"}}>
+          <div style={{textAlign:"center",marginBottom:16}}>
+            <h2 style={{fontSize:"clamp(24px,4vw,36px)",fontWeight:700,margin:"0 0 12px"}}>Planos e preços</h2>
+            <p style={{color:"#777",fontSize:16}}>Plano anual com <strong style={{color:ac}}>10% de desconto</strong>, pago em 12x</p>
+          </div>
+          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(210px,1fr))",gap:20,marginTop:40}}>
+            {PLANOS.map(p=>(
+              <div key={p.nome} style={{borderRadius:16,border:p.destaque?`2px solid ${ac}`:"1px solid #f0f0f0",padding:"28px 24px",background:p.destaque?"#0f0f0f":"#fff",position:"relative",boxShadow:p.destaque?"0 8px 32px rgba(245,200,66,0.15)":"0 2px 12px rgba(0,0,0,0.04)"}}>
+                {p.destaque && <div style={{position:"absolute",top:-12,left:"50%",transform:"translateX(-50%)",background:ac,color:"#111",fontSize:11,fontWeight:700,padding:"4px 14px",borderRadius:20,whiteSpace:"nowrap"}}>Mais popular</div>}
+                <div style={{color:p.destaque?"#fff":"#111",fontWeight:700,fontSize:18,marginBottom:4}}>{p.nome}</div>
+                <div style={{color:"#777",fontSize:13,marginBottom:20}}>{p.emp} empregados</div>
+                {p.mensal ? (
+                  <>
+                    <div style={{marginBottom:4}}>
+                      <span style={{color:p.destaque?ac:"#111",fontSize:32,fontWeight:700}}>R${p.mensal}</span>
+                      <span style={{color:"#999",fontSize:13}}>/mês</span>
+                    </div>
+                    <div style={{color:"#999",fontSize:12,marginBottom:24}}>ou R${p.anual}/mês no anual</div>
+                  </>
+                ) : (
+                  <div style={{color:p.destaque?ac:"#111",fontSize:22,fontWeight:700,marginBottom:24}}>Sob consulta</div>
+                )}
+                <a href="#contato" style={{display:"block",textAlign:"center",padding:"12px",borderRadius:10,background:p.destaque?ac:"#f5f5f5",color:p.destaque?"#111":"#555",fontWeight:700,fontSize:14,textDecoration:"none"}}>
+                  {p.mensal?"Começar agora":"Falar com a gente"}
+                </a>
+              </div>
+            ))}
+          </div>
+          <p style={{textAlign:"center",color:"#999",fontSize:13,marginTop:24}}>Acima de 50 empregados: R$7,99 por empregado adicional/mês</p>
+        </div>
+      </section>
+
+      {/* CONTATO */}
+      <section id="contato" style={{padding:"80px 24px",background:"#f9f9f9"}}>
+        <div style={{maxWidth:560,margin:"0 auto"}}>
+          <div style={{textAlign:"center",marginBottom:40}}>
+            <h2 style={{fontSize:"clamp(24px,4vw,36px)",fontWeight:700,margin:"0 0 12px"}}>Fale com a gente</h2>
+            <p style={{color:"#777",fontSize:16}}>Solicite uma demonstração gratuita ou tire suas dúvidas</p>
+          </div>
+          {formSent ? (
+            <div style={{textAlign:"center",padding:"48px",background:"#fff",borderRadius:16,border:"1px solid #f0f0f0"}}>
+              <div style={{fontSize:48,marginBottom:16}}>✅</div>
+              <h3 style={{fontSize:20,fontWeight:700,margin:"0 0 8px"}}>Mensagem enviada!</h3>
+              <p style={{color:"#777"}}>Entraremos em contato em breve.</p>
+            </div>
+          ) : (
+            <div style={{background:"#fff",borderRadius:16,padding:"40px",border:"1px solid #f0f0f0",boxShadow:"0 4px 24px rgba(0,0,0,0.06)"}}>
+              <div style={{display:"flex",flexDirection:"column",gap:14}}>
+                <div>
+                  <label style={{display:"block",fontSize:13,color:"#555",marginBottom:6,fontWeight:600}}>Nome *</label>
+                  <input value={formData.nome} onChange={e=>setFormData({...formData,nome:e.target.value})} placeholder="Seu nome" style={{width:"100%",padding:"12px 14px",borderRadius:10,border:"1px solid #e0e0e0",fontFamily:"DM Mono,monospace",fontSize:14,outline:"none",boxSizing:"border-box"}}/>
+                </div>
+                <div>
+                  <label style={{display:"block",fontSize:13,color:"#555",marginBottom:6,fontWeight:600}}>Email *</label>
+                  <input value={formData.email} onChange={e=>setFormData({...formData,email:e.target.value})} type="email" placeholder="seu@email.com" style={{width:"100%",padding:"12px 14px",borderRadius:10,border:"1px solid #e0e0e0",fontFamily:"DM Mono,monospace",fontSize:14,outline:"none",boxSizing:"border-box"}}/>
+                </div>
+                <div>
+                  <label style={{display:"block",fontSize:13,color:"#555",marginBottom:6,fontWeight:600}}>Nome do restaurante</label>
+                  <input value={formData.restaurante} onChange={e=>setFormData({...formData,restaurante:e.target.value})} placeholder="Ex: Restaurante do João" style={{width:"100%",padding:"12px 14px",borderRadius:10,border:"1px solid #e0e0e0",fontFamily:"DM Mono,monospace",fontSize:14,outline:"none",boxSizing:"border-box"}}/>
+                </div>
+                <div>
+                  <label style={{display:"block",fontSize:13,color:"#555",marginBottom:6,fontWeight:600}}>Mensagem</label>
+                  <textarea value={formData.mensagem} onChange={e=>setFormData({...formData,mensagem:e.target.value})} placeholder="Conte um pouco sobre seu restaurante e o que precisa..." rows={4} style={{width:"100%",padding:"12px 14px",borderRadius:10,border:"1px solid #e0e0e0",fontFamily:"DM Mono,monospace",fontSize:14,outline:"none",resize:"vertical",boxSizing:"border-box"}}/>
+                </div>
+                <button onClick={sendForm} disabled={!formData.nome.trim()||!formData.email.trim()||formSending}
+                  style={{padding:"14px",borderRadius:12,border:"none",background:(!formData.nome.trim()||!formData.email.trim())?"#e0e0e0":ac,color:(!formData.nome.trim()||!formData.email.trim())?"#999":"#111",fontWeight:700,fontSize:16,cursor:(!formData.nome.trim()||!formData.email.trim())?"not-allowed":"pointer",fontFamily:"DM Mono,monospace"}}>
+                  {formSending?"Enviando...":"Enviar mensagem →"}
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      </section>
+
+      {/* FOOTER */}
+      <footer style={{background:"#0f0f0f",padding:"40px 24px",textAlign:"center"}}>
+        <div style={{marginBottom:16}}>
+          <span style={{fontSize:20}}>🍽️</span>
+          <span style={{fontWeight:700,fontSize:18,color:"#fff",marginLeft:8}}>App<span style={{color:ac}}>Tip</span></span>
+        </div>
+        <p style={{color:"#555",fontSize:13,marginBottom:20}}>Transparência e eficiência para equipes de restaurantes</p>
+        <div style={{display:"flex",gap:20,justifyContent:"center",flexWrap:"wrap",marginBottom:20}}>
+          <button onClick={onEmployee} style={{background:"none",border:"none",color:"#555",cursor:"pointer",fontFamily:"DM Mono,monospace",fontSize:13}}>Área do Empregado</button>
+          <button onClick={onManager} style={{background:"none",border:"none",color:"#555",cursor:"pointer",fontFamily:"DM Mono,monospace",fontSize:13}}>Área de Gestão</button>
+          <button onClick={()=>document.getElementById("apptip-privacy").style.display="flex"} style={{background:"none",border:"none",color:"#555",cursor:"pointer",fontFamily:"DM Mono,monospace",fontSize:13}}>Política de Privacidade</button>
+        </div>
+        <p style={{color:"#333",fontSize:12}}>© {new Date().getFullYear()} AppTip. Todos os direitos reservados.</p>
+      </footer>
     </div>
   );
 }
