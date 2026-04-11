@@ -547,6 +547,34 @@ function FaleDpTab({ empId, emp, restaurantId, dpMessages, onUpdate }) {
       <button onClick={send} disabled={!body.trim()} style={{ width: "100%", padding: "12px", borderRadius: 12, background: body.trim() ? ac : "#2a2a2a", border: "none", color: "#111", fontWeight: 700, fontSize: 14, cursor: body.trim() ? "pointer" : "default", fontFamily: "DM Mono,monospace" }}>
         Enviar Mensagem
       </button>
+
+      {/* Direitos LGPD */}
+      <div style={{marginTop:24,padding:"16px",borderRadius:12,border:"1px solid #2a2a2a",background:"var(--bg1)"}}>
+        <p style={{color:"var(--text3)",fontSize:12,fontWeight:700,margin:"0 0 8px"}}>🔒 Seus direitos (LGPD)</p>
+        <p style={{color:"var(--text3)",fontSize:11,margin:"0 0 12px",lineHeight:1.6}}>
+          Pela Lei Geral de Proteção de Dados você pode solicitar acesso, correção ou exclusão dos seus dados pessoais a qualquer momento.
+        </p>
+        <button onClick={()=>{
+          if(!window.confirm("Confirma a solicitação de exclusão dos seus dados? O gestor receberá sua solicitação.")) return;
+          const msg = {
+            id: Date.now().toString(),
+            restaurantId,
+            empId,
+            empName: emp?.name ?? "—",
+            category: "denuncia",
+            body: `[SOLICITAÇÃO LGPD] ${emp?.name} (${emp?.empCode}) solicita a exclusão de todos os seus dados pessoais do sistema, conforme direito garantido pela Lei nº 13.709/2018 (LGPD).`,
+            date: new Date().toISOString(),
+            read: false,
+          };
+          onUpdate("dpMessages", [...dpMessages, msg]);
+          onUpdate("_toast", "✅ Solicitação enviada ao gestor.");
+        }} style={{padding:"8px 16px",borderRadius:8,border:"1px solid #ef444433",background:"transparent",color:"#ef4444",cursor:"pointer",fontFamily:"DM Mono,monospace",fontSize:12}}>
+          Solicitar exclusão dos meus dados
+        </button>
+        <button onClick={()=>document.getElementById("apptip-privacy").style.display="flex"} style={{display:"block",marginTop:8,background:"none",border:"none",color:"var(--text3)",cursor:"pointer",fontFamily:"DM Mono,monospace",fontSize:11,padding:0,textDecoration:"underline"}}>
+          Ver Política de Privacidade completa
+        </button>
+      </div>
     </div>
   );
 }
@@ -1884,6 +1912,18 @@ function EmployeePortal({ employees, roles, tips, schedules, restaurants, commun
   const [pin, setPin] = useState("");
   const [err, setErr] = useState("");
   const [empId, setEmpId] = useState(() => localStorage.getItem("apptip_empid") || null);
+  const [loginAttempts, setLoginAttempts] = useState(0);
+  const [loginBlockedUntil, setLoginBlockedUntil] = useState(null);
+  const [termsAccepted, setTermsAccepted] = useState(() => localStorage.getItem("apptip_terms") === "1");
+  const [showTerms, setShowTerms] = useState(false);
+
+  const loginIsBlocked = loginBlockedUntil && new Date() < loginBlockedUntil;
+
+  useEffect(() => {
+    if (!loginIsBlocked) return;
+    const t = setInterval(() => { if (new Date() >= loginBlockedUntil) { setLoginBlockedUntil(null); setErr(""); clearInterval(t); } }, 1000);
+    return () => clearInterval(t);
+  }, [loginBlockedUntil]);
 
   useEffect(() => {
     if (empId) localStorage.setItem("apptip_empid", empId);
@@ -1943,19 +1983,31 @@ function EmployeePortal({ employees, roles, tips, schedules, restaurants, commun
   }, [hasPending, tab]);
 
   function tryLogin() {
+    if (loginIsBlocked) return;
     const cleanInput = cpf.trim().toUpperCase().replace(/\s/g,"");
     const cleanPin = pin.trim();
     const found = employees.find(e =>
       (e.empCode && e.empCode.toUpperCase() === cleanInput && String(e.pin) === cleanPin) ||
       (e.cpf && e.cpf.replace(/\D/g,"") === cleanInput.replace(/\D/g,"") && String(e.pin) === cleanPin)
     );
-    if (!found) { setErr("ID/CPF ou PIN incorretos."); return; }
-    // Block inactive employees
+    if (!found) {
+      const na = loginAttempts + 1;
+      setLoginAttempts(na);
+      if (na >= 5) {
+        setLoginBlockedUntil(new Date(Date.now() + 30000));
+        setLoginAttempts(0);
+        setErr("Muitas tentativas. Aguarde 30 segundos.");
+      } else {
+        setErr(`ID/CPF ou PIN incorretos. ${5-na} tentativa${5-na!==1?"s":""} restante${5-na!==1?"s":""}.`);
+      }
+      return;
+    }
     if (found.inactive && found.inactiveFrom && found.inactiveFrom <= today()) {
       setErr("Acesso desativado. Entre em contato com o departamento pessoal.");
       return;
     }
     setErr("");
+    setLoginAttempts(0);
     setEmpId(found.id);
   }
 
@@ -1974,11 +2026,19 @@ function EmployeePortal({ employees, roles, tips, schedules, restaurants, commun
         <h2 style={{ color: ac, margin: "0 0 4px" }}>Área do Empregado</h2>
         <p style={{ color: "var(--text3)", fontSize: 13, marginBottom: 22 }}>Use seu ID (ex: QUI0001) ou CPF + PIN</p>
         <div style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 14, textAlign: "left" }}>
-          <div><label style={S.label}>ID ou CPF</label><input value={cpf} onChange={e => setCpf(e.target.value)} placeholder="QUI0001 ou 000.000.000-00" style={S.input} /></div>
-          <div><label style={S.label}>PIN (4 dígitos)</label><input type="password" inputMode="numeric" maxLength={4} value={pin} onChange={e => setPin(e.target.value)} placeholder="••••" style={{ ...S.input, letterSpacing: 6, fontSize: 18, textAlign: "center" }} onKeyDown={e => e.key === "Enter" && tryLogin()} /></div>
+          <div><label style={S.label}>ID ou CPF</label><input value={cpf} onChange={e => setCpf(e.target.value)} placeholder="QUI0001 ou 000.000.000-00" style={S.input} disabled={loginIsBlocked}/></div>
+          <div><label style={S.label}>PIN (4 dígitos)</label><input type="password" inputMode="numeric" maxLength={4} value={pin} onChange={e => setPin(e.target.value)} placeholder="••••" style={{ ...S.input, letterSpacing: 6, fontSize: 18, textAlign: "center" }} onKeyDown={e => e.key === "Enter" && tryLogin()} disabled={loginIsBlocked}/></div>
         </div>
-        {err && <p style={{ color: "#e74c3c", fontSize: 13, marginBottom: 10 }}>{err}</p>}
-        <button onClick={tryLogin} style={{ ...S.btnPrimary, marginBottom: 12 }}>Entrar</button>
+        {/* Aceite de termos */}
+        {!termsAccepted && (
+          <label style={{display:"flex",alignItems:"flex-start",gap:8,textAlign:"left",marginBottom:12,cursor:"pointer"}}>
+            <input type="checkbox" checked={termsAccepted} onChange={e=>{setTermsAccepted(e.target.checked);if(e.target.checked)localStorage.setItem("apptip_terms","1");}} style={{width:15,height:15,marginTop:2,accentColor:ac,flexShrink:0}}/>
+            <span style={{color:"var(--text3)",fontSize:11}}>Li e aceito a <button onClick={e=>{e.preventDefault();document.getElementById("apptip-privacy").style.display="flex";}} style={{background:"none",border:"none",color:ac,cursor:"pointer",fontFamily:"DM Mono,monospace",fontSize:11,padding:0,textDecoration:"underline"}}>Política de Privacidade</button> e o uso dos meus dados para gestão de gorjetas.</span>
+          </label>
+        )}
+        {err && <p style={{ color: loginIsBlocked?"#f59e0b":"#e74c3c", fontSize: 13, marginBottom: 10 }}>{err}</p>}
+        <button onClick={tryLogin} disabled={loginIsBlocked || !termsAccepted} style={{ ...S.btnPrimary, marginBottom: 12, opacity:(loginIsBlocked||!termsAccepted)?0.5:1, cursor:(loginIsBlocked||!termsAccepted)?"not-allowed":"pointer" }}>Entrar</button>
+        {termsAccepted && <p style={{color:"var(--text3)",fontSize:10,marginBottom:12}}><button onClick={()=>document.getElementById("apptip-privacy").style.display="flex"} style={{background:"none",border:"none",color:"var(--text3)",cursor:"pointer",fontFamily:"DM Mono,monospace",fontSize:10,padding:0,textDecoration:"underline"}}>Política de Privacidade</button></p>}
         <button onClick={onBack} style={{ ...S.btnSecondary, width: "100%" }}>← Voltar</button>
       </div>
     </div>
@@ -4093,18 +4153,41 @@ function LoginScreen({ superManagers, managers, onLoginSuper, onLoginManager, on
   const [cpf, setCpf] = useState("");
   const [pin, setPin] = useState("");
   const [err, setErr] = useState("");
+  const [attempts, setAttempts] = useState(0);
+  const [blockedUntil, setBlockedUntil] = useState(null);
   const ac = "#f5c842";
 
+  const isBlocked = blockedUntil && new Date() < blockedUntil;
+  const secondsLeft = isBlocked ? Math.ceil((blockedUntil - new Date()) / 1000) : 0;
+
   function tryLogin() {
+    if (isBlocked) return;
     const clean = cpf.replace(/\D/g,"");
-    // Tenta supergestor primeiro
     const superUser = superManagers.find(s => s.cpf?.replace(/\D/g,"")===clean && String(s.pin)===String(pin));
-    if (superUser) { setErr(""); onLoginSuper(superUser); return; }
-    // Tenta gestor
+    if (superUser) { setErr(""); setAttempts(0); onLoginSuper(superUser); return; }
     const mgr = managers.find(m => m.cpf?.replace(/\D/g,"")===clean && String(m.pin)===String(pin));
-    if (mgr) { setErr(""); onLoginManager(mgr); return; }
-    setErr("CPF ou PIN incorretos.");
+    if (mgr) { setErr(""); setAttempts(0); onLoginManager(mgr); return; }
+    const newAttempts = attempts + 1;
+    setAttempts(newAttempts);
+    if (newAttempts >= 5) {
+      const until = new Date(Date.now() + 30000);
+      setBlockedUntil(until);
+      setAttempts(0);
+      setErr("Muitas tentativas. Aguarde 30 segundos.");
+    } else {
+      setErr(`CPF ou PIN incorretos. ${5 - newAttempts} tentativa${5-newAttempts!==1?"s":""} restante${5-newAttempts!==1?"s":""}.`);
+    }
   }
+
+  // Contador regressivo
+  useEffect(() => {
+    if (!isBlocked) return;
+    const t = setInterval(() => {
+      if (new Date() >= blockedUntil) { setBlockedUntil(null); setErr(""); clearInterval(t); }
+      else setErr(`Muitas tentativas. Aguarde ${Math.ceil((blockedUntil-new Date())/1000)}s.`);
+    }, 1000);
+    return () => clearInterval(t);
+  }, [blockedUntil]);
 
   return (
     <div style={{minHeight:"100vh",background:"var(--bg)",display:"flex",alignItems:"center",justifyContent:"center",fontFamily:"DM Mono,monospace",padding:24}}>
@@ -4115,13 +4198,19 @@ function LoginScreen({ superManagers, managers, onLoginSuper, onLoginManager, on
           <p style={{color:"var(--text3)",fontSize:12,margin:0}}>Acesso para gestores e super gestores</p>
         </div>
         <div style={{display:"flex",flexDirection:"column",gap:10,marginBottom:14}}>
-          <div><label style={S.label}>CPF</label><input value={cpf} onChange={e=>setCpf(maskCpf(e.target.value))} placeholder="000.000.000-00" style={S.input} inputMode="numeric"/></div>
-          <div><label style={S.label}>PIN</label><input type="password" inputMode="numeric" maxLength={6} value={pin} onChange={e=>setPin(e.target.value)} placeholder="••••" style={{...S.input,letterSpacing:6,fontSize:18,textAlign:"center"}} onKeyDown={e=>e.key==="Enter"&&tryLogin()}/></div>
+          <div><label style={S.label}>CPF</label><input value={cpf} onChange={e=>setCpf(maskCpf(e.target.value))} placeholder="000.000.000-00" style={S.input} inputMode="numeric" disabled={isBlocked}/></div>
+          <div><label style={S.label}>PIN</label><input type="password" inputMode="numeric" maxLength={6} value={pin} onChange={e=>setPin(e.target.value)} placeholder="••••" style={{...S.input,letterSpacing:6,fontSize:18,textAlign:"center"}} onKeyDown={e=>e.key==="Enter"&&tryLogin()} disabled={isBlocked}/></div>
         </div>
-        {err && <p style={{color:"#e74c3c",fontSize:13,marginBottom:10}}>{err}</p>}
-        <button onClick={tryLogin} style={{...S.btnPrimary,marginBottom:10}}>Entrar</button>
+        {err && <p style={{color:isBlocked?"#f59e0b":"#e74c3c",fontSize:13,marginBottom:10}}>{err}</p>}
+        <button onClick={tryLogin} disabled={isBlocked} style={{...S.btnPrimary,marginBottom:10,opacity:isBlocked?0.5:1,cursor:isBlocked?"not-allowed":"pointer"}}>Entrar</button>
         {superManagers.length===0&&<button onClick={onSetupFirst} style={{...S.btnSecondary,width:"100%",textAlign:"center",marginBottom:10}}>Criar primeiro Super Gestor</button>}
-        <button onClick={onBack} style={{...S.btnSecondary,width:"100%",textAlign:"center"}}>← Voltar</button>
+        <button onClick={onBack} style={{...S.btnSecondary,width:"100%",textAlign:"center",marginBottom:14}}>← Voltar</button>
+        <p style={{color:"var(--text3)",fontSize:10,textAlign:"center",margin:0}}>
+          Ao entrar você concorda com nossa{" "}
+          <button onClick={()=>document.getElementById("apptip-privacy").style.display="flex"} style={{background:"none",border:"none",color:ac,cursor:"pointer",fontFamily:"DM Mono,monospace",fontSize:10,padding:0,textDecoration:"underline"}}>
+            Política de Privacidade
+          </button>
+        </p>
       </div>
     </div>
   );
@@ -4202,15 +4291,17 @@ export default function App() {
   });
   const [loaded, setLoaded] = useState(false);
   const [toast, setToast] = useState("");
-  const [currentUser, setCurrentUser] = useState(() => {
-    try { const s = localStorage.getItem("apptip_user"); return s ? JSON.parse(s) : null; } catch { return null; }
+  // currentUser: restaurado por ID após dados carregarem, nunca armazenamos o objeto completo
+  const [currentUser, setCurrentUser] = useState(null);
+  const [currentUserId] = useState(() => {
+    try { return localStorage.getItem("apptip_userid") || null; } catch { return null; }
   });
   const [userRole, setUserRole] = useState(() => localStorage.getItem("apptip_role") || null);
 
-  // Persist session
+  // Persist session — salva apenas IDs, nunca dados sensíveis
   useEffect(() => {
-    if (currentUser) localStorage.setItem("apptip_user", JSON.stringify(currentUser));
-    else localStorage.removeItem("apptip_user");
+    if (currentUser) localStorage.setItem("apptip_userid", currentUser.id);
+    else localStorage.removeItem("apptip_userid");
   }, [currentUser]);
   useEffect(() => {
     if (userRole) localStorage.setItem("apptip_role", userRole);
@@ -4239,7 +4330,19 @@ export default function App() {
       const vals = await Promise.all(Object.values(K).map(load));
       const keys = Object.keys(K);
       const map = { superManagers:setSuperManagers, managers:setManagers, restaurants:setRestaurants, employees:setEmployees, roles:setRoles, tips:setTips, splits:setSplits, schedules:setSchedules, communications:setCommunications, commAcks:setCommAcks, faq:setFaq, dpMessages:setDpMessages, workSchedules:setWorkSchedules, notifications:setNotifications, noTipDays:setNoTipDays };
-      keys.forEach((k, i) => { if (k !== "receipts" && vals[i]) map[k]?.(vals[i]); });
+      const loaded_data = {};
+      keys.forEach((k, i) => { if (k !== "receipts" && vals[i]) { map[k]?.(vals[i]); loaded_data[k] = vals[i]; } });
+      // Restaurar currentUser por ID (nunca armazenamos o objeto completo)
+      if (currentUserId) {
+        const role = localStorage.getItem("apptip_role");
+        if (role === "super") {
+          const u = (loaded_data.superManagers ?? []).find(s => s.id === currentUserId);
+          if (u) setCurrentUser(u); else { localStorage.removeItem("apptip_userid"); localStorage.removeItem("apptip_role"); }
+        } else if (role === "manager") {
+          const u = (loaded_data.managers ?? []).find(m => m.id === currentUserId);
+          if (u) setCurrentUser(u); else { localStorage.removeItem("apptip_userid"); localStorage.removeItem("apptip_role"); }
+        }
+      }
       // Load receipts from separate collection
       const recs = await loadReceipts();
       if (recs.length) setReceipts(recs);
@@ -4314,6 +4417,36 @@ export default function App() {
       {isAdm && view === "super"   && <SuperManagerPortal data={data} onUpdate={handleUpdate} onBack={doLogout} currentUser={currentUser} toggleTheme={toggleTheme} theme={theme} />}
       {isAdm && view === "manager" && <ManagerPortal manager={currentUser} data={data} onUpdate={handleUpdate} onBack={doLogout} toggleTheme={toggleTheme} theme={theme} />}
       <Toast msg={toast} onClose={()=>setToast("")} />
+
+      {/* Modal de Política de Privacidade — acessível de qualquer tela */}
+      <div id="apptip-privacy" style={{display:"none",position:"fixed",inset:0,background:"rgba(0,0,0,0.85)",zIndex:9999,alignItems:"center",justifyContent:"center",padding:20}} onClick={e=>{if(e.target===e.currentTarget)e.currentTarget.style.display="none";}}>
+        <div style={{background:"var(--card-bg)",borderRadius:16,padding:28,maxWidth:480,width:"100%",maxHeight:"85vh",overflowY:"auto",border:"1px solid var(--border)",fontFamily:"DM Mono,monospace"}}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20}}>
+            <h2 style={{color:"#f5c842",margin:0,fontSize:18}}>🔒 Política de Privacidade</h2>
+            <button onClick={()=>document.getElementById("apptip-privacy").style.display="none"} style={{background:"none",border:"none",color:"var(--text3)",cursor:"pointer",fontSize:20}}>✕</button>
+          </div>
+          <div style={{color:"var(--text2)",fontSize:13,lineHeight:1.8}}>
+            <p style={{color:"var(--text3)",fontSize:11,marginTop:0}}>Última atualização: {new Date().toLocaleDateString("pt-BR")}</p>
+
+            <p><strong style={{color:"var(--text)"}}>1. Quem somos</strong><br/>O AppTip é uma plataforma de gestão de gorjetas para restaurantes, operada pelo estabelecimento ao qual você está vinculado.</p>
+
+            <p><strong style={{color:"var(--text)"}}>2. Dados coletados</strong><br/>Coletamos: nome completo, CPF, cargo, data de admissão e PIN de acesso. Esses dados são necessários para identificação e distribuição de gorjetas.</p>
+
+            <p><strong style={{color:"var(--text)"}}>3. Finalidade</strong><br/>Seus dados são usados exclusivamente para: controle de acesso ao sistema, cálculo e distribuição de gorjetas, gestão de escala e comunicados internos.</p>
+
+            <p><strong style={{color:"var(--text)"}}>4. Armazenamento</strong><br/>Os dados são armazenados no Google Firebase (servidores na América do Sul) com acesso restrito ao seu restaurante. Não compartilhamos seus dados com terceiros.</p>
+
+            <p><strong style={{color:"var(--text)"}}>5. Seus direitos (LGPD)</strong><br/>Você tem direito a: acessar seus dados, corrigir informações incorretas, solicitar a exclusão dos seus dados e revogar o consentimento a qualquer momento.</p>
+
+            <p><strong style={{color:"var(--text)"}}>6. Solicitação de exclusão</strong><br/>Para solicitar a exclusão dos seus dados, entre em contato com o gestor do seu restaurante através da função "Fale com DP" no aplicativo.</p>
+
+            <p><strong style={{color:"var(--text)"}}>7. Contato</strong><br/>Dúvidas sobre privacidade devem ser direcionadas ao gestor responsável pelo restaurante.</p>
+
+            <p style={{color:"var(--text3)",fontSize:11,borderTop:"1px solid var(--border)",paddingTop:12,marginTop:20}}>Esta política está em conformidade com a Lei Geral de Proteção de Dados (LGPD — Lei nº 13.709/2018).</p>
+          </div>
+          <button onClick={()=>document.getElementById("apptip-privacy").style.display="none"} style={{...S.btnPrimary,marginTop:8}}>Entendi</button>
+        </div>
+      </div>
     </>
   );
 }
