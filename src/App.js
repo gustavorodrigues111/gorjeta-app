@@ -1171,8 +1171,32 @@ function WorkScheduleManagerTab({ restaurantId, employees, workSchedules, notifi
 // ── Work Schedule Employee Tab ────────────────────────────────────────────────
 function WorkScheduleEmployeeTab({ empId, restaurantId, workSchedules }) {
   const ac = "#f5c842";
-  const empScheds = workSchedules?.[restaurantId]?.[empId] ?? [];
+  const empScheds = [...(workSchedules?.[restaurantId]?.[empId] ?? [])].sort((a,b)=>a.validFrom.localeCompare(b.validFrom));
   const current = empScheds[empScheds.length - 1];
+
+  function scheduleBlock(s, validUntil) {
+    return (
+      <div style={{fontFamily:"DM Mono,monospace"}}>
+        {[0,1,2,3,4,5,6].map(i => {
+          const d = s.days[i];
+          const hasShift = d?.in && d?.out;
+          const isWeekend = i === 0 || i === 6;
+          return (
+            <div key={i} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"9px 14px",marginBottom:5,background:hasShift?"var(--card-bg)":"var(--bg1)",borderRadius:9,border:`1px solid ${hasShift?"var(--border)":"transparent"}`,opacity:hasShift?1:0.5}}>
+              <span style={{color:isWeekend?"#f59e0b":"var(--text)",fontWeight:700,fontSize:13,minWidth:36}}>{WEEK_DAYS_LABEL[i]}</span>
+              {hasShift
+                ? <span style={{color:"var(--text2)",fontSize:13}}>{d.in} – {d.out} <span style={{color:"var(--text3)",fontSize:11}}>({d.break||0}min intervalo)</span></span>
+                : <span style={{color:"var(--text3)",fontSize:12}}>Folga</span>
+              }
+            </div>
+          );
+        })}
+        {validUntil && (
+          <p style={{color:"var(--text3)",fontSize:11,marginTop:6,textAlign:"right"}}>Vigente até {fmtDate(validUntil)}</p>
+        )}
+      </div>
+    );
+  }
 
   if (!current) return (
     <div style={{textAlign:"center",marginTop:40}}>
@@ -1183,49 +1207,33 @@ function WorkScheduleEmployeeTab({ empId, restaurantId, workSchedules }) {
 
   return (
     <div style={{fontFamily:"DM Mono,monospace"}}>
-      <p style={{color:ac,fontSize:14,fontWeight:700,margin:"0 0 4px"}}>Seu Horário</p>
-      <p style={{color:"var(--text3)",fontSize:12,marginBottom:16}}>Vigente desde {fmtDate(current.validFrom)}</p>
+      {/* Current schedule */}
+      <div style={{...S.card,marginBottom:20,borderColor:"#f5c84233"}}>
+        <p style={{color:ac,fontSize:14,fontWeight:700,margin:"0 0 2px"}}>🕐 Horário atual</p>
+        <p style={{color:"var(--text3)",fontSize:12,marginBottom:14}}>Vigência a partir de {fmtDate(current.validFrom)}</p>
+        {scheduleBlock(current, null)}
+      </div>
 
-      {[0,1,2,3,4,5,6].map(dayIdx => {
-        const d = current.days[dayIdx];
-        if (!d?.in || !d?.out) return (
-          <div key={dayIdx} style={{display:"flex",justifyContent:"space-between",padding:"10px 14px",background:"var(--bg1)",borderRadius:8,marginBottom:6,opacity:0.4}}>
-            <span style={{color:([0,6].includes(dayIdx))?"#f59e0b":"#555",fontWeight:600}}>{WEEK_DAYS_LABEL[dayIdx]}</span>
-            <span style={{color:"var(--text3)",fontSize:12}}>Folga</span>
-          </div>
-        );
-        const calc = calcDayHours(d.in, d.out, parseInt(d.break)||0);
-        return (
-          <div key={dayIdx} style={{background:"var(--card-bg)",borderRadius:10,padding:"12px 14px",marginBottom:8,border:"1px solid var(--border)"}}>
-            <div style={{display:"flex",justifyContent:"space-between",marginBottom:8}}>
-              <span style={{color:([0,6].includes(dayIdx))?"#f59e0b":"#fff",fontWeight:700,fontSize:14}}>{WEEK_DAYS_LABEL[dayIdx]}</span>
-              <span style={{color:ac,fontWeight:700,fontSize:14}}>{fmtHHMM(calc.totalContract)}h</span>
-            </div>
-            <div style={{display:"flex",gap:16,fontSize:12,flexWrap:"wrap"}}>
-              <span style={{color:"#10b981"}}>🟢 Entrada: {d.in}</span>
-              <span style={{color:"#e74c3c"}}>🔴 Saída: {d.out}</span>
-              <span style={{color:"var(--text3)"}}>☕ Intervalo: {d.break||0}min</span>
-              {calc.nocturnal > 0 && <span style={{color:"#8b5cf6"}}>🌙 Noturno: {fmtHHMM(calc.nocturnal)}</span>}
-            </div>
-          </div>
-        );
-      })}
-
+      {/* Previous schedules */}
       {empScheds.length > 1 && (
-        <details style={{marginTop:20}}>
-          <summary style={{color:"var(--text3)",fontSize:12,cursor:"pointer",padding:"8px 12px",background:"var(--bg1)",borderRadius:8}}>
-            📂 Horários anteriores ({empScheds.length - 1})
+        <details>
+          <summary style={{color:"var(--text3)",fontSize:12,cursor:"pointer",padding:"8px 12px",background:"var(--bg1)",borderRadius:8,marginBottom:8,listStyle:"none"}}>
+            📂 Horários anteriores ({empScheds.length - 1}) ▾
           </summary>
-          <div style={{paddingTop:8}}>
-            {[...empScheds].reverse().slice(1).map(s => (
-              <div key={s.id} style={{...S.card,marginBottom:8,opacity:0.7}}>
-                <p style={{color:"var(--text3)",fontSize:12,margin:"0 0 8px"}}>Vigente desde {fmtDate(s.validFrom)}</p>
-                {[0,1,2,3,4,5,6].filter(i=>s.days[i]?.in&&s.days[i]?.out).map(i=>{
-                  const d=s.days[i];
-                  return <div key={i} style={{color:"var(--text3)",fontSize:12,marginBottom:2}}>{WEEK_DAYS_LABEL[i]}: {d.in} – {d.out}</div>;
-                })}
-              </div>
-            ))}
+          <div style={{paddingTop:4}}>
+            {[...empScheds].reverse().slice(1).map((s, idx, arr) => {
+              // validUntil = day before the next (more recent) schedule's validFrom
+              const newerSched = [...empScheds].reverse()[idx]; // the one right after in reverse
+              const validUntil = newerSched?.validFrom
+                ? (() => { const d = new Date(newerSched.validFrom+"T12:00:00"); d.setDate(d.getDate()-1); return d.toISOString().slice(0,10); })()
+                : null;
+              return (
+                <div key={s.id} style={{...S.card,marginBottom:10,opacity:0.7}}>
+                  <p style={{color:"var(--text3)",fontSize:12,fontWeight:700,margin:"0 0 10px"}}>Vigência a partir de {fmtDate(s.validFrom)}</p>
+                  {scheduleBlock(s, validUntil)}
+                </div>
+              );
+            })}
           </div>
         </details>
       )}
