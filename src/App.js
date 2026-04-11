@@ -4097,8 +4097,6 @@ function ManagerPortal({ manager, data, onUpdate, onBack, toggleTheme, theme }) 
 
   const selRest = myRestaurants.find(r => r.id === selId);
 
-  const selRest = myRestaurants.find(r => r.id === selId);
-
   return (
     <div style={{ minHeight:"100vh", background:"var(--bg)", fontFamily:"DM Mono,monospace" }}>
       <div style={{ background:"var(--bg1)", borderBottom:"1px solid var(--border)", padding:"14px 20px", display:"flex", justifyContent:"space-between", alignItems:"center" }}>
