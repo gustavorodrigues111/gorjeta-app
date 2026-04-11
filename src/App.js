@@ -1,4 +1,4 @@
-// AppTip v4.6 — 2026-04-11h
+// AppTip v4.6 — 2026-04-11i
 import { useState, useEffect } from "react";
 import { db } from "./firebase";
 import { doc, getDoc, setDoc, deleteDoc, collection, getDocs } from "firebase/firestore";
@@ -11,10 +11,16 @@ async function load(key) {
     return snap.exists() ? snap.data().value : null;
   } catch (e) { console.error("load error", e); return null; }
 }
-async function save(key, value) {
-  try {
-    await setDoc(doc(db, "appdata", key), { value });
-  } catch (e) { console.error("save error", e); }
+async function save(key, value, retries = 3) {
+  for (let i = 0; i < retries; i++) {
+    try {
+      await setDoc(doc(db, "appdata", key), { value });
+      return;
+    } catch (e) {
+      console.error(`save error (tentativa ${i+1}):`, e);
+      if (i < retries - 1) await new Promise(r => setTimeout(r, 1000 * (i + 1)));
+    }
+  }
 }
 
 // Receipts stored per-document to avoid Firestore 1MB limit
@@ -7808,7 +7814,7 @@ export default function App() {
       {view === "home" && <Home onLogin={()=>setView("login")} />}
       <Toast msg={toast} onClose={()=>setToast("")} />
       {/* Rodapé de versão */}
-      <div style={{position:"fixed",bottom:8,right:12,fontSize:10,color:"var(--text3)",fontFamily:"'DM Mono',monospace",opacity:0.45,pointerEvents:"none",zIndex:100}}>v4.6h</div>
+      <div style={{position:"fixed",bottom:8,right:12,fontSize:10,color:"var(--text3)",fontFamily:"'DM Mono',monospace",opacity:0.45,pointerEvents:"none",zIndex:100}}>v4.6i</div>
 
       {/* Modal Política de Privacidade */}
       <div id="apptip-privacy" style={{display:"none",position:"fixed",inset:0,background:"rgba(0,0,0,0.5)",zIndex:9999,alignItems:"center",justifyContent:"center",padding:20}} onClick={e=>{if(e.target===e.currentTarget)e.currentTarget.style.display="none";}}>
