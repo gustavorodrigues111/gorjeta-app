@@ -1,3 +1,4 @@
+// AppTip v4.6 — 2026-04-11
 import { useState, useEffect } from "react";
 import { db } from "./firebase";
 import { doc, getDoc, setDoc, deleteDoc, collection, getDocs } from "firebase/firestore";
