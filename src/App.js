@@ -594,12 +594,9 @@ Exemplo (gorjeta R$${fmtR(EX)}, ${totalPontos}pt no total):
       a:"O PIN é sua senha de acesso ao AppTip — um código de 4 dígitos numéricos.\n\nPara fazer login use:\n• Seu ID de empregado (ex: LBZ0005) ou CPF\n• Seu PIN de 4 dígitos\n\nNo primeiro acesso o sistema pedirá que você crie um PIN pessoal.\n\nPara trocar o PIN depois: solicite ao seu gestor que faça o reset. Após o reset, você deverá criar um novo PIN no próximo acesso.\n\nNunca compartilhe seu PIN com ninguém.",
     },
   ].filter(item => {
-    // Verifica se a aba está autorizada pelo admin E ativa pelo gestor
-    if (item.tabKey) {
-      if (rest?.tabsConfig?.[item.tabKey] === false) return false;
-      if (rest?.tabsGestor?.[item.tabKey] === false) return false;
-    }
-    // Verifica toggle individual da FAQ automática
+    if (!item.tabKey) return rest?.tabsGestor?.faqAuto?.[item.id] !== false;
+    if (rest?.tabsConfig?.[item.tabKey] === false) return false;
+    if (rest?.tabsGestor?.[item.tabKey] === false) return false;
     if (rest?.tabsGestor?.faqAuto?.[item.id] === false) return false;
     return true;
   });
@@ -4173,20 +4170,23 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                     </p>
                     <div style={{display:"flex",flexDirection:"column",gap:6}}>
                       {FAQS_AUTO.map((item) => {
-                        const adminOk = item.tabKey ? restaurant?.tabsConfig?.[item.tabKey] !== false : true;
-                        const abaGestorOk = item.tabKey ? restaurant?.tabsGestor?.[item.tabKey] !== false : true;
+                        // Admin controla via tabsConfig, Gestor via tabsGestor
+                        const adminBloqueou = item.tabKey ? restaurant?.tabsConfig?.[item.tabKey] === false : false;
+                        const gestorOcultou = item.tabKey ? restaurant?.tabsGestor?.[item.tabKey] === false : false;
                         const faqAutoOk = restaurant?.tabsGestor?.faqAuto?.[item.id] !== false;
-                        // FAQ visível só se: admin autorizou aba + gestor não ocultou aba + faqAuto não ocultado
-                        const gestorOk = abaGestorOk && faqAutoOk;
-                        const visivel = adminOk && gestorOk;
+                        // Se admin bloqueou aba → sempre oculto, sem toggle
+                        // Se gestor ocultou aba → oculto, sem toggle
+                        // Caso contrário → segue faqAutoOk
+                        const abaOk = !adminBloqueou && !gestorOcultou;
+                        const visivel = abaOk && faqAutoOk;
                         return (
                           <details key={item.id} style={{borderRadius:10,background:"var(--card-bg)",border:`1px solid ${visivel?"var(--ac)22":"var(--border)"}`,overflow:"hidden",opacity:visivel?1:0.6}}>
                             <summary style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"10px 12px",cursor:"pointer",listStyle:"none",gap:8}}>
                               <span style={{fontSize:13,fontWeight:600,color:visivel?"var(--text)":"var(--text3)",flex:1}}>{item.q}</span>
                               <div style={{display:"flex",alignItems:"center",gap:6,flexShrink:0}}>
-                                {!adminOk && <span style={{fontSize:10,color:"var(--text3)",background:"var(--bg2)",padding:"2px 7px",borderRadius:10,border:"1px solid var(--border)"}}>aba bloqueada pelo admin</span>}
-                                {adminOk && !abaGestorOk && <span style={{fontSize:10,color:"var(--text3)",background:"var(--bg2)",padding:"2px 7px",borderRadius:10,border:"1px solid var(--border)"}}>aba oculta nas configurações</span>}
-                                {adminOk && abaGestorOk && (
+                                {adminBloqueou && <span style={{fontSize:10,color:"var(--text3)",background:"var(--bg2)",padding:"2px 7px",borderRadius:10,border:"1px solid var(--border)"}}>aba bloqueada pelo admin</span>}
+                                {!adminBloqueou && gestorOcultou && <span style={{fontSize:10,color:"var(--text3)",background:"var(--bg2)",padding:"2px 7px",borderRadius:10,border:"1px solid var(--border)"}}>aba oculta nas configurações</span>}
+                                {abaOk && (
                                   <button onClick={e=>{
                                     e.preventDefault(); e.stopPropagation();
                                     const cur = restaurant?.tabsGestor?.faqAuto ?? {};
