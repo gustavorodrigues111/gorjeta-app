@@ -2526,7 +2526,8 @@ function EmployeeSpreadsheet({ restEmps, restRoles, rid, employees, onUpdate, re
     { id:"p10",  empMax:10  },
     { id:"p20",  empMax:20  },
     { id:"p50",  empMax:50  },
-    { id:"p999", empMax:999 },
+    { id:"p999", empMax:100 },
+    { id:"pOrc", empMax:999 },
   ];
   const plano = PLANOS.find(p=>p.id===(restaurant?.planoId??"p10")) ?? PLANOS[0];
   const activeCount = restEmps.filter(e=>!e.inactive).length;
@@ -2629,8 +2630,8 @@ function EmployeeSpreadsheet({ restEmps, restRoles, rid, employees, onUpdate, re
               <div style={{color:"var(--text3)",fontSize:12}}>Para adicionar mais empregados, solicite upgrade do plano.</div>
             </div>
             <button onClick={()=>{
-              const PLANOS_LABEL = { p10:"Starter (10 emp.)", p20:"Básico (20 emp.)", p50:"Profissional (50 emp.)", p999:"Enterprise" };
-              const PROXIMO = { p10:"p20", p20:"p50", p50:"p999" };
+              const PLANOS_LABEL = { p10:"Starter (10 emp.)", p20:"Básico (20 emp.)", p50:"Profissional (50 emp.)", p999:"Enterprise (51-100 emp.)", pOrc:"Orçamento (+100 emp.)" };
+              const PROXIMO = { p10:"p20", p20:"p50", p50:"p999", p999:"pOrc" };
               const planoAtual = PLANOS_LABEL[restaurant?.planoId??"p10"] ?? "Starter";
               const planoProx = PLANOS_LABEL[PROXIMO[restaurant?.planoId??"p10"]] ?? "Enterprise";
               const restNome = restaurant?.name ?? "Restaurante";
@@ -3889,7 +3890,8 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }
     { id:"p10",  label:"Starter",     empMax:10,  mensal:97,    anual:87.30  },
     { id:"p20",  label:"Básico",      empMax:20,  mensal:187,   anual:168.30 },
     { id:"p50",  label:"Profissional",empMax:50,  mensal:397,   anual:357.30 },
-    { id:"p999", label:"Enterprise",  empMax:999, mensal:null,  anual:null   },
+    { id:"p999", label:"Enterprise",  empMax:100, mensal:null,  anual:null   },
+    { id:"pOrc", label:"Orçamento",    empMax:999, mensal:null,  anual:null   },
   ];
   function getPlano(r) { return PLANOS.find(p=>p.id===(r.planoId??"p10")) ?? PLANOS[0]; }
 
@@ -4074,14 +4076,17 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }
           const tipoCobranca = rest?.tipoCobranca ?? "mensal";
           const empAtivos = employees.filter(e=>e.restaurantId===selRestaurant&&!e.inactive).length;
 
-          // Cálculo do valor — Enterprise com adicional por empregado acima de 50
-          const empMax = rest?.planoId === "p999" ? (rest?.empMaxCustom ?? 50) : plano.empMax;
+          // Cálculo do valor
+          const isEnterprise = rest?.planoId === "p999";
+          const isOrcamento  = rest?.planoId === "pOrc";
+          const empMax = isEnterprise ? (rest?.empMaxCustom ?? 51) : (isOrcamento ? (rest?.empMaxCustom ?? 101) : plano.empMax);
           let valorBase = tipoCobranca === "anual" ? plano.anual : plano.mensal;
           let valorAdicionais = 0;
-          if (rest?.planoId === "p999" && empMax > 50) {
-            valorAdicionais = (empMax - 50) * 7.99;
+          if (isEnterprise) {
+            valorBase = 0;
+            valorAdicionais = empMax * 7.99;
           }
-          const valorTotal = valorBase ? valorBase + valorAdicionais : null;
+          const valorTotal = isOrcamento ? null : (valorBase ?? 0) + valorAdicionais;
 
           // Status de pagamento
           const status = fin.status ?? "ativo"; // "ativo" | "aviso" | "inadimplente"
@@ -4146,10 +4151,19 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }
                         onUpdate("restaurants",updated);
                       }}
                         style={{padding:"10px 14px",borderRadius:10,border:`1px solid ${sel?ac:"var(--border)"}`,background:sel?"var(--ac-bg)":"transparent",cursor:"pointer",fontFamily:"'DM Sans',sans-serif",textAlign:"left",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-                        <span style={{color:sel?"var(--ac-text)":"var(--text2)",fontWeight:sel?700:400}}>{sel?"✓":"○"} {p.label} — até {p.empMax === 999 ? "ilimitado" : p.empMax} emp.</span>
-                        {p.mensal
-                          ? <span style={{color:"var(--text3)",fontSize:12}}>R${p.mensal}/mês · R${p.anual}/mês anual</span>
-                          : <span style={{color:"var(--text3)",fontSize:12}}>Sob consulta + R$7,99/emp. acima de 50</span>}
+                        <span style={{color:sel?"var(--ac-text)":"var(--text2)",fontWeight:sel?700:400}}>
+                          {sel?"✓":"○"} {p.label}
+                          {p.id==="p10"&&" — até 10 emp."}
+                          {p.id==="p20"&&" — até 20 emp."}
+                          {p.id==="p50"&&" — até 50 emp."}
+                          {p.id==="p999"&&" — 51 a 100 emp."}
+                          {p.id==="pOrc"&&" — acima de 100 emp."}
+                        </span>
+                        {p.id==="p10"&&<span style={{color:"var(--text3)",fontSize:12}}>R$97/mês · R$87,30/mês anual</span>}
+                        {p.id==="p20"&&<span style={{color:"var(--text3)",fontSize:12}}>R$187/mês · R$168,30/mês anual</span>}
+                        {p.id==="p50"&&<span style={{color:"var(--text3)",fontSize:12}}>R$397/mês · R$357,30/mês anual</span>}
+                        {p.id==="p999"&&<span style={{color:"var(--text3)",fontSize:12}}>R$7,99/emp./mês</span>}
+                        {p.id==="pOrc"&&<span style={{color:"var(--text3)",fontSize:12}}>Sob orçamento</span>}
                       </button>
                     );
                   })}
@@ -4171,38 +4185,59 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }
                   })}
                 </div>
 
-                {/* Limite Enterprise */}
-                {rest?.planoId === "p999" && (
+                {isEnterprise && (
                   <div style={{display:"flex",alignItems:"center",gap:10}}>
-                    <label style={{...S.label,marginBottom:0}}>Empregados contratados:</label>
-                    <input type="number" min="51" defaultValue={rest?.empMaxCustom??51}
+                    <label style={{...S.label,marginBottom:0}}>Empregados contratados (51–100):</label>
+                    <input type="number" min="51" max="100" defaultValue={rest?.empMaxCustom??51}
                       onBlur={e=>{
-                        const v = parseInt(e.target.value);
-                        if(v>0){const updated=restaurants.map(r=>r.id===selRestaurant?{...r,empMaxCustom:v}:r);onUpdate("restaurants",updated);}
+                        const v = Math.min(100, Math.max(51, parseInt(e.target.value)||51));
+                        const updated=restaurants.map(r=>r.id===selRestaurant?{...r,empMaxCustom:v}:r);
+                        onUpdate("restaurants",updated);
                       }}
                       style={{...S.input,width:80,textAlign:"center",fontFamily:"'DM Mono',monospace"}}/>
                     <span style={{color:"var(--text3)",fontSize:12}}>empregados</span>
                   </div>
                 )}
+                {isOrcamento && (
+                  <div style={{display:"flex",alignItems:"center",gap:10}}>
+                    <label style={{...S.label,marginBottom:0}}>Empregados contratados (acima de 100):</label>
+                    <input type="number" min="101" defaultValue={rest?.empMaxCustom??101}
+                      onBlur={e=>{
+                        const v = Math.max(101, parseInt(e.target.value)||101);
+                        const updated=restaurants.map(r=>r.id===selRestaurant?{...r,empMaxCustom:v}:r);
+                        onUpdate("restaurants",updated);
+                      }}
+                      style={{...S.input,width:90,textAlign:"center",fontFamily:"'DM Mono',monospace"}}/>
+                    <span style={{color:"var(--text3)",fontSize:12}}>empregados</span>
+                  </div>
+                )}
               </div>
 
-              {/* Resumo do valor */}
               <div style={{...S.card,marginBottom:20,background:"var(--ac-bg)",border:"1px solid var(--ac)33"}}>
                 <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:10}}>
                   <div>
                     <div style={{color:"var(--text3)",fontSize:11,fontWeight:600,textTransform:"uppercase",letterSpacing:0.5,marginBottom:4}}>Valor a cobrar</div>
-                    <div style={{color:"var(--ac-text)",fontWeight:800,fontSize:22,fontFamily:"'DM Mono',monospace"}}>
-                      {valorTotal ? `R$ ${valorTotal.toLocaleString("pt-BR",{minimumFractionDigits:2})}` : "Sob consulta"}
-                      <span style={{color:"var(--text3)",fontSize:13,fontWeight:400}}>/mês</span>
-                    </div>
-                    {valorAdicionais > 0 && (
-                      <div style={{color:"var(--text3)",fontSize:12,marginTop:2}}>
-                        Base R${valorBase?.toFixed(2)} + {empMax-50} emp. adicionais × R$7,99
+                    {isOrcamento ? (
+                      <div>
+                        <div style={{color:"var(--ac-text)",fontWeight:800,fontSize:18,fontFamily:"'DM Sans',sans-serif"}}>Sob orçamento</div>
+                        <div style={{color:"var(--text3)",fontSize:12,marginTop:4}}>Acima de 100 empregados — entre em contato para definir valor</div>
+                      </div>
+                    ) : (
+                      <div>
+                        <div style={{color:"var(--ac-text)",fontWeight:800,fontSize:22,fontFamily:"'DM Mono',monospace"}}>
+                          R$ {valorTotal?.toLocaleString("pt-BR",{minimumFractionDigits:2})}
+                          <span style={{color:"var(--text3)",fontSize:13,fontWeight:400}}>/mês</span>
+                        </div>
+                        {isEnterprise && (
+                          <div style={{color:"var(--text3)",fontSize:12,marginTop:4}}>
+                            {empMax} emp. × R$7,99/emp.
+                          </div>
+                        )}
                       </div>
                     )}
                   </div>
                   <div style={{color:"var(--text3)",fontSize:13}}>
-                    {empAtivos}/{empMax} empregados ativos
+                    {empAtivos}/{isOrcamento ? "∞" : empMax} empregados ativos
                   </div>
                 </div>
               </div>
@@ -4545,10 +4580,12 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }
             const plano = getPlano(r);
             const fin = r.financeiro ?? {};
             const tipoCobranca = r.tipoCobranca ?? "mensal";
-            const empMax = r.planoId === "p999" ? (r.empMaxCustom ?? 50) : plano.empMax;
-            const valorBase = tipoCobranca === "anual" ? plano.anual : plano.mensal;
-            const valorAdicionais = r.planoId === "p999" && empMax > 50 ? (empMax - 50) * 7.99 : 0;
-            const valorTotal = valorBase ? valorBase + valorAdicionais : null;
+            const isEnt = r.planoId === "p999";
+            const isOrc = r.planoId === "pOrc";
+            const empMax = isEnt ? (r.empMaxCustom ?? 51) : (isOrc ? (r.empMaxCustom ?? 101) : plano.empMax);
+            const valorBase = isEnt ? 0 : (tipoCobranca === "anual" ? plano.anual : plano.mensal);
+            const valorAdicionais = isEnt ? empMax * 7.99 : 0;
+            const valorTotal = isOrc ? null : (valorBase ?? 0) + valorAdicionais;
             const status = fin.status ?? "ativo";
             const venc = fin.proximoVencimento;
             const diasParaVencer = venc ? Math.ceil((new Date(venc+"T12:00:00") - new Date()) / (1000*60*60*24)) : null;
