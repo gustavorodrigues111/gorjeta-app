@@ -1720,7 +1720,7 @@ function ReceibosEmployeeTab({ empId, restaurantId, receipts }) {
   );
 }
 
-function EmployeePortal({ employees, roles, tips, schedules, restaurants, communications, commAcks, faq, dpMessages, receipts, workSchedules, onBack, onUpdateEmployee, onUpdate }) {
+function EmployeePortal({ employees, roles, tips, schedules, restaurants, communications, commAcks, faq, dpMessages, receipts, workSchedules, onBack, onUpdateEmployee, onUpdate, toggleTheme, theme }) {
   const [cpf, setCpf] = useState("");
   const [pin, setPin] = useState("");
   const [err, setErr] = useState("");
@@ -1849,7 +1849,12 @@ function EmployeePortal({ employees, roles, tips, schedules, restaurants, commun
           <div style={{ color: ac, fontWeight: 700, fontSize: 15 }}>{emp?.name}</div>
           <div style={{ color: "var(--text3)", fontSize: 11 }}>{role?.name} · {restaurant?.name}</div>
         </div>
-        <button onClick={() => { setEmpId(null); setCpf(""); setPin(""); }} style={{ ...S.btnSecondary, fontSize: 12, padding: "6px 14px" }}>Sair</button>
+        <div style={{display:"flex",gap:8,alignItems:"center"}}>
+          <button onClick={toggleTheme} style={{background:"none",border:"1px solid var(--border)",borderRadius:20,padding:"6px 10px",cursor:"pointer",fontSize:16,color:"var(--text2)"}}>
+            {theme==="dark"?"☀️":"🌙"}
+          </button>
+          <button onClick={() => { setEmpId(null); setCpf(""); setPin(""); }} style={{ ...S.btnSecondary, fontSize: 12, padding: "6px 14px" }}>Sair</button>
+        </div>
       </div>
 
       {hasPending && (
@@ -3208,7 +3213,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
 //
 // SUPER MANAGER PORTAL
 //
-function SuperManagerPortal({ data, onUpdate, onBack, currentUser }) {
+function SuperManagerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }) {
   const { superManagers, managers, restaurants, employees, roles, tips, splits, schedules } = data;
   const [tab, setTab] = useState("restaurants");
   const [selRestaurant, setSelRestaurant] = useState(null);
@@ -3466,7 +3471,7 @@ function SuperManagerPortal({ data, onUpdate, onBack, currentUser }) {
 //
 // MANAGER PORTAL (regular manager, single or multi restaurant)
 //
-function ManagerPortal({ manager, data, onUpdate, onBack }) {
+function ManagerPortal({ manager, data, onUpdate, onBack, toggleTheme, theme }) {
   const { restaurants, employees, roles, tips, splits, schedules } = data;
   const myRestaurants = restaurants.filter(r => manager.restaurantIds?.includes(r.id));
   const [selId, setSelId] = useState(myRestaurants.length === 1 ? myRestaurants[0].id : null);
@@ -3482,7 +3487,12 @@ function ManagerPortal({ manager, data, onUpdate, onBack }) {
           <span style={{color:ac,fontWeight:700}}>Gestor</span>
           <span style={{color:"var(--text3)",fontSize:12}}>· {manager.name}</span>
         </div>
-        <button onClick={onBack} style={{...S.btnSecondary,fontSize:12}}>Sair</button>
+        <div style={{display:"flex",gap:8,alignItems:"center"}}>
+            <button onClick={toggleTheme} style={{background:"none",border:"1px solid var(--border)",borderRadius:20,padding:"6px 10px",cursor:"pointer",fontSize:16,color:"var(--text2)"}}>
+              {theme==="dark"?"☀️":"🌙"}
+            </button>
+            <button onClick={onBack} style={{...S.btnSecondary,fontSize:12}}>Sair</button>
+          </div>
       </div>
 
       {/* Restaurant picker if multiple */}
@@ -3703,15 +3713,8 @@ export default function App() {
   if (!loaded) return <div style={{minHeight:"100vh",background:"var(--bg)",display:"flex",alignItems:"center",justifyContent:"center",color:"#f5c842",fontFamily:"DM Mono,monospace",fontSize:18}}>Carregando…</div>;
 
   // Theme toggle button - fixed position
-  const ThemeBtn = () => (
-    <button onClick={toggleTheme} style={{position:"fixed",bottom:24,right:24,zIndex:9990,width:42,height:42,borderRadius:"50%",border:"1px solid var(--border)",background:"var(--card-bg)",color:"var(--text2)",cursor:"pointer",fontSize:18,display:"flex",alignItems:"center",justifyContent:"center",boxShadow:"0 2px 12px rgba(0,0,0,.2)"}}>
-      {theme === "dark" ? "☀️" : "🌙"}
-    </button>
-  );
-
   return (
     <>
-      <ThemeBtn />
       {view === "home"     && <Home onManager={()=>setView("login")} onEmployee={()=>setView("employee")} />}
       {view === "setup"    && <FirstSetup onDone={sm=>{handleUpdate("superManagers",[sm]);setCurrentUser(sm);setUserRole("super");setView("super");}} />}
       {view === "login"    && (
@@ -3723,9 +3726,9 @@ export default function App() {
           onSetupFirst={()=>setView("setup")}
         />
       )}
-      {view === "super"    && <SuperManagerPortal data={data} onUpdate={handleUpdate} onBack={doLogout} currentUser={currentUser} />}
-      {view === "manager"  && <ManagerPortal manager={currentUser} data={data} onUpdate={handleUpdate} onBack={doLogout} />}
-      {view === "employee" && <EmployeePortal employees={employees} roles={roles} tips={tips} schedules={schedules} restaurants={restaurants} communications={communications} commAcks={commAcks} faq={faq} dpMessages={dpMessages} receipts={receipts} workSchedules={workSchedules} onBack={()=>setView("home")} onUpdateEmployee={emp=>{const next=employees.map(e=>e.id===emp.id?emp:e);handleUpdate("employees",next);}} onUpdate={handleUpdate} />}
+      {view === "super"    && <SuperManagerPortal data={data} onUpdate={handleUpdate} onBack={doLogout} currentUser={currentUser} toggleTheme={toggleTheme} theme={theme} />}
+      {view === "manager"  && <ManagerPortal manager={currentUser} data={data} onUpdate={handleUpdate} onBack={doLogout} toggleTheme={toggleTheme} theme={theme} />}
+      {view === "employee" && <EmployeePortal employees={employees} roles={roles} tips={tips} schedules={schedules} restaurants={restaurants} communications={communications} commAcks={commAcks} faq={faq} dpMessages={dpMessages} receipts={receipts} workSchedules={workSchedules} onBack={()=>setView("home")} onUpdateEmployee={emp=>{const next=employees.map(e=>e.id===emp.id?emp:e);handleUpdate("employees",next);}} onUpdate={handleUpdate} toggleTheme={toggleTheme} theme={theme} />}
       <Toast msg={toast} onClose={()=>setToast("")} />
     </>
   );
