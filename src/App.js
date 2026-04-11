@@ -4762,7 +4762,6 @@ Qualquer duvida estamos a disposicao! 😊
 
                     // Semáforo
                     let semaforo = "verde";
-                    let semaforo = "verde";
                     let semaforoMsg = "Ativo";
                     const finStatus = r.financeiro?.status ?? "ativo";
                     const cicloFimR = r.financeiro?.cicloFim;
