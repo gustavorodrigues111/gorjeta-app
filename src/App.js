@@ -3747,7 +3747,7 @@ function Home({ onManager, onEmployee }) {
     <div style={{minHeight:"100vh",background:"var(--bg)",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",fontFamily:"DM Mono,monospace",padding:24}}>
       <div style={{fontSize:52,marginBottom:10}}>🍽️</div>
       <h1 style={{color:"#f5c842",fontSize:28,fontWeight:700,margin:"0 0 4px",letterSpacing:-1}}>StaffTable</h1>
-      <p style={{color:"var(--text3)",fontSize:13,marginBottom:48,textAlign:"center"}}>Gestão de equipe para restaurantes</p>
+      <p style={{color:"var(--text3)",fontSize:13,marginBottom:48,textAlign:"center"}}>Comunicação transparente e gestão{"\n"}para equipes de restaurantes</p>
       <div style={{display:"flex",flexDirection:"column",gap:14,width:"100%",maxWidth:300}}>
         <button onClick={onManager} style={{...S.btnPrimary,padding:"18px",fontSize:16,display:"flex",alignItems:"center",justifyContent:"center",gap:10}}>📊 Área de Gestão</button>
         <button onClick={onEmployee} style={{padding:"18px",borderRadius:16,border:"2px solid #2a2a2a",background:"transparent",color:"var(--text)",fontWeight:600,fontSize:16,cursor:"pointer",fontFamily:"DM Mono,monospace",display:"flex",alignItems:"center",justifyContent:"center",gap:10}}>👤 Área do Empregado</button>
