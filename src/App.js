@@ -4174,7 +4174,10 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                     <div style={{display:"flex",flexDirection:"column",gap:6}}>
                       {FAQS_AUTO.map((item) => {
                         const adminOk = item.tabKey ? restaurant?.tabsConfig?.[item.tabKey] !== false : true;
-                        const gestorOk = (restaurant?.tabsGestor?.faqAuto?.[item.id]) !== false;
+                        const abaGestorOk = item.tabKey ? restaurant?.tabsGestor?.[item.tabKey] !== false : true;
+                        const faqAutoOk = restaurant?.tabsGestor?.faqAuto?.[item.id] !== false;
+                        // FAQ visível só se: admin autorizou aba + gestor não ocultou aba + faqAuto não ocultado
+                        const gestorOk = abaGestorOk && faqAutoOk;
                         const visivel = adminOk && gestorOk;
                         return (
                           <details key={item.id} style={{borderRadius:10,background:"var(--card-bg)",border:`1px solid ${visivel?"var(--ac)22":"var(--border)"}`,overflow:"hidden",opacity:visivel?1:0.6}}>
@@ -4182,11 +4185,12 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                               <span style={{fontSize:13,fontWeight:600,color:visivel?"var(--text)":"var(--text3)",flex:1}}>{item.q}</span>
                               <div style={{display:"flex",alignItems:"center",gap:6,flexShrink:0}}>
                                 {!adminOk && <span style={{fontSize:10,color:"var(--text3)",background:"var(--bg2)",padding:"2px 7px",borderRadius:10,border:"1px solid var(--border)"}}>aba bloqueada pelo admin</span>}
-                                {adminOk && (
+                                {adminOk && !abaGestorOk && <span style={{fontSize:10,color:"var(--text3)",background:"var(--bg2)",padding:"2px 7px",borderRadius:10,border:"1px solid var(--border)"}}>aba oculta nas configurações</span>}
+                                {adminOk && abaGestorOk && (
                                   <button onClick={e=>{
                                     e.preventDefault(); e.stopPropagation();
                                     const cur = restaurant?.tabsGestor?.faqAuto ?? {};
-                                    const updated = restaurants.map(r=>r.id===rid?{...r,tabsGestor:{...(r.tabsGestor??{}),faqAuto:{...cur,[item.id]:!gestorOk}}}:r);
+                                    const updated = restaurants.map(r=>r.id===rid?{...r,tabsGestor:{...(r.tabsGestor??{}),faqAuto:{...cur,[item.id]:!faqAutoOk}}}:r);
                                     onUpdate("restaurants",updated);
                                   }} style={{padding:"3px 10px",borderRadius:20,border:"none",background:visivel?"var(--green)":"var(--border)",color:visivel?"#fff":"var(--text3)",fontWeight:700,cursor:"pointer",fontFamily:"'DM Sans',sans-serif",fontSize:11,whiteSpace:"nowrap"}}>
                                     {visivel?"👁 Exibindo":"🚫 Oculto"}
