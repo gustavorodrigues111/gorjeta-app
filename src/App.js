@@ -86,7 +86,7 @@ function makeEmpCode(restaurantCode, seq) {
 
 //
 const K = {
-  superManagers: "v4:superManagers",
+  owners: "v4:owners",
   managers:      "v4:managers",
   restaurants:   "v4:restaurants",  // added taxRate, enabledTabs
   employees:     "v4:employees",    // added inactiveFrom, inactive
@@ -973,7 +973,7 @@ function validateWeekSchedule(days) {
 }
 
 // ── Work Schedule Manager Tab ─────────────────────────────────────────────────
-function WorkScheduleManagerTab({ restaurantId, employees, workSchedules, notifications, managers, currentManagerName, onUpdate, communications, isSuperManager }) {
+function WorkScheduleManagerTab({ restaurantId, employees, workSchedules, notifications, managers, currentManagerName, onUpdate, communications, isOwner }) {
   const ac = "var(--ac)";
   const restEmps = employees.filter(e => e.restaurantId === restaurantId && !e.inactive);
   const [selEmpId, setSelEmpId] = useState(null);
@@ -1108,7 +1108,7 @@ function WorkScheduleManagerTab({ restaurantId, employees, workSchedules, notifi
             📂 Histórico ({empSchedules.length} versões)
           </summary>
           <div style={{paddingTop:8}}>
-            {isSuperManager && (
+            {isOwner && (
               <div style={{padding:"6px 12px 10px",display:"flex",alignItems:"center",gap:10,flexWrap:"wrap"}}>
                 <span style={{color:"var(--text3)",fontSize:11}}>Selecione versões para apagar (a versão atual não pode ser removida):</span>
                 {selectedSchedIds.size > 0 && (
@@ -1129,7 +1129,7 @@ function WorkScheduleManagerTab({ restaurantId, employees, workSchedules, notifi
             )}
             {[...empSchedules].reverse().slice(1).map(s => (
               <div key={s.id} style={{padding:"6px 12px",borderBottom:"1px solid var(--border)",fontSize:12,display:"flex",alignItems:"center",gap:10,background:selectedSchedIds.has(s.id)?"var(--red-bg)":"transparent"}}>
-                {isSuperManager && (
+                {isOwner && (
                   <input type="checkbox" checked={selectedSchedIds.has(s.id)}
                     onChange={e=>{
                       const next = new Set(selectedSchedIds);
@@ -1303,7 +1303,7 @@ function WorkScheduleEmployeeTab({ empId, restaurantId, workSchedules }) {
   );
 }
 
-function DpManagerTab({ restaurantId, dpMessages, onUpdate, isSuperManager }) {
+function DpManagerTab({ restaurantId, dpMessages, onUpdate, isOwner }) {
   const msgs = dpMessages.filter(m => m.restaurantId === restaurantId)
     .sort((a, b) => b.date.localeCompare(a.date));
   const [filter, setFilter] = useState("all");
@@ -1340,7 +1340,7 @@ function DpManagerTab({ restaurantId, dpMessages, onUpdate, isSuperManager }) {
             <button key={val} onClick={() => setFilter(val)} style={{ padding: "6px 12px", borderRadius: 20, border: `1px solid ${filter === val ? ac : "var(--border)"}`, background: filter === val ? ac + "22" : "transparent", color: filter === val ? ac : "#555", cursor: "pointer", fontFamily: "'DM Mono',monospace", fontSize: 11 }}>{lbl}</button>
           ))}
         </div>
-        {isSuperManager && selectedIds.size > 0 && (
+        {isOwner && selectedIds.size > 0 && (
           <button onClick={deleteSelected} style={{padding:"6px 14px",borderRadius:8,border:"none",background:"var(--red)",color:"var(--text)",fontWeight:700,cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:12}}>
             🗑️ Apagar selecionadas ({selectedIds.size})
           </button>
@@ -1352,7 +1352,7 @@ function DpManagerTab({ restaurantId, dpMessages, onUpdate, isSuperManager }) {
         <div key={m.id} style={{ ...S.card, marginBottom: 10, opacity: m.read ? 0.7 : 1, borderColor: selectedIds.has(m.id) ? "#ef444488" : m.read ? "var(--border)" : "var(--ac)44", background: selectedIds.has(m.id) ? "#1a0808" : undefined }}>
           <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8, alignItems:"flex-start" }}>
             <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-              {isSuperManager && (
+              {isOwner && (
                 <input type="checkbox" checked={selectedIds.has(m.id)} onChange={()=>toggleSelect(m.id)}
                   style={{accentColor:"var(--red)",cursor:"pointer",width:14,height:14,flexShrink:0}}
                 />
@@ -2450,7 +2450,7 @@ const EMP_COLS        = "80px 2fr 1.2fr 100px auto 1.5fr auto";
 const EMP_COLS_HEADER = "80px 2fr 1.2fr 100px auto 1.5fr auto";
 const empInS2 = { background:"var(--bg1)", border:"1px solid var(--border)", borderRadius:6, color:"var(--text)", fontFamily:"'DM Mono',monospace", fontSize:12, padding:"6px 8px", outline:"none", width:"100%", boxSizing:"border-box" };
 
-function EmpRowLine({ emp, isNew, row, restRoles, isSaved, isSuperManager, onChange, onSave, onToggleInactive, onDelete, onAdd, onResetPin, employees }) {
+function EmpRowLine({ emp, isNew, row, restRoles, isSaved, isOwner, onChange, onSave, onToggleInactive, onDelete, onAdd, onResetPin, employees }) {
   const ac = "var(--ac)";
   const isInactive = !isNew && emp?.inactive && emp?.inactiveFrom <= today();
   return (
@@ -2472,7 +2472,7 @@ function EmpRowLine({ emp, isNew, row, restRoles, isSaved, isSuperManager, onCha
       <div style={{display:"flex",gap:4,alignItems:"center"}}>
         <input type="password" value={row.pin||""} onChange={ev=>onChange("pin",ev.target.value)} maxLength={6} placeholder="••••"
           style={{...empInS2,width:70,flexShrink:0}}/>
-        {!isNew && isSuperManager && (
+        {!isNew && isOwner && (
           <button onClick={()=>onResetPin(emp)} title="Resetar PIN para o código do empregado"
             style={{padding:"5px 8px",borderRadius:6,border:"1px solid #f59e0b44",background:"transparent",color:"#f59e0b",cursor:"pointer",fontSize:10,fontFamily:"'DM Mono',monospace",whiteSpace:"nowrap"}}>
             🔑
@@ -2499,7 +2499,7 @@ function EmpRowLine({ emp, isNew, row, restRoles, isSaved, isSuperManager, onCha
                 style={{padding:"4px 8px",borderRadius:6,border:`1px solid ${isInactive?"#10b98144":"#f59e0b44"}`,background:"transparent",color:isInactive?"var(--green)":"#f59e0b",cursor:"pointer",fontSize:11,fontFamily:"'DM Mono',monospace"}}>
                 {isInactive?"↑":"↓"}
               </button>
-              {isSuperManager && isInactive && (
+              {isOwner && isInactive && (
                 <button onClick={onDelete} title="Excluir permanentemente"
                   style={{padding:"4px 8px",borderRadius:6,border:"1px solid #e74c3c44",background:"transparent",color:"var(--red)",cursor:"pointer",fontSize:11,fontFamily:"'DM Mono',monospace"}}>✕</button>
               )}
@@ -2510,7 +2510,7 @@ function EmpRowLine({ emp, isNew, row, restRoles, isSaved, isSuperManager, onCha
   );
 }
 
-function EmployeeSpreadsheet({ restEmps, restRoles, rid, employees, onUpdate, restCode: restCode_, isSuperManager, restaurant }) {
+function EmployeeSpreadsheet({ restEmps, restRoles, rid, employees, onUpdate, restCode: restCode_, isOwner, restaurant }) {
   const PLANOS = [
     { id:"p10",  empMax:10  },
     { id:"p20",  empMax:20  },
@@ -2591,7 +2591,7 @@ function EmployeeSpreadsheet({ restEmps, restRoles, rid, employees, onUpdate, re
           Ativos ({activeEmps.length})
         </button>
         <button onClick={()=>setShowInactive(true)} style={{flex:1,padding:"8px",borderRadius:10,border:`1px solid ${showInactive?"#8b5cf6":"var(--border)"}`,background:showInactive?"#8b5cf622":"transparent",color:showInactive?"#8b5cf6":"var(--text3)",cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:13}}>
-          Inativos ({inactiveEmps.length}){isSuperManager && inactiveEmps.length>0 && " · clique ✕ p/ excluir"}
+          Inativos ({inactiveEmps.length}){isOwner && inactiveEmps.length>0 && " · clique ✕ p/ excluir"}
         </button>
       </div>
 
@@ -2605,7 +2605,7 @@ function EmployeeSpreadsheet({ restEmps, restRoles, rid, employees, onUpdate, re
       {/* Linha de novo empregado */}
       {!showInactive && (
         <EmpRowLine isNew emp={null} row={newRow} restRoles={restRoles}
-          isSaved={false} isSuperManager={isSuperManager}
+          isSaved={false} isOwner={isOwner}
           onChange={(f,v)=>setNewRow(p=>({...p,[f]:v}))}
           onAdd={saveNew} onSave={null} onToggleInactive={null} onDelete={null} onResetPin={null} employees={employees}/>
       )}
@@ -2640,7 +2640,7 @@ function EmployeeSpreadsheet({ restEmps, restRoles, rid, employees, onUpdate, re
               const row = getRow(emp);
               return (
                 <EmpRowLine key={emp.id} isNew={false} emp={emp} row={row} restRoles={restRoles}
-                  isSaved={saved[emp.id]} isSuperManager={isSuperManager}
+                  isSaved={saved[emp.id]} isOwner={isOwner}
                   onChange={(f,v)=>setField(emp.id,f,v)}
                   onSave={()=>saveEmp(emp)}
                   onToggleInactive={()=>toggleInactive(emp)}
@@ -2656,7 +2656,7 @@ function EmployeeSpreadsheet({ restEmps, restRoles, rid, employees, onUpdate, re
   );
 }
 
-function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, splits, schedules, onUpdate, perms, isSuperManager, data, currentUser }) {
+function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, splits, schedules, onUpdate, perms, isOwner, data, currentUser }) {
   const now = new Date();
   const [year, setYear] = useState(now.getFullYear());
   const [month, setMonth] = useState(now.getMonth());
@@ -2859,8 +2859,8 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
   const dim = new Date(year, month + 1, 0).getDate();
 
   const ac = "var(--ac)";
-  const canTips  = perms.tips     || isSuperManager;
-  const canSched = perms.schedule || isSuperManager;
+  const canTips  = perms.tips     || isOwner;
+  const canSched = perms.schedule || isOwner;
   const isDP     = perms.isDP === true;
 
   // Abas opcionais — seguem config do restaurante (supergestor também oculta se desativou)
@@ -2872,17 +2872,17 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
     canTips                                           && ["dashboard",   "📊 Dashboard"],
     canTips                                           && ["tips",        "💸 Gorjetas"],
     canSched                                          && ["schedule",    "📅 Escala"],
-    (isSuperManager || tabVisible("roles"))           && ["roles",       "🏷️ Cargos"],
-    (isSuperManager || canTips || tabVisible("employees")) && ["employees","👥 Equipe"],
+    (isOwner || tabVisible("roles"))           && ["roles",       "🏷️ Cargos"],
+    (isOwner || canTips || tabVisible("employees")) && ["employees","👥 Equipe"],
     tabVisible("horarios")                            && ["horarios",    "🕐 Horários"],
     tabVisible("recibos")                             && ["recibos",     "📄 Recibos"],
     tabVisible("faq")                                 && ["faq",         "❓ FAQ"],
     tabVisible("comunicados")                         && ["comunicados", "📢 Comunicados"],
     tabVisible("dp")                                  && ["dp",          "💬 Fale com DP"],
-    (isSuperManager || isDP)                          && ["notificacoes",`📬 Caixa${inboxUnread>0?` (${inboxUnread})`:""}`],
+    (isOwner || isDP)                          && ["notificacoes",`📬 Caixa${inboxUnread>0?` (${inboxUnread})`:""}`],
   ].filter(Boolean);
 
-  const [tab, setTab] = useState(isSuperManager ? "dashboard" : isDP ? "notificacoes" : (perms.tips ? "dashboard" : "schedule"));
+  const [tab, setTab] = useState(isOwner ? "dashboard" : isDP ? "notificacoes" : (perms.tips ? "dashboard" : "schedule"));
 
   return (
     <div style={{ fontFamily:"'DM Sans',sans-serif" }}>
@@ -2892,7 +2892,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
           <span style={{ color:"var(--text)", fontWeight:700, fontSize:15 }}>{restaurant.name}</span>
           {restaurant.cnpj && <span style={{ color:"var(--text3)", fontSize:12, marginLeft:10 }}>{restaurant.cnpj}</span>}
         </div>
-        {(canTips || isSuperManager) && <button onClick={() => setTab("config")} style={{ ...S.btnSecondary, fontSize:12 }}>⚙️ Config</button>}
+        {(canTips || isOwner) && <button onClick={() => setTab("config")} style={{ ...S.btnSecondary, fontSize:12 }}>⚙️ Config</button>}
       </div>
 
       {/* Tabs */}
@@ -3327,7 +3327,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
             restEmps={employees.filter(e => e.restaurantId === rid)}
             restRoles={restRoles} rid={rid}
             employees={employees} onUpdate={onUpdate} restCode={restaurant.shortCode}
-            isSuperManager={isSuperManager} restaurant={restaurant}
+            isOwner={isOwner} restaurant={restaurant}
           />
         )}
 
@@ -3635,12 +3635,12 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
 
         {/* FALE COM DP */}
         {tab === "dp" && (
-          <DpManagerTab restaurantId={rid} dpMessages={data?.dpMessages ?? []} onUpdate={onUpdate} isSuperManager={isSuperManager} />
+          <DpManagerTab restaurantId={rid} dpMessages={data?.dpMessages ?? []} onUpdate={onUpdate} isOwner={isOwner} />
         )}
 
         {/* HORARIOS */}
         {tab === "horarios" && (
-          <WorkScheduleManagerTab restaurantId={rid} employees={employees} workSchedules={data?.workSchedules??{}} notifications={data?.notifications??[]} managers={data?.managers??[]} currentManagerName={currentUser?.name ?? (isSuperManager?"Super Gestor":"Gestor")} onUpdate={onUpdate} communications={data?.communications??[]} isSuperManager={isSuperManager} />
+          <WorkScheduleManagerTab restaurantId={rid} employees={employees} workSchedules={data?.workSchedules??{}} notifications={data?.notifications??[]} managers={data?.managers??[]} currentManagerName={currentUser?.name ?? (isOwner?"Admin AppTip":"Gestor")} onUpdate={onUpdate} communications={data?.communications??[]} isOwner={isOwner} />
         )}
 
         {/* NOTIFICAÇÕES */}
@@ -3657,7 +3657,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
         {tab === "config" && (
           <div>
             {/* Abas opcionais — só supergestor */}
-            {isSuperManager && (
+            {isOwner && (
               <div style={{...S.card,marginBottom:20}}>
                 <p style={{color:ac,fontSize:14,fontWeight:700,margin:"0 0 4px"}}>📋 Abas Visíveis</p>
                 <p style={{color:"var(--text3)",fontSize:12,marginBottom:14}}>Escolha quais abas aparecem para gestores e empregados deste restaurante.</p>
@@ -3783,8 +3783,8 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
 //
 // SUPER MANAGER PORTAL
 //
-function SuperManagerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }) {
-  const { superManagers, managers, restaurants, employees, roles, tips, splits, schedules } = data;
+function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }) {
+  const { owners, managers, restaurants, employees, roles, tips, splits, schedules, noTipDays } = data;
   const [tab, setTab] = useState("restaurants");
   const [selRestaurant, setSelRestaurantState] = useState(() => {
     const saved = localStorage.getItem("apptip_selrest");
@@ -3805,9 +3805,9 @@ function SuperManagerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, 
   const [showMgrModal, setShowMgrModal]     = useState(false);
   const [editMgrId, setEditMgrId]           = useState(null);
   const [mgrForm, setMgrForm]               = useState({ name:"",cpf:"",pin:"",restaurantIds:[],perms:{tips:true,schedule:true},isDP:false });
-  const [showSuperModal, setShowSuperModal] = useState(false);
-  const [editSuperId, setEditSuperId]       = useState(null);
-  const [superForm, setSuperForm]           = useState({ name:"",cpf:"",pin:"" });
+  const [showOwnerModal, setShowSuperModal] = useState(false);
+  const [editOwnerId, setEditSuperId]       = useState(null);
+  const [ownerForm, setSuperForm]           = useState({ name:"",cpf:"",pin:"" });
 
   function saveRest() {
     if (!restForm.name.trim()) return;
@@ -3826,11 +3826,11 @@ function SuperManagerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, 
     onUpdate("managers", editMgrId ? managers.map(x=>x.id===editMgrId?m:x) : [...managers,m]);
     setShowMgrModal(false);
   }
-  function saveSuper() {
-    if (!superForm.name.trim()||!superForm.pin.trim()) return;
-    const s = { ...superForm, id: editSuperId ?? Date.now().toString() };
-    onUpdate("superManagers", editSuperId ? superManagers.map(x=>x.id===editSuperId?s:x) : [...superManagers,s]);
-    setShowSuperModal(false);
+  function saveOwner() {
+    if (!ownerForm.name.trim()||!ownerForm.pin.trim()) return;
+    const s = { ...ownerForm, id: editOwnerId ?? Date.now().toString() };
+    onUpdate("owners", editOwnerId ? owners.map(x=>x.id===editOwnerId?s:x) : [...owners,s]);
+    setShowOwnerModal(false);
   }
 
   const PLANOS = [
@@ -3842,7 +3842,7 @@ function SuperManagerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, 
   function getPlano(r) { return PLANOS.find(p=>p.id===(r.planoId??"p10")) ?? PLANOS[0]; }
 
   const ac = "var(--ac)";
-  const TABS = [["restaurants","🏢 Restaurantes"],["managers","👔 Gestores"],["superManagers","⭐ Super Gestores"]];
+  const TABS = [["restaurants","🏢 Restaurantes"],["managers","👔 Gestores"],["owners","⭐ Admins AppTip"]];
 
   if (selRestaurant) {
     const rest = restaurants.find(r => r.id === selRestaurant);
@@ -3855,7 +3855,7 @@ function SuperManagerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, 
           </div>
           <button onClick={onBack} style={{ ...S.btnSecondary, fontSize:12 }}>Sair</button>
         </div>
-        <RestaurantPanel restaurant={rest} restaurants={restaurants} employees={employees} roles={roles} tips={tips} splits={splits} schedules={schedules} onUpdate={onUpdate} perms={{ tips:true, schedule:true }} isSuperManager data={data} currentUser={currentUser} />
+        <RestaurantPanel restaurant={rest} restaurants={restaurants} employees={employees} roles={roles} tips={tips} splits={splits} schedules={schedules} onUpdate={onUpdate} perms={{ tips:true, schedule:true }} isOwner data={data} currentUser={currentUser} />
       </div>
     );
   }
@@ -3865,7 +3865,7 @@ function SuperManagerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, 
       <div style={{ background:"var(--header-bg)", borderBottom:"1px solid var(--border)", padding:"14px 20px", display:"flex", justifyContent:"space-between", alignItems:"center", boxShadow:"0 1px 4px rgba(0,0,0,0.04)" }}>
         <div style={{ display:"flex", alignItems:"center", gap:8 }}>
           <span style={{ fontSize:18 }}>⭐</span>
-          <span style={{ color:"var(--text)", fontWeight:800, fontSize:16 }}>Super Gestor</span>
+          <span style={{ color:"var(--text)", fontWeight:800, fontSize:16 }}>Admin AppTip</span>
           <span style={{ color:"var(--text3)", fontSize:12 }}>· {currentUser?.name}</span>
         </div>
         <div style={{display:"flex",gap:8,alignItems:"center"}}>
@@ -3996,10 +3996,10 @@ function SuperManagerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, 
         )}
 
         {/* SUPER GESTORES */}
-        {tab === "superManagers" && (
+        {tab === "owners" && (
           <div>
-            <button onClick={()=>{setEditSuperId(null);setSuperForm({name:"",cpf:"",pin:""});setShowSuperModal(true);}} style={{...S.btnPrimary,marginBottom:20}}>+ Novo Super Gestor</button>
-            {superManagers.map(s=>(
+            <button onClick={()=>{setEditOwnerId(null);setOwnerForm({name:"",cpf:"",pin:""});setShowOwnerModal(true);}} style={{...S.btnPrimary,marginBottom:20}}>+ Novo Admin AppTip</button>
+            {owners.map(s=>(
               <div key={s.id} style={{...S.card,marginBottom:10,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
                 <div>
                   <div style={{color:"var(--text)",fontWeight:600}}>{s.name}</div>
@@ -4007,8 +4007,8 @@ function SuperManagerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, 
                   {s.id===currentUser?.id&&<span style={{color:ac,fontSize:11}}>← você</span>}
                 </div>
                 <div style={{display:"flex",gap:8}}>
-                  <button onClick={()=>{setEditSuperId(s.id);setSuperForm({name:s.name,cpf:s.cpf??"",pin:s.pin??""});setShowSuperModal(true);}} style={{...S.btnSecondary,fontSize:12}}>Editar</button>
-                  {superManagers.length>1&&<button onClick={()=>onUpdate("superManagers",superManagers.filter(x=>x.id!==s.id))} style={{background:"none",border:"1px solid #e74c3c33",borderRadius:8,color:"var(--red)",cursor:"pointer",fontSize:12,padding:"6px 12px",fontFamily:"'DM Mono',monospace"}}>✕</button>}
+                  <button onClick={()=>{setEditSuperId(s.id);setOwnerForm({name:s.name,cpf:s.cpf??"",pin:s.pin??""});setShowOwnerModal(true);}} style={{...S.btnSecondary,fontSize:12}}>Editar</button>
+                  {owners.length>1&&<button onClick={()=>onUpdate("owners",owners.filter(x=>x.id!==s.id))} style={{background:"none",border:"1px solid #e74c3c33",borderRadius:8,color:"var(--red)",cursor:"pointer",fontSize:12,padding:"6px 12px",fontFamily:"'DM Mono',monospace"}}>✕</button>}
                 </div>
               </div>
             ))}
@@ -4127,13 +4127,13 @@ function SuperManagerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, 
         </Modal>
       )}
 
-      {showSuperModal && (
-        <Modal title={editSuperId?"Editar Super Gestor":"Novo Super Gestor"} onClose={()=>setShowSuperModal(false)}>
+      {showOwnerModal && (
+        <Modal title={editOwnerId?"Editar Admin AppTip":"Novo Admin AppTip"} onClose={()=>setShowOwnerModal(false)}>
           <div style={{display:"flex",flexDirection:"column",gap:10}}>
-            <div><label style={S.label}>Nome completo</label><input value={superForm.name} onChange={e=>setSuperForm({...superForm,name:e.target.value})} style={S.input}/></div>
-            <div><label style={S.label}>CPF</label><input value={superForm.cpf} onChange={e=>setSuperForm({...superForm,cpf:maskCpf(e.target.value)})} placeholder="000.000.000-00" style={S.input} inputMode="numeric"/></div>
-            <div><label style={S.label}>PIN (4–6 dígitos)</label><input type="password" value={superForm.pin} onChange={e=>setSuperForm({...superForm,pin:e.target.value})} maxLength={6} style={S.input}/></div>
-            <button onClick={saveSuper} style={S.btnPrimary}>{editSuperId?"Salvar":"Criar"}</button>
+            <div><label style={S.label}>Nome completo</label><input value={ownerForm.name} onChange={e=>setOwnerForm({...ownerForm,name:e.target.value})} style={S.input}/></div>
+            <div><label style={S.label}>CPF</label><input value={ownerForm.cpf} onChange={e=>setOwnerForm({...ownerForm,cpf:maskCpf(e.target.value)})} placeholder="000.000.000-00" style={S.input} inputMode="numeric"/></div>
+            <div><label style={S.label}>PIN (4–6 dígitos)</label><input type="password" value={ownerForm.pin} onChange={e=>setOwnerForm({...ownerForm,pin:e.target.value})} maxLength={6} style={S.input}/></div>
+            <button onClick={saveOwner} style={S.btnPrimary}>{editOwnerId?"Salvar":"Criar"}</button>
           </div>
         </Modal>
       )}
@@ -4204,7 +4204,7 @@ function ManagerPortal({ manager, data, onUpdate, onBack, toggleTheme, theme }) 
               <button onClick={()=>setSelId(null)} style={{...S.btnSecondary,fontSize:12,padding:"4px 12px"}}>← Trocar restaurante</button>
             </div>
           )}
-          <RestaurantPanel restaurant={selRest} restaurants={restaurants} employees={employees} roles={roles} tips={tips} splits={splits} schedules={schedules} onUpdate={onUpdate} perms={{...(manager.perms ?? {tips:true,schedule:true}), isDP: manager.isDP ?? false}} isSuperManager={false} data={data} currentUser={manager}/>
+          <RestaurantPanel restaurant={selRest} restaurants={restaurants} employees={employees} roles={roles} tips={tips} splits={splits} schedules={schedules} onUpdate={onUpdate} perms={{...(manager.perms ?? {tips:true,schedule:true}), isDP: manager.isDP ?? false}} isOwner={false} data={data} currentUser={manager}/>
         </div>
       )}
     </div>
@@ -4214,7 +4214,7 @@ function ManagerPortal({ manager, data, onUpdate, onBack, toggleTheme, theme }) 
 //
 // LOGIN
 //
-function UnifiedLogin({ superManagers, managers, employees, onLoginSuper, onLoginManager, onLoginEmployee, onSetupFirst, toggleTheme, theme }) {
+function UnifiedLogin({ owners, managers, employees, onLoginOwner, onLoginManager, onLoginEmployee, onSetupFirst, toggleTheme, theme }) {
   const [credential, setCredential] = useState("");
   const [pin, setPin] = useState("");
   const [err, setErr] = useState("");
@@ -4247,8 +4247,8 @@ function UnifiedLogin({ superManagers, managers, employees, onLoginSuper, onLogi
 
     if (!isEmpId) {
       // Supergestor
-      const superUser = superManagers.find(s => s.cpf?.replace(/\D/g,"") === cleanCpf && String(s.pin) === cleanPin);
-      if (superUser) found.push({ label:"Super Gestor", icon:"⭐", action:()=>{ setChoices(null); onLoginSuper(superUser); } });
+      const superUser = owners.find(s => s.cpf?.replace(/\D/g,"") === cleanCpf && String(s.pin) === cleanPin);
+      if (superUser) found.push({ label:"Admin AppTip", icon:"⭐", action:()=>{ setChoices(null); onLoginOwner(superUser); } });
 
       // Gestor (aceita PIN do gestor OU PIN do empregado com mesmo CPF)
       const empByCpf = employees.find(e => e.cpf?.replace(/\D/g,"") === cleanCpf);
@@ -4256,7 +4256,7 @@ function UnifiedLogin({ superManagers, managers, employees, onLoginSuper, onLogi
       if (mgr) found.push({ label:"Gestor", icon:"📊", action:()=>{ setChoices(null); onLoginManager(mgr); } });
 
       // Empregado por CPF (aceita PIN do empregado, do gestor OU do supergestor com mesmo CPF)
-      const superByCpf = superManagers.find(s => s.cpf?.replace(/\D/g,"") === cleanCpf);
+      const superByCpf = owners.find(s => s.cpf?.replace(/\D/g,"") === cleanCpf);
       const mgrByCpf = managers.find(m => m.cpf?.replace(/\D/g,"") === cleanCpf);
       const emp = employees.find(e => e.cpf?.replace(/\D/g,"") === cleanCpf && (
         String(e.pin) === cleanPin ||
@@ -4285,7 +4285,7 @@ function UnifiedLogin({ superManagers, managers, employees, onLoginSuper, onLogi
     if (found.length > 1) {
       const cleanCpfForName = credential.replace(/\D/g,"");
       const name =
-        superManagers.find(s => s.cpf?.replace(/\D/g,"") === cleanCpfForName)?.name ??
+        owners.find(s => s.cpf?.replace(/\D/g,"") === cleanCpfForName)?.name ??
         managers.find(m => m.cpf?.replace(/\D/g,"") === cleanCpfForName)?.name ??
         employees.find(e => e.cpf?.replace(/\D/g,"") === cleanCpfForName)?.name ??
         "Usuário";
@@ -4323,7 +4323,7 @@ function UnifiedLogin({ superManagers, managers, employees, onLoginSuper, onLogi
               <div>
                 <div style={{color:"var(--text)",fontWeight:700,fontSize:16}}>{opt.label}</div>
                 <div style={{color:"var(--text3)",fontSize:13,marginTop:2}}>
-                  {opt.label==="Super Gestor"&&"Gerenciar restaurantes e equipes"}
+                  {opt.label==="Admin AppTip"&&"Gerenciar restaurantes e equipes"}
                   {opt.label==="Gestor"&&"Gerenciar gorjetas, escala e equipe"}
                   {opt.label==="Empregado"&&"Ver meu extrato, escala e comunicados"}
                 </div>
@@ -4426,9 +4426,9 @@ function UnifiedLogin({ superManagers, managers, employees, onLoginSuper, onLogi
               Entrar →
             </button>
 
-            {superManagers.length === 0 && (
+            {owners.length === 0 && (
               <button onClick={onSetupFirst} style={{...S.btnSecondary,width:"100%",textAlign:"center"}}>
-                Criar primeiro Super Gestor
+                Criar primeiro Admin AppTip
               </button>
             )}
           </div>
@@ -4466,7 +4466,7 @@ function FirstSetup({ onDone }) {
         <div style={{textAlign:"center",marginBottom:20}}>
           <div style={{fontSize:40}}>🍽️</div>
           <h2 style={{color:"var(--ac)",margin:"8px 0 4px"}}>Bem-vindo!</h2>
-          <p style={{color:"var(--text3)",fontSize:13}}>Cadastre o primeiro Super Gestor para começar.</p>
+          <p style={{color:"var(--text3)",fontSize:13}}>Cadastre o primeiro Admin AppTip para começar.</p>
         </div>
         <div style={{display:"flex",flexDirection:"column",gap:10}}>
           <div><label style={S.label}>Nome completo</label><input value={form.name} onChange={e=>setForm({...form,name:e.target.value})} style={S.input}/></div>
@@ -4739,7 +4739,7 @@ export default function App() {
     else localStorage.removeItem("apptip_role");
   }, [userRole]);
 
-  const [superManagers, setSuperManagers] = useState([]);
+  const [owners, setOwners] = useState([]);
   const [managers,      setManagers]      = useState([]);
   const [restaurants,   setRestaurants]   = useState([]);
   const [employees,     setEmployees]     = useState([]);
@@ -4761,13 +4761,13 @@ export default function App() {
     (async () => {
       const vals = await Promise.all(Object.values(K).map(load));
       const keys = Object.keys(K);
-      const map = { superManagers:setSuperManagers, managers:setManagers, restaurants:setRestaurants, employees:setEmployees, roles:setRoles, tips:setTips, splits:setSplits, schedules:setSchedules, communications:setCommunications, commAcks:setCommAcks, faq:setFaq, dpMessages:setDpMessages, workSchedules:setWorkSchedules, notifications:setNotifications, noTipDays:setNoTipDays };
+      const map = { owners:setOwners, managers:setManagers, restaurants:setRestaurants, employees:setEmployees, roles:setRoles, tips:setTips, splits:setSplits, schedules:setSchedules, communications:setCommunications, commAcks:setCommAcks, faq:setFaq, dpMessages:setDpMessages, workSchedules:setWorkSchedules, notifications:setNotifications, noTipDays:setNoTipDays };
       const loaded_data = {};
       keys.forEach((k, i) => { if (k !== "receipts" && vals[i]) { map[k]?.(vals[i]); loaded_data[k] = vals[i]; } });
       if (savedId) {
         const role = localStorage.getItem("apptip_role");
         if (role === "super") {
-          const u = (loaded_data.superManagers ?? []).find(s => s.id === savedId);
+          const u = (loaded_data.owners ?? []).find(s => s.id === savedId);
           if (u) setCurrentUser(u); else { localStorage.removeItem("apptip_userid"); localStorage.removeItem("apptip_role"); setView("login"); }
         } else if (role === "manager") {
           const u = (loaded_data.managers ?? []).find(m => m.id === savedId);
@@ -4783,7 +4783,7 @@ export default function App() {
     })();
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const data = { superManagers, managers, restaurants, employees, roles, tips, splits, schedules, communications, commAcks, faq, dpMessages, receipts, workSchedules, notifications, noTipDays };
+  const data = { owners, managers, restaurants, employees, roles, tips, splits, schedules, communications, commAcks, faq, dpMessages, receipts, workSchedules, notifications, noTipDays };
 
   async function handleUpdate(field, value) {
     if (field === "_toast") { setToast(value); return; }
@@ -4801,11 +4801,11 @@ export default function App() {
       setToast("Recibos atualizados");
       return;
     }
-    const setters = { superManagers:setSuperManagers, managers:setManagers, restaurants:setRestaurants, employees:setEmployees, roles:setRoles, tips:setTips, splits:setSplits, schedules:setSchedules, communications:setCommunications, commAcks:setCommAcks, faq:setFaq, dpMessages:setDpMessages, workSchedules:setWorkSchedules, notifications:setNotifications, noTipDays:setNoTipDays };
-    const keys    = { superManagers:K.superManagers, managers:K.managers, restaurants:K.restaurants, employees:K.employees, roles:K.roles, tips:K.tips, splits:K.splits, schedules:K.schedules, communications:K.communications, commAcks:K.commAcks, faq:K.faq, dpMessages:K.dpMessages, workSchedules:K.workSchedules, notifications:K.notifications, noTipDays:K.noTipDays };
+    const setters = { owners:setOwners, managers:setManagers, restaurants:setRestaurants, employees:setEmployees, roles:setRoles, tips:setTips, splits:setSplits, schedules:setSchedules, communications:setCommunications, commAcks:setCommAcks, faq:setFaq, dpMessages:setDpMessages, workSchedules:setWorkSchedules, notifications:setNotifications, noTipDays:setNoTipDays };
+    const keys    = { owners:K.owners, managers:K.managers, restaurants:K.restaurants, employees:K.employees, roles:K.roles, tips:K.tips, splits:K.splits, schedules:K.schedules, communications:K.communications, commAcks:K.commAcks, faq:K.faq, dpMessages:K.dpMessages, workSchedules:K.workSchedules, notifications:K.notifications, noTipDays:K.noTipDays };
     setters[field]?.(value);
     await save(keys[field], value);
-    const labels = { superManagers:"Super Gestores atualizados", managers:"Gestores atualizados", restaurants:"Restaurantes atualizados", employees:"Empregados atualizados", roles:"Cargos atualizados", tips:"Gorjetas atualizadas", splits:"Percentuais salvos", schedules:"Escala atualizada", communications:"Comunicados atualizados", commAcks:"Ciências atualizadas", faq:"FAQ atualizado", dpMessages:"Mensagem enviada", workSchedules:"Horários salvos", notifications:"Notificações atualizadas" };
+    const labels = { owners:"Admins atualizados", managers:"Gestores atualizados", restaurants:"Restaurantes atualizados", employees:"Empregados atualizados", roles:"Cargos atualizados", tips:"Gorjetas atualizadas", splits:"Percentuais salvos", schedules:"Escala atualizada", communications:"Comunicados atualizados", commAcks:"Ciências atualizadas", faq:"FAQ atualizado", dpMessages:"Mensagem enviada", workSchedules:"Horários salvos", notifications:"Notificações atualizadas" };
     setToast(labels[field] ?? "Salvo!");
   }
 
@@ -4829,16 +4829,16 @@ export default function App() {
     <>
       {view === "login" && (
         <UnifiedLogin
-          superManagers={superManagers} managers={managers} employees={employees}
-          onLoginSuper={u=>{setCurrentUser(u);setUserRole("super");setView("super");}}
+          owners={owners} managers={managers} employees={employees}
+          onLoginOwner={u=>{setCurrentUser(u);setUserRole("super");setView("super");}}
           onLoginManager={u=>{setCurrentUser(u);setUserRole("manager");setView("manager");}}
           onLoginEmployee={u=>{setUserRole("employee");setView("employee");}}
           onSetupFirst={()=>setView("setup")}
           toggleTheme={toggleTheme} theme={theme}
         />
       )}
-      {view === "setup" && <FirstSetup onDone={sm=>{handleUpdate("superManagers",[sm]);setCurrentUser(sm);setUserRole("super");setView("super");}} />}
-      {view === "super" && <SuperManagerPortal data={data} onUpdate={handleUpdate} onBack={doLogout} currentUser={currentUser} toggleTheme={toggleTheme} theme={theme} />}
+      {view === "setup" && <FirstSetup onDone={sm=>{handleUpdate("owners",[sm]);setCurrentUser(sm);setUserRole("super");setView("super");}} />}
+      {view === "super" && <OwnerPortal data={data} onUpdate={handleUpdate} onBack={doLogout} currentUser={currentUser} toggleTheme={toggleTheme} theme={theme} />}
       {view === "manager" && <ManagerPortal manager={currentUser} data={data} onUpdate={handleUpdate} onBack={doLogout} toggleTheme={toggleTheme} theme={theme} />}
       {view === "employee" && <EmployeePortal employees={employees} roles={roles} tips={tips} schedules={schedules} restaurants={restaurants} communications={communications} commAcks={commAcks} faq={faq} dpMessages={dpMessages} receipts={receipts} workSchedules={workSchedules} onBack={doLogout} onUpdateEmployee={emp=>{const next=employees.map(e=>e.id===emp.id?emp:e);handleUpdate("employees",next);}} onUpdate={handleUpdate} toggleTheme={toggleTheme} theme={theme} />}
       {view === "home" && <Home onManager={()=>setView("login")} onEmployee={()=>setView("login")} />}
