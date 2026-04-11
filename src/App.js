@@ -3960,7 +3960,7 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }
 
         {/* Sub-tabs */}
         <div style={{ display:"flex", borderBottom:"1px solid var(--border)", background:"var(--header-bg)", overflowX:"auto" }}>
-          {[["operacional","⚙️ Operacional"],["gestores","👔 Gestores deste restaurante"]].map(([id,lbl])=>(
+          {[["operacional","⚙️ Operacional"],["gestores","👔 Gestores"],["financeiro","💳 Financeiro"]].map(([id,lbl])=>(
             <button key={id} onClick={()=>setRestTab(id)}
               style={{ padding:"10px 20px", background:"none", border:"none", borderBottom:`2px solid ${restTab===id?ac:"transparent"}`, color:restTab===id?ac:"var(--text3)", cursor:"pointer", fontSize:13, fontFamily:"'DM Sans',sans-serif", fontWeight:restTab===id?700:500, whiteSpace:"nowrap" }}>
               {lbl}
@@ -4064,6 +4064,191 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }
             )}
           </div>
         )}
+
+        {/* Financeiro */}
+        {restTab === "financeiro" && (() => {
+          const fin = rest?.financeiro ?? {};
+          const plano = getPlano(rest);
+          const tipoCobranca = rest?.tipoCobranca ?? "mensal";
+          const empAtivos = employees.filter(e=>e.restaurantId===selRestaurant&&!e.inactive).length;
+
+          // Cálculo do valor — Enterprise com adicional por empregado acima de 50
+          const empMax = rest?.planoId === "p999" ? (rest?.empMaxCustom ?? 50) : plano.empMax;
+          let valorBase = tipoCobranca === "anual" ? plano.anual : plano.mensal;
+          let valorAdicionais = 0;
+          if (rest?.planoId === "p999" && empMax > 50) {
+            valorAdicionais = (empMax - 50) * 7.99;
+          }
+          const valorTotal = valorBase ? valorBase + valorAdicionais : null;
+
+          // Status de pagamento
+          const status = fin.status ?? "ativo"; // "ativo" | "aviso" | "inadimplente"
+          const statusConfig = {
+            ativo:        { label:"✅ Ativo", color:"var(--green)", bg:"var(--green-bg)" },
+            aviso:        { label:"⚠️ Aguardando confirmação", color:"#f59e0b", bg:"#f59e0b11" },
+            inadimplente: { label:"🔴 Inadimplente — acesso bloqueado", color:"var(--red)", bg:"var(--red-bg)" },
+          };
+          const sc = statusConfig[status];
+
+          const pagamentos = fin.pagamentos ?? [];
+
+          function saveFinanceiro(update) {
+            const updated = restaurants.map(r => r.id===selRestaurant ? {...r, financeiro:{...fin,...update}} : r);
+            onUpdate("restaurants", updated);
+          }
+
+          return (
+            <div style={{padding:"24px",maxWidth:700,margin:"0 auto"}}>
+
+              {/* Status atual */}
+              <div style={{...S.card,border:`1px solid ${sc.color}44`,background:sc.bg,marginBottom:20}}>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:12}}>
+                  <div>
+                    <div style={{color:sc.color,fontWeight:700,fontSize:16,marginBottom:4}}>{sc.label}</div>
+                    {fin.proximoVencimento && (
+                      <div style={{color:"var(--text3)",fontSize:13}}>
+                        Próximo vencimento: <strong style={{color:"var(--text)"}}>{new Date(fin.proximoVencimento+"T12:00:00").toLocaleDateString("pt-BR")}</strong>
+                        {fin.proximoVencimento < today() && status !== "inadimplente" && (
+                          <span style={{color:"var(--red)",marginLeft:8,fontWeight:700}}>· VENCIDO</span>
+                        )}
+                      </div>
+                    )}
+                    {fin.obs && <div style={{color:"var(--text3)",fontSize:12,marginTop:4}}>📝 {fin.obs}</div>}
+                  </div>
+                  <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+                    {status !== "ativo" && (
+                      <button onClick={()=>saveFinanceiro({status:"ativo"})}
+                        style={{padding:"8px 16px",borderRadius:8,border:"1px solid var(--green)44",background:"var(--green-bg)",color:"var(--green)",cursor:"pointer",fontFamily:"'DM Sans',sans-serif",fontSize:13,fontWeight:700}}>
+                        ✅ Liberar acesso
+                      </button>
+                    )}
+                    {status === "ativo" && (
+                      <button onClick={()=>saveFinanceiro({status:"inadimplente"})}
+                        style={{padding:"8px 16px",borderRadius:8,border:"1px solid var(--red)33",background:"transparent",color:"var(--red)",cursor:"pointer",fontFamily:"'DM Sans',sans-serif",fontSize:13,fontWeight:600}}>
+                        🔴 Marcar inadimplente
+                      </button>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              {/* Plano e valor */}
+              <div style={{...S.card,marginBottom:20}}>
+                <h4 style={{color:"var(--text)",fontWeight:700,fontSize:14,margin:"0 0 16px"}}>📦 Plano contratado</h4>
+                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:16}}>
+                  <div style={{padding:"12px 14px",borderRadius:10,background:"var(--bg2)"}}>
+                    <div style={{color:"var(--text3)",fontSize:11,fontWeight:600,marginBottom:4}}>PLANO</div>
+                    <div style={{color:"var(--text)",fontWeight:700,fontSize:15}}>{plano.label}</div>
+                  </div>
+                  <div style={{padding:"12px 14px",borderRadius:10,background:"var(--bg2)"}}>
+                    <div style={{color:"var(--text3)",fontSize:11,fontWeight:600,marginBottom:4}}>COBRANÇA</div>
+                    <div style={{color:"var(--text)",fontWeight:700,fontSize:15}}>{tipoCobranca === "anual" ? "Anual (12x)" : "Mensal"}</div>
+                  </div>
+                  <div style={{padding:"12px 14px",borderRadius:10,background:"var(--bg2)"}}>
+                    <div style={{color:"var(--text3)",fontSize:11,fontWeight:600,marginBottom:4}}>EMPREGADOS ATIVOS</div>
+                    <div style={{color:"var(--text)",fontWeight:700,fontSize:15}}>{empAtivos} / {empMax}</div>
+                  </div>
+                  <div style={{padding:"12px 14px",borderRadius:10,background:"var(--ac-bg)",border:`1px solid var(--ac)33`}}>
+                    <div style={{color:"var(--text3)",fontSize:11,fontWeight:600,marginBottom:4}}>VALOR MENSAL</div>
+                    <div style={{color:"var(--ac-text)",fontWeight:800,fontSize:18,fontFamily:"'DM Mono',monospace"}}>
+                      {valorTotal ? `R$ ${valorTotal.toLocaleString("pt-BR",{minimumFractionDigits:2})}` : "Sob consulta"}
+                    </div>
+                    {valorAdicionais > 0 && (
+                      <div style={{color:"var(--text3)",fontSize:11,marginTop:2}}>Base R${valorBase} + {empMax-50} emp. × R$7,99</div>
+                    )}
+                  </div>
+                </div>
+
+                {/* Limite personalizado para Enterprise */}
+                {rest?.planoId === "p999" && (
+                  <div style={{display:"flex",alignItems:"center",gap:10}}>
+                    <label style={{color:"var(--text3)",fontSize:13}}>Limite de empregados contratado:</label>
+                    <input type="number" min="51" defaultValue={rest?.empMaxCustom??51}
+                      onBlur={e=>{
+                        const v = parseInt(e.target.value);
+                        if(v>0){const updated=restaurants.map(r=>r.id===selRestaurant?{...r,empMaxCustom:v}:r);onUpdate("restaurants",updated);}
+                      }}
+                      style={{...S.input,width:80,textAlign:"center",fontFamily:"'DM Mono',monospace"}}/>
+                  </div>
+                )}
+              </div>
+
+              {/* Registrar pagamento */}
+              <div style={{...S.card,marginBottom:20}}>
+                <h4 style={{color:"var(--text)",fontWeight:700,fontSize:14,margin:"0 0 16px"}}>➕ Registrar pagamento</h4>
+                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:10}}>
+                  <div>
+                    <label style={S.label}>Data do pagamento</label>
+                    <input type="date" id="fin-data" defaultValue={today()} style={S.input}/>
+                  </div>
+                  <div>
+                    <label style={S.label}>Valor pago (R$)</label>
+                    <input type="number" id="fin-valor" placeholder={valorTotal?.toFixed(2)??"0,00"} style={S.input}/>
+                  </div>
+                  <div>
+                    <label style={S.label}>Forma de pagamento</label>
+                    <select id="fin-forma" style={S.input}>
+                      <option value="pix">PIX</option>
+                      <option value="boleto">Boleto</option>
+                      <option value="cartao">Cartão</option>
+                      <option value="transferencia">Transferência</option>
+                      <option value="outro">Outro</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label style={S.label}>Próximo vencimento</label>
+                    <input type="date" id="fin-venc" style={S.input}/>
+                  </div>
+                </div>
+                <div style={{marginBottom:10}}>
+                  <label style={S.label}>Observação</label>
+                  <input id="fin-obs" placeholder="Ex: Pagou com desconto, mês de teste grátis..." style={S.input}/>
+                </div>
+                <button onClick={()=>{
+                  const data_ = document.getElementById("fin-data")?.value;
+                  const valor = parseFloat(document.getElementById("fin-valor")?.value);
+                  const forma = document.getElementById("fin-forma")?.value;
+                  const venc  = document.getElementById("fin-venc")?.value;
+                  const obs   = document.getElementById("fin-obs")?.value;
+                  if(!data_||!valor) { alert("Preencha data e valor."); return; }
+                  const novo = { id:Date.now().toString(), data:data_, valor, forma, obs:obs||"", registradoEm:new Date().toISOString() };
+                  const novosPagementos = [novo, ...pagamentos];
+                  saveFinanceiro({ pagamentos:novosPagementos, proximoVencimento:venc||fin.proximoVencimento, obs:obs||fin.obs, status:"ativo" });
+                  onUpdate("_toast","✅ Pagamento registrado!");
+                }} style={{...S.btnPrimary,width:"auto",padding:"10px 24px"}}>
+                  Confirmar pagamento
+                </button>
+              </div>
+
+              {/* Histórico */}
+              <div style={{...S.card}}>
+                <h4 style={{color:"var(--text)",fontWeight:700,fontSize:14,margin:"0 0 16px"}}>📋 Histórico de pagamentos</h4>
+                {pagamentos.length === 0 && (
+                  <p style={{color:"var(--text3)",fontSize:13,textAlign:"center",padding:"20px 0"}}>Nenhum pagamento registrado ainda.</p>
+                )}
+                <div style={{display:"flex",flexDirection:"column",gap:8}}>
+                  {pagamentos.slice(0,12).map(p=>(
+                    <div key={p.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"10px 14px",borderRadius:10,background:"var(--bg2)"}}>
+                      <div>
+                        <div style={{color:"var(--text)",fontWeight:600,fontSize:14,fontFamily:"'DM Mono',monospace"}}>
+                          R$ {p.valor?.toLocaleString("pt-BR",{minimumFractionDigits:2})}
+                        </div>
+                        <div style={{color:"var(--text3)",fontSize:12}}>
+                          {new Date(p.data+"T12:00:00").toLocaleDateString("pt-BR")} · {p.forma?.toUpperCase()}
+                          {p.obs && ` · ${p.obs}`}
+                        </div>
+                      </div>
+                      <button onClick={()=>{
+                        if(!window.confirm("Remover este pagamento?")) return;
+                        saveFinanceiro({pagamentos:pagamentos.filter(x=>x.id!==p.id)});
+                      }} style={{background:"none",border:"none",color:"var(--text3)",cursor:"pointer",fontSize:14,padding:4}}>✕</button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          );
+        })()}
 
         {/* Modais herdados */}
         {showMgrModal && (
@@ -4196,7 +4381,12 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }
                     // Semáforo
                     let semaforo = "verde";
                     let semaforoMsg = "Ativo";
-                    if (pct >= 100) { semaforo = "vermelho"; semaforoMsg = "Limite atingido"; }
+                    const finStatus = r.financeiro?.status ?? "ativo";
+                    const venc = r.financeiro?.proximoVencimento;
+                    const vencido = venc && venc < today();
+                    if (finStatus === "inadimplente") { semaforo = "vermelho"; semaforoMsg = "🔴 Inadimplente"; }
+                    else if (vencido) { semaforo = "vermelho"; semaforoMsg = "💳 Vencido"; }
+                    else if (pct >= 100) { semaforo = "vermelho"; semaforoMsg = "Limite atingido"; }
                     else if (!temGorjetaMes) { semaforo = "amarelo"; semaforoMsg = "Sem gorjeta este mês"; }
                     else if (pct >= 80) { semaforo = "amarelo"; semaforoMsg = "Próximo do limite"; }
 
@@ -4784,7 +4974,16 @@ function UnifiedLogin({ owners, managers, employees, onLoginOwner, onLoginManage
       // Gestor (aceita PIN do gestor OU PIN do empregado com mesmo CPF)
       const empByCpf = employees.find(e => e.cpf?.replace(/\D/g,"") === cleanCpf);
       const mgr = managers.find(m => m.cpf?.replace(/\D/g,"") === cleanCpf && (String(m.pin) === cleanPin || (empByCpf && String(empByCpf.pin) === cleanPin)));
-      if (mgr) found.push({ label:"Gestor", icon:"📊", action:()=>{ setChoices(null); onLoginManager(mgr); } });
+      if (mgr) {
+        // Verifica se TODOS os restaurantes do gestor estão inadimplentes
+        const restsMgr = restaurants.filter(r=>mgr.restaurantIds?.includes(r.id));
+        const todosInadimplentes = restsMgr.length > 0 && restsMgr.every(r=>r.financeiro?.status==="inadimplente");
+        if (todosInadimplentes) {
+          setErr("⚠️ O acesso ao sistema está suspenso. Entre em contato com o administrador AppTip.");
+          return;
+        }
+        found.push({ label:"Gestor", icon:"📊", action:()=>{ setChoices(null); onLoginManager(mgr); } });
+      }
 
       // Empregado por CPF (aceita PIN do empregado, do gestor OU do supergestor com mesmo CPF)
       const superByCpf = owners.find(s => s.cpf?.replace(/\D/g,"") === cleanCpf);
@@ -4795,6 +4994,12 @@ function UnifiedLogin({ owners, managers, employees, onLoginOwner, onLoginManage
         (superByCpf && String(superByCpf.pin) === cleanPin)
       ));
       if (emp && !(emp.inactive && emp.inactiveFrom && emp.inactiveFrom <= today())) {
+        // Verifica inadimplência do restaurante
+        const restDoEmp = restaurants.find(r=>r.id===emp.restaurantId);
+        if (restDoEmp?.financeiro?.status === "inadimplente") {
+          setErr("⚠️ O acesso ao sistema está suspenso. Entre em contato com o administrador do restaurante.");
+          return;
+        }
         found.push({ label:"Empregado", icon:"👤", action:()=>{ setChoices(null); localStorage.setItem("apptip_empid", emp.id); localStorage.setItem("apptip_userid", emp.id); onLoginEmployee(emp); } });
       }
     } else {
