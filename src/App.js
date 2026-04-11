@@ -1,4 +1,4 @@
-// AppTip v4.6 — 2026-04-11b
+// AppTip v4.6 — 2026-04-11e
 import { useState, useEffect } from "react";
 import { db } from "./firebase";
 import { doc, getDoc, setDoc, deleteDoc, collection, getDocs } from "firebase/firestore";
@@ -4205,36 +4205,33 @@ Responda SOMENTE com o JSON abaixo, sem texto adicional, sem markdown:
 
               function confirmarEscala() {
                 if (!aiSchedPreview) return;
-                let newSched = { ...schedules };
 
                 // Mapa de nome → id para fallback caso IA retorne nome em vez de id
                 const nomeParaId = {};
-                areaEmps.forEach(e => {
+                restEmps.forEach(e => {
                   nomeParaId[e.name.toLowerCase().trim()] = e.id;
-                  // também tenta primeiro nome
                   nomeParaId[e.name.split(" ")[0].toLowerCase().trim()] = e.id;
                 });
 
+                // Monta o novo schedules do zero baseado no atual
+                const newRestSched = { ...(schedules?.[rid] ?? {}) };
+                const newMesSched  = { ...(newRestSched[mesKey] ?? {}) };
+
+                let aplicados = 0;
                 Object.entries(aiSchedPreview.escala).forEach(([empKey, days]) => {
-                  // Tenta o id direto, senão tenta por nome
-                  const empId = areaEmps.find(e => e.id === empKey)?.id
+                  const empId = restEmps.find(e => e.id === empKey)?.id
                     ?? nomeParaId[empKey.toLowerCase().trim()]
                     ?? null;
                   if (!empId) { console.warn("Empregado não encontrado:", empKey); return; }
-
-                  newSched = {
-                    ...newSched,
-                    [rid]: {
-                      ...(newSched[rid] ?? {}),
-                      [mesKey]: {
-                        ...(newSched[rid]?.[mesKey] ?? {}),
-                        [empId]: { ...(newSched[rid]?.[mesKey]?.[empId] ?? {}), ...days }
-                      }
-                    }
-                  };
+                  newMesSched[empId] = { ...(newMesSched[empId] ?? {}), ...days };
+                  aplicados++;
                 });
+
+                console.log("confirmarEscala — mesKey:", mesKey, "rid:", rid, "aplicados:", aplicados, "preview:", aiSchedPreview.escala);
+
+                const newSched = { ...schedules, [rid]: { ...newRestSched, [mesKey]: newMesSched } };
                 onUpdate("schedules", newSched);
-                onUpdate("_toast", "✨ Escala atualizada pela IA!");
+                onUpdate("_toast", `✨ Escala atualizada! (${aplicados} empregado${aplicados!==1?"s":""} afetado${aplicados!==1?"s":""})`);
                 setShowAiSched(false);
                 setAiSchedPreview(null);
                 setAiSchedInput("");
@@ -7810,6 +7807,8 @@ export default function App() {
       {view === "guia-gestor" && <GuiaGestor />}
       {view === "home" && <Home onLogin={()=>setView("login")} />}
       <Toast msg={toast} onClose={()=>setToast("")} />
+      {/* Rodapé de versão */}
+      <div style={{position:"fixed",bottom:8,right:12,fontSize:10,color:"var(--text3)",fontFamily:"'DM Mono',monospace",opacity:0.45,pointerEvents:"none",zIndex:100}}>v4.6e</div>
 
       {/* Modal Política de Privacidade */}
       <div id="apptip-privacy" style={{display:"none",position:"fixed",inset:0,background:"rgba(0,0,0,0.5)",zIndex:9999,alignItems:"center",justifyContent:"center",padding:20}} onClick={e=>{if(e.target===e.currentTarget)e.currentTarget.style.display="none";}}>
