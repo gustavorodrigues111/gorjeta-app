@@ -4518,19 +4518,16 @@ Qualquer duvida estamos a disposicao! 😊
                   const chaveUsada = cobForma==="pix" ? (cobChave||PIX_PADRAO) : cobLink;
                   const msg = `Ola, *${rest?.name}*! 👋\n\nSegue sua fatura *AppTip* referente a *${periodoLabel}*. 🍽️\n\n📦 *Plano:* ${plano.label}${isEnterprise?` (${empMax} emp.)`:""})\n💰 *Valor:* R$ ${valor.toLocaleString("pt-BR",{minimumFractionDigits:2})}${vencLabel?`\n📅 *Vencimento:* ${vencLabel}`:""}\n\n${cobForma==="pix"?`💠 *Pagamento via PIX*\nChave: *${chaveUsada}*\nFavorecido: ${PIX_NOME}`:`🔗 *Link de pagamento:*\n${chaveUsada}`}\n\nQualquer duvida estamos a disposicao! 😊\n*Equipe AppTip*`;
                   const numero = rest.whatsappFin.replace(/\D/g,"");
-                  const msgEncoded = msg.split('').map(c => {
-                    const code = c.codePointAt(0);
-                    if (code > 127) return encodeURIComponent(c);
-                    return c;
-                  }).join('').replace(/ /g, '%20').replace(/\n/g, '%0A').replace(/\*/g, '*');
+                  const urlWpp = `https://wa.me/55${numero}?text=${encodeURIComponent(msg)}`;
 
-                  // Abre WhatsApp PRIMEIRO (antes de qualquer setState) para evitar bloqueio do Safari
-                  window.open(`https://wa.me/55${numero}?text=${msgEncoded}`, "_blank");
-
+                  // Salva cobrança
                   const cob = { id:Date.now().toString(), periodo:cobPeriodo, periodoLabel, venc:cobVenc, valor, forma:cobForma==="pix"?"PIX":"Link", chave:chaveUsada, criadaEm:new Date().toISOString(), status:"pendente" };
                   saveFinanceiro({ cobrancas:[...(fin.cobrancas??[]), cob] });
                   setCobValor(""); setCobVenc(""); setCobLink("");
-                  onUpdate("_toast","📲 Cobrança gerada!");
+                  onUpdate("_toast","📲 Cobrança gerada! Abrindo WhatsApp...");
+
+                  // Abre WhatsApp — usa location.href que Safari nunca bloqueia
+                  setTimeout(() => { window.location.href = urlWpp; }, 300);
                 }} disabled={!rest?.whatsappFin}
                   style={{...S.btnPrimary,opacity:rest?.whatsappFin?1:0.5,cursor:rest?.whatsappFin?"pointer":"not-allowed"}}>
                   📲 Gerar e enviar cobrança via WhatsApp
