@@ -6449,12 +6449,15 @@ function Home({ onLogin }) {
   }
 
   const FEATURES = [
-    { icon:"💸", title:"Gorjetas transparentes", desc:"Cálculo e distribuição automática por área e cargo. Cada empregado vê exatamente o que recebeu, sem dúvidas." },
-    { icon:"📅", title:"Escala inteligente", desc:"Controle de folgas, faltas, férias e compensações integrado ao cálculo de gorjetas." },
-    { icon:"👥", title:"Gestão de equipe", desc:"Cadastro completo, cargos, horários e acesso individual para cada empregado." },
-    { icon:"📄", title:"Recibos digitais", desc:"Holerites enviados direto para cada empregado, com confirmação de leitura." },
-    { icon:"💬", title:"Canal com o DP", desc:"Canal direto e anônimo para comunicação entre equipe e departamento pessoal." },
-    { icon:"📱", title:"100% no celular", desc:"Sem app para instalar. Acessa pelo navegador em qualquer smartphone." },
+    { icon:"💸", title:"Gorjetas transparentes", desc:"Cálculo e distribuição automática por área e cargo. Cada empregado vê exatamente o que recebeu, bruto e líquido, sem dúvidas." },
+    { icon:"📅", title:"Escala inteligente", desc:"Controle de folgas, faltas, férias e compensações integrado ao cálculo de gorjetas. Escala base gerada automaticamente pelo horário contratual." },
+    { icon:"👥", title:"Gestão de equipe", desc:"Cadastro completo, cargos, pontos e acesso individual para cada empregado. Histórico preservado mesmo após inativação." },
+    { icon:"❓", title:"FAQ com assistente de IA", desc:"Base de perguntas e respostas para sua equipe. Perguntas automáticas sobre gorjetas e regras, mais IA (Gemini) para ajudar o gestor a redigir." },
+    { icon:"📢", title:"Comunicados com IA", desc:"Envie avisos para toda a equipe ou áreas específicas. Assistente de IA ajuda a redigir. Acompanhe quem leu e confirmou." },
+    { icon:"💬", title:"Canal com o DP", desc:"Canal direto, inclusive anônimo, para comunicação entre equipe e departamento pessoal. Sugestões, denúncias, atestados e dúvidas trabalhistas." },
+    { icon:"📄", title:"Recibos digitais", desc:"Gorjeta, adiantamento, férias e 13º — tudo disponível direto no app do empregado assim que o gestor faz o upload." },
+    { icon:"🔒", title:"Gestão financeira integrada", desc:"Controle de ciclos, cobranças e pagamentos. Página de fatura para o cliente confirmar o pagamento com um clique." },
+    { icon:"📱", title:"100% no celular", desc:"Sem app para instalar. Acessa pelo navegador em qualquer smartphone. Gestor e empregado com portais distintos e seguros." },
   ];
 
   const PLANOS = [
@@ -6494,7 +6497,7 @@ function Home({ onLogin }) {
             Gorjetas distribuídas<br/><span style={{color:ac}}>com transparência total</span>
           </h1>
           <p style={{color:"#8c7a5e",fontSize:"clamp(15px,2vw,18px)",lineHeight:1.7,marginBottom:40,maxWidth:520,margin:"0 auto 40px"}}>
-            O AppTip automatiza o cálculo e distribuição de gorjetas, controla escala e mantém sua equipe sempre informada — tudo pelo celular, sem app para instalar.
+            O AppTip automatiza o cálculo e distribuição de gorjetas, controla escala, comunicados e FAQ com IA — tudo pelo celular, sem app para instalar.
           </p>
           <div style={{display:"flex",gap:12,justifyContent:"center",flexWrap:"wrap"}}>
             <a href="#contato" style={{padding:"15px 32px",borderRadius:12,background:ac,color:"#fff",fontWeight:700,fontSize:16,textDecoration:"none",display:"inline-block",boxShadow:"0 4px 20px #d4a01744"}}>
@@ -6511,7 +6514,7 @@ function Home({ onLogin }) {
       {/* STATS */}
       <section style={{background:"#fff",padding:"48px 24px",borderTop:"1px solid #ede8df",borderBottom:"1px solid #ede8df"}}>
         <div style={{maxWidth:700,margin:"0 auto",display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:24,textAlign:"center"}}>
-          {[["100%","Mobile first — sem app"],["LGPD","Conformidade total"],["0","Taxa de adesão"]].map(([n,l])=>(
+          {[["100%","Mobile first — sem app instalar"],["IA","FAQ e comunicados assistidos"],["LGPD","Conformidade e dados protegidos"]].map(([n,l])=>(
             <div key={l}>
               <div style={{fontSize:32,fontWeight:800,color:ac,marginBottom:6,letterSpacing:-1,fontFamily:"'DM Mono',monospace"}}>{n}</div>
               <div style={{color:"#8c7a5e",fontSize:13,fontWeight:500}}>{l}</div>
@@ -6525,7 +6528,7 @@ function Home({ onLogin }) {
         <div style={{maxWidth:960,margin:"0 auto"}}>
           <div style={{textAlign:"center",marginBottom:56}}>
             <h2 style={{fontSize:"clamp(24px,4vw,38px)",fontWeight:800,margin:"0 0 12px",letterSpacing:-0.8,color:"#1c1208"}}>Tudo que sua equipe precisa</h2>
-            <p style={{color:"#8c7a5e",fontSize:16}}>Um sistema completo, sem complicação</p>
+            <p style={{color:"#8c7a5e",fontSize:16}}>Um sistema completo — gorjetas, escala, comunicados com IA e muito mais</p>
           </div>
           <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(280px,1fr))",gap:20}}>
             {FEATURES.map(f=>(
@@ -6543,12 +6546,13 @@ function Home({ onLogin }) {
       <section style={{padding:"80px 24px",background:"#f0ebe0"}}>
         <div style={{maxWidth:800,margin:"0 auto",textAlign:"center"}}>
           <h2 style={{color:"#1c1208",fontSize:"clamp(24px,4vw,38px)",fontWeight:800,margin:"0 0 12px",letterSpacing:-0.8}}>Como funciona</h2>
-          <p style={{color:"#8c7a5e",fontSize:16,marginBottom:56}}>Em 3 passos simples</p>
+          <p style={{color:"#8c7a5e",fontSize:16,marginBottom:56}}>Do cadastro ao extrato do empregado em minutos</p>
           <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(200px,1fr))",gap:32}}>
             {[
-              ["1","Você configura","Cadastra o restaurante, áreas, cargos e empregados em minutos"],
-              ["2","Lança as gorjetas","Informa o valor diário e o sistema distribui automaticamente por cargo"],
-              ["3","Equipe acompanha","Cada empregado vê seu extrato, escala e comunicados pelo celular"],
+              ["1","Configure o restaurante","Cadastre áreas, cargos com pontos, empregados e regras fiscais. Pronto para operar."],
+              ["2","Lance as gorjetas","Informe o valor diário. O sistema distribui automaticamente por cargo, área e escala."],
+              ["3","Comunique a equipe","Envie comunicados com IA, gerencie o FAQ automático e mantenha todos informados."],
+              ["4","Equipe acompanha tudo","Cada empregado vê extrato, escala, recibos e comunicados direto pelo celular."],
             ].map(([n,t,d])=>(
               <div key={n}>
                 <div style={{width:52,height:52,borderRadius:"50%",background:ac,color:"#fff",fontSize:22,fontWeight:800,display:"flex",alignItems:"center",justifyContent:"center",margin:"0 auto 16px",fontFamily:"'DM Mono',monospace"}}>{n}</div>
