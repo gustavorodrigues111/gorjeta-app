@@ -2716,7 +2716,13 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
     setSplitForm(null);
   }
 
-  const areaEmps = restEmps.filter(e => restRoles.find(r => r.id === e.roleId)?.area === schedArea);
+  const areaEmps = schedArea === "Todos"
+    ? restEmps.slice().sort((a,b) => {
+        const aA = restRoles.find(r=>r.id===a.roleId)?.area ?? "z";
+        const bA = restRoles.find(r=>r.id===b.roleId)?.area ?? "z";
+        return aA.localeCompare(bA) || a.name.localeCompare(b.name);
+      })
+    : restEmps.filter(e => restRoles.find(r => r.id === e.roleId)?.area === schedArea);
   const dim = new Date(year, month + 1, 0).getDate();
 
   const ac = "#f5c842";
@@ -3120,7 +3126,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
         {tab === "schedule" && (
           <div>
             <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12,flexWrap:"wrap",gap:8}}>
-              <div style={{flex:1}}><PillBar options={AREAS} value={schedArea} onChange={setSchedArea}/></div>
+              <div style={{flex:1}}><PillBar options={["Todos", ...AREAS]} value={schedArea} onChange={setSchedArea}/></div>
               <div style={{display:"flex",gap:8}}>
                 <div style={{display:"flex",gap:4}}>
                   <button onClick={()=>{setYear(month===0?year-1:year);setMonth(month===0?11:month-1);}} style={{...S.btnSecondary,padding:"6px 10px",fontSize:13}}>‹</button>
@@ -3285,7 +3291,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
               ))}
             </div>
 
-            {areaEmps.length === 0 && <p style={{color:"var(--text3)",textAlign:"center"}}>Nenhum empregado nesta área.</p>}
+            {areaEmps.length === 0 && <p style={{color:"var(--text3)",textAlign:"center"}}>Nenhum empregado {schedArea === "Todos" ? "cadastrado" : "nesta área"}.</p>}
 
             {areaEmps.length > 0 && (() => {
               const daysInMonth = dim;
@@ -3345,30 +3351,46 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                         let workC=0, offC=0;
                         Object.values(dayMap).forEach(v=>{ if(v===DAY_OFF||v===DAY_FAULT_J||v===DAY_FAULT_U||v===DAY_VACATION) offC++; });
                         workC = daysInMonth - offC - Object.values(dayMap).filter(v=>v===DAY_COMP).length;
+
+                        // Separador de área no modo "Todos"
+                        const prevEmp = areaEmps[ei-1];
+                        const prevArea = prevEmp ? restRoles.find(r=>r.id===prevEmp.roleId)?.area : null;
+                        const curArea = role?.area;
+                        const showAreaHeader = schedArea === "Todos" && curArea !== prevArea;
+
                         return (
-                          <tr key={emp.id} style={{background:ei%2===0?"#111":"#141414"}}>
-                            <td style={{position:"sticky",left:0,background:ei%2===0?"#111":"#141414",zIndex:1,padding:"5px 10px",borderRight:"1px solid var(--border)",minWidth:130}}>
-                              <div style={{color:"var(--text)",fontSize:11,fontWeight:600}}>{emp.name}</div>
-                              <div style={{color:"var(--text3)",fontSize:9}}>{role?.name}</div>
-                            </td>
-                            {Array.from({length:daysInMonth},(_,i)=>{
-                              const d = i+1;
-                              const date = `${year}-${String(month+1).padStart(2,"0")}-${String(d).padStart(2,"0")}`;
-                              const status = dayMap[date];
-                              const color = STATUS_COLORS[status] ?? "#10b981";
-                              const label = STATUS_SHORT[status] ?? "•";
-                              const wd = new Date(date+"T12:00:00").getDay();
-                              const isWe = wd===0||wd===6;
-                              return (
-                                <td key={d} onClick={()=>cycleStatus(emp.id, date)}
-                                  style={{textAlign:"center",padding:"3px 2px",cursor:"pointer",background:status?color+"33":(isWe?"#1a1a0a":"transparent"),borderRight:"1px solid #1a1a1a",width:30}}>
-                                  <span style={{color:color,fontSize:status?9:11,fontWeight:status?700:400}}>{label}</span>
+                          <React.Fragment key={emp.id}>
+                            {showAreaHeader && (
+                              <tr>
+                                <td colSpan={daysInMonth + 3} style={{padding:"8px 10px 4px",background:"#0d0d0d",borderTop:"1px solid #2a2a2a",borderBottom:"1px solid #2a2a2a"}}>
+                                  <span style={{color:AREA_COLORS[curArea]??"#888",fontSize:10,fontWeight:700,letterSpacing:1}}>{(curArea??"").toUpperCase()}</span>
                                 </td>
-                              );
-                            })}
-                            <td style={{textAlign:"center",color:"#10b981",fontSize:11,fontWeight:700,padding:"3px 6px"}}>{workC}</td>
-                            <td style={{textAlign:"center",color:"#e74c3c",fontSize:11,padding:"3px 6px"}}>{offC}</td>
-                          </tr>
+                              </tr>
+                            )}
+                            <tr style={{background:ei%2===0?"#111":"#141414"}}>
+                              <td style={{position:"sticky",left:0,background:ei%2===0?"#111":"#141414",zIndex:1,padding:"5px 10px",borderRight:"1px solid var(--border)",minWidth:130}}>
+                                <div style={{color:"var(--text)",fontSize:11,fontWeight:600}}>{emp.name}</div>
+                                <div style={{color:"var(--text3)",fontSize:9}}>{role?.name}</div>
+                              </td>
+                              {Array.from({length:daysInMonth},(_,i)=>{
+                                const d = i+1;
+                                const date = `${year}-${String(month+1).padStart(2,"0")}-${String(d).padStart(2,"0")}`;
+                                const status = dayMap[date];
+                                const color = STATUS_COLORS[status] ?? "#10b981";
+                                const label = STATUS_SHORT[status] ?? "•";
+                                const wd = new Date(date+"T12:00:00").getDay();
+                                const isWe = wd===0||wd===6;
+                                return (
+                                  <td key={d} onClick={()=>cycleStatus(emp.id, date)}
+                                    style={{textAlign:"center",padding:"3px 2px",cursor:"pointer",background:status?color+"33":(isWe?"#1a1a0a":"transparent"),borderRight:"1px solid #1a1a1a",width:30}}>
+                                    <span style={{color:color,fontSize:status?9:11,fontWeight:status?700:400}}>{label}</span>
+                                  </td>
+                                );
+                              })}
+                              <td style={{textAlign:"center",color:"#10b981",fontSize:11,fontWeight:700,padding:"3px 6px"}}>{workC}</td>
+                              <td style={{textAlign:"center",color:"#e74c3c",fontSize:11,padding:"3px 6px"}}>{offC}</td>
+                            </tr>
+                          </React.Fragment>
                         );
                       })}
                     </tbody>
