@@ -4417,18 +4417,18 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }
                   <div style={{padding:"14px",borderRadius:10,background:"var(--card-bg)",border:"1px solid var(--border)",marginBottom:12}}>
                     <div style={{color:"var(--text)",fontWeight:700,fontSize:16,marginBottom:4}}>{fmt(cobPeriodo||proxIni)} a {fmt(cobVenc||proxFim)}</div>
                     <div style={{color:"var(--text3)",fontSize:12,marginBottom:10}}>{tipo==="anual"?"Ciclo anual":"Ciclo 30 dias"} · Venc. {fmt(cobVenc||proxFim)}</div>
-                    <div style={{display:"flex",gap:8}}>
-                      <div style={{flex:1}}>
+                    <div style={{display:"flex",flexDirection:"column",gap:6}}>
+                      <div>
                         <div style={{color:"var(--text3)",fontSize:10,marginBottom:3}}>Início</div>
                         <input key={`ini-${proxIni}`} type="date" defaultValue={cobPeriodo||proxIni}
                           onChange={e=>setCobPeriodo(e.target.value)}
-                          style={{...S.input,fontSize:13,padding:"8px",width:"100%",boxSizing:"border-box"}}/>
+                          style={{...S.input,fontSize:13,padding:"8px",width:"100%",boxSizing:"border-box",display:"block"}}/>
                       </div>
-                      <div style={{flex:1}}>
+                      <div>
                         <div style={{color:"var(--text3)",fontSize:10,marginBottom:3}}>Vencimento</div>
                         <input key={`fim-${proxFim}`} type="date" defaultValue={cobVenc||proxFim}
                           onChange={e=>setCobVenc(e.target.value)}
-                          style={{...S.input,fontSize:13,padding:"8px",width:"100%",boxSizing:"border-box"}}/>
+                          style={{...S.input,fontSize:13,padding:"8px",width:"100%",boxSizing:"border-box",display:"block"}}/>
                       </div>
                     </div>
                   </div>
