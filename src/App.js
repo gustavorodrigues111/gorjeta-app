@@ -3888,6 +3888,7 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }
   const isMaster = currentUser?.isMaster === true;
   const trash = data?.trash ?? { restaurants:[], managers:[], employees:[] };
   const trashCount = (trash.restaurants?.length??0) + (trash.managers?.length??0) + (trash.employees?.length??0);
+  const [restTab, setRestTab] = useState("operacional");
 
   // Soft delete helpers
   function softDelete(type, item) {
@@ -3923,7 +3924,6 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }
   if (selRestaurant) {
     const rest = restaurants.find(r => r.id === selRestaurant);
     const restMgrs = managers.filter(m => m.restaurantIds?.includes(selRestaurant));
-    const [restTab, setRestTab] = useState("operacional");
 
     return (
       <div style={{ minHeight:"100vh", background:"var(--bg)", fontFamily:"'DM Sans',sans-serif" }}>
