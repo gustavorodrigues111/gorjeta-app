@@ -3128,61 +3128,12 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                       if (isNoTip) { cardBorder = "#6366f155"; cardBg = "#0d0d1a"; }
                       else if (isLaunched && !isDirty && !isCleared) { cardBorder = "#10b98133"; cardBg = "#0a1a0a"; }
                       else if (isDirty) { cardBorder = "#f59e0b55"; cardBg = "#1a1200"; }
-                      else if (isCleared) { cardBorder = "#ef444455"; cardBg = "#1a0a0a"; }
                       else if (hasVal) { cardBorder = "#f5c84233"; cardBg = "#1a1a0a"; }
-
-                      // Se marcado sem gorjeta — card com banner + campos editáveis
-                      if (isNoTip) return (
-                        <div key={date} style={{marginBottom:6,borderRadius:10,border:"1px solid #6366f155",background:"#0d0d1a",overflow:"hidden"}}>
-                          {/* Banner de status */}
-                          <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"5px 10px",background:"#6366f118",borderBottom:"1px solid #6366f133"}}>
-                            <div style={{display:"flex",alignItems:"center",gap:6}}>
-                              <span style={{fontSize:13}}>🚫</span>
-                              <span style={{color:"#a5b4fc",fontSize:11,fontWeight:700}}>Sem gorjeta</span>
-                              <span style={{color:"#6366f188",fontSize:10}}>— registrado sem acúmulo</span>
-                            </div>
-                            <button onClick={()=>{
-                              const updated = { ...(data?.noTipDays??{}), [rid]: ((data?.noTipDays?.[rid])??[]).filter(d=>d!==date) };
-                              onUpdate("noTipDays", updated);
-                              onUpdate("_toast",`✅ ${fmtDate(date)}: disponível para lançamento`);
-                            }} style={{padding:"3px 10px",borderRadius:6,border:"1px solid #6366f144",background:"transparent",color:"#818cf8",cursor:"pointer",fontFamily:"DM Mono,monospace",fontSize:11}}>
-                              Desfazer
-                            </button>
-                          </div>
-                          {/* Campos editáveis — para poder corrigir e lançar se necessário */}
-                          <div style={{display:"grid",gridTemplateColumns:"44px 130px 1fr auto",gap:8,padding:"7px 10px",alignItems:"center",opacity:0.5}}>
-                            <div style={{textAlign:"center"}}>
-                              <div style={{color:isWeekend?"#f59e0b":"#888",fontSize:13,fontWeight:700}}>{parseInt(date.slice(-2))}</div>
-                              <div style={{color:"var(--text3)",fontSize:9}}>{weekday}</div>
-                            </div>
-                            <input type="number" min="0" step="0.01" value={row.total}
-                              onChange={e=>{ const newRows=tipRows.filter(r=>r.date!==date); setTipRows([...newRows,{...row,total:e.target.value}]); }}
-                              placeholder="R$ 0,00"
-                              style={{...S.input,fontSize:13,padding:"6px 8px",background:"#1a1a2a",color:"#818cf8",borderColor:"#6366f133"}}
-                            />
-                            <input value={row.note}
-                              onChange={e=>{ const newRows=tipRows.filter(r=>r.date!==date); setTipRows([...newRows,{...row,note:e.target.value}]); }}
-                              placeholder="Observação"
-                              style={{...S.input,fontSize:12,padding:"6px 8px",background:"#1a1a2a",borderColor:"#6366f133"}}
-                            />
-                            {hasVal && (
-                              <button onClick={()=>{
-                                // Lança a gorjeta e desmarca sem gorjeta ao mesmo tempo
-                                const updatedNoTip = { ...(data?.noTipDays??{}), [rid]: ((data?.noTipDays?.[rid])??[]).filter(d=>d!==date) };
-                                onUpdate("noTipDays", updatedNoTip);
-                                const n = calcTipForDate(date, val, row.note);
-                                if(n>0) { setTipRows(prev=>prev.filter(r=>r.date!==date)); onUpdate("_toast",`✅ ${fmtDate(date)}: ${n} empregados`); }
-                              }} style={{padding:"6px 10px",borderRadius:8,border:"none",background:ac,color:"#111",fontWeight:700,cursor:"pointer",fontFamily:"DM Mono,monospace",fontSize:11,whiteSpace:"nowrap",opacity:1}}>
-                                Lançar
-                              </button>
-                            )}
-                          </div>
-                        </div>
-                      );
 
                       return (
                         <div key={date} style={{marginBottom:6,borderRadius:10,border:`1px solid ${cardBorder}`,background:cardBg,overflow:"hidden"}}>
-                          <div style={{display:"grid",gridTemplateColumns:"44px 130px 1fr auto",gap:8,padding:"7px 10px",alignItems:"center"}}>
+                          <div style={{display:"grid",gridTemplateColumns:"44px 1fr 1fr auto",gap:8,padding:"7px 10px",alignItems:"center"}}>
+
                             {/* Data */}
                             <div style={{textAlign:"center"}}>
                               <div style={{color:isWeekend?"#f59e0b":"#aaa",fontSize:13,fontWeight:700}}>{parseInt(date.slice(-2))}</div>
@@ -3192,83 +3143,85 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                             {/* Valor */}
                             <input
                               type="number" min="0" step="0.01"
-                              value={row.total}
-                              onChange={e=>{
-                                const newRows = tipRows.filter(r=>r.date!==date);
-                                setTipRows([...newRows, {...row, total:e.target.value}]);
-                              }}
-                              placeholder="R$ 0,00"
+                              value={isNoTip ? "" : row.total}
+                              disabled={isNoTip}
+                              onChange={e=>{ const nr=tipRows.filter(r=>r.date!==date); setTipRows([...nr,{...row,total:e.target.value}]); }}
+                              placeholder={isNoTip ? "—" : "R$ 0,00"}
                               style={{...S.input,fontSize:13,padding:"6px 8px",
-                                background: isDirty?"#221500": isLaunched?"#0d1a0d":"#1a1a1a",
-                                color: isDirty?"#f59e0b": isLaunched?"#10b981":"#fff",
-                                borderColor: isDirty?"#f59e0b44": isLaunched?"#10b98133":"transparent"
+                                background: isNoTip?"transparent": isDirty?"#221500": isLaunched?"#0d1a0d":"#1a1a1a",
+                                color: isNoTip?"#555": isDirty?"#f59e0b": isLaunched?"#10b981":"#fff",
+                                borderColor: isNoTip?"transparent": isDirty?"#f59e0b44": isLaunched?"#10b98133":"transparent",
+                                opacity: isNoTip?0.4:1
                               }}
                             />
 
-                            {/* Observação */}
-                            <input
-                              value={row.note}
-                              onChange={e=>{
-                                const newRows = tipRows.filter(r=>r.date!==date);
-                                setTipRows([...newRows, {...row, note:e.target.value}]);
-                              }}
-                              placeholder="Observação"
-                              style={{...S.input,fontSize:12,padding:"6px 8px"}}
-                            />
+                            {/* Observação OU badge sem gorjeta */}
+                            {isNoTip ? (
+                              <div style={{display:"flex",alignItems:"center",gap:6}}>
+                                <span style={{fontSize:12}}>🚫</span>
+                                <span style={{color:"#818cf8",fontSize:12,fontWeight:600}}>Sem gorjeta</span>
+                              </div>
+                            ) : (
+                              <input
+                                value={row.note}
+                                onChange={e=>{ const nr=tipRows.filter(r=>r.date!==date); setTipRows([...nr,{...row,note:e.target.value}]); }}
+                                placeholder="Observação"
+                                style={{...S.input,fontSize:12,padding:"6px 8px"}}
+                              />
+                            )}
 
                             {/* Ações */}
-                            <div style={{display:"flex",gap:4,alignItems:"center"}}>
-                              {/* Não lançado + sem valor → botão Sem gorjeta */}
-                              {!isLaunched && !hasVal && (
-                                <button onClick={()=>{
-                                  const updated = { ...(data?.noTipDays??{}), [rid]: [...((data?.noTipDays?.[rid])??[]).filter(d=>d!==date), date] };
-                                  onUpdate("noTipDays", updated);
-                                  setTipRows(prev=>prev.filter(r=>r.date!==date));
-                                  onUpdate("_toast",`🚫 ${fmtDate(date)}: marcado como sem gorjeta`);
-                                }} style={{padding:"5px 10px",borderRadius:8,border:"1px solid #6366f133",background:"transparent",color:"#6366f1",cursor:"pointer",fontFamily:"DM Mono,monospace",fontSize:11,whiteSpace:"nowrap"}}>
-                                  🚫 Sem gorjeta
-                                </button>
+                            <div style={{display:"flex",gap:6,alignItems:"center"}}>
+
+                              {/* Checkbox "Sem gorjeta" — sempre visível se não lançado */}
+                              {!isLaunched && (
+                                <label style={{display:"flex",alignItems:"center",gap:4,cursor:"pointer",userSelect:"none",padding:"4px 8px",borderRadius:8,border:`1px solid ${isNoTip?"#6366f155":"#2a2a2a"}`,background:isNoTip?"#6366f111":"transparent"}} title={isNoTip?"Desmarcar sem gorjeta":"Marcar como dia sem gorjeta"}>
+                                  <input type="checkbox" checked={isNoTip}
+                                    onChange={e=>{
+                                      const days = data?.noTipDays?.[rid] ?? [];
+                                      const updated = { ...(data?.noTipDays??{}), [rid]: e.target.checked ? [...days.filter(d=>d!==date), date] : days.filter(d=>d!==date) };
+                                      onUpdate("noTipDays", updated);
+                                      if(e.target.checked) setTipRows(prev=>prev.filter(r=>r.date!==date));
+                                      onUpdate("_toast", e.target.checked ? `🚫 ${fmtDate(date)}: sem gorjeta` : `✅ ${fmtDate(date)}: disponível`);
+                                    }}
+                                    style={{width:14,height:14,cursor:"pointer",accentColor:"#6366f1",margin:0}}
+                                  />
+                                  <span style={{color:isNoTip?"#818cf8":"#555",fontSize:10,whiteSpace:"nowrap"}}>Sem gorj.</span>
+                                </label>
                               )}
 
-                              {/* Não lançado + tem valor → Lançar */}
-                              {!isLaunched && hasVal && (
+                              {/* Lançar */}
+                              {!isLaunched && !isNoTip && hasVal && (
                                 <button onClick={()=>{
-                                  const n = calcTipForDate(date, val, row.note);
-                                  if(n>0) {
-                                    setTipRows(prev=>prev.filter(r=>r.date!==date));
-                                    onUpdate("_toast",`✅ ${fmtDate(date)}: ${n} empregados`);
-                                  }
+                                  const n=calcTipForDate(date,val,row.note);
+                                  if(n>0){setTipRows(prev=>prev.filter(r=>r.date!==date));onUpdate("_toast",`✅ ${fmtDate(date)}: ${n} empregados`);}
                                 }} style={{padding:"6px 12px",borderRadius:8,border:"none",background:ac,color:"#111",fontWeight:700,cursor:"pointer",fontFamily:"DM Mono,monospace",fontSize:11,whiteSpace:"nowrap"}}>
                                   Lançar
                                 </button>
                               )}
 
-                              {/* Lançado + valor alterado → Salvar */}
+                              {/* Salvar */}
                               {isLaunched && isDirty && hasVal && (
                                 <button onClick={()=>{
-                                  const n = calcTipForDate(date, val, row.note);
-                                  if(n>0) {
-                                    setTipRows(prev=>prev.filter(r=>r.date!==date));
-                                    onUpdate("_toast",`✏️ ${fmtDate(date)}: atualizado para ${n} empregados`);
-                                  }
+                                  const n=calcTipForDate(date,val,row.note);
+                                  if(n>0){setTipRows(prev=>prev.filter(r=>r.date!==date));onUpdate("_toast",`✏️ ${fmtDate(date)}: atualizado`);}
                                 }} style={{padding:"6px 10px",borderRadius:8,border:"none",background:"#f59e0b",color:"#111",fontWeight:700,cursor:"pointer",fontFamily:"DM Mono,monospace",fontSize:11,whiteSpace:"nowrap"}}>
                                   Salvar
                                 </button>
                               )}
 
-                              {/* Lançado sem alteração → ✓ */}
+                              {/* Check lançado */}
                               {isLaunched && !isDirty && !isCleared && (
-                                <span style={{color:"#10b981",fontSize:14}}>✓</span>
+                                <span style={{color:"#10b981",fontSize:15,padding:"0 4px"}}>✓</span>
                               )}
 
-                              {/* Lançado → Zerar */}
+                              {/* Zerar */}
                               {isLaunched && (
                                 <button onClick={()=>{
-                                  if(!window.confirm(`Zerar gorjeta de ${fmtDate(date)}? Isso remove todos os lançamentos do dia.`)) return;
-                                  const newTips = tips.filter(t=>!(t.restaurantId===rid && t.date===date));
-                                  onUpdate("tips", newTips);
+                                  if(!window.confirm(`Zerar gorjeta de ${fmtDate(date)}?`)) return;
+                                  onUpdate("tips",tips.filter(t=>!(t.restaurantId===rid&&t.date===date)));
                                   setTipRows(prev=>prev.filter(r=>r.date!==date));
-                                  onUpdate("_toast",`🗑️ ${fmtDate(date)}: lançamentos removidos`);
+                                  onUpdate("_toast",`🗑️ ${fmtDate(date)}: removido`);
                                 }} style={{padding:"5px 8px",borderRadius:8,border:"1px solid #ef444433",background:"transparent",color:"#ef4444",cursor:"pointer",fontFamily:"DM Mono,monospace",fontSize:11,whiteSpace:"nowrap"}}>
                                   Zerar
                                 </button>
@@ -3277,7 +3230,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                           </div>
 
                           {/* Preview rateio */}
-                          {!isLaunched && hasVal && (
+                          {!isLaunched && !isNoTip && hasVal && (
                             <div style={{padding:"5px 10px 7px",borderTop:"1px solid var(--border)",background:"#0d0d0d"}}>
                               <div style={{display:"flex",justifyContent:"space-between",fontSize:11,color:"var(--text3)",marginBottom:3}}>
                                 <span>Pool: {fmt(val)} · Ret. {Math.round(taxRate*100)}%: -{fmt(val*taxRate)} · Dist.: {fmt(val*(1-taxRate))}</span>
@@ -3285,11 +3238,11 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                               </div>
                               {mode !== MODE_GLOBAL_POINTS && (
                                 <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
-                                  {AREAS.map(a => {
-                                    const emps = getActiveEmps(date).filter(e=>restRoles.find(r=>r.id===e.roleId)?.area===a);
+                                  {AREAS.map(a=>{
+                                    const emps=getActiveEmps(date).filter(e=>restRoles.find(r=>r.id===e.roleId)?.area===a);
                                     if(!emps.length) return null;
-                                    const pts = emps.reduce((s,e)=>s+(parseFloat(restRoles.find(r=>r.id===e.roleId)?.points)||0),0);
-                                    const aPool = val*(1-taxRate)*(tSplit[a]/100);
+                                    const pts=emps.reduce((s,e)=>s+(parseFloat(restRoles.find(r=>r.id===e.roleId)?.points)||0),0);
+                                    const aPool=val*(1-taxRate)*(tSplit[a]/100);
                                     return <span key={a} style={{fontSize:10,color:AREA_COLORS[a]}}>{a}: {fmt(aPool)} ({emps.length}/{pts}pt)</span>;
                                   })}
                                 </div>
@@ -3300,9 +3253,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                           {/* Info lançado */}
                           {isLaunched && !isDirty && (
                             <div style={{padding:"3px 10px 5px",borderTop:"1px solid #10b98122",background:"#081208"}}>
-                              <span style={{fontSize:11,color:"#10b98199"}}>
-                                Distribuído: {fmt(launchedPool)} → {dayTips.length} lançamentos
-                              </span>
+                              <span style={{fontSize:11,color:"#10b98199"}}>Distribuído: {fmt(launchedPool)} → {dayTips.length} lançamentos</span>
                             </div>
                           )}
                         </div>
@@ -3845,7 +3796,17 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
 function SuperManagerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }) {
   const { superManagers, managers, restaurants, employees, roles, tips, splits, schedules } = data;
   const [tab, setTab] = useState("restaurants");
-  const [selRestaurant, setSelRestaurant] = useState(null);
+  const [selRestaurant, setSelRestaurantState] = useState(() => {
+    const saved = localStorage.getItem("apptip_selrest");
+    if (saved && restaurants.find(r => r.id === saved)) return saved;
+    return null;
+  });
+
+  function setSelRestaurant(id) {
+    setSelRestaurantState(id);
+    if (id) localStorage.setItem("apptip_selrest", id);
+    else localStorage.removeItem("apptip_selrest");
+  }
 
   // forms
   const [showRestModal, setShowRestModal]   = useState(false);
@@ -4119,8 +4080,22 @@ function SuperManagerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, 
 function ManagerPortal({ manager, data, onUpdate, onBack, toggleTheme, theme }) {
   const { restaurants, employees, roles, tips, splits, schedules } = data;
   const myRestaurants = restaurants.filter(r => manager.restaurantIds?.includes(r.id));
-  const [selId, setSelId] = useState(myRestaurants.length === 1 ? myRestaurants[0].id : null);
+  const [selId, setSelId] = useState(() => {
+    // Restaura o restaurante selecionado do localStorage, ou seleciona automaticamente se só tiver um
+    const saved = localStorage.getItem("apptip_selrest");
+    if (myRestaurants.length === 1) return myRestaurants[0].id;
+    if (saved && myRestaurants.find(r => r.id === saved)) return saved;
+    return null;
+  });
   const ac = "#f5c842";
+
+  // Persiste o restaurante selecionado
+  useEffect(() => {
+    if (selId) localStorage.setItem("apptip_selrest", selId);
+    else localStorage.removeItem("apptip_selrest");
+  }, [selId]);
+
+  const selRest = myRestaurants.find(r => r.id === selId);
 
   const selRest = myRestaurants.find(r => r.id === selId);
 
@@ -4370,6 +4345,7 @@ export default function App() {
   function doLogout() {
     setCurrentUser(null);
     setUserRole(null);
+    localStorage.removeItem("apptip_selrest");
     if (isAdm) {
       setView("login");
     } else {
