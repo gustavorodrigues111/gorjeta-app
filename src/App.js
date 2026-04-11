@@ -5620,8 +5620,8 @@ function Home({ onLogin }) {
 
   const PLANOS = [
     { nome:"Starter",      emp:"até 10",    precoAnual:"R$87,30",  precoMensal:"R$97",   anualSub:"por mês no plano anual", mensalSub:"ou R$97/mês no mensal",  destaque:false, cta:"Começar agora" },
-    { nome:"Básico",       emp:"até 20",    precoAnual:"R$168,30", precoMensal:"R$187",  anualSub:"por mês no plano anual", mensalSub:"ou R$187/mês no mensal", destaque:false, cta:"Começar agora" },
-    { nome:"Profissional", emp:"até 50",    precoAnual:"R$357,30", precoMensal:"R$397",  anualSub:"por mês no plano anual", mensalSub:"ou R$397/mês no mensal", destaque:true,  cta:"Começar agora" },
+    { nome:"Básico",       emp:"até 20",    precoAnual:"R$168,30", precoMensal:"R$187",  anualSub:"por mês no plano anual", mensalSub:"ou R$187/mês no mensal", destaque:true,  cta:"Começar agora" },
+    { nome:"Profissional", emp:"até 50",    precoAnual:"R$357,30", precoMensal:"R$397",  anualSub:"por mês no plano anual", mensalSub:"ou R$397/mês no mensal", destaque:false, cta:"Começar agora" },
     { nome:"Enterprise",   emp:"51 a 100",  precoAnual:"R$7,99",   precoMensal:null,     anualSub:"por empregado/mês",      mensalSub:"pagamento mensal",       destaque:false, cta:"Falar com a gente" },
     { nome:"On Demand",    emp:"+100",      precoAnual:null,       precoMensal:null,     anualSub:"",                       mensalSub:"Solução personalizada",  destaque:false, cta:"Falar com a gente" },
   ];
@@ -5728,38 +5728,37 @@ function Home({ onLogin }) {
             <h2 style={{fontSize:"clamp(24px,4vw,38px)",fontWeight:800,margin:"0 0 12px",letterSpacing:-0.8,color:"#1c1208"}}>Planos e preços</h2>
             <p style={{color:"#8c7a5e",fontSize:16}}>Plano anual com <strong style={{color:ac}}>10% de desconto</strong></p>
           </div>
-          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(180px,1fr))",gap:16}}>
+          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(160px,1fr))",gap:16}}>
             {PLANOS.map(p=>(
-              <div key={p.nome} style={{borderRadius:16,border:p.destaque?`2px solid ${ac}`:"1px solid #ede8df",padding:"24px 20px",background:p.destaque?"#1c1208":"#fff",position:"relative",boxShadow:p.destaque?"0 8px 32px #d4a01733":"0 2px 12px rgba(0,0,0,0.04)"}}>
+              <div key={p.nome} style={{borderRadius:16,border:p.destaque?`2px solid ${ac}`:"1px solid #ede8df",padding:"24px 18px",background:p.destaque?"#1c1208":"#fff",position:"relative",boxShadow:p.destaque?"0 8px 32px #d4a01733":"0 2px 12px rgba(0,0,0,0.04)",display:"flex",flexDirection:"column"}}>
                 {p.destaque && <div style={{position:"absolute",top:-12,left:"50%",transform:"translateX(-50%)",background:ac,color:"#fff",fontSize:11,fontWeight:700,padding:"4px 14px",borderRadius:20,whiteSpace:"nowrap"}}>Mais popular</div>}
-                <div style={{color:p.destaque?"#fff":"#1c1208",fontWeight:800,fontSize:17,marginBottom:4}}>{p.nome}</div>
-                <div style={{color:p.destaque?"#d4c4a0":"#8c7a5e",fontSize:13,marginBottom:16}}>{p.emp} empregados</div>
+                <div style={{color:p.destaque?"#fff":"#1c1208",fontWeight:800,fontSize:16,marginBottom:4}}>{p.nome}</div>
+                <div style={{color:p.destaque?"#d4c4a0":"#8c7a5e",fontSize:12,marginBottom:16}}>{p.emp} empregados</div>
 
-                {/* Preço principal — anual (mais barato) */}
+                {/* Preço principal — anual */}
                 {p.precoAnual ? (
-                  <div style={{marginBottom:8}}>
-                    <div style={{display:"flex",alignItems:"baseline",gap:4,marginBottom:2}}>
-                      <span style={{color:p.destaque?ac:"#1c1208",fontSize:p.nome==="Enterprise"?22:30,fontWeight:800,fontFamily:"'DM Mono',monospace",letterSpacing:-1}}>{p.precoAnual}</span>
-                      <span style={{color:p.destaque?"#d4c4a0":"#8c7a5e",fontSize:12}}>/mês</span>
+                  <div style={{marginBottom:8,flex:1}}>
+                    <div style={{display:"flex",alignItems:"baseline",gap:2,flexWrap:"wrap",marginBottom:2}}>
+                      <span style={{color:p.destaque?ac:"#1c1208",fontSize:p.nome==="Enterprise"?20:26,fontWeight:800,fontFamily:"'DM Mono',monospace",letterSpacing:-0.5,lineHeight:1.1}}>{p.precoAnual}</span>
+                      <span style={{color:p.destaque?"#d4c4a0":"#8c7a5e",fontSize:11,whiteSpace:"nowrap"}}>/mês</span>
                     </div>
-                    <div style={{color:p.destaque?"#d4a017":"#d4a017",fontSize:11,fontWeight:700,marginBottom:p.precoMensal?6:16}}>
+                    <div style={{color:"#d4a017",fontSize:11,fontWeight:700,marginBottom:p.precoMensal?6:16}}>
                       {p.nome==="Enterprise" ? "por empregado/mês" : "✦ no plano anual"}
                     </div>
-                    {/* Preço mensal abaixo, menor */}
                     {p.precoMensal && (
-                      <div style={{color:p.destaque?"#6b5a3e":"#a08060",fontSize:12,marginBottom:16}}>
+                      <div style={{color:p.destaque?"#6b5a3e":"#a08060",fontSize:11,marginBottom:16}}>
                         ou {p.precoMensal}/mês no mensal
                       </div>
                     )}
                   </div>
                 ) : (
-                  <div style={{marginBottom:16}}>
-                    <div style={{color:p.destaque?ac:"#1c1208",fontSize:20,fontWeight:800,marginBottom:4}}>Sob orçamento</div>
+                  <div style={{marginBottom:16,flex:1}}>
+                    <div style={{color:p.destaque?ac:"#1c1208",fontSize:18,fontWeight:800,marginBottom:4}}>Sob orçamento</div>
                     <div style={{color:p.destaque?"#d4c4a0":"#8c7a5e",fontSize:12}}>{p.mensalSub}</div>
                   </div>
                 )}
 
-                <a href="#contato" style={{display:"block",textAlign:"center",padding:"11px",borderRadius:10,background:p.destaque?ac:"#f5f0e8",color:p.destaque?"#fff":"#5c4a2e",fontWeight:700,fontSize:14,textDecoration:"none"}}>
+                <a href="#contato" style={{display:"block",textAlign:"center",padding:"11px",borderRadius:10,background:p.destaque?ac:"#f5f0e8",color:p.destaque?"#fff":"#5c4a2e",fontWeight:700,fontSize:14,textDecoration:"none",marginTop:"auto"}}>
                   {p.cta}
                 </a>
               </div>
