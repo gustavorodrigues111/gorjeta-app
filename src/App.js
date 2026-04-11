@@ -4489,18 +4489,14 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }
                       const v = parseFloat(cobValor) || valorTotal || 0;
                       return (
                         <div style={{fontFamily:"'DM Sans',sans-serif",fontSize:13,color:"#1a1a1a",lineHeight:1.7,whiteSpace:"pre-wrap"}}>
-{`Ola, *${rest?.name}*! 👋
+{`Ola, *${rest?.name}*!
 
-Segue sua fatura *AppTip* - ${periodoLabel}
+Segue o link da sua fatura *AppTip* referente a *${periodoLabel}*:
 
-*Plano:* ${plano.label}${isEnterprise?` (${empMax} emp.)`:""}
-*Valor:* R$ ${v.toLocaleString("pt-BR",{minimumFractionDigits:2})}${vencLabel?`\n*Vencimento:* ${vencLabel}`:""}
-
-*Pagamento via ${cobForma==="pix"?"PIX":"Link"}*
-${cobForma==="pix"?`Chave: *${cobChave||PIX_PADRAO}*\nFavorecido: ${PIX_NOME}`:`Link: ${cobLink||"(link será adicionado)"}`}
+https://apptip.app/fatura/(ID gerado ao enviar)
 
 Qualquer duvida estamos a disposicao!
-*Equipe AppTip* 🍽️`}
+*Equipe AppTip*`}
                         </div>
                       );
                     })()}
