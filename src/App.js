@@ -1269,16 +1269,8 @@ function ReceibosManagerTab({ restaurantId, employees, roles, restaurants, recei
           if (numPat) detectedMonth = `${numPat[2]}-${numPat[1]}`;
         }
 
-        // Auto-detect type from text
-        let detectedType = type; // fallback to selected
-        const tLow = text.toLowerCase();
-        if (tLow.includes("adiantamento") || tLow.includes("antecipação") || tLow.includes("1ª parcela") || tLow.includes("1a parcela")) {
-          detectedType = "adiantamento";
-        } else if (tLow.includes("13") || tLow.includes("décimo") || tLow.includes("decimo")) {
-          detectedType = "13salario";
-        } else if (tLow.includes("salário") || tLow.includes("salario") || tLow.includes("pagamento") || tLow.includes("holerite") || tLow.includes("contra-cheque") || tLow.includes("contracheque")) {
-          detectedType = "pagamento";
-        }
+        // Type is set by user before upload — no auto-detection
+        const detectedType = type;
         let matchedEmp = null;
         let extractedName = "";
         let extractedCpf = "";
@@ -1382,8 +1374,7 @@ function ReceibosManagerTab({ restaurantId, employees, roles, restaurants, recei
         const funcLabelMatch = text.match(/Fun[çc][aã]o:\s*([A-ZÁÉÍÓÚÃÕÂÊÎÔÛÇÀÜ][A-ZÁÉÍÓÚÃÕÂÊÎÔÛÇÀÜa-záéíóúãõâêîôûçàü\s()]{1,40}?)(?=\s{2,}|CPF|CBO|PIS|RUA|$)/);
         if (funcLabelMatch) extractedRole = funcLabelMatch[1].trim();
 
-        // DEBUG
-        console.log(`[PDF p.${p}] CPF:"${cpfDigitsInText}" fp:"${fingerprint}" matched:"${matchedEmp?.name ?? "NONE"}" name:"${text.match(/Nome\s+do\s+Colaborador\s+(.{0,35})/)?.[1]?.trim() ?? "?"}"`);
+
 
         const viewport = page.getViewport({ scale: 1.5 });
         const canvas = document.createElement("canvas");
@@ -1443,21 +1434,21 @@ function ReceibosManagerTab({ restaurantId, employees, roles, restaurants, recei
     <div style={{fontFamily:"DM Mono,monospace"}}>
       <div style={{...S.card, marginBottom:20}}>
         <p style={{color:ac,fontSize:14,fontWeight:700,margin:"0 0 6px"}}>📤 Importar Recibos</p>
-        <p style={{color:"var(--text3)",fontSize:12,marginBottom:14}}>O sistema detecta mês e tipo automaticamente pelo PDF. Os campos abaixo são usados só se não conseguir detectar.</p>
+        <p style={{color:"var(--text3)",fontSize:12,marginBottom:14}}>Selecione o tipo e o mês antes de enviar o PDF.</p>
         <div style={{display:"flex",flexDirection:"column",gap:10}}>
-          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
-            <div>
-              <label style={S.label}>Mês (fallback)</label>
-              <input type="month" value={selMonth} onChange={e=>setSelMonth(e.target.value)} style={S.input}/>
+          <div>
+            <label style={S.label}>Tipo de recibo</label>
+            <div style={{display:"flex",gap:8}}>
+              {[["pagamento","💰 Pagamento"],["adiantamento","💵 Adiantamento"],["13salario","🎄 13º Salário"],["ferias","🏖️ Férias"]].map(([v,l])=>(
+                <button key={v} onClick={()=>setType(v)} style={{flex:1,padding:"10px 6px",borderRadius:10,border:`2px solid ${type===v?ac:"var(--border)"}`,background:type===v?ac+"22":"transparent",color:type===v?ac:"var(--text3)",cursor:"pointer",fontFamily:"DM Mono,monospace",fontSize:12,fontWeight:type===v?700:400}}>
+                  {l}
+                </button>
+              ))}
             </div>
-            <div>
-              <label style={S.label}>Tipo (fallback)</label>
-              <select value={type} onChange={e=>setType(e.target.value)} style={{...S.input,cursor:"pointer"}}>
-                <option value="pagamento">💰 Pagamento</option>
-                <option value="adiantamento">💵 Adiantamento</option>
-                <option value="13salario">🎄 13º Salário</option>
-              </select>
-            </div>
+          </div>
+          <div>
+            <label style={S.label}>Mês de referência</label>
+            <input type="month" value={selMonth} onChange={e=>setSelMonth(e.target.value)} style={S.input}/>
           </div>
           <div>
             <label style={S.label}>Arquivo PDF</label>
@@ -1622,6 +1613,7 @@ function ReceibosManagerTab({ restaurantId, employees, roles, restaurants, recei
           pagamento:   { label:"💰 Pagamento",    color:"#10b981" },
           adiantamento:{ label:"💵 Adiantamento", color:"#3b82f6" },
           "13salario": { label:"🎄 13º Salário",  color:"#f59e0b" },
+          ferias:      { label:"🏖️ Férias",       color:"#8b5cf6" },
         };
         const typeKeys = Object.keys(TYPE_INFO).filter(t => mReceipts.some(r=>r.type===t));
 
@@ -1656,6 +1648,7 @@ function ReceibosManagerTab({ restaurantId, employees, roles, restaurants, recei
                             <option value="pagamento">💰 Pagamento</option>
                             <option value="adiantamento">💵 Adiantamento</option>
                             <option value="13salario">🎄 13º Salário</option>
+                            <option value="ferias">🏖️ Férias</option>
                           </select>
                           <button onClick={()=>{if(window.confirm(`Excluir recibo de ${r.empName}?`)) onUpdate("receipts", receipts.filter(x=>x.id!==r.id));}} style={{background:"none",border:"1px solid #e74c3c33",borderRadius:6,color:"#e74c3c",cursor:"pointer",fontSize:12,padding:"4px 8px",fontFamily:"DM Mono,monospace",flexShrink:0}}>✕</button>
                         </div>
@@ -1716,7 +1709,7 @@ function ReceibosEmployeeTab({ empId, restaurantId, receipts }) {
             {mR.map(r=>(
               <button key={r.id} onClick={()=>setSelReceipt(r)}
                 style={{width:"100%",display:"flex",justifyContent:"space-between",alignItems:"center",padding:"12px",borderRadius:10,border:"1px solid var(--border)",background:"var(--bg1)",cursor:"pointer",fontFamily:"DM Mono,monospace",marginBottom:6}}>
-                <span style={{color:"var(--text)",fontSize:13}}>{r.type==="pagamento"?"💰 Recibo de Pagamento":r.type==="adiantamento"?"💵 Recibo de Adiantamento":"🎄 13º Salário"}</span>
+                <span style={{color:"var(--text)",fontSize:13}}>{r.type==="pagamento"?"💰 Recibo de Pagamento":r.type==="adiantamento"?"💵 Recibo de Adiantamento":r.type==="ferias"?"🏖️ Férias":"🎄 13º Salário"}</span>
                 <span style={{color:"var(--text3)",fontSize:11}}>Ver →</span>
               </button>
             ))}
@@ -3639,7 +3632,7 @@ export default function App() {
       const vals = await Promise.all(Object.values(K).map(load));
       const keys = Object.keys(K);
       const map = { superManagers:setSuperManagers, managers:setManagers, restaurants:setRestaurants, employees:setEmployees, roles:setRoles, tips:setTips, splits:setSplits, schedules:setSchedules, communications:setCommunications, commAcks:setCommAcks, faq:setFaq, dpMessages:setDpMessages, workSchedules:setWorkSchedules, notifications:setNotifications };
-      keys.filter(k => k !== "receipts").forEach((k, i) => { if (vals[i]) map[k]?.(vals[i]); });
+      keys.forEach((k, i) => { if (k !== "receipts" && vals[i]) map[k]?.(vals[i]); });
       // Load receipts from separate collection
       const recs = await loadReceipts();
       if (recs.length) setReceipts(recs);
