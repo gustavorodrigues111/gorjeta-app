@@ -4426,11 +4426,7 @@ function UnifiedLogin({ owners, managers, employees, onLoginOwner, onLoginManage
               Entrar →
             </button>
 
-            {superManagers.length === 0 && false && ( // removido — admins criados pelo próprio painel
-              <button onClick={onSetupFirst} style={{...S.btnSecondary,width:"100%",textAlign:"center"}}>
-                Criar primeiro Admin AppTip
-              </button>
-            )}
+
           </div>
         </div>
 
