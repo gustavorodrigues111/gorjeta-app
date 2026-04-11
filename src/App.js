@@ -2861,49 +2861,197 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
         )}
 
         {/* DASHBOARD */}
-        {tab === "dashboard" && (
-          <div>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10, marginBottom: 20 }}>
-              {[["Pool Bruto",totalGross,"#fff"],["Impostos 33%",totalTax,"#e74c3c"],["Distribuído",totalNet,ac]].map(([lbl,val,col])=>(
-                <div key={lbl} style={{ ...S.card, textAlign: "center" }}>
-                  <div style={{ color: "var(--text3)", fontSize: 10, marginBottom: 4 }}>{lbl}</div>
-                  <div style={{ color: col, fontWeight: 700, fontSize: 14 }}>{fmt(val)}</div>
+        {tab === "dashboard" && (() => {
+          const dim = new Date(year, month+1, 0).getDate();
+          const todayStr = today();
+          const isCurrentMonth = todayStr.startsWith(`${year}-${String(month+1).padStart(2,"0")}`);
+
+          // — Gorjetas —
+          const tipPoolTotal = [...new Set(monthTips.map(t=>t.date))].reduce((s,d)=>{
+            const dt = monthTips.filter(t=>t.date===d);
+            return s + (dt[0]?.poolTotal ?? 0);
+          }, 0);
+          const diasLancados = [...new Set(monthTips.map(t=>t.date))].length;
+          // Dias úteis passados (seg-sex) até hoje ou fim do mês
+          const limitDay = isCurrentMonth ? parseInt(todayStr.slice(-2)) : dim;
+          let diasUteisPassados = 0;
+          for (let d=1; d<=limitDay; d++) {
+            const wd = new Date(`${year}-${String(month+1).padStart(2,"0")}-${String(d).padStart(2,"0")}T12:00:00`).getDay();
+            if (wd!==0 && wd!==6) diasUteisPassados++;
+          }
+          const diasSemLancamento = Math.max(0, diasUteisPassados - diasLancados);
+
+          // — Escala —
+          const schedMonth = schedules?.[rid]?.[mk] ?? {};
+          let totalFolgas=0, totalFaltasU=0, totalFaltasJ=0, totalComp=0, totalFerias=0;
+          restEmps.forEach(emp => {
+            const dm = schedMonth[emp.id] ?? {};
+            Object.values(dm).forEach(v => {
+              if(v===DAY_OFF) totalFolgas++;
+              else if(v===DAY_FAULT_U) totalFaltasU++;
+              else if(v===DAY_FAULT_J) totalFaltasJ++;
+              else if(v===DAY_COMP) totalComp++;
+              else if(v===DAY_VACATION) totalFerias++;
+            });
+          });
+
+          // — Equipe —
+          const semCargo = restEmps.filter(e=>!restRoles.find(r=>r.id===e.roleId)).length;
+          const semHorario = restEmps.filter(e=>!(data?.workSchedules?.[rid]?.[e.id]?.length)).length;
+
+          // — Pendências —
+          const alerts = [];
+          if (diasSemLancamento > 0)
+            alerts.push({ icon:"💸", color:"#f59e0b", msg:`${diasSemLancamento} dia${diasSemLancamento>1?"s":""} útil${diasSemLancamento>1?"":"is"} sem gorjeta lançada`, tab:"tips" });
+          if (semCargo > 0)
+            alerts.push({ icon:"👤", color:"#ef4444", msg:`${semCargo} empregado${semCargo>1?"s":""} sem cargo definido`, tab:"employees" });
+          if (semHorario > 0)
+            alerts.push({ icon:"🕐", color:"#8b5cf6", msg:`${semHorario} empregado${semHorario>1?"s":""} sem horário cadastrado`, tab:"horarios" });
+          if (totalFaltasU > 0)
+            alerts.push({ icon:"⚠️", color:"#ef4444", msg:`${totalFaltasU} falta${totalFaltasU>1?"s":""} injustificada${totalFaltasU>1?"s":""} este mês`, tab:"schedule" });
+          const dpNaoLidas = (data?.dpMessages??[]).filter(m=>m.restaurantId===rid&&!m.read).length;
+          if (dpNaoLidas > 0)
+            alerts.push({ icon:"💬", color:"#3b82f6", msg:`${dpNaoLidas} mensagem${dpNaoLidas>1?"ns":""} não lida${dpNaoLidas>1?"s":""} no Fale com DP`, tab:"dp" });
+          const commsSemCiencia = (data?.communications??[]).filter(c=>
+            c.restaurantId===rid && !c.autoSchedule &&
+            restEmps.some(e=>!(data?.commAcks??{})[`${c.id}_${e.id}`])
+          ).length;
+          if (commsSemCiencia > 0)
+            alerts.push({ icon:"📢", color:"#f59e0b", msg:`${commsSemCiencia} comunicado${commsSemCiencia>1?"s":""} aguardando ciência`, tab:"comunicados" });
+
+          return (
+            <div>
+              {/* Linha 1 — Gorjetas do mês */}
+              <div style={{...S.card, marginBottom:14}}>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
+                  <span style={{color:ac,fontWeight:700,fontSize:13}}>💸 Gorjetas — {monthLabel(year,month)}</span>
+                  <button onClick={()=>setTab("tips")} style={{...S.btnSecondary,fontSize:11,padding:"4px 10px"}}>Ver tudo →</button>
                 </div>
-              ))}
-            </div>
-            {(restaurant.divisionMode ?? MODE_AREA_POINTS) === MODE_AREA_POINTS && (
-              <div style={{ ...S.card, marginBottom: 20 }}>
-                <p style={{ color: "var(--text3)", fontSize: 12, margin: "0 0 12px" }}>Distribuição por Área</p>
-                {AREAS.map(a => {
-                  const aNet = monthTips.filter(t => t.area === a).reduce((s,t) => s + t.myNet, 0);
-                  return (
-                    <div key={a} style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8 }}>
-                      <div style={{ minWidth: 70 }}><AreaBadge area={a} /></div>
-                      <div style={{ flex: 1, background: "var(--bg1)", borderRadius: 4, height: 6, overflow: "hidden" }}>
-                        <div style={{ width: `${curSplit[a]}%`, height: "100%", background: AREA_COLORS[a] }} />
-                      </div>
-                      <span style={{ color: "var(--text2)", fontSize: 12, minWidth: 36 }}>{curSplit[a]}%</span>
-                      <span style={{ color: ac, fontSize: 13, fontWeight: 600, minWidth: 80, textAlign: "right" }}>{fmt(aNet)}</span>
+                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr 1fr",gap:8}}>
+                  {[
+                    ["Pool total", fmt(tipPoolTotal), "#fff"],
+                    ["Retenção",   fmt(totalTax),     "#e74c3c"],
+                    ["Distribuído",fmt(totalNet),      ac],
+                    ["Dias lançados", `${diasLancados}/${dim}`, diasLancados===dim?"#10b981":"#f59e0b"],
+                  ].map(([lbl,val,col])=>(
+                    <div key={lbl} style={{background:"var(--bg1)",borderRadius:10,padding:"10px 8px",textAlign:"center"}}>
+                      <div style={{color:"var(--text3)",fontSize:9,marginBottom:4,lineHeight:1.2}}>{lbl}</div>
+                      <div style={{color:col,fontWeight:700,fontSize:13}}>{val}</div>
                     </div>
-                  );
-                })}
-              </div>
-            )}
-            {empSummary.map((e, i) => (
-              <div key={e.id} style={{ ...S.card, marginBottom: 8, display: "flex", alignItems: "center", gap: 12 }}>
-                <span style={{ color: ac, minWidth: 24 }}>{i===0?"🥇":i===1?"🥈":i===2?"🥉":`${i+1}`}</span>
-                <div style={{ flex: 1 }}>
-                  <div style={{ color: "var(--text)", fontSize: 14, fontWeight: 600 }}>{e.name}</div>
-                  <div style={{ color: "var(--text3)", fontSize: 12 }}>{e.roleName}{e.area&&` · `}{e.area&&<span style={{color:AREA_COLORS[e.area]}}>{e.area}</span>}</div>
+                  ))}
                 </div>
-                <div style={{ textAlign: "right" }}>
-                  <div style={{ color: ac, fontWeight: 700 }}>{fmt(e.net)}</div>
-                  <div style={{ color: "var(--text3)", fontSize: 11 }}>bruto {fmt(e.gross)}</div>
+                {(restaurant.divisionMode ?? MODE_AREA_POINTS) === MODE_AREA_POINTS && totalNet > 0 && (
+                  <div style={{marginTop:12,display:"flex",flexDirection:"column",gap:6}}>
+                    {AREAS.map(a=>{
+                      const aNet = monthTips.filter(t=>t.area===a).reduce((s,t)=>s+t.myNet,0);
+                      if(!aNet) return null;
+                      return (
+                        <div key={a} style={{display:"flex",alignItems:"center",gap:8}}>
+                          <span style={{color:AREA_COLORS[a],fontSize:11,minWidth:70,fontWeight:600}}>{a}</span>
+                          <div style={{flex:1,background:"var(--bg2)",borderRadius:4,height:5,overflow:"hidden"}}>
+                            <div style={{width:`${(aNet/totalNet)*100}%`,height:"100%",background:AREA_COLORS[a],borderRadius:4}}/>
+                          </div>
+                          <span style={{color:"var(--text2)",fontSize:11,minWidth:70,textAlign:"right"}}>{fmt(aNet)}</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+
+              {/* Linha 2 — Escala e Equipe lado a lado */}
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:14}}>
+                {/* Escala */}
+                <div style={{...S.card}}>
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
+                    <span style={{color:ac,fontWeight:700,fontSize:12}}>📅 Escala</span>
+                    <button onClick={()=>setTab("schedule")} style={{...S.btnSecondary,fontSize:10,padding:"3px 8px"}}>→</button>
+                  </div>
+                  {[
+                    ["Folgas",    totalFolgas,  "#e74c3c"],
+                    ["F.Injust.", totalFaltasU, "#ef4444"],
+                    ["F.Just.",   totalFaltasJ, "#f59e0b"],
+                    ["Comp.",     totalComp,    "#3b82f6"],
+                    ["Férias",    totalFerias,  "#8b5cf6"],
+                  ].map(([lbl,val,col])=>(
+                    <div key={lbl} style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:5}}>
+                      <span style={{color:"var(--text3)",fontSize:11}}>{lbl}</span>
+                      <span style={{color:val>0?col:"var(--text3)",fontWeight:val>0?700:400,fontSize:12}}>{val}</span>
+                    </div>
+                  ))}
+                </div>
+
+                {/* Equipe */}
+                <div style={{...S.card}}>
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
+                    <span style={{color:ac,fontWeight:700,fontSize:12}}>👥 Equipe</span>
+                    <button onClick={()=>setTab("employees")} style={{...S.btnSecondary,fontSize:10,padding:"3px 8px"}}>→</button>
+                  </div>
+                  {[
+                    ["Ativos",       restEmps.length,  "#10b981"],
+                    ["Sem cargo",    semCargo,         semCargo>0?"#ef4444":"var(--text3)"],
+                    ["Sem horário",  semHorario,       semHorario>0?"#8b5cf6":"var(--text3)"],
+                  ].map(([lbl,val,col])=>(
+                    <div key={lbl} style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:5}}>
+                      <span style={{color:"var(--text3)",fontSize:11}}>{lbl}</span>
+                      <span style={{color:val>0?col:"var(--text3)",fontWeight:700,fontSize:12}}>{val}</span>
+                    </div>
+                  ))}
+                  <div style={{borderTop:"1px solid var(--border)",marginTop:8,paddingTop:8}}>
+                    {AREAS.map(a=>{
+                      const n = restEmps.filter(e=>restRoles.find(r=>r.id===e.roleId)?.area===a).length;
+                      if(!n) return null;
+                      return (
+                        <div key={a} style={{display:"flex",justifyContent:"space-between",marginBottom:3}}>
+                          <span style={{color:AREA_COLORS[a],fontSize:10}}>{a}</span>
+                          <span style={{color:"var(--text2)",fontSize:10}}>{n}</span>
+                        </div>
+                      );
+                    })}
+                  </div>
                 </div>
               </div>
-            ))}
-          </div>
-        )}
+
+              {/* Pendências / Alertas */}
+              {alerts.length > 0 && (
+                <div style={{...S.card,marginBottom:14,border:"1px solid #f59e0b33",background:"#1a1400"}}>
+                  <span style={{color:"#f59e0b",fontWeight:700,fontSize:13,display:"block",marginBottom:10}}>⚡ Pendências</span>
+                  {alerts.map((a,i)=>(
+                    <div key={i} onClick={()=>setTab(a.tab)} style={{display:"flex",alignItems:"center",gap:10,padding:"8px 10px",borderRadius:8,cursor:"pointer",marginBottom:4,background:"var(--bg1)",border:`1px solid ${a.color}22`}}>
+                      <span style={{fontSize:16}}>{a.icon}</span>
+                      <span style={{color:"var(--text2)",fontSize:12,flex:1}}>{a.msg}</span>
+                      <span style={{color:a.color,fontSize:11}}>→</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {alerts.length === 0 && (
+                <div style={{...S.card,marginBottom:14,border:"1px solid #10b98133",background:"#0a1a0a",textAlign:"center",padding:"16px"}}>
+                  <span style={{fontSize:24}}>✅</span>
+                  <p style={{color:"#10b981",fontSize:13,margin:"6px 0 0",fontWeight:600}}>Tudo em dia!</p>
+                  <p style={{color:"var(--text3)",fontSize:11,margin:"4px 0 0"}}>Nenhuma pendência encontrada para {monthLabel(year,month)}</p>
+                </div>
+              )}
+
+              {/* Ações rápidas */}
+              <div style={{...S.card}}>
+                <span style={{color:ac,fontWeight:700,fontSize:13,display:"block",marginBottom:10}}>⚡ Ações rápidas</span>
+                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+                  {[
+                    ["💸 Lançar gorjeta", "tips"],
+                    ["📅 Ver escala",     "schedule"],
+                    ["👥 Equipe",         "employees"],
+                    ["📢 Comunicados",    "comunicados"],
+                  ].filter(([,t])=>TABS.some(tab=>tab[0]===t)).map(([lbl,t])=>(
+                    <button key={t} onClick={()=>setTab(t)} style={{padding:"10px",borderRadius:10,border:"1px solid var(--border)",background:"var(--bg1)",color:"var(--text2)",cursor:"pointer",fontFamily:"DM Mono,monospace",fontSize:12,textAlign:"left",fontWeight:500}}>
+                      {lbl}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+          );
+        })()}
 
         {/* GORJETAS */}
         {tab === "tips" && (
