@@ -3735,8 +3735,16 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
       setTipRows([]);
       onUpdate("_toast", `✅ ${dirtyRows.length} dia${dirtyRows.length>1?"s":""} salvo${dirtyRows.length>1?"s":""}! (${count} empregados)`);
     } else {
-      console.warn("[saveTipRows] count=0, dirtyRows:",dirtyRows.length,"tips após calc:",currentTips.length);
-      onUpdate("_toast","⚠️ Nenhum empregado ativo para distribuir. Verifique console (F12) para detalhes.");
+      const sampleDate = dirtyRows[0]?.date ?? "?";
+      const admCount = restEmps.filter(e => e.admission && e.admission > sampleDate).length;
+      const noRoleCount = restEmps.filter(e => !restRoles.find(r => r.id === e.roleId)).length;
+      const freelaCount = restEmps.filter(e => e.isFreela).length;
+      let reason = `Total ${restEmps.length} empregados. `;
+      if (admCount > 0) reason += `${admCount} com admissão após ${new Date(sampleDate+"T12:00:00").toLocaleDateString("pt-BR")}. `;
+      if (noRoleCount > 0) reason += `${noRoleCount} sem cargo. `;
+      if (freelaCount > 0) reason += `${freelaCount} freela. `;
+      reason += "Corrija as datas de admissão dos empregados se necessário.";
+      onUpdate("_toast","⚠️ " + reason);
     }
   }
 
