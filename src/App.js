@@ -6727,6 +6727,50 @@ function ManagerPortal({ manager, data, onUpdate, onBack, toggleTheme, theme }) 
 }
 
 //
+// MANAGER PIN CHANGE (first access / reset)
+//
+function ManagerPinChange({ manager, onDone, onBack }) {
+  const [pin1, setPin1] = useState("");
+  const [pin2, setPin2] = useState("");
+  const [err, setErr] = useState("");
+
+  function submit() {
+    if (pin1.length !== 4 || !/^\d{4}$/.test(pin1)) { setErr("PIN deve ter exatamente 4 dígitos numéricos."); return; }
+    if (pin1 !== pin2) { setErr("PINs não coincidem."); return; }
+    const cpfDigits = (manager.cpf??"").replace(/\D/g,"");
+    if (pin1 === cpfDigits.slice(0,4)) { setErr("O novo PIN não pode ser igual aos 4 primeiros dígitos do CPF."); return; }
+    onDone(pin1);
+  }
+
+  return (
+    <div style={{minHeight:"100vh",background:"var(--bg)",display:"flex",alignItems:"center",justifyContent:"center",fontFamily:"'DM Sans',sans-serif",padding:24}}>
+      <div style={{...S.card,maxWidth:380,width:"100%",boxShadow:"0 8px 32px rgba(0,0,0,0.08)"}}>
+        <div style={{textAlign:"center",marginBottom:24}}>
+          <div style={{fontSize:36,marginBottom:12}}>🔑</div>
+          <h2 style={{color:"var(--text)",margin:"0 0 8px",fontSize:22,fontWeight:800}}>Novo PIN</h2>
+          <p style={{color:"var(--text3)",fontSize:14,lineHeight:1.5}}>
+            Olá, {manager.name?.split(" ")[0]}! Defina um novo PIN de 4 dígitos para continuar.
+          </p>
+        </div>
+        <div style={{display:"flex",flexDirection:"column",gap:12}}>
+          <div>
+            <label style={S.label}>Novo PIN (4 dígitos)</label>
+            <input type="password" inputMode="numeric" maxLength={4} value={pin1} onChange={e=>setPin1(e.target.value.replace(/\D/g,"").slice(0,4))} placeholder="••••" style={{...S.input,letterSpacing:8,fontSize:22,textAlign:"center",fontFamily:"'DM Mono',monospace"}}/>
+          </div>
+          <div>
+            <label style={S.label}>Confirmar PIN</label>
+            <input type="password" inputMode="numeric" maxLength={4} value={pin2} onChange={e=>setPin2(e.target.value.replace(/\D/g,"").slice(0,4))} placeholder="••••" style={{...S.input,letterSpacing:8,fontSize:22,textAlign:"center",fontFamily:"'DM Mono',monospace"}} onKeyDown={e=>e.key==="Enter"&&submit()}/>
+          </div>
+          {err && <div style={{background:"var(--red-bg)",border:"1px solid var(--red)33",borderRadius:8,padding:"8px 12px",color:"var(--red)",fontSize:13}}>{err}</div>}
+          <button onClick={submit} style={S.btnPrimary}>Salvar e Continuar →</button>
+          <button onClick={onBack} style={{...S.btnSecondary,textAlign:"center"}}>← Sair</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+//
 // LOGIN
 //
 function UnifiedLogin({ owners, managers, employees, restaurants, onLoginOwner, onLoginManager, onLoginEmployee, onSetupFirst, onGoHome, toggleTheme, theme }) {
