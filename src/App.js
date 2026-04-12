@@ -3373,6 +3373,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
     (isOwner || tabVisible("comunicados"))        && ["comunicados", "📢 Comunicados"],
     (isOwner || tabVisible("dp"))                && ["dp",          "💬 Fale com DP"],
     isDP                                       && ["notificacoes",`📬 Caixa${inboxUnread>0?` (${inboxUnread})`:""}`],
+    (canTips || isOwner)                       && ["config",       "⚙️ Configurações"],
   ].filter(Boolean);
 
   const [tab, setTab] = useState(isDP ? "notificacoes" : (perms.tips || isOwner) ? "dashboard" : "schedule");
@@ -3398,25 +3399,6 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
 
   return (
     <div style={{ fontFamily:"'DM Sans',sans-serif" }}>
-      {/* Restaurant sub-header */}
-      <div style={{ background:"var(--bg2)", borderBottom:"1px solid var(--border)", padding:"10px 16px", display:"flex", justifyContent:"space-between", alignItems:"center", gap:8 }}>
-        <div style={{display:"flex",alignItems:"center",gap:8,minWidth:0}}>
-          <div style={{minWidth:0}}>
-            <span style={{ color:"var(--text)", fontWeight:700, fontSize:14 }}>{restaurant.name}</span>
-            {restaurant.cnpj && <span style={{ color:"var(--text3)", fontSize:11, marginLeft:8 }}>{restaurant.cnpj}</span>}
-          </div>
-        </div>
-        {(canTips || isOwner) && (
-          <button onClick={() => setTab("config")}
-            style={{ ...S.btnSecondary, fontSize:12, flexShrink:0, display:"flex", alignItems:"center", gap:4,
-              background: tab==="config" ? "var(--ac-bg)" : undefined,
-              borderColor: tab==="config" ? ac : undefined,
-              color: tab==="config" ? "var(--ac-text)" : undefined }}>
-            ⚙️ Configurações
-          </button>
-        )}
-      </div>
-
       {/* Tabs com scroll suave */}
       <div style={{ display:"flex", borderBottom:"1px solid var(--border)", background:"var(--header-bg)", overflowX:"auto", scrollbarWidth:"none", WebkitOverflowScrolling:"touch" }}>
         {TABS.map(([id, lbl]) => (
@@ -6407,7 +6389,10 @@ function ManagerPortal({ manager, data, onUpdate, onBack, toggleTheme, theme }) 
                 {selRest ? selRest.name : "Gestor"}
               </span>
             </div>
-            <div style={{color:"var(--text3)",fontSize:10,marginTop:1}}>{manager.name}</div>
+            <div style={{color:"var(--text3)",fontSize:10,marginTop:1}}>
+              {manager.name}
+              {selRest?.cnpj && <span style={{marginLeft:6,color:"var(--text3)",fontSize:10}}>{selRest.cnpj}</span>}
+            </div>
           </div>
         </div>
         <div style={{display:"flex",gap:5,alignItems:"center",flexShrink:0}}>
