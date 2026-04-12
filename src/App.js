@@ -63,7 +63,7 @@ const monthLabel = (y, m) => new Date(y, m, 1).toLocaleDateString("pt-BR", { mon
 const WEEKDAYS = ["Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb"];
 const AREAS = ["Bar", "Cozinha", "Salão", "Limpeza"];
 const AREA_COLORS = { Bar: "#3b82f6", Cozinha: "#f59e0b", Salão: "var(--green)", Limpeza: "#8b5cf6" };
-const DEFAULT_SPLIT = { Bar: 15, Cozinha: 40, Salão: 35, Limpeza: 10 };
+const DEFAULT_SPLIT = { Bar: 12, Cozinha: 40, Salão: 40, Limpeza: 8 };
 const TAX = 0.33;
 const DAY_OFF       = "off";    // folga programada
 const DAY_COMP      = "comp";   // compensacao banco de horas
@@ -512,7 +512,7 @@ function FaqTab({ restaurantId, faq, emp, roles, restaurants, splits }) {
   const restRolesSemGorjeta = (roles ?? []).filter(r => r.restaurantId === restaurantId && !r.inactive && r.noTip);
   const taxRate = rest?.taxRate ?? 0.33;
   const taxLabel = taxRate === 0.20 ? "20% (Simples Nacional)" : "33% (Lucro Real/Presumido)";
-  const splitType = rest?.splitType ?? "points";
+  const splitType = (rest?.divisionMode ?? MODE_AREA_POINTS) === MODE_AREA_POINTS ? "area" : "points";
   const ac = "var(--ac)";
 
   const now = new Date();
@@ -3581,7 +3581,24 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
   function saveSplit() {
     const total = AREAS.reduce((a, k) => a + parseFloat(splitForm[k] || 0), 0);
     if (Math.abs(total - 100) > 0.01) { alert("Os percentuais devem somar 100%."); return; }
-    onUpdate("splits", { ...splits, [rid]: { ...(splits?.[rid] ?? {}), [mk]: Object.fromEntries(AREAS.map(a => [a, parseFloat(splitForm[a])])) } });
+    const newSplit = Object.fromEntries(AREAS.map(a => [a, parseFloat(splitForm[a])]));
+    const updatedRestSplits = { ...(splits?.[rid] ?? {}), [mk]: newSplit };
+
+    // Ask if they want to apply to future months too
+    const applyFuture = window.confirm("Deseja aplicar esses percentuais também para os próximos meses?");
+    if (applyFuture) {
+      // Apply to 12 future months from current
+      const [cy, cm] = mk.split("-").map(Number);
+      for (let i = 1; i <= 12; i++) {
+        const fm = cm - 1 + i;
+        const fy = cy + Math.floor(fm / 12);
+        const fmIdx = fm % 12;
+        const fmk = `${fy}-${String(fmIdx + 1).padStart(2, "0")}`;
+        updatedRestSplits[fmk] = { ...newSplit };
+      }
+    }
+
+    onUpdate("splits", { ...splits, [rid]: updatedRestSplits });
     setSplitForm(null);
   }
 
@@ -3647,7 +3664,14 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
       {/* Tabs com scroll suave */}
       <div style={{ display:"flex", borderBottom:"1px solid var(--border)", background:"var(--header-bg)", overflowX:"auto", scrollbarWidth:"none", WebkitOverflowScrolling:"touch" }}>
         {TABS.map(([id, lbl]) => (
-          <button key={id} onClick={() => setTab(id)}
+          <button key={id} onClick={() => {
+            if (tab === "config" && id !== "config" && configDirty) {
+              const action = window.confirm("Você tem alterações não salvas nas configurações.\n\nDeseja salvar antes de sair?");
+              if (action) { saveConfig(); }
+              else { discardConfig(); }
+            }
+            setTab(id);
+          }}
             style={{ padding:"11px 16px", background:"none", border:"none", borderBottom:`2px solid ${tab===id?ac:"transparent"}`, color:tab===id?ac:"var(--text3)", cursor:"pointer", fontSize:13, fontFamily:"'DM Sans',sans-serif", fontWeight:tab===id?700:500, whiteSpace:"nowrap", flexShrink:0 }}>
             {lbl}
           </button>
@@ -4714,7 +4738,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
             {/* FAQs automáticas — expansíveis e com toggle */}
             {(()=>{
               const ac = "var(--ac)";
-              const splitType = restaurant?.splitType ?? "points";
+              const splitType = (restaurant?.divisionMode ?? MODE_AREA_POINTS) === MODE_AREA_POINTS ? "area" : "points";
               const taxRate = restaurant?.taxRate ?? 0.33;
               const taxLabel = taxRate===0.20?"20% (Simples Nacional)":"33% (Lucro Real/Presumido)";
               const restRolesCom = (data?.roles??[]).filter(r=>r.restaurantId===rid&&!r.inactive&&!r.noTip);
@@ -5106,13 +5130,15 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
               </div>
             )}
 
-            {/* Salvar / Descartar configuração de abas */}
+            {/* Salvar / Descartar configuração de abas — sticky no rodapé */}
             {configDirty && (
-              <div style={{...S.card,marginBottom:20,background:"var(--ac-bg)",border:"1px solid var(--ac)33"}}>
-                <p style={{color:ac,fontSize:13,fontWeight:700,margin:"0 0 8px"}}>Alterações não salvas</p>
-                <div style={{display:"flex",gap:10}}>
-                  <button onClick={saveConfig} style={{...S.btnPrimary,flex:1,padding:"10px",fontSize:13}}>Salvar Config</button>
-                  <button onClick={discardConfig} style={{...S.btnSecondary,flex:1,padding:"10px",fontSize:13}}>Descartar</button>
+              <div style={{position:"sticky",bottom:0,zIndex:50,padding:"12px 0"}}>
+                <div style={{...S.card,background:"var(--ac-bg)",border:"1px solid var(--ac)33",boxShadow:"0 -4px 16px rgba(0,0,0,0.1)"}}>
+                  <p style={{color:ac,fontSize:13,fontWeight:700,margin:"0 0 8px"}}>Alterações não salvas</p>
+                  <div style={{display:"flex",gap:10}}>
+                    <button onClick={saveConfig} style={{...S.btnPrimary,flex:1,padding:"10px",fontSize:13}}>Salvar Config</button>
+                    <button onClick={discardConfig} style={{...S.btnSecondary,flex:1,padding:"10px",fontSize:13}}>Descartar</button>
+                  </div>
                 </div>
               </div>
             )}
