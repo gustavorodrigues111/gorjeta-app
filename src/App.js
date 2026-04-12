@@ -61,9 +61,9 @@ const maskCpf = (v) => { const d = (v ?? "").replace(/\D/g,"").slice(0,11); if(d
 const monthKey = (y, m) => `${y}-${String(m + 1).padStart(2, "0")}`;
 const monthLabel = (y, m) => new Date(y, m, 1).toLocaleDateString("pt-BR", { month: "long", year: "numeric" });
 const WEEKDAYS = ["Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb"];
-const AREAS = ["Bar", "Cozinha", "Salão", "Limpeza", "Produção"];
-const AREA_COLORS = { Bar: "#3b82f6", Cozinha: "#f59e0b", Salão: "var(--green)", Limpeza: "#8b5cf6", "Produção": "#ec4899" };
-const DEFAULT_SPLIT = { Bar: 12, Cozinha: 35, Salão: 35, Limpeza: 8, "Produção": 10 };
+const AREAS = ["Bar", "Cozinha", "Salão", "Limpeza"];
+const AREA_COLORS = { Bar: "#3b82f6", Cozinha: "#f59e0b", Salão: "var(--green)", Limpeza: "#8b5cf6" };
+const DEFAULT_SPLIT = { Bar: 15, Cozinha: 40, Salão: 35, Limpeza: 10 };
 const TAX = 0.33;
 const DAY_OFF       = "off";    // folga programada
 const DAY_COMP      = "comp";   // compensacao banco de horas
@@ -513,7 +513,7 @@ function FaqTab({ restaurantId, faq, emp, roles, restaurants, splits }) {
 
   const now = new Date();
   const mk = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,"0")}`;
-  const curSplit = splits?.[restaurantId]?.[mk] ?? { Bar:12, Cozinha:35, Salão:35, Limpeza:8, "Produção":10 };
+  const curSplit = splits?.[restaurantId]?.[mk] ?? DEFAULT_SPLIT;
 
   const pontosCargo = parseFloat(empRole?.points) || 0;
   const totalPontos = restRolesComGorjeta.reduce((s,r) => s+(parseFloat(r.points)||0), 0);
@@ -558,7 +558,7 @@ Exemplo (gorjeta R$${fmtR(EX)}, ${totalPontos}pt no total):
       q: splitType==="area" ? "🏢 Como funciona a divisão por área e pontos?" : "📊 Como funciona a tabela de pontos?",
       a:(() => {
         if (splitType==="area") {
-          const AREAS = ["Bar","Cozinha","Salão","Limpeza","Produção"];
+          const AREAS = ["Bar","Cozinha","Salão","Limpeza"];
           const ativas = AREAS.filter(a => (curSplit[a]??0)>0);
           const linhas = ativas.map(a => {
             const pct = curSplit[a]??0;
@@ -2463,7 +2463,7 @@ Cargos existentes:
 ${existingList || "(nenhum)"}
 
 Regras:
-- "area" deve ser: Bar, Cozinha, Salão, Limpeza ou Produção
+- "area" deve ser: Bar, Cozinha, Salão ou Limpeza
 - "pontos": 0 a 20 (0 = sem gorjeta). Se não informado ao criar, estime pela hierarquia (Gerente=10, Subchef=9, Garçom=6, Auxiliar=3)
 - Se não informar área ao criar, deduza pelo nome do cargo
 - Para modificar, use o "id" do cargo existente e inclua APENAS os campos que mudam
@@ -2778,7 +2778,7 @@ const EMP_COLS        = "80px 2fr 1.2fr 100px auto 1.5fr auto";
 const EMP_COLS_HEADER = "80px 2fr 1.2fr 100px auto 1.5fr auto";
 const empInS2 = { background:"var(--bg1)", border:"1px solid var(--border)", borderRadius:6, color:"var(--text)", fontFamily:"'DM Mono',monospace", fontSize:12, padding:"6px 8px", outline:"none", width:"100%", boxSizing:"border-box" };
 
-function EmpRowLine({ emp, isNew, row, restRoles, isSaved, isOwner, onChange, onSave, onToggleInactive, onDelete, onAdd, onResetPin, employees }) {
+function EmpRowLine({ emp, isNew, row, restRoles, isSaved, isOwner, onChange, onSave, onToggleInactive, onDelete, onAdd, onResetPin, onToggleProd, employees }) {
   const ac = "var(--ac)";
   const isInactive = !isNew && emp?.inactive && emp?.inactiveFrom <= today();
   return (
@@ -2808,14 +2808,22 @@ function EmpRowLine({ emp, isNew, row, restRoles, isSaved, isOwner, onChange, on
         )}
       </div>
 
-      <select value={row.roleId||""} onChange={ev=>onChange("roleId",ev.target.value)} style={{...empInS2,cursor:"pointer"}}>
-        <option value="">Selecionar…</option>
-        {AREAS.map(a=>(
-          <optgroup key={a} label={a}>
-            {restRoles.filter(r=>r.area===a&&!r.inactive).map(r=><option key={r.id} value={r.id}>{r.name} ({r.points}pt)</option>)}
-          </optgroup>
-        ))}
-      </select>
+      <div style={{display:"flex",gap:4,alignItems:"center"}}>
+        <select value={row.roleId||""} onChange={ev=>onChange("roleId",ev.target.value)} style={{...empInS2,cursor:"pointer",flex:1}}>
+          <option value="">Selecionar…</option>
+          {AREAS.map(a=>(
+            <optgroup key={a} label={a}>
+              {restRoles.filter(r=>r.area===a&&!r.inactive).map(r=><option key={r.id} value={r.id}>{r.name} ({r.points}pt)</option>)}
+            </optgroup>
+          ))}
+        </select>
+        {!isNew && (
+          <button onClick={onToggleProd} title={emp?.isProducao?"Remover produção":"Marcar como produção"}
+            style={{padding:"4px 6px",borderRadius:6,border:`1px solid ${emp?.isProducao?"#ec4899":"var(--border)"}`,background:emp?.isProducao?"#ec489922":"transparent",color:emp?.isProducao?"#ec4899":"var(--text3)",cursor:"pointer",fontSize:11,fontFamily:"'DM Mono',monospace",whiteSpace:"nowrap",flexShrink:0}}>
+            🏭
+          </button>
+        )}
+      </div>
 
       {/* Última coluna: ações */}
       <div style={{display:"flex",gap:4,alignItems:"center"}}>
@@ -3019,7 +3027,7 @@ Responda com JSON: {"empregados": [{"nome":"...", "cargoId":"...", "admissao":"2
         <EmpRowLine isNew emp={null} row={newRow} restRoles={restRoles}
           isSaved={false} isOwner={isOwner}
           onChange={(f,v)=>setNewRow(p=>({...p,[f]:v}))}
-          onAdd={saveNew} onSave={null} onToggleInactive={null} onDelete={null} onResetPin={null} employees={employees}/>
+          onAdd={saveNew} onSave={null} onToggleInactive={null} onDelete={null} onResetPin={null} onToggleProd={null} employees={employees}/>
       )}
 
       {activeCount >= plano.empMax && (
@@ -3091,6 +3099,9 @@ Responda com JSON: {"empregados": [{"nome":"...", "cargoId":"...", "admissao":"2
                   onToggleInactive={()=>toggleInactive(emp)}
                   onDelete={()=>deleteEmp(emp)}
                   onResetPin={resetPin}
+                  onToggleProd={()=>{
+                    onUpdate("employees", employees.map(x => x.id===emp.id ? {...x, isProducao:!x.isProducao} : x));
+                  }}
                   employees={employees}/>
               );
             })}
@@ -3197,18 +3208,17 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
     const toDistribute = total - totalTaxAmt;
     const mode = restaurant.divisionMode ?? MODE_AREA_POINTS;
     const empDayStatus = (empId) => { const m = schedules?.[rid]?.[tKey]?.[empId] ?? {}; return m[date]; };
-    const isProd = (area) => area === "Produção";
     const activeEmps = restEmps.filter(emp => {
       const r = restRoles.find(r => r.id === emp.roleId);
       if (!r) return false;
       if (emp.admission && emp.admission > date) return false;
       if (emp.inactive && emp.inactiveFrom && emp.inactiveFrom <= date) return false;
+      if (emp.isProducao) return true; // produção entra em todos os dias
       const status = empDayStatus(emp.id);
       if (!status) return true;
       if (status === DAY_COMP) return true;
       if (status === DAY_FAULT_J || status === DAY_FAULT_U) return false;
       if (status === DAY_VACATION) return false;
-      if (isProd(r.area)) return true;
       return false;
     }).map(emp => ({ ...emp, points: parseFloat(restRoles.find(r=>r.id===emp.roleId)?.points) || 0, area: restRoles.find(r=>r.id===emp.roleId)?.area }));
     const newTips = [];
@@ -3230,11 +3240,12 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
   function applyFaultPenalty(tKey, allTips) {
     // Find employees with falta injustificada this month
     const monthSchedule = schedules?.[rid]?.[tKey] ?? {};
+    const producaoPenalty = restaurant.producaoPenalty ?? 4; // % padrão produção
     const penaltyEmps = restEmps.filter(emp => {
       const r = restRoles.find(r => r.id === emp.roleId);
       if (!r) return false;
-      // Producao has fixed 4%, others use configured rate
-      const rate = r.area === "Produção" ? 4 : (restaurant.faultPenalty?.[r.area] ?? 0);
+      // Produção usa producaoPenalty do restaurante, demais usam faultPenalty por área
+      const rate = emp.isProducao ? producaoPenalty : (restaurant.faultPenalty?.[r.area] ?? 0);
       if (rate <= 0) return false;
       const empDayMap = monthSchedule[emp.id] ?? {};
       return Object.values(empDayMap).some(s => s === DAY_FAULT_U);
@@ -3255,7 +3266,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
       const emp = penaltyEmps.find(e => e.id === t.employeeId);
       if (!emp) return t;
       const r = restRoles.find(r => r.id === emp.roleId);
-      const rate = r?.area === "Produção" ? 4 : (restaurant.faultPenalty?.[r?.area] ?? 0);
+      const rate = emp.isProducao ? producaoPenalty : (restaurant.faultPenalty?.[r?.area] ?? 0);
       const empDayMap = monthSchedule[emp.id] ?? {};
       const faultDays = Object.values(empDayMap).filter(s => s === DAY_FAULT_U).length;
       const totalPenalty = monthPool * (rate / 100) * faultDays;
@@ -3294,12 +3305,12 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
       const r = restRoles.find(r => r.id === emp.roleId);
       if (!r || r.noTip) return false;
       if (emp.admission && emp.admission > date) return false;
+      if (emp.isProducao) return true; // produção entra em todos os dias
       const status = empDayStatus(emp.id);
       if (!status) return true; // trabalho = entra
       if (status === DAY_COMP) return true; // compensacao = entra
       if (status === DAY_FAULT_J || status === DAY_FAULT_U) return false; // faltas = nao entra
       if (status === DAY_VACATION) return false; // ferias = nao entra
-      if (r.area === "Produção") return true; // producao entra em folga
       return false; // demais: folga = nao entra
     }).map(emp => ({
       ...emp,
@@ -3491,7 +3502,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
             const currentSched = sched?.[sched.length-1];
             const dayIdx = new Date(todayStr+"T12:00:00").getDay();
             const dayData = currentSched?.days?.[dayIdx];
-            const entry = { name: e.name.split(" ")[0], role: role?.name, area: role?.area, in: dayData?.in, out: dayData?.out, break: dayData?.break, hasSchedule: !!currentSched && dayData?.active !== false };
+            const entry = { name: e.name.split(" ")[0], role: role?.name, area: role?.area, in: dayData?.in, out: dayData?.out, break: dayData?.break, hasSchedule: !!currentSched && dayData?.active !== false, isProducao: !!e.isProducao };
             if (status === DAY_OFF) teamToday.off.push(entry);
             else if (status === DAY_VACATION) teamToday.vacation.push(entry);
             else if (status === DAY_COMP) teamToday.comp.push(entry);
@@ -3553,6 +3564,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                         <div key={i} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"4px 0",borderBottom:"1px solid var(--border)",fontSize:12}}>
                           <div style={{minWidth:0}}>
                             <span style={{color:"var(--text2)",fontWeight:500}}>{e.name}</span>
+                            {e.isProducao && <span style={{fontSize:10,marginLeft:3}} title="Produção">🏭</span>}
                             {e.role && <span style={{color:"var(--text3)",fontSize:10,marginLeft:4}}>{e.role}</span>}
                           </div>
                           {e.hasSchedule && e.in && e.out
@@ -4415,7 +4427,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
               const totalPts = restRolesCom.reduce((s,r)=>s+(parseFloat(r.points)||0),0);
               const now2 = new Date();
               const mk2 = `${now2.getFullYear()}-${String(now2.getMonth()+1).padStart(2,"0")}`;
-              const curSplit2 = splits?.[rid]?.[mk2] ?? {Bar:12,Cozinha:35,Salão:35,Limpeza:8,"Produção":10};
+              const curSplit2 = splits?.[rid]?.[mk2] ?? DEFAULT_SPLIT;
               const EX = 1000;
               const fmtR2 = n=>n.toLocaleString("pt-BR",{minimumFractionDigits:2,maximumFractionDigits:2});
 
@@ -4431,7 +4443,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                   tabKey: null,
                   q: splitType==="area"?"🏢 Como funciona a divisão por área e pontos?":"📊 Como funciona a tabela de pontos?",
                   a: splitType==="area" ? (()=>{
-                    const AREAS2=["Bar","Cozinha","Salão","Limpeza","Produção"];
+                    const AREAS2=["Bar","Cozinha","Salão","Limpeza"];
                     const ativas=AREAS2.filter(a=>(curSplit2[a]??0)>0);
                     const linhas=ativas.map(a=>{
                       const pct=curSplit2[a]??0;
@@ -4830,9 +4842,9 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
             {/* Fault Penalty */}
             <div style={{...S.card,marginBottom:20}}>
               <p style={{color:ac,fontSize:14,fontWeight:700,margin:"0 0 6px"}}>Penalidade por Falta Injustificada</p>
-              <p style={{color:"var(--text3)",fontSize:12,marginBottom:14}}>% do pool mensal descontado por falta injustificada. Produção tem regra própria (sempre 4%). Configure as demais áreas abaixo.</p>
+              <p style={{color:"var(--text3)",fontSize:12,marginBottom:14}}>% do pool mensal descontado por falta injustificada. Configure por área e para empregados de produção.</p>
               <div style={{display:"flex",flexDirection:"column",gap:10}}>
-                {AREAS.filter(a => a !== "Produção").map(area => {
+                {AREAS.map(area => {
                   const current = restaurant.faultPenalty?.[area] ?? 0;
                   return (
                     <div key={area} style={{display:"flex",alignItems:"center",gap:10}}>
@@ -4849,10 +4861,22 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                     </div>
                   );
                 })}
-                <div style={{display:"flex",alignItems:"center",gap:10}}>
-                  <div style={{minWidth:80}}><AreaBadge area="Produção"/></div>
-                  <div style={{...S.input,width:70,textAlign:"center",color:"var(--text3)",background:"var(--bg5)",border:"1px solid var(--border)"}}>4%</div>
-                  <span style={{color:"var(--text3)",fontSize:12}}>fixo (regra Produção)</span>
+                <div style={{borderTop:"1px solid var(--border)",paddingTop:10,marginTop:4}}>
+                  <div style={{display:"flex",alignItems:"center",gap:10}}>
+                    <div style={{minWidth:80}}>
+                      <span style={{background:"#ec489922",color:"#ec4899",padding:"3px 10px",borderRadius:8,fontSize:11,fontWeight:700,fontFamily:"'DM Mono',monospace"}}>🏭 Produção</span>
+                    </div>
+                    <input type="number" min="0" max="20" step="0.5" value={restaurant.producaoPenalty ?? 4}
+                      onChange={e => {
+                        const val = parseFloat(e.target.value) || 0;
+                        const updated = restaurants.map(r => r.id===rid ? {...r, producaoPenalty: val} : r);
+                        onUpdate("restaurants", updated);
+                      }}
+                      style={{...S.input, width:70, textAlign:"center"}}
+                    />
+                    <span style={{color:"var(--text3)",fontSize:13}}>% por falta (empregados de produção)</span>
+                  </div>
+                  <p style={{color:"var(--text3)",fontSize:11,margin:"6px 0 0",fontStyle:"italic"}}>Aplica-se a empregados marcados como "Produção" no cadastro, independente da área.</p>
                 </div>
               </div>
             </div>
@@ -7747,7 +7771,7 @@ hr{border:none;border-top:1px solid var(--border);margin:24px 0}
       <div class="card"><h3>Por que é fundamental?</h3><p>A escala define quem trabalhou em cada dia e determina quem recebe gorjeta. Manter a escala atualizada garante a distribuição correta.</p></div>
       <div class="card"><h3>Como preencher</h3>
         <div class="steps">
-          <div class="step"><div class="sn">1</div><div class="sc"><strong>Filtre por área</strong><p>Salão, Cozinha, Bar, Limpeza, Produção.</p></div></div>
+          <div class="step"><div class="sn">1</div><div class="sc"><strong>Filtre por área</strong><p>Salão, Cozinha, Bar, Limpeza.</p></div></div>
           <div class="step"><div class="sn">2</div><div class="sc"><strong>Marque os dias</strong><p><span class="tag gr">✓</span> trabalhado · <strong>F</strong> falta injustificada · <strong>FJ</strong> justificada · <strong>A</strong> atestado · <strong>V</strong> férias</p></div></div>
           <div class="step"><div class="sn">3</div><div class="sc"><strong>Salvo automaticamente</strong><p>Sem botão de confirmação — cada clique salva.</p></div></div>
         </div>
@@ -8125,6 +8149,15 @@ export default function App() {
           await save(K.trash, cleanTrash);
           setTrash(cleanTrash);
         }
+      }
+
+      // Migração: cargos da área "Produção" → "Cozinha"
+      const rolesWithProd = (loaded_data.roles ?? []).filter(r => r.area === "Produção");
+      if (rolesWithProd.length > 0) {
+        const migratedRoles = (loaded_data.roles ?? []).map(r => r.area === "Produção" ? {...r, area: "Cozinha"} : r);
+        await save(K.roles, migratedRoles);
+        setRoles(migratedRoles);
+        console.log(`Migrados ${rolesWithProd.length} cargo(s) de Produção → Cozinha`);
       }
 
       setLoaded(true);
