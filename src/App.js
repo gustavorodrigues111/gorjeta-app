@@ -2529,7 +2529,7 @@ Inclua apenas as ações solicitadas. Arrays vazios se não houver ação daquel
     setAiPreview(null); setAiInput(""); setShowAi(false);
   }
 
-  const ROLE_COLS = "1.2fr 70px 120px 160px";
+  const ROLE_COLS = "minmax(80px,2fr) 60px 100px auto";
 
   function getRow(r) { return editRows[r.id] ?? { name: r.name, area: r.area ?? "Bar", points: r.points === 0 ? "0" : String(r.points || "") }; }
   function setRow(role, field, val) { setEditRows(prev => ({ ...prev, [role.id]: { ...getRow(role), [field]: val } })); }
@@ -3555,7 +3555,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
               {isCurrentMonth && teamToday.work.length + teamToday.off.length + teamToday.vacation.length > 0 && (
                 <div style={{...S.card,marginBottom:14}}>
                   <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
-                    <span style={{color:ac,fontWeight:700,fontSize:13}}>👥 Equipe hoje</span>
+                    <span style={{color:ac,fontWeight:700,fontSize:13}}>👥 Equipe hoje <span style={{color:"var(--text3)",fontWeight:400,fontSize:11}}>({new Date().toLocaleDateString("pt-BR")})</span></span>
                     <button onClick={()=>setTab("schedule")} style={{...S.btnSecondary,fontSize:11,padding:"4px 10px"}}>Escala →</button>
                   </div>
                   {teamToday.work.length > 0 && (
@@ -3759,13 +3759,12 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                   <div>
                     <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
                       <span style={{color:"var(--text3)",fontSize:12}}>{monthLabel(year,month)} — {daysInMonth} dias</span>
-                      <MonthNav year={year} month={month} onChange={(y,m)=>{setYear(y);setMonth(m);}} />
                     </div>
 
                     {/* Cabeçalho */}
-                    <div style={{display:"grid",gridTemplateColumns:"46px 1fr 1fr 100px 90px",gap:6,padding:"0 8px 4px",marginBottom:2}}>
-                      {["","Valor (R$)","Observação","Sem gorjeta",""].map((h,i)=>(
-                        <div key={i} style={{color:"var(--text3)",fontSize:10,fontWeight:700,textAlign:i===3?"center":"left"}}>{h}</div>
+                    <div style={{display:"grid",gridTemplateColumns:"46px 1fr 100px 90px",gap:6,padding:"0 8px 4px",marginBottom:2}}>
+                      {["","Valor (R$)","Sem gorjeta",""].map((h,i)=>(
+                        <div key={i} style={{color:"var(--text3)",fontSize:10,fontWeight:700,textAlign:i===2?"center":"left"}}>{h}</div>
                       ))}
                     </div>
 
@@ -3794,7 +3793,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                       else if (hasVal)                 { bg = "#faf8f4"; border = "var(--ac)33"; }
 
                       return (
-                        <div key={date} style={{display:"grid",gridTemplateColumns:"46px 1fr 1fr 100px 90px",gap:6,padding:"5px 8px",marginBottom:4,borderRadius:10,background:bg,border:`1px solid ${border}`,alignItems:"center"}}>
+                        <div key={date} style={{display:"grid",gridTemplateColumns:"46px 1fr 100px 90px",gap:6,padding:"5px 8px",marginBottom:4,borderRadius:10,background:bg,border:`1px solid ${border}`,alignItems:"center"}}>
 
                           {/* Data */}
                           <div style={{textAlign:"center"}}>
@@ -3809,24 +3808,11 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                             disabled={isNoTip}
                             onChange={e=>{ const nr=tipRows.filter(r=>r.date!==date); setTipRows([...nr,{...row,total:e.target.value}]); }}
                             placeholder="0,00"
-                            style={{...S.input, fontSize:13, padding:"6px 8px",
+                            style={{...S.input, fontSize:14, padding:"8px 10px",
                               background:  isNoTip?"#f5f0ff"  : isDirty?"#fef9e7" : isLaunched?"#e8faf0" : "var(--bg2)",
                               color:       isNoTip?"#6366f1"  : isDirty?"#f59e0b" : isLaunched?"var(--green)" : "var(--text)",
                               borderColor: isNoTip?"transparent": isDirty?"#f59e0b44": isLaunched?"#10b98133": "var(--border)",
                               cursor:      isNoTip?"not-allowed" : "text",
-                            }}
-                          />
-
-                          {/* Observação */}
-                          <input
-                            value={isNoTip ? "" : row.note}
-                            disabled={isNoTip}
-                            onChange={e=>{ const nr=tipRows.filter(r=>r.date!==date); setTipRows([...nr,{...row,note:e.target.value}]); }}
-                            placeholder={isNoTip ? "—" : "Observação"}
-                            style={{...S.input, fontSize:12, padding:"6px 8px",
-                              background: isNoTip?"#f5f0ff":"var(--input-bg)",
-                              color:      isNoTip?"#6366f1":"var(--text)",
-                              cursor:     isNoTip?"not-allowed":"text",
                             }}
                           />
 
@@ -3994,18 +3980,12 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
         {/* ESCALA */}
         {tab === "schedule" && (
           <div>
-            {/* Month navigation */}
-            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
-              <div style={{display:"flex",gap:4,alignItems:"center"}}>
-                <button onClick={()=>{setYear(month===0?year-1:year);setMonth(month===0?11:month-1);}} style={{...S.btnSecondary,padding:"6px 10px",fontSize:13}}>‹</button>
-                <span style={{color:"var(--text)",fontSize:14,fontWeight:700,padding:"6px 12px",background:"var(--card-bg)",borderRadius:8,whiteSpace:"nowrap"}}>{monthLabel(year,month)}</span>
-                <button onClick={()=>{setYear(month===11?year+1:year);setMonth(month===11?0:month+1);}} style={{...S.btnSecondary,padding:"6px 10px",fontSize:13}}>›</button>
-              </div>
-              {isOwner && <button onClick={()=>{
+            {isOwner && <div style={{display:"flex",justifyContent:"flex-end",marginBottom:10}}>
+              <button onClick={()=>{
                 const ok = resetTab("schedule","Escala",()=>({schedules:schedules?.[rid]}));
                 if(ok){ const s={...schedules}; delete s[rid]; onUpdate("schedules",s); onUpdate("_toast","🗑️ Escala enviada para a lixeira"); }
-              }} style={{...S.btnSecondary,fontSize:11,color:"var(--red)",borderColor:"var(--red)44",padding:"5px 10px"}}>🗑️ Reset</button>}
-            </div>
+              }} style={{...S.btnSecondary,fontSize:11,color:"var(--red)",borderColor:"var(--red)44",padding:"5px 10px"}}>🗑️ Reset</button>
+            </div>}
             {/* Area filter */}
             <div style={{marginBottom:12}}>
               <PillBar options={["Todos", ...AREAS]} value={schedArea} onChange={setSchedArea}/>
