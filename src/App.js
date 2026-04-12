@@ -3,9 +3,10 @@ import { useState, useEffect, Component } from "react";
 import { db } from "./firebase";
 import { doc, getDoc, setDoc } from "firebase/firestore";
 
-const APP_VERSION = "5.6.0";
+const APP_VERSION = "5.7.0";
 
-/* eslint-disable no-unused-vars */
+const DEFAULT_ADMISSION = () => `${new Date().getFullYear()}-01-01`;
+const round2 = (v) => Math.round(v * 100) / 100;
 
 // Error Boundary — evita tela branca mostrando mensagem de erro
 class ErrorBoundary extends Component {
@@ -82,6 +83,7 @@ const DAY_LABELS = {
   [DAY_FREELA]:   { label: "Freela",         color: "#06b6d4" },
 };
 // Days that count for gorjeta
+// eslint-disable-next-line no-unused-vars
 const DAYS_EARN_TIP = new Set([DAY_COMP]);
 // eslint-disable-next-line no-unused-vars
 const DAYS_NO_TIP   = new Set([DAY_OFF, DAY_VACATION, DAY_FAULT_J, DAY_FAULT_U, DAY_FREELA]);
@@ -184,6 +186,7 @@ function MonthNav({ year, month, onChange }) {
   );
 }
 
+// eslint-disable-next-line no-unused-vars
 function PermBadge({ label, on }) {
   if (!on) return null;
   return <span style={{ background:"var(--green-bg)", color:"var(--green)", borderRadius:6, padding:"2px 10px", fontSize:11, fontWeight:700 }}>✓ {label}</span>;
@@ -253,6 +256,7 @@ function CalendarGrid({ year, month, dayMap, onDayClick, readOnly }) {
 // Cycle order: work > off > freela > comp > faultJ > faultU > work (férias só via formulário)
 const DAY_CYCLE = [DAY_OFF, DAY_FREELA, DAY_COMP, DAY_FAULT_J, DAY_FAULT_U];
 
+// eslint-disable-next-line no-unused-vars
 function ScheduleCalendar({ empId, restaurantId, year, month, schedules, onUpdate }) {
   const mk = monthKey(year, month);
   const dayMap = schedules?.[restaurantId]?.[mk]?.[empId] ?? {};
@@ -823,6 +827,7 @@ function ComunicadosManagerTab({ restaurantId, communications, commAcks, employe
   const [aiInput, setAiInput] = useState("");
   const [aiLoading, setAiLoading] = useState(false);
   const [aiError, setAiError] = useState("");
+  // eslint-disable-next-line no-unused-vars
   const ac = "var(--ac)";
 
   async function handleAiSuggest() {
@@ -891,9 +896,11 @@ function ComunicadosManagerTab({ restaurantId, communications, commAcks, employe
           // Filter to target employees only
           const targetEmps = !c.target || c.target === "all" ? restEmps
             : c.target.startsWith("emp:") ? restEmps.filter(e => `emp:${e.id}` === c.target)
-            : c.target.startsWith("area:") ? restEmps.filter(e => { const r = employees.find(x=>x.id===e.id); return true; }) // area filter below
+            : c.target.startsWith("area:") ? restEmps.filter(e => { // eslint-disable-next-line no-unused-vars
+const r = employees.find(x=>x.id===e.id); return true; }) // area filter below
             : restEmps;
           const areaFilter = c.target?.startsWith("area:") ? c.target.replace("area:","") : null;
+          // eslint-disable-next-line no-unused-vars
           const finalEmps = areaFilter ? restEmps.filter(e => {
             // need roles from props - use employees directly
             return true; // simplified, will show all for area (ack table)
@@ -1335,6 +1342,7 @@ function timeToMin(t) {
   const [h, m] = t.split(":").map(Number);
   return h * 60 + (m || 0);
 }
+// eslint-disable-next-line no-unused-vars
 function minToTime(m) {
   if (m === null || m === undefined) return "";
   const h = Math.floor(m / 60) % 24;
@@ -1363,6 +1371,7 @@ function calcDayHours(inTime, outTime, breakMin) {
   // Count minutes in nocturnal window
   let noctMin = 0;
   const NOC_START = 22 * 60; // 1320
+  // eslint-disable-next-line no-unused-vars
   const NOC_END = 5 * 60 + 24 * 60; // 300 + 1440 = 1740 (next day 5am)
   for (let t = inM; t < outM; t++) {
     const tMod = t % (24 * 60);
@@ -1448,7 +1457,6 @@ function WorkScheduleManagerTab({ restaurantId, employees, roles, workSchedules,
   // ── Helpers: convert between internal format (with active flag) and storage format ──
   function toInternal(storedEntry) {
     const storedDays = storedEntry?.days;
-    const hoursComplete = storedEntry?.hoursComplete !== false; // legacy entries default true
     const out = {};
     for (let i = 0; i < 7; i++) {
       const d = storedDays?.[i];
@@ -1489,6 +1497,7 @@ function WorkScheduleManagerTab({ restaurantId, employees, roles, workSchedules,
   }
 
   // ── Check if ANY active day has hours ──
+  // eslint-disable-next-line no-unused-vars
   function hasAnyHours(days) {
     return Object.values(days).some(d => d.active && d.in && d.out);
   }
@@ -2334,6 +2343,7 @@ function EmployeePortal({ employees, roles, tips, schedules, splits, restaurants
 
   // Abas do empregado — respeita config do admin E escolha do gestor
   const empTabVisible = (key) => restaurant?.tabsConfig?.[key] !== false && restaurant?.tabsGestor?.[key] !== false;
+  // eslint-disable-next-line no-unused-vars
   const TABS = [
     ["comunicados", "📢 Comunicados"],
     ["escala",      "📅 Escala"],
@@ -3034,6 +3044,7 @@ Inclua apenas as ações solicitadas. Arrays vazios se não houver ação daquel
 
 // ─── EmpRowLine definido FORA do EmployeeSpreadsheet para evitar re-mount ───
 const EMP_COLS        = "80px 2fr 1.2fr 100px auto 1.5fr auto";
+// eslint-disable-next-line no-unused-vars
 const EMP_COLS_HEADER = "80px 2fr 1.2fr 100px auto 1.5fr auto";
 const empInS2 = { background:"var(--bg1)", border:"1px solid var(--border)", borderRadius:6, color:"var(--text)", fontFamily:"'DM Mono',monospace", fontSize:12, padding:"6px 8px", outline:"none", width:"100%", boxSizing:"border-box" };
 
@@ -3193,7 +3204,7 @@ Inclua apenas as ações solicitadas. Arrays vazios se não houver ação daquel
             empCode, pin,
             name: e.nome,
             cpf: e.cpf || "",
-            admission: e.admissao || "2026-01-01",
+            admission: e.admissao || DEFAULT_ADMISSION(),
             roleId: role?.id || "",
             roleName: role?.name || e.cargo || "(não encontrado)",
             roleMatched: !!role,
@@ -3300,7 +3311,7 @@ Inclua apenas as ações solicitadas. Arrays vazios se não houver ação daquel
     const seq = nextEmpSeq(employees, restCode);
     const empCode = makeEmpCode(restCode, seq);
     const pin = newRow.pin || String(seq).padStart(4,"0");
-    onUpdate("employees", [...employees, { ...newRow, admission: newRow.admission || "2026-01-01", id:Date.now().toString(), empCode, pin, restaurantId:rid }]);
+    onUpdate("employees", [...employees, { ...newRow, admission: newRow.admission || DEFAULT_ADMISSION(), id:Date.now().toString(), empCode, pin, restaurantId:rid }]);
     setNewRow(blank());
   }
 
@@ -3526,12 +3537,14 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
 
   // Privacy: mascarar dados quando ativo (admin vendo restaurante com privacyMode)
   const pFmt = privacyMask ? () => "R$ ••••,••" : fmt;
+  // eslint-disable-next-line no-unused-vars
   const pCpf = privacyMask ? () => "•••.•••.•••-••" : (v => v || "—");
   const pText = privacyMask ? () => "••••••••••••••••" : (v => v);
 
   const curSplit  = splits?.[rid]?.[mk] ?? DEFAULT_SPLIT;
   const monthTips = tips.filter(t => t.restaurantId === rid && t.monthKey === mk);
   const tipDates  = [...new Set(monthTips.map(t => t.date))].sort();
+  // eslint-disable-next-line no-unused-vars
   const totalGross = monthTips.reduce((a, t) => a + t.myShare, 0);
   const totalNet   = monthTips.reduce((a, t) => a + t.myNet, 0);
   const totalTax   = monthTips.reduce((a, t) => a + t.myTax, 0);
@@ -3605,6 +3618,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
   }
   function discardConfig() { setLocalConfig(null); }
 
+  // eslint-disable-next-line no-unused-vars
   const empSummary = restEmps.map(e => {
     const eT = monthTips.filter(t => t.employeeId === e.id);
     const r = restRoles.find(r => r.id === e.roleId);
@@ -3624,34 +3638,35 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
     const toDistribute = total - totalTaxAmt;
     const mode = restaurant.divisionMode ?? MODE_AREA_POINTS;
     const empDayStatus = (empId) => { const m = schedules?.[rid]?.[tKey]?.[empId] ?? {}; return m[date]; };
-    let _dbgNoRole=0,_dbgFreela=0,_dbgAdm=0,_dbgInact=0,_dbgSched=0,_dbgOk=0;
     const activeEmps = restEmps.filter(emp => {
       const r = restRoles.find(r => r.id === emp.roleId);
-      if (!r) { _dbgNoRole++; return false; }
-      if (emp.isFreela) { _dbgFreela++; return false; }
-      const admDate = emp.admission || "2026-01-01";
-      if (admDate > date) { _dbgAdm++; return false; }
-      if (emp.inactive && emp.inactiveFrom && emp.inactiveFrom <= date) { _dbgInact++; return false; }
+      if (!r) return false;
+      if (emp.isFreela) return false;
+      const admDate = emp.admission || DEFAULT_ADMISSION();
+      if (admDate > date) return false;
+      if (emp.inactive && emp.inactiveFrom && emp.inactiveFrom <= date) return false;
       const status = empDayStatus(emp.id);
-      if (status === DAY_VACATION || status === DAY_FREELA) { _dbgSched++; return false; }
-      if (emp.isProducao) { _dbgOk++; return true; }
-      if (!status || status === DAY_COMP) { _dbgOk++; return true; }
-      if (status === DAY_FAULT_J || status === DAY_FAULT_U) { _dbgSched++; return false; }
-      if (status === DAY_OFF) { _dbgSched++; return false; }
-      _dbgOk++; return true;
-    }).map(emp => ({ ...emp, points: parseFloat(restRoles.find(r=>r.id===emp.roleId)?.points) || 0, area: restRoles.find(r=>r.id===emp.roleId)?.area }));
-    console.log("[calcTip]",date,"restEmps:",restEmps.length,"active:",activeEmps.length,"noRole:",_dbgNoRole,"freela:",_dbgFreela,"adm:",_dbgAdm,"inact:",_dbgInact,"sched:",_dbgSched,"ok:",_dbgOk);
+      if (status === DAY_VACATION || status === DAY_FREELA) return false;
+      if (emp.isProducao) return true;
+      if (!status || status === DAY_COMP) return true;
+      if (status === DAY_FAULT_J || status === DAY_FAULT_U) return false;
+      if (status === DAY_OFF) return false;
+      return true;
+    }).map(emp => { const r = restRoles.find(r => r.id === emp.roleId); return { ...emp, points: parseFloat(r?.points) || 0, area: r?.area ?? "Salão" }; });
     const newTips = [];
-    if (mode === MODE_GLOBAL_POINTS) {
-      const totalPoints = activeEmps.reduce((a,e)=>a+e.points,0);
-      console.log("[calcTip]","mode:global","totalPoints:",totalPoints,"emps:",activeEmps.map(e=>({name:e.name,pts:e.points,area:e.area})));
-      if (!totalPoints) return { count: 0, updatedTips: allTips };
-      activeEmps.forEach(emp => { const g=total*(emp.points/totalPoints),tx=totalTaxAmt*(emp.points/totalPoints); newTips.push({id:`${Date.now()}-${emp.id}-${Math.random().toString(36).slice(2,6)}`,restaurantId:rid,employeeId:emp.id,date,monthKey:tKey,poolTotal:total,areaPool:toDistribute,area:emp.area??"—",myShare:g,myTax:tx,myNet:g-tx,note:noteVal,taxRate}); });
-    } else {
-      const tSplit = splits?.[rid]?.[tKey] ?? DEFAULT_SPLIT;
-      const byArea = {}; AREAS.forEach(a=>{byArea[a]=[];}); activeEmps.forEach(emp=>{if(emp.area)byArea[emp.area].push(emp);});
-      console.log("[calcTip]","mode:area","split:",JSON.stringify(tSplit),"byArea:",Object.fromEntries(AREAS.map(a=>[a,byArea[a].length])));
-      AREAS.forEach(area => { const emps=byArea[area],tp=emps.reduce((a,e)=>a+e.points,0); if(!tp)return; const ap=toDistribute*(tSplit[area]/100); emps.forEach(emp=>{const g=total*(tSplit[area]/100)*(emp.points/tp),tx=totalTaxAmt*(tSplit[area]/100)*(emp.points/tp);newTips.push({id:`${Date.now()}-${emp.id}-${Math.random().toString(36).slice(2,6)}`,restaurantId:rid,employeeId:emp.id,date,monthKey:tKey,poolTotal:total,areaPool:ap,area,myShare:g,myTax:tx,myNet:g-tx,note:noteVal,taxRate});}); });
+    try {
+      if (mode === MODE_GLOBAL_POINTS) {
+        const totalPoints = activeEmps.reduce((a,e)=>a+e.points,0);
+        if (!totalPoints) return { count: 0, updatedTips: allTips };
+        activeEmps.forEach(emp => { const g=round2(total*(emp.points/totalPoints)),tx=round2(totalTaxAmt*(emp.points/totalPoints)); newTips.push({id:`${Date.now()}-${emp.id}-${Math.random().toString(36).slice(2,6)}`,restaurantId:rid,employeeId:emp.id,date,monthKey:tKey,poolTotal:total,areaPool:toDistribute,area:emp.area??"—",myShare:g,myTax:tx,myNet:round2(g-tx),note:noteVal,taxRate}); });
+      } else {
+        const tSplit = splits?.[rid]?.[tKey] ?? DEFAULT_SPLIT;
+        const byArea = {}; AREAS.forEach(a=>{byArea[a]=[];}); activeEmps.forEach(emp=>{if(emp.area)byArea[emp.area].push(emp);});
+        AREAS.forEach(area => { const emps=byArea[area],tp=emps.reduce((a,e)=>a+e.points,0); if(!tp)return; const ap=round2(toDistribute*(tSplit[area]/100)); emps.forEach(emp=>{const g=round2(total*(tSplit[area]/100)*(emp.points/tp)),tx=round2(totalTaxAmt*(tSplit[area]/100)*(emp.points/tp));newTips.push({id:`${Date.now()}-${emp.id}-${Math.random().toString(36).slice(2,6)}`,restaurantId:rid,employeeId:emp.id,date,monthKey:tKey,poolTotal:total,areaPool:ap,area,myShare:g,myTax:tx,myNet:round2(g-tx),note:noteVal,taxRate});}); });
+      }
+    } catch (err) {
+      onUpdate("_toast", "⚠️ Erro no cálculo de gorjeta: " + (err.message || "desconhecido"));
+      return { count: 0, updatedTips: allTips };
     }
     // Remove existing tips for this date before adding new ones (supports re-launch)
     const tipsWithoutDate = allTips.filter(t => !(t.restaurantId === rid && t.date === date));
@@ -3659,59 +3674,60 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
     return { count: newTips.length, updatedTips };
   }
 
+  // eslint-disable-next-line no-unused-vars
   function applyFaultPenalty(tKey, allTips) {
-    const monthSchedule = schedules?.[rid]?.[tKey] ?? {};
-    const prodPenaltyU = restaurant.producaoPenaltyU ?? 6.66; // % falta injustificada produção
-    const prodPenaltyJ = restaurant.producaoPenaltyJ ?? 3.33; // % falta justificada produção
+    try {
+      const monthSchedule = schedules?.[rid]?.[tKey] ?? {};
+      const prodPenaltyU = restaurant.producaoPenaltyU ?? 6.66;
+      const prodPenaltyJ = restaurant.producaoPenaltyJ ?? 3.33;
 
-    // Empregados com penalidade aplicável
-    const penaltyEmps = restEmps.filter(emp => {
-      const r = restRoles.find(r => r.id === emp.roleId);
-      if (!r) return false;
-      const empDayMap = monthSchedule[emp.id] ?? {};
-      const statuses = Object.values(empDayMap);
-      if (emp.isProducao) {
-        // Produção: penalidade por falta justificada E injustificada
-        return statuses.some(s => s === DAY_FAULT_U || s === DAY_FAULT_J);
-      } else {
-        // Regulares: só falta injustificada
-        const rate = restaurant.faultPenalty?.[r.area] ?? 0;
-        if (rate <= 0) return false;
-        return statuses.some(s => s === DAY_FAULT_U);
-      }
-    });
-    if (!penaltyEmps.length) return;
+      const penaltyEmps = restEmps.filter(emp => {
+        const r = restRoles.find(r => r.id === emp.roleId);
+        if (!r) return false;
+        const empDayMap = monthSchedule[emp.id] ?? {};
+        const statuses = Object.values(empDayMap);
+        if (emp.isProducao) {
+          return statuses.some(s => s === DAY_FAULT_U || s === DAY_FAULT_J);
+        } else {
+          const rate = restaurant.faultPenalty?.[r.area] ?? 0;
+          if (rate <= 0) return false;
+          return statuses.some(s => s === DAY_FAULT_U);
+        }
+      });
+      if (!penaltyEmps.length) return;
 
-    // Total pool for the month
-    const monthTipsLocal = allTips.filter(t => t.restaurantId === rid && t.monthKey === tKey);
-    const monthPool = [...new Set(monthTipsLocal.map(t => t.date))]
-      .reduce((sum, date) => {
-        const dayTips = monthTipsLocal.filter(t => t.date === date);
-        return sum + (dayTips[0]?.poolTotal ?? 0);
-      }, 0);
-    if (!monthPool) return;
+      const monthTipsLocal = allTips.filter(t => t.restaurantId === rid && t.monthKey === tKey);
+      const monthPool = [...new Set(monthTipsLocal.map(t => t.date))]
+        .reduce((sum, date) => {
+          const dayTips = monthTipsLocal.filter(t => t.date === date);
+          return sum + (dayTips[0]?.poolTotal ?? 0);
+        }, 0);
+      if (!monthPool) return;
 
-    const updated = allTips.map(t => {
-      if (t.restaurantId !== rid || t.monthKey !== tKey) return t;
-      const emp = penaltyEmps.find(e => e.id === t.employeeId);
-      if (!emp) return t;
-      const r = restRoles.find(r => r.id === emp.roleId);
-      const empDayMap = monthSchedule[emp.id] ?? {};
-      let totalPenalty = 0;
-      if (emp.isProducao) {
-        const faultU = Object.values(empDayMap).filter(s => s === DAY_FAULT_U).length;
-        const faultJ = Object.values(empDayMap).filter(s => s === DAY_FAULT_J).length;
-        totalPenalty = monthPool * ((prodPenaltyU / 100) * faultU + (prodPenaltyJ / 100) * faultJ);
-      } else {
-        const rate = restaurant.faultPenalty?.[r?.area] ?? 0;
-        const faultDays = Object.values(empDayMap).filter(s => s === DAY_FAULT_U).length;
-        totalPenalty = monthPool * (rate / 100) * faultDays;
-      }
-      const empTipsCount = allTips.filter(x => x.restaurantId === rid && x.monthKey === tKey && x.employeeId === emp.id).length;
-      const penaltyPerEntry = empTipsCount > 0 ? totalPenalty / empTipsCount : 0;
-      return { ...t, myNet: Math.max(0, t.myNet - penaltyPerEntry), penalty: penaltyPerEntry };
-    });
-    onUpdate("tips", updated);
+      const updated = allTips.map(t => {
+        if (t.restaurantId !== rid || t.monthKey !== tKey) return t;
+        const emp = penaltyEmps.find(e => e.id === t.employeeId);
+        if (!emp) return t;
+        const r = restRoles.find(r => r.id === emp.roleId);
+        const empDayMap = monthSchedule[emp.id] ?? {};
+        let totalPenalty = 0;
+        if (emp.isProducao) {
+          const faultU = Object.values(empDayMap).filter(s => s === DAY_FAULT_U).length;
+          const faultJ = Object.values(empDayMap).filter(s => s === DAY_FAULT_J).length;
+          totalPenalty = round2(monthPool * ((prodPenaltyU / 100) * faultU + (prodPenaltyJ / 100) * faultJ));
+        } else {
+          const rate = restaurant.faultPenalty?.[r?.area] ?? 0;
+          const faultDays = Object.values(empDayMap).filter(s => s === DAY_FAULT_U).length;
+          totalPenalty = round2(monthPool * (rate / 100) * faultDays);
+        }
+        const empTipsCount = allTips.filter(x => x.restaurantId === rid && x.monthKey === tKey && x.employeeId === emp.id).length;
+        const penaltyPerEntry = empTipsCount > 0 ? round2(totalPenalty / empTipsCount) : 0;
+        return { ...t, myNet: round2(Math.max(0, t.myNet - penaltyPerEntry)), penalty: penaltyPerEntry };
+      });
+      onUpdate("tips", updated);
+    } catch (err) {
+      onUpdate("_toast", "⚠️ Erro ao aplicar penalidade: " + (err.message || "desconhecido"));
+    }
   }
 
   function recalcTipDay(date, currentTips) {
@@ -4963,6 +4979,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
 
             {/* FAQs automáticas — expansíveis e com toggle */}
             {(()=>{
+              // eslint-disable-next-line no-unused-vars
               const ac = "var(--ac)";
               const splitType = (localRest.divisionMode ?? MODE_AREA_POINTS) === MODE_AREA_POINTS ? "area" : "points";
               const taxRate = localRest.taxRate ?? 0.33;
@@ -5125,6 +5142,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
         {tab === "dp_gestores" && isDP && (() => {
           const managers = data?.managers ?? [];
           const myId = currentUser?.id;
+          // eslint-disable-next-line no-unused-vars
           const myRestIds = currentUser?.restaurantIds ?? [];
           const restMgrs = managers.filter(m => (m.restaurantIds??[]).includes(rid) && m.id !== myId);
           const canEdit = (m) => m.createdBy === myId;
@@ -5537,6 +5555,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
 // SUPER MANAGER PORTAL
 //
 function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }) {
+  // eslint-disable-next-line no-unused-vars
   const { owners, managers, restaurants, employees, roles, tips, splits, schedules, noTipDays } = data;
   const [tab, setTab] = useState("dashboard");
   const [selRestaurant, setSelRestaurantState] = useState(() => {
@@ -5622,6 +5641,7 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }
     const r = restaurants.find(x => x.id === restId);
     return r?.privacyMode === true;
   }
+  // eslint-disable-next-line no-unused-vars
   function maskMoney(val, restId) {
     if (!isPrivate(restId)) return typeof val === "number" ? val.toLocaleString("pt-BR",{minimumFractionDigits:2}) : val;
     return "••••,••";
@@ -5630,6 +5650,7 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }
     if (!isPrivate(restId)) return cpf || "—";
     return cpf ? "•••.•••.•••-••" : "—";
   }
+  // eslint-disable-next-line no-unused-vars
   function maskText(text, restId) {
     if (!isPrivate(restId)) return text;
     return text ? "••••••••••••••••" : "";
@@ -5647,8 +5668,8 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }
   const trashCount = (trash.restaurants?.length??0) + (trash.managers?.length??0) + (trash.employees?.length??0) + (trash.tabData?.length??0);
   const [restTab, setRestTab] = useState("operacional");
   const [filtroFinanceiro, setFiltroFinanceiro] = useState("todos");
-  const PIX_PADRAO = "11985499821";
-  const PIX_NOME   = "Gustavo Rodrigues da Silva";
+  const PIX_PADRAO = data?.pixChave  || "11985499821";
+  const PIX_NOME   = data?.pixNome   || "Gustavo Rodrigues da Silva";
   const [cobForma, setCobForma]   = useState("pix");
   const [cobChave, setCobChave]   = useState(PIX_PADRAO);
   const [cobLink,  setCobLink]    = useState("");
@@ -5893,7 +5914,6 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }
           const proxFim = tipo === "anual" ? addDays(addYear(proxIni), -1) : addDays(proxIni, 29);
           // Vencimento = dia anterior ao início do próximo ciclo = último dia do ciclo atual
           const proxVenc = addDays(proxIni, -1);
-          const proxLabel = `${fmt(proxIni)} a ${fmt(proxFim)}`;
 
           // ─── Helpers de persistência ────────────────────────────────
           function saveFin(update) {
@@ -6681,7 +6701,6 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }
 
         {/* FINANCEIRO GERAL */}
         {tab === "financeiro_geral" && (() => {
-          const hoje = today();
           const rows = restaurants.map(r => {
             const plano = getPlano(r);
             const fin = r.financeiro ?? {};
@@ -6972,7 +6991,6 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }
         {/* LIXEIRA — só master */}
         {tab === "trash" && isMaster && (() => {
           const cutoff7  = new Date(Date.now() - 7  * 24*60*60*1000).toISOString();
-          const cutoff30 = new Date(Date.now() - 30 * 24*60*60*1000).toISOString();
 
           const allItems = [
             ...(trash.restaurants??[]).map(x=>({...x,_type:"restaurants",_icon:"🏢",_days:30})),
@@ -7398,6 +7416,7 @@ function ManagerPortal({ manager, data, onUpdate, onBack, toggleTheme, theme, on
     if (saved && myRestaurants.find(r => r.id === saved)) return saved;
     return null;
   });
+  // eslint-disable-next-line no-unused-vars
   const ac = "var(--ac)";
 
   // Mobile detection
