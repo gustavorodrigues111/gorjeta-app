@@ -4150,27 +4150,46 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
               const mesLabel = monthLabel(year, month);
               const mesKey = mk;
 
-              // Helper: normalize escala keys from names → employee IDs
+              // Helper: normalize date to YYYY-MM-DD with zero padding
+              function padDate(dateStr) {
+                const parts = dateStr.split("-");
+                if (parts.length !== 3) return dateStr;
+                return `${parts[0]}-${parts[1].padStart(2,"0")}-${parts[2].padStart(2,"0")}`;
+              }
+
+              // Helper: normalize escala keys from names → employee IDs + fix date formats
               function normalizeEscalaKeys(escala) {
                 const nomeParaId = {};
+                const semAcento = (s) => s.normalize("NFD").replace(/[\u0300-\u036f]/g,"").toLowerCase().trim();
                 restEmps.forEach(e => {
                   nomeParaId[e.id] = e.id; // ID direto
                   nomeParaId[e.name.toLowerCase().trim()] = e.id;
                   nomeParaId[e.name.split(" ")[0].toLowerCase().trim()] = e.id;
-                  // sem acentos
-                  const semAcento = (s) => s.normalize("NFD").replace(/[\u0300-\u036f]/g,"").toLowerCase().trim();
                   nomeParaId[semAcento(e.name)] = e.id;
                   nomeParaId[semAcento(e.name.split(" ")[0])] = e.id;
                 });
+                const validStatuses = new Set(["off","vac","faultj","faultu","comp"]);
+                const expectedMonth = String(month+1).padStart(2,"0");
                 const normalized = {};
                 Object.entries(escala).forEach(([key, days]) => {
-                  const semAcento = (s) => s.normalize("NFD").replace(/[\u0300-\u036f]/g,"").toLowerCase().trim();
                   const empId = nomeParaId[key] ?? nomeParaId[key.toLowerCase().trim()] ?? nomeParaId[semAcento(key)] ?? null;
-                  if (empId && days && typeof days === "object") {
-                    // Merge if same empId already exists (LLM might use name AND id)
-                    normalized[empId] = { ...(normalized[empId] ?? {}), ...days };
-                  } else {
+                  if (!empId || !days || typeof days !== "object") {
                     console.warn("AI escala: chave não mapeada →", key);
+                    return;
+                  }
+                  const fixedDays = {};
+                  Object.entries(days).forEach(([dateStr, status]) => {
+                    // Normaliza data para YYYY-MM-DD com zero padding
+                    const fixed = padDate(dateStr);
+                    // Valida que é do mês correto e status válido
+                    if (fixed.slice(0,4) === String(year) && fixed.slice(5,7) === expectedMonth && validStatuses.has(status)) {
+                      fixedDays[fixed] = status;
+                    } else {
+                      console.warn("AI escala: data/status ignorado →", dateStr, status);
+                    }
+                  });
+                  if (Object.keys(fixedDays).length > 0) {
+                    normalized[empId] = { ...(normalized[empId] ?? {}), ...fixedDays };
                   }
                 });
                 return normalized;
@@ -4296,11 +4315,10 @@ Responda SOMENTE com JSON:
                   updatedSched[rid][mk][empId] = empDayMap;
                 });
 
-                onUpdate("schedules", updatedSched);
                 setShowAiSched(false);
                 setAiSchedPreview(null);
                 setAiSchedInput("");
-                onUpdate("_toast", "✅ Escala aplicada com sucesso!");
+                onUpdate("schedules", updatedSched);
               }
 
               return (
