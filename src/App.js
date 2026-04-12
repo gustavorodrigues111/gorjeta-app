@@ -3,7 +3,7 @@ import { useState, useEffect, Component } from "react";
 import { db } from "./firebase";
 import { doc, getDoc, setDoc } from "firebase/firestore";
 
-const APP_VERSION = "5.3.0";
+const APP_VERSION = "5.3.1";
 
 /* eslint-disable no-unused-vars */
 
@@ -5137,18 +5137,6 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
               </div>
             )}
 
-            {/* Salvar / Descartar configuração de abas — sticky no rodapé */}
-            {configDirty && (
-              <div style={{position:"sticky",bottom:0,zIndex:50,padding:"12px 0"}}>
-                <div style={{...S.card,background:"var(--ac-bg)",border:"1px solid var(--ac)33",boxShadow:"0 -4px 16px rgba(0,0,0,0.1)"}}>
-                  <p style={{color:ac,fontSize:13,fontWeight:700,margin:"0 0 8px"}}>Alterações não salvas</p>
-                  <div style={{display:"flex",gap:10}}>
-                    <button onClick={saveConfig} style={{...S.btnPrimary,flex:1,padding:"10px",fontSize:13}}>Salvar Config</button>
-                    <button onClick={discardConfig} style={{...S.btnSecondary,flex:1,padding:"10px",fontSize:13}}>Descartar</button>
-                  </div>
-                </div>
-              </div>
-            )}
             <div style={{...S.card,marginBottom:20}}>
               <p style={{color:ac,fontSize:14,fontWeight:700,margin:"0 0 4px"}}>Retenção Fiscal sobre Gorjeta</p>
               <p style={{color:"var(--text3)",fontSize:12,marginBottom:12}}>Conforme a Lei 13.419/2017, a gorjeta é rendimento do trabalhador sujeito a encargos. A alíquota depende do regime tributário do estabelecimento.</p>
@@ -5251,7 +5239,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                     <button key={mode} onClick={()=>{
                       patchConfig({ divisionMode: mode });
                     }} style={{padding:"14px 16px",borderRadius:12,border:`2px solid ${selected?ac:"var(--border)"}`,background:selected?ac+"11":"transparent",cursor:"pointer",textAlign:"left",fontFamily:"'DM Mono',monospace"}}>
-                      <div style={{color:selected?ac:"#fff",fontWeight:700,fontSize:14}}>{label}</div>
+                      <div style={{color:selected?ac:"var(--text)",fontWeight:700,fontSize:14}}>{label}</div>
                       <div style={{color:"var(--text3)",fontSize:12,marginTop:4}}>{desc}</div>
                     </button>
                   );
@@ -5275,6 +5263,19 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                     <button onClick={()=>setSplitForm({...curSplit})} style={{...S.btnSecondary,marginTop:12,width:"100%",textAlign:"center"}}>Editar percentuais</button>
                   </div>
                 )}
+              </div>
+            )}
+
+            {/* Salvar / Descartar configurações — sticky no rodapé */}
+            {configDirty && (
+              <div style={{position:"sticky",bottom:0,zIndex:50,padding:"12px 0"}}>
+                <div style={{background:"var(--card-bg)",border:"2px solid var(--ac)",borderRadius:14,padding:"14px 18px",boxShadow:"0 -4px 20px rgba(0,0,0,0.15)"}}>
+                  <p style={{color:"var(--ac)",fontSize:13,fontWeight:700,margin:"0 0 10px"}}>⚠️ Alterações não salvas</p>
+                  <div style={{display:"flex",gap:10}}>
+                    <button onClick={saveConfig} style={{...S.btnPrimary,flex:1,padding:"12px",fontSize:14,fontWeight:700}}>Salvar Configurações</button>
+                    <button onClick={discardConfig} style={{...S.btnSecondary,padding:"12px 16px",fontSize:13}}>Descartar</button>
+                  </div>
+                </div>
               </div>
             )}
           </div>
@@ -6847,16 +6848,20 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }
 
         {tab === "changelog" && (() => {
           const CHANGELOG = [
+            { version:"5.3.1", date:"2026-04-12", items:[
+              "Aba Config unificada: todas as configurações agora salvam com botão explícito (retenção, penalidades, modalidade, abas)",
+              "Botão Salvar Config fixo no rodapé (sticky) — sempre visível quando há alterações pendentes",
+              "Aviso ao sair da aba Config sem salvar: pergunta se deseja salvar antes",
+              "FAQ automático do gestor agora reflete alterações de config em tempo real (antes de salvar)",
+              "Correção: FAQ de gorjeta atualiza corretamente ao alternar entre Área+Pontos e Pontos Global",
+            ]},
             { version:"5.3.0", date:"2026-04-12", items:[
               "Aba Horários: empregados agrupados por área",
               "Alternância empregado/gestor: botão direto no header para usuários com perfil duplo",
               "Tela do gestor agora inicia sempre pelo Dashboard",
               "Correção: comunicados automáticos de horário não bloqueiam mais a tela do empregado",
-              "Correção: FAQ de gorjeta agora reflete corretamente o modo de divisão (Área+Pontos ou Global)",
               "Percentuais de área: ao salvar, pergunta se deseja aplicar aos próximos meses",
               "Novos percentuais padrão: Bar 12%, Cozinha 40%, Salão 40%, Limpeza 8%",
-              "Botão de salvar config agora fica fixo no rodapé da tela",
-              "Aviso ao sair da aba Config sem salvar alterações pendentes",
               "Campo PIN substituído por botão 🔑 Resetar na aba Equipe",
             ]},
             { version:"5.2.0", date:"2026-04-12", items:[
