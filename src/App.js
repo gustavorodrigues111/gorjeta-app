@@ -3,7 +3,7 @@ import { useState, useEffect, Component } from "react";
 import { db } from "./firebase";
 import { doc, getDoc, setDoc } from "firebase/firestore";
 
-const APP_VERSION = "5.3.2";
+const APP_VERSION = "5.3.3";
 
 /* eslint-disable no-unused-vars */
 
@@ -6877,6 +6877,9 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }
 
         {tab === "changelog" && (() => {
           const CHANGELOG = [
+            { version:"5.3.3", date:"2026-04-12", items:[
+              "Login por ID (ex: LBZ0001): agora mostra tela de escolha Gestor/Empregado quando o CPF do empregado também é de um gestor",
+            ]},
             { version:"5.3.2", date:"2026-04-12", items:[
               "FAQ gorjeta: texto agora explica claramente o cálculo para cada modo (Área+Pontos vs Pontos Global)",
               "FAQ sistema: descrição detalhada de como funciona cada modalidade de divisão",
@@ -7407,12 +7410,28 @@ function UnifiedLogin({ owners, managers, employees, restaurants, onLoginOwner, 
         return;
       }
     } else {
-      // Por ID — sempre empregado
+      // Por ID — busca empregado, mas verifica se também é gestor
       const emp = employees.find(e => e.empCode?.toUpperCase() === clean.toUpperCase() && String(e.pin) === cleanPin);
       if (emp) {
         if (emp.inactive && emp.inactiveFrom && emp.inactiveFrom <= today()) {
           setErr("Acesso desativado. Fale com o departamento pessoal."); return;
         }
+        // Verificar se o CPF desse empregado também é de um gestor
+        const empCpf = emp.cpf?.replace(/\D/g,"");
+        const mgr = empCpf ? managers.find(m => m.cpf?.replace(/\D/g,"") === empCpf) : null;
+        if (mgr) {
+          // Dual-role — mostrar tela de escolha
+          const found = [];
+          found.push({ label:"Gestor", icon:"📊", action:()=>{ setChoices(null); onLoginManager(mgr); } });
+          const restDoEmp = restaurants.find(r=>r.id===emp.restaurantId);
+          if (!(restDoEmp?.financeiro?.status === "inadimplente")) {
+            found.push({ label:"Empregado", icon:"👤", action:()=>{ setChoices(null); localStorage.setItem("apptip_empid", emp.id); localStorage.setItem("apptip_userid", emp.id); onLoginEmployee(emp); } });
+          }
+          if (found.length === 1) { setErr(""); setAttempts(0); found[0].action(); return; }
+          const name = mgr.name ?? emp.name ?? "Usuário";
+          setErr(""); setAttempts(0); setChoices({ name, options: found }); return;
+        }
+        // Só empregado
         localStorage.setItem("apptip_empid", emp.id);
         localStorage.setItem("apptip_userid", emp.id);
         setErr(""); setAttempts(0); onLoginEmployee(emp); return;
