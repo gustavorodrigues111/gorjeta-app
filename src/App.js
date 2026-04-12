@@ -4183,7 +4183,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                 </div>
                 <div style={{display:"grid",gridTemplateColumns:mobileOnly?"1fr 1fr":"1fr 1fr 1fr 1fr",gap:mobileOnly?6:8}}>
                   {[
-                    ["Pool total",    pFmt(tipPoolTotal || 0), "#fff"],
+                    ["Pool total",    pFmt(tipPoolTotal || 0), "var(--text)"],
                     ["Retenção",      pFmt(totalTax || 0),     "var(--red)"],
                     ["Distribuído",   pFmt(totalNet || 0),     ac],
                     ["Dias preenchidos", `${diasLancados}/${dim}`, diasLancados===dim?"var(--green)":diasLancados>=diasUteisPassados?"var(--green)":"#f59e0b"],
