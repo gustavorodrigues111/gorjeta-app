@@ -3,7 +3,7 @@ import { useState, useEffect, Component } from "react";
 import { db } from "./firebase";
 import { doc, getDoc, setDoc } from "firebase/firestore";
 
-const APP_VERSION = "5.1.0";
+const APP_VERSION = "5.2.0";
 
 /* eslint-disable no-unused-vars */
 
@@ -70,6 +70,7 @@ const DAY_COMP      = "comp";   // compensacao banco de horas
 const DAY_VACATION  = "vac";    // ferias
 const DAY_FAULT_J   = "faultj"; // falta justificada
 const DAY_FAULT_U   = "faultu"; // falta injustificada
+const DAY_FREELA    = "freela"; // freela — presente mas sem gorjeta
 
 // eslint-disable-next-line no-unused-vars
 const DAY_LABELS = {
@@ -78,11 +79,12 @@ const DAY_LABELS = {
   [DAY_VACATION]: { label: "Férias",         color: "#8b5cf6" },
   [DAY_FAULT_J]:  { label: "Falta Just.",    color: "#f59e0b" },
   [DAY_FAULT_U]:  { label: "Falta Injust.",  color: "var(--red)" },
+  [DAY_FREELA]:   { label: "Freela",         color: "#06b6d4" },
 };
 // Days that count for gorjeta
 const DAYS_EARN_TIP = new Set([DAY_COMP]);
 // eslint-disable-next-line no-unused-vars
-const DAYS_NO_TIP   = new Set([DAY_OFF, DAY_VACATION, DAY_FAULT_J, DAY_FAULT_U]);
+const DAYS_NO_TIP   = new Set([DAY_OFF, DAY_VACATION, DAY_FAULT_J, DAY_FAULT_U, DAY_FREELA]);
 
 // Division mode constants
 const MODE_AREA_POINTS = "area_points"; // default: split by area % then by points within area
@@ -200,6 +202,7 @@ function CalendarGrid({ year, month, dayMap, onDayClick, readOnly }) {
     if (!dateStr) return null;
     const s = dayMap?.[dateStr];
     if (s === DAY_OFF)      return { bg: "#e74c3c22", border: "var(--red)",  text: "var(--red)"  };
+    if (s === DAY_FREELA)   return { bg: "#06b6d422", border: "#06b6d4",  text: "#06b6d4"  };
     if (s === DAY_COMP)     return { bg: "#3b82f622", border: "#3b82f6",  text: "#3b82f6"  };
     if (s === DAY_VACATION) return { bg: "#8b5cf622", border: "#8b5cf6",  text: "#8b5cf6"  };
     if (s === DAY_FAULT_J)  return { bg: "#f59e0b22", border: "#f59e0b",  text: "#f59e0b"  };
@@ -210,6 +213,7 @@ function CalendarGrid({ year, month, dayMap, onDayClick, readOnly }) {
   const LEGEND = [
     ["var(--green)", "Trabalho"],
     ["var(--red)", "Folga"],
+    ["#06b6d4", "Freela"],
     ["#3b82f6", "Compensação"],
     ["#8b5cf6", "Férias"],
     ["#f59e0b", "Falta Just."],
@@ -246,8 +250,8 @@ function CalendarGrid({ year, month, dayMap, onDayClick, readOnly }) {
   );
 }
 
-// Cycle order: work > off > comp > faultJ > faultU > work (férias só via formulário)
-const DAY_CYCLE = [DAY_OFF, DAY_COMP, DAY_FAULT_J, DAY_FAULT_U];
+// Cycle order: work > off > freela > comp > faultJ > faultU > work (férias só via formulário)
+const DAY_CYCLE = [DAY_OFF, DAY_FREELA, DAY_COMP, DAY_FAULT_J, DAY_FAULT_U];
 
 function ScheduleCalendar({ empId, restaurantId, year, month, schedules, onUpdate }) {
   const mk = monthKey(year, month);
@@ -586,7 +590,7 @@ Exemplo (gorjeta R$${fmtR(EX)}, ${totalPontos}pt no total):
       id:"__escala__",
       tabKey: "escala",
       q:"📅 Como funciona a escala e por que ela importa?",
-      a:"A escala registra sua presença em cada dia e define diretamente se você recebe gorjeta.\n\nVocê recebe gorjeta quando:\n✅ Trabalhando normalmente\n✅ Compensação de banco de horas (C)\n\nVocê NÃO recebe gorjeta quando:\n❌ Folga\n❌ Falta injustificada (F) — além de não receber, pode haver uma penalidade descontada da gorjeta do mês, caso o restaurante tenha essa regra ativa\n❌ Falta justificada (FJ)\n❌ Atestado médico (A)\n❌ Férias (V) — nenhum empregado recebe gorjeta durante férias, incluindo os de produção\n\nExceção: empregados de produção (🏭) recebem gorjeta todos os dias, exceto férias. Em caso de falta (justificada ou injustificada), sofrem penalidade com percentuais distintos.\n\nSe notar algum erro na sua escala, avise o gestor o quanto antes — erros afetam diretamente o valor que você recebe.",
+      a:"A escala registra sua presença em cada dia e define diretamente se você recebe gorjeta.\n\nVocê recebe gorjeta quando:\n✅ Trabalhando normalmente\n✅ Compensação de banco de horas (C)\n\nVocê NÃO recebe gorjeta quando:\n❌ Folga\n❌ Freela (FL) — presente cobrindo a equipe, mas sem gorjeta\n❌ Falta injustificada (F) — além de não receber, pode haver penalidade\n❌ Falta justificada (FJ)\n❌ Atestado médico (A)\n❌ Férias (V) — nenhum empregado recebe gorjeta durante férias, incluindo produção\n\nExceções:\n• Empregados de produção (🏭) recebem gorjeta todos os dias, exceto férias\n• Empregados freela (🎯) nunca participam do rateio de gorjeta\n\nSe notar algum erro na sua escala, avise o gestor o quanto antes — erros afetam diretamente o valor que você recebe.",
     },
     {
       id:"__producao__",
@@ -597,6 +601,15 @@ Exemplo (gorjeta R$${fmtR(EX)}, ${totalPontos}pt no total):
         const penJ = rest?.producaoPenaltyJ ?? 2;
         const isEmpProd = emp?.isProducao;
         return `Empregados marcados como "Produção" têm regras especiais de gorjeta:\n\n✅ Recebem gorjeta TODOS os dias (trabalhando, folga, compensação, etc.)\n❌ NÃO recebem gorjeta durante férias — assim como qualquer outro empregado\n✅ A distribuição segue os pontos do cargo normalmente\n\n⚠️ Penalidades por falta (sobre o pool mensal, por dia):\n• Falta injustificada: ${penU}% por dia\n• Falta justificada: ${penJ}% por dia\n\nExemplo: pool mensal de R$${fmtR(10000)}, 2 faltas injustificadas + 1 justificada → desconto de ${penU*2}% + ${penJ}% = ${penU*2+penJ}% = R$${fmtR(10000*(penU*2+penJ)/100)}\n\n${isEmpProd ? "📌 Você está marcado como empregado de produção. Essas regras se aplicam a você." : "Essas regras só se aplicam a empregados marcados como produção pelo gestor."}\n\nO status de produção é definido pelo gestor na aba Equipe e pode ser atribuído a empregados de qualquer área.`;
+      })(),
+    },
+    {
+      id:"__freela__",
+      tabKey: null,
+      q:"🎯 O que é empregado freela?",
+      a:(() => {
+        const isEmpFreela = emp?.isFreela;
+        return `Empregados marcados como "Freela" são colaboradores que cobrem a equipe esporadicamente:\n\n✅ Aparecem normalmente na escala\n❌ Nunca participam do rateio de gorjeta, independente do status na escala\n✅ O cargo e área são atribuídos normalmente\n\nAlém disso, qualquer empregado pode receber o status "Freela" (FL) em um dia específico da escala. Nesse caso, ele está presente mas não recebe gorjeta naquele dia — útil para quem estava de folga e resolveu cobrir.\n\n${isEmpFreela ? "📌 Você está marcado como empregado freela. Você não participa do rateio de gorjeta." : "Essas regras só se aplicam a empregados marcados como freela pelo gestor."}\n\nO status de freela é definido pelo gestor na aba Equipe.`;
       })(),
     },
     {
@@ -2221,7 +2234,7 @@ function EmployeePortal({ employees, roles, tips, schedules, splits, restaurants
                   {sorted.map(t => {
                     running += t.myNet;
                     const statusOfDay = schedules?.[emp?.restaurantId]?.[mk]?.[empId]?.[t.date];
-                    const statusLabels = {off:"Folga",vac:"Férias",faultj:"Falta Just.",faultu:"Falta Injust.",comp:"Compensação"};
+                    const statusLabels = {off:"Folga",freela:"Freela",vac:"Férias",faultj:"Falta Just.",faultu:"Falta Injust.",comp:"Compensação"};
                     return (
                       <div key={t.id} style={{background:"var(--card-bg)",borderBottom:"1px solid var(--border)",padding:"8px",borderRadius:0}}>
                         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr 1fr",gap:4,marginBottom: statusOfDay||t.note?4:0}}>
@@ -2267,11 +2280,12 @@ function EmployeePortal({ employees, roles, tips, schedules, splits, restaurants
                 <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 8, marginTop: 20 }}>
                   {(() => {
                     const dim = new Date(year, month + 1, 0).getDate();
-                    const counts = { work: 0, off: 0, comp: 0, vac: 0, fj: 0, fu: 0 };
+                    const counts = { work: 0, off: 0, freela: 0, comp: 0, vac: 0, fj: 0, fu: 0 };
                     for (let d = 1; d <= dim; d++) {
                       const k = `${year}-${String(month+1).padStart(2,"0")}-${String(d).padStart(2,"0")}`;
                       const s = dayMap[k];
                       if (s === DAY_OFF) counts.off++;
+                      else if (s === DAY_FREELA) counts.freela++;
                       else if (s === DAY_COMP) counts.comp++;
                       else if (s === DAY_VACATION) counts.vac++;
                       else if (s === DAY_FAULT_J) counts.fj++;
@@ -2280,6 +2294,7 @@ function EmployeePortal({ employees, roles, tips, schedules, splits, restaurants
                     }
                     return [
                       ["Trabalho", counts.work, "var(--green)"], ["Folga", counts.off, "var(--red)"],
+                      ["Freela", counts.freela, "#06b6d4"],
                       ["Compensação", counts.comp, "#3b82f6"], ["Férias", counts.vac, "#8b5cf6"],
                       ["Falta Just.", counts.fj, "#f59e0b"], ["Falta Injust.", counts.fu, "var(--red)"],
                     ].map(([lbl, val, col]) => (
@@ -2305,17 +2320,18 @@ function EmployeePortal({ employees, roles, tips, schedules, splits, restaurants
               const dim = new Date(year, month+1, 0).getDate();
               const STATUS_COLORS = {
                 [DAY_OFF]:      "var(--red)",
+                [DAY_FREELA]:   "#06b6d4",
                 [DAY_COMP]:     "#3b82f6",
                 [DAY_VACATION]: "#8b5cf6",
                 [DAY_FAULT_J]:  "#f59e0b",
                 [DAY_FAULT_U]:  "var(--red)",
               };
               const STATUS_SHORT = {
-                [DAY_OFF]:"F",[DAY_COMP]:"C",[DAY_VACATION]:"Fér",
+                [DAY_OFF]:"F",[DAY_FREELA]:"FL",[DAY_COMP]:"C",[DAY_VACATION]:"Fér",
                 [DAY_FAULT_J]:"FJ",[DAY_FAULT_U]:"FI",
               };
               const LEGEND = [
-                ["var(--green)","Trabalho"],["var(--red)","Folga"],["#3b82f6","Comp."],
+                ["var(--green)","Trabalho"],["var(--red)","Folga"],["#06b6d4","Freela"],["#3b82f6","Comp."],
                 ["#8b5cf6","Férias"],["#f59e0b","F.Just."],["var(--red)","F.Injust."],
               ];
 
@@ -2789,7 +2805,7 @@ const EMP_COLS        = "80px 2fr 1.2fr 100px auto 1.5fr auto";
 const EMP_COLS_HEADER = "80px 2fr 1.2fr 100px auto 1.5fr auto";
 const empInS2 = { background:"var(--bg1)", border:"1px solid var(--border)", borderRadius:6, color:"var(--text)", fontFamily:"'DM Mono',monospace", fontSize:12, padding:"6px 8px", outline:"none", width:"100%", boxSizing:"border-box" };
 
-function EmpRowLine({ emp, isNew, row, restRoles, isSaved, isOwner, onChange, onSave, onToggleInactive, onDelete, onAdd, onResetPin, onToggleProd, employees }) {
+function EmpRowLine({ emp, isNew, row, restRoles, isSaved, isOwner, onChange, onSave, onToggleInactive, onDelete, onAdd, onResetPin, onToggleProd, onToggleFreela, employees }) {
   const ac = "var(--ac)";
   const isInactive = !isNew && emp?.inactive && emp?.inactiveFrom <= today();
   return (
@@ -2832,6 +2848,12 @@ function EmpRowLine({ emp, isNew, row, restRoles, isSaved, isOwner, onChange, on
           <button onClick={onToggleProd} title={emp?.isProducao?"Remover produção":"Marcar como produção"}
             style={{padding:"4px 6px",borderRadius:6,border:`1px solid ${emp?.isProducao?"#ec4899":"var(--border)"}`,background:emp?.isProducao?"#ec489922":"transparent",color:emp?.isProducao?"#ec4899":"var(--text3)",cursor:"pointer",fontSize:11,fontFamily:"'DM Mono',monospace",whiteSpace:"nowrap",flexShrink:0}}>
             🏭
+          </button>
+        )}
+        {!isNew && (
+          <button onClick={onToggleFreela} title={emp?.isFreela?"Remover freela":"Marcar como freela"}
+            style={{padding:"4px 6px",borderRadius:6,border:`1px solid ${emp?.isFreela?"#06b6d4":"var(--border)"}`,background:emp?.isFreela?"#06b6d422":"transparent",color:emp?.isFreela?"#06b6d4":"var(--text3)",cursor:"pointer",fontSize:11,fontFamily:"'DM Mono',monospace",whiteSpace:"nowrap",flexShrink:0}}>
+            🎯
           </button>
         )}
       </div>
@@ -3172,7 +3194,7 @@ Inclua apenas as ações solicitadas. Arrays vazios se não houver ação daquel
         <EmpRowLine isNew emp={null} row={newRow} restRoles={restRoles}
           isSaved={false} isOwner={isOwner}
           onChange={(f,v)=>setNewRow(p=>({...p,[f]:v}))}
-          onAdd={saveNew} onSave={null} onToggleInactive={null} onDelete={null} onResetPin={null} onToggleProd={null} employees={employees}/>
+          onAdd={saveNew} onSave={null} onToggleInactive={null} onDelete={null} onResetPin={null} onToggleProd={null} onToggleFreela={null} employees={employees}/>
       )}
 
       {activeCount >= plano.empMax && (
@@ -3246,6 +3268,9 @@ Inclua apenas as ações solicitadas. Arrays vazios se não houver ação daquel
                   onResetPin={resetPin}
                   onToggleProd={()=>{
                     onUpdate("employees", employees.map(x => x.id===emp.id ? {...x, isProducao:!x.isProducao} : x));
+                  }}
+                  onToggleFreela={()=>{
+                    onUpdate("employees", employees.map(x => x.id===emp.id ? {...x, isFreela:!x.isFreela} : x));
                   }}
                   employees={employees}/>
               );
@@ -3356,10 +3381,12 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
     const activeEmps = restEmps.filter(emp => {
       const r = restRoles.find(r => r.id === emp.roleId);
       if (!r) return false;
+      if (emp.isFreela) return false; // freela nunca entra na gorjeta
       if (emp.admission && emp.admission > date) return false;
       if (emp.inactive && emp.inactiveFrom && emp.inactiveFrom <= date) return false;
       const status = empDayStatus(emp.id);
       if (status === DAY_VACATION) return false; // férias = ninguém entra, nem produção
+      if (status === DAY_FREELA) return false; // freela no dia = não entra
       if (emp.isProducao) return true; // produção entra em todos os outros dias
       if (!status) return true;
       if (status === DAY_COMP) return true;
@@ -3464,9 +3491,11 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
     const activeEmps = allRestEmps.filter(emp => {
       const r = restRoles.find(r => r.id === emp.roleId);
       if (!r || r.noTip) return false;
+      if (emp.isFreela) return false; // freela nunca entra na gorjeta
       if (emp.admission && emp.admission > date) return false;
       const status = empDayStatus(emp.id);
       if (status === DAY_VACATION) return false; // férias = ninguém entra, nem produção
+      if (status === DAY_FREELA) return false; // freela no dia = não entra
       if (emp.isProducao) return true; // produção entra em todos os outros dias
       if (!status) return true; // trabalho = entra
       if (status === DAY_COMP) return true; // compensacao = entra
@@ -3654,7 +3683,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
           const todayTips = monthTips.filter(t => t.date === todayStr);
           const gorjetaHoje = todayTips.length > 0 ? todayTips[0].poolTotal : null;
           const escalaHoje = schedules?.[rid]?.[mk] ?? {};
-          const teamToday = { work:[], off:[], vacation:[], comp:[], faultJ:[], faultU:[] };
+          const teamToday = { work:[], off:[], vacation:[], comp:[], faultJ:[], faultU:[], freela:[] };
           restEmps.forEach(e => {
             const status = (escalaHoje[e.id] ?? {})[todayStr];
             const role = restRoles.find(r => r.id === e.roleId);
@@ -3662,8 +3691,9 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
             const currentSched = sched?.[sched.length-1];
             const dayIdx = new Date(todayStr+"T12:00:00").getDay();
             const dayData = currentSched?.days?.[dayIdx];
-            const entry = { name: e.name.split(" ")[0], role: role?.name, area: role?.area, in: dayData?.in, out: dayData?.out, break: dayData?.break, hasSchedule: !!currentSched && dayData?.active !== false, isProducao: !!e.isProducao };
+            const entry = { name: e.name.split(" ")[0], role: role?.name, area: role?.area, in: dayData?.in, out: dayData?.out, break: dayData?.break, hasSchedule: !!currentSched && dayData?.active !== false, isProducao: !!e.isProducao, isFreela: !!e.isFreela };
             if (status === DAY_OFF) teamToday.off.push(entry);
+            else if (status === DAY_FREELA) teamToday.freela.push(entry);
             else if (status === DAY_VACATION) teamToday.vacation.push(entry);
             else if (status === DAY_COMP) teamToday.comp.push(entry);
             else if (status === DAY_FAULT_J) teamToday.faultJ.push(entry);
@@ -3710,54 +3740,91 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                 </div>
               )}
 
-              {/* Equipe hoje — detalhamento */}
-              {isCurrentMonth && teamToday.work.length + teamToday.off.length + teamToday.vacation.length > 0 && (
-                <div style={{...S.card,marginBottom:14}}>
-                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
-                    <span style={{color:ac,fontWeight:700,fontSize:13}}>👥 Equipe hoje <span style={{color:"var(--text3)",fontWeight:400,fontSize:11}}>({new Date().toLocaleDateString("pt-BR")})</span></span>
-                    <button onClick={()=>setTab("schedule")} style={{...S.btnSecondary,fontSize:11,padding:"4px 10px"}}>Escala →</button>
-                  </div>
-                  {teamToday.work.length > 0 && (
-                    <div style={{marginBottom:8}}>
-                      <div style={{color:"var(--green)",fontSize:11,fontWeight:700,marginBottom:6}}>Trabalhando ({teamToday.work.length})</div>
-                      {teamToday.work.map((e,i) => (
-                        <div key={i} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"4px 0",borderBottom:"1px solid var(--border)",fontSize:12}}>
-                          <div style={{minWidth:0}}>
-                            <span style={{color:"var(--text2)",fontWeight:500}}>{e.name}</span>
-                            {e.isProducao && <span style={{fontSize:10,marginLeft:3}} title="Produção">🏭</span>}
-                            {e.role && <span style={{color:"var(--text3)",fontSize:10,marginLeft:4}}>{e.role}</span>}
-                          </div>
-                          {e.hasSchedule && e.in && e.out
-                            ? <div style={{display:"flex",alignItems:"center",gap:6,flexShrink:0}}>
-                                <span style={{color:"var(--green)",fontSize:10,fontFamily:"'DM Mono',monospace",fontWeight:600}}>{e.in}–{e.out}</span>
-                                {e.break > 0 && <span style={{color:"var(--text3)",fontSize:9,background:"var(--bg2)",padding:"1px 5px",borderRadius:6}}>{e.break}min</span>}
-                              </div>
-                            : <span style={{color:"var(--text3)",fontSize:9,fontStyle:"italic"}}>sem horário</span>
-                          }
+              {/* Equipe hoje — detalhamento por área */}
+              {isCurrentMonth && teamToday.work.length + teamToday.off.length + teamToday.vacation.length + teamToday.freela.length > 0 && (() => {
+                // Separate workers by area, production, and off-duty
+                const byArea = {};
+                AREAS.forEach(a => { byArea[a] = []; });
+                const prodSection = [];
+                teamToday.work.forEach(e => {
+                  if (e.isProducao) prodSection.push(e);
+                  else if (e.area && byArea[e.area]) byArea[e.area].push(e);
+                  else if (e.area) { byArea[e.area] = byArea[e.area] || []; byArea[e.area].push(e); }
+                });
+                // Comp goes into their area too
+                teamToday.comp.forEach(e => {
+                  if (e.isProducao) prodSection.push({...e, isComp:true});
+                  else if (e.area && byArea[e.area]) byArea[e.area].push({...e, isComp:true});
+                });
+                const offSection = [...teamToday.off, ...teamToday.freela.map(e=>({...e,isFreelaDia:true})), ...teamToday.vacation.map(e=>({...e,isVac:true})), ...teamToday.faultJ.map(e=>({...e,isFJ:true})), ...teamToday.faultU.map(e=>({...e,isFU:true}))];
+
+                const EmpLine = ({e,i,color}) => (
+                  <div key={i} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"4px 0",borderBottom:"1px solid var(--border)",fontSize:12}}>
+                    <div style={{minWidth:0}}>
+                      <span style={{color:"var(--text2)",fontWeight:500}}>{e.name}</span>
+                      {e.isProducao && <span style={{fontSize:10,marginLeft:3}} title="Produção">🏭</span>}
+                      {e.isFreela && <span style={{fontSize:10,marginLeft:3}} title="Freela">🎯</span>}
+                      {e.isComp && <span style={{fontSize:9,marginLeft:4,color:"#3b82f6"}}>comp</span>}
+                      {e.isFreelaDia && <span style={{fontSize:9,marginLeft:4,color:"#06b6d4"}}>freela</span>}
+                      {e.isVac && <span style={{fontSize:9,marginLeft:4,color:"#8b5cf6"}}>férias</span>}
+                      {e.isFJ && <span style={{fontSize:9,marginLeft:4,color:"#f59e0b"}}>falta just.</span>}
+                      {e.isFU && <span style={{fontSize:9,marginLeft:4,color:"var(--red)"}}>falta inj.</span>}
+                      {e.role && <span style={{color:"var(--text3)",fontSize:10,marginLeft:4}}>{e.role}</span>}
+                    </div>
+                    {e.hasSchedule && e.in && e.out
+                      ? <div style={{display:"flex",alignItems:"center",gap:6,flexShrink:0}}>
+                          <span style={{color:color||"var(--green)",fontSize:10,fontFamily:"'DM Mono',monospace",fontWeight:600}}>{e.in}–{e.out}</span>
+                          {e.break > 0 && <span style={{color:"var(--text3)",fontSize:9,background:"var(--bg2)",padding:"1px 5px",borderRadius:6}}>{e.break}min</span>}
                         </div>
-                      ))}
+                      : <span style={{color:"var(--text3)",fontSize:9,fontStyle:"italic"}}>sem horário</span>
+                    }
+                  </div>
+                );
+
+                return (
+                  <div style={{...S.card,marginBottom:14}}>
+                    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
+                      <span style={{color:ac,fontWeight:700,fontSize:13}}>👥 Equipe hoje <span style={{color:"var(--text3)",fontWeight:400,fontSize:11}}>({new Date().toLocaleDateString("pt-BR")})</span></span>
+                      <button onClick={()=>setTab("schedule")} style={{...S.btnSecondary,fontSize:11,padding:"4px 10px"}}>Escala →</button>
                     </div>
-                  )}
-                  {teamToday.off.length > 0 && (
-                    <div style={{marginBottom:4}}>
-                      <div style={{color:"var(--red)",fontSize:11,fontWeight:700,marginBottom:2}}>Folga ({teamToday.off.length})</div>
-                      <div style={{color:"var(--text3)",fontSize:11}}>{teamToday.off.map(e=>e.name).join(", ")}</div>
-                    </div>
-                  )}
-                  {teamToday.vacation.length > 0 && (
-                    <div style={{marginBottom:4}}>
-                      <div style={{color:"#8b5cf6",fontSize:11,fontWeight:700,marginBottom:2}}>Férias ({teamToday.vacation.length})</div>
-                      <div style={{color:"var(--text3)",fontSize:11}}>{teamToday.vacation.map(e=>e.name).join(", ")}</div>
-                    </div>
-                  )}
-                  {teamToday.comp.length > 0 && (
-                    <div style={{marginBottom:4}}>
-                      <div style={{color:"#3b82f6",fontSize:11,fontWeight:700,marginBottom:2}}>Compensação ({teamToday.comp.length})</div>
-                      <div style={{color:"var(--text3)",fontSize:11}}>{teamToday.comp.map(e=>e.name).join(", ")}</div>
-                    </div>
-                  )}
-                </div>
-              )}
+                    {/* Áreas */}
+                    {AREAS.map(area => byArea[area].length > 0 && (
+                      <div key={area} style={{marginBottom:8}}>
+                        <div style={{color:AREA_COLORS[area]??"var(--green)",fontSize:11,fontWeight:700,marginBottom:4,display:"flex",alignItems:"center",gap:4}}>
+                          <span style={{width:8,height:8,borderRadius:"50%",background:AREA_COLORS[area],display:"inline-block"}}></span>
+                          {area} ({byArea[area].length})
+                        </div>
+                        {byArea[area].map((e,i) => <EmpLine key={i} e={e} i={i} color={AREA_COLORS[area]} />)}
+                      </div>
+                    ))}
+                    {/* Produção */}
+                    {prodSection.length > 0 && (
+                      <div style={{marginBottom:8}}>
+                        <div style={{color:"#ec4899",fontSize:11,fontWeight:700,marginBottom:4,display:"flex",alignItems:"center",gap:4}}>
+                          <span>🏭</span> Produção ({prodSection.length})
+                        </div>
+                        {prodSection.map((e,i) => <EmpLine key={i} e={e} i={i} color="#ec4899" />)}
+                      </div>
+                    )}
+                    {/* Folga / Freela / Férias / Faltas */}
+                    {offSection.length > 0 && (
+                      <div style={{marginBottom:4}}>
+                        <div style={{color:"var(--text3)",fontSize:11,fontWeight:700,marginBottom:4}}>Fora ({offSection.length})</div>
+                        {offSection.map((e,i) => (
+                          <div key={i} style={{display:"flex",alignItems:"center",gap:4,padding:"2px 0",fontSize:11,color:"var(--text3)"}}>
+                            <span>{e.name}</span>
+                            {e.isFreelaDia && <span style={{fontSize:9,color:"#06b6d4",background:"#06b6d422",padding:"1px 5px",borderRadius:4}}>freela</span>}
+                            {e.isVac && <span style={{fontSize:9,color:"#8b5cf6",background:"#8b5cf622",padding:"1px 5px",borderRadius:4}}>férias</span>}
+                            {e.isFJ && <span style={{fontSize:9,color:"#f59e0b",background:"#f59e0b22",padding:"1px 5px",borderRadius:4}}>falta just.</span>}
+                            {e.isFU && <span style={{fontSize:9,color:"var(--red)",background:"#ef444422",padding:"1px 5px",borderRadius:4}}>falta inj.</span>}
+                            {!e.isFreelaDia && !e.isVac && !e.isFJ && !e.isFU && <span style={{fontSize:9,color:"var(--red)",background:"#ef444422",padding:"1px 5px",borderRadius:4}}>folga</span>}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
 
               <div style={{...S.card, marginBottom:14}}>
                 <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
@@ -4210,11 +4277,12 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                   const { jsPDF } = window.jspdf;
                   const doc = new jsPDF({ orientation:"landscape", unit:"mm", format:"a4" });
                   const daysInMonth = new Date(year, month+1, 0).getDate();
-                  const STATUS_SHORT = {off:"F",comp:"C",vac:"FÉR",faultj:"FJ",faultu:"FI"};
-                  // Colors: work=green, off=red, comp=blue, vac=purple, faultj=orange, faultu=dark red
+                  const STATUS_SHORT = {off:"F",freela:"FL",comp:"C",vac:"FÉR",faultj:"FJ",faultu:"FI"};
+                  // Colors: work=green, off=red, freela=cyan, comp=blue, vac=purple, faultj=orange, faultu=dark red
                   const STATUS_COLORS = {
                     work: [39,174,96],
                     off:  [231,76,60],
+                    freela:[6,182,212],
                     comp: [59,130,246],
                     vac:  [139,92,246],
                     faultj:[245,158,11],
@@ -4229,6 +4297,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                   const legend = [
                     ["T  Trabalho", STATUS_COLORS.work],
                     ["F  Folga", STATUS_COLORS.off],
+                    ["FL  Freela", STATUS_COLORS.freela],
                     ["C  Compensação", STATUS_COLORS.comp],
                     ["FÉR  Férias", STATUS_COLORS.vac],
                     ["FJ  Falta Just.", STATUS_COLORS.faultj],
@@ -4333,7 +4402,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
 
             {/* Legend */}
             <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:12}}>
-              {[["var(--green)","T","Trabalho"],["var(--red)","F","Folga"],["#3b82f6","C","Comp."],["#8b5cf6","Fér","Férias"],["#f59e0b","FJ","Falta Just."],["var(--red)","FI","Falta Injust."]].map(([c,s,l])=>(
+              {[["var(--green)","T","Trabalho"],["var(--red)","F","Folga"],["#06b6d4","FL","Freela"],["#3b82f6","C","Comp."],["#8b5cf6","Fér","Férias"],["#f59e0b","FJ","Falta Just."],["var(--red)","FI","Falta Injust."]].map(([c,s,l])=>(
                 <div key={s} style={{display:"flex",alignItems:"center",gap:3}}>
                   <div style={{width:20,height:16,borderRadius:3,background:c+"33",border:`1px solid ${c}`,display:"flex",alignItems:"center",justifyContent:"center"}}>
                     <span style={{color:c,fontSize:9,fontWeight:700}}>{s}</span>
@@ -4350,7 +4419,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                 const mesNome = monthLabel(year, month);
                 const n = areaEmps.length;
                 if (!n) return;
-                if (!window.confirm(`Reiniciar escala de ${mesNome}?\n\nTodos os ${n} empregado(s) ${schedArea==="Todos"?"":"da área "+schedArea+" "}voltarão ao status "Trabalho" em todos os dias.\n\nIsso remove folgas, férias, faltas e compensações do mês.`)) return;
+                if (!window.confirm(`Reiniciar escala de ${mesNome}?\n\nTodos os ${n} empregado(s) ${schedArea==="Todos"?"":"da área "+schedArea+" "}voltarão ao status "Trabalho" em todos os dias.\n\nIsso remove folgas, freelas, férias, faltas e compensações do mês.`)) return;
                 let newSched = JSON.parse(JSON.stringify(schedules ?? {}));
                 if (!newSched[rid]) newSched[rid] = {};
                 if (!newSched[rid][mk]) newSched[rid][mk] = {};
@@ -4441,13 +4510,14 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
               const daysInMonth = dim;
               const STATUS_COLORS = {
                 [DAY_OFF]:      "var(--red)",
+                [DAY_FREELA]:   "#06b6d4",
                 [DAY_COMP]:     "#3b82f6",
                 [DAY_VACATION]: "#8b5cf6",
                 [DAY_FAULT_J]:  "#f59e0b",
                 [DAY_FAULT_U]:  "var(--red)",
               };
               const STATUS_SHORT = {
-                [DAY_OFF]:"F",[DAY_COMP]:"C",[DAY_VACATION]:"Fér",
+                [DAY_OFF]:"F",[DAY_FREELA]:"FL",[DAY_COMP]:"C",[DAY_VACATION]:"Fér",
                 [DAY_FAULT_J]:"FJ",[DAY_FAULT_U]:"FI",
               };
 
@@ -4493,7 +4563,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                         const role = restRoles.find(r=>r.id===emp.roleId);
                         const dayMap = schedules?.[rid]?.[mk]?.[emp.id] ?? {};
                         let workC=0, offC=0;
-                        Object.values(dayMap).forEach(v=>{ if(v===DAY_OFF||v===DAY_FAULT_J||v===DAY_FAULT_U||v===DAY_VACATION) offC++; });
+                        Object.values(dayMap).forEach(v=>{ if(v===DAY_OFF||v===DAY_FREELA||v===DAY_FAULT_J||v===DAY_FAULT_U||v===DAY_VACATION) offC++; });
                         workC = daysInMonth - offC - Object.values(dayMap).filter(v=>v===DAY_COMP).length;
 
                         const prevEmp = areaEmps[ei-1];
@@ -4620,8 +4690,9 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                     return `Sistema: Pontos Global\nTodos que trabalharam dividem a gorjeta proporcionalmente aos pontos do cargo.\n\nTabela de cargos:\n${linhas}${restRolesSem.length>0?"\n\nSem gorjeta: "+restRolesSem.map(r=>r.name).join(", "):""}`;
                   })(),
                 },
-                { id:"__escala__", tabKey:null, q:"📅 Como funciona a escala e por que ela importa?", a:"A escala registra a presença em cada dia e define quem recebe gorjeta.\n\nRecebe gorjeta: trabalhando normalmente ou compensação (C).\nNÃO recebe: folga, falta injustificada (F) + possível penalidade, falta justificada (FJ), atestado (A), férias (V).\n\nExceção: empregados de produção (🏭) recebem gorjeta todos os dias, exceto férias. Em caso de falta (justificada ou injustificada), sofrem penalidade com percentuais distintos configurados pelo gestor.\n\nImportante: nenhum empregado recebe gorjeta durante férias, incluindo os de produção." },
+                { id:"__escala__", tabKey:null, q:"📅 Como funciona a escala e por que ela importa?", a:"A escala registra a presença em cada dia e define quem recebe gorjeta.\n\nRecebe gorjeta: trabalhando normalmente ou compensação (C).\nNÃO recebe: folga, freela (FL), falta injustificada (F) + penalidade, falta justificada (FJ), atestado (A), férias (V).\n\nExceções:\n• Produção (🏭): recebe gorjeta todos os dias, exceto férias. Penalidade com percentuais distintos para cada tipo de falta.\n• Freela (🎯): nunca participa do rateio de gorjeta.\n• Status Freela no dia: empregado presente mas sem gorjeta naquele dia.\n\nNenhum empregado recebe gorjeta durante férias, incluindo os de produção." },
                 { id:"__producao__", tabKey:null, q:`🏭 O que é empregado de produção?`, a:`Empregados marcados como "Produção" têm regras especiais de gorjeta:\n\n1. Recebem gorjeta TODOS os dias (trabalhando, folga, compensação, etc.)\n2. NÃO recebem gorjeta durante férias — assim como qualquer outro empregado\n3. A distribuição segue os pontos do cargo normalmente\n4. Penalidade por falta injustificada: ${restaurant.producaoPenaltyU??4}% do pool mensal por dia\n5. Penalidade por falta justificada: ${restaurant.producaoPenaltyJ??2}% do pool mensal por dia\n\nExemplo: pool mensal de R$10.000, 2 faltas injustificadas (${restaurant.producaoPenaltyU??4}%) + 1 justificada (${restaurant.producaoPenaltyJ??2}%) → desconto de ${((restaurant.producaoPenaltyU??4)*2+(restaurant.producaoPenaltyJ??2))}% = R$${fmtR2(10000*((restaurant.producaoPenaltyU??4)*2+(restaurant.producaoPenaltyJ??2))/100)}\n\nO status de produção é definido pelo gestor na aba Equipe, usando o ícone 🏭 ao lado do cargo. Pode ser atribuído a empregados de qualquer área.` },
+                { id:"__freela__", tabKey:null, q:"🎯 O que é empregado freela?", a:"Empregados marcados como 'Freela' são colaboradores esporádicos que cobrem a equipe:\n\n1. Aparecem normalmente na escala\n2. Nunca participam do rateio de gorjeta\n3. Cargo e área são atribuídos normalmente\n\nAlém do flag no cadastro, existe o status 'Freela' (FL) na escala: marca um empregado regular como presente sem gorjeta naquele dia (ex: veio cobrir na folga).\n\nDefina o flag na aba Equipe usando o ícone 🎯 ao lado do cargo." },
                 { id:"__dp__", tabKey:"dp", q:"💬 Para que serve o Fale com DP?", a:"Canal direto com o DP. Use para: dúvidas trabalhistas, atestados, documentos, sugestões, elogios e denúncias anônimas. O gestor do DP responde pelo app." },
                 { id:"__comunicados__", tabKey:"comunicados", q:"📢 Como funcionam os comunicados?", a:"Avisos enviados pelo gestor para a equipe. O empregado recebe notificação, lê e confirma com \"Li e entendi\". O gestor acompanha quem confirmou." },
                 { id:"__pin__", tabKey:null, q:"🔐 O que é o PIN e como trocar?", a:"O PIN é a senha de 4 dígitos numéricos. Para login: ID de empregado (ex: LBZ0005) ou CPF + PIN. Para trocar o PIN, solicite ao gestor que faça o reset." },
@@ -5249,6 +5320,7 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }
     ["owners","⭐ Admins AppTip"],
     ["inbox", `📬 Caixa${unreadNotifs > 0 ? ` (${unreadNotifs})` : ""}`],
     ...(isMaster ? [["trash", `🗑️ Lixeira${trashCount > 0 ? ` (${trashCount})` : ""}`]] : []),
+    ["changelog", "📋 Versões"],
   ];
 
   if (selRestaurant) {
@@ -6639,6 +6711,72 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }
             </div>
           );
         })()}
+
+        {tab === "changelog" && (() => {
+          const CHANGELOG = [
+            { version:"5.2.0", date:"2026-04-12", items:[
+              "Novo status de escala: FREELA — empregado presente mas sem gorjeta",
+              "Novo flag de empregado: Freela (🎯) — nunca participa do rateio de gorjeta",
+              "Dashboard de equipe separado por áreas (Bar, Cozinha, Salão, Limpeza), Produção e Fora",
+              "Log de versões (esta aba) exclusivo para administradores",
+              "Penalidade de produção: percentuais separados para falta justificada e injustificada",
+              "Férias exclui todos os empregados da gorjeta, incluindo produção",
+            ]},
+            { version:"5.1.0", date:"2026-04-10", items:[
+              "Produção deixa de ser área e passa a ser flag no empregado (🏭)",
+              "Penalidade de produção com percentual configurável (padrão 4%)",
+              "PIN de 4 dígitos para gestores e empregados com login unificado",
+              "Forçar troca de PIN no primeiro acesso do gestor",
+              "IA de cadastro de empregados com preview, edição e inativação",
+              "Matching fuzzy de cargos na IA de cadastro",
+              "FAQ de produção para empregados e gestores",
+              "Guia do Gestor atualizado com produção e penalidades",
+            ]},
+            { version:"5.0.0", date:"2026-04-06", items:[
+              "Rewrite completo: React 18 single-file architecture",
+              "Sistema de gorjetas com modo Área+Pontos e Global Pontos",
+              "Escala mensal com status: trabalho, folga, compensação, férias, faltas",
+              "Gestão de cargos com pontos e áreas",
+              "FAQ inteligente para empregados",
+              "Guia do Gestor interativo",
+              "Fale com DP (canal direto empregado-gestor)",
+              "Comunicados com confirmação de leitura",
+              "Horários contratuais com geração automática de escala",
+              "Penalidade por falta injustificada por área",
+              "Export PDF/CSV de gorjetas e escala",
+              "Painel administrativo com dashboard financeiro",
+              "Sistema de notificações e caixa de entrada",
+              "Tema claro/escuro",
+            ]},
+          ];
+          return (
+            <div>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}}>
+                <h3 style={{color:ac,fontSize:16,fontWeight:700,margin:0}}>📋 Log de Versões</h3>
+                <span style={{color:"var(--text3)",fontSize:12}}>Versão atual: <strong style={{color:ac}}>{APP_VERSION}</strong></span>
+              </div>
+              {CHANGELOG.map((v,vi) => (
+                <div key={v.version} style={{...S.card,marginBottom:12,border:vi===0?`1px solid ${ac}33`:"1px solid var(--border)"}}>
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
+                    <div style={{display:"flex",alignItems:"center",gap:8}}>
+                      <span style={{background:vi===0?ac:"var(--text3)",color:vi===0?"#fff":"var(--bg)",padding:"2px 10px",borderRadius:20,fontSize:12,fontWeight:700,fontFamily:"'DM Mono',monospace"}}>v{v.version}</span>
+                      {vi===0 && <span style={{background:"#10b98133",color:"var(--green)",padding:"2px 8px",borderRadius:10,fontSize:10,fontWeight:700}}>ATUAL</span>}
+                    </div>
+                    <span style={{color:"var(--text3)",fontSize:11}}>{new Date(v.date+"T12:00:00").toLocaleDateString("pt-BR",{day:"numeric",month:"long",year:"numeric"})}</span>
+                  </div>
+                  <div style={{display:"flex",flexDirection:"column",gap:4}}>
+                    {v.items.map((item,ii) => (
+                      <div key={ii} style={{display:"flex",gap:6,alignItems:"flex-start",fontSize:12,color:"var(--text2)"}}>
+                        <span style={{color:vi===0?ac:"var(--text3)",fontSize:10,marginTop:2}}>•</span>
+                        <span>{item}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          );
+        })()}
       </div>
 
       {/* Modals */}
@@ -7953,7 +8091,7 @@ hr{border:none;border-top:1px solid var(--border);margin:24px 0}
       <div class="card"><h3>Como preencher</h3>
         <div class="steps">
           <div class="step"><div class="sn">1</div><div class="sc"><strong>Filtre por área</strong><p>Salão, Cozinha, Bar, Limpeza.</p></div></div>
-          <div class="step"><div class="sn">2</div><div class="sc"><strong>Marque os dias</strong><p><span class="tag gr">✓</span> trabalhado · <strong>F</strong> falta injustificada · <strong>FJ</strong> justificada · <strong>A</strong> atestado · <strong>V</strong> férias</p></div></div>
+          <div class="step"><div class="sn">2</div><div class="sc"><strong>Marque os dias</strong><p><span class="tag gr">✓</span> trabalhado · <strong>F</strong> folga · <strong>FL</strong> freela (presente sem gorjeta) · <strong>C</strong> compensação · <strong>FJ</strong> falta justificada · <strong>FI</strong> falta injustificada · <strong>V</strong> férias</p></div></div>
           <div class="step"><div class="sn">3</div><div class="sc"><strong>Salvo automaticamente</strong><p>Sem botão de confirmação — cada clique salva.</p></div></div>
         </div>
         <div class="ib tip"><span class="ico">💡</span><span>Empregados com horário contratual cadastrado em Horários têm a escala base gerada automaticamente. Você só ajusta as exceções.</span></div>
@@ -7999,6 +8137,16 @@ hr{border:none;border-top:1px solid var(--border);margin:24px 0}
           <tr><td>Configuração</td><td>Os percentuais de penalidade são configuráveis em <strong>Configurações → Penalidade por Falta</strong></td></tr>
         </table>
         <div class="ib tip"><span class="ico">💡</span><span>Use esse flag para empregados que participam da produção geral do restaurante e devem receber gorjeta diariamente, independente da escala individual.</span></div>
+      </div>
+      <div class="card"><h3>🎯 Empregado Freela <span class="new">NOVO</span></h3>
+        <p>Empregados podem ser marcados como "Freela" usando o botão 🎯 ao lado do cargo na tabela de equipe. São colaboradores esporádicos que cobrem a equipe.</p>
+        <table>
+          <tr><th>Regra</th><th>Descrição</th></tr>
+          <tr><td>Gorjeta</td><td><strong>Nunca</strong> participa do rateio de gorjeta, independente do status na escala</td></tr>
+          <tr><td>Escala</td><td>Aparece normalmente na escala e pode ser escalado em qualquer dia</td></tr>
+          <tr><td>Cargo</td><td>Cargo e área são atribuídos normalmente, mas os pontos não contam para gorjeta</td></tr>
+        </table>
+        <div class="ib blue"><span class="ico">📐</span><span>Além do flag no cadastro, existe o status "Freela" (FL) na escala: marca um empregado regular como presente sem gorjeta naquele dia — útil para quem estava de folga e resolveu cobrir.</span></div>
       </div>
       <div class="card"><h3>Inativar empregado</h3><p>Ao inativar, o empregado perde o acesso imediatamente. O histórico de gorjetas é preservado. É possível reativar na aba "Inativos" a qualquer momento.</p></div>
       <div class="card"><h3>Limite do plano</h3>
