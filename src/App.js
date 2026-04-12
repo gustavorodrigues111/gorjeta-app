@@ -2861,15 +2861,15 @@ function EmpRowLine({ emp, isNew, row, restRoles, isSaved, isOwner, onChange, on
       <input value={row.cpf||""} onChange={ev=>onChange("cpf",maskCpf(ev.target.value))} placeholder="000.000.000-00" style={empInS2} inputMode="numeric"/>
       <input type="date" value={row.admission||""} onChange={ev=>onChange("admission",ev.target.value)} style={empInS2}/>
 
-      {/* PIN — campo + botão resetar */}
-      <div style={{display:"flex",gap:4,alignItems:"center"}}>
-        <input type="password" value={row.pin||""} onChange={ev=>onChange("pin",ev.target.value)} maxLength={4} placeholder="••••"
-          style={{...empInS2,width:70,flexShrink:0}}/>
-        {!isNew && isOwner && (
+      {/* PIN — botão resetar */}
+      <div style={{display:"flex",gap:4,alignItems:"center",justifyContent:"center"}}>
+        {!isNew ? (
           <button onClick={()=>onResetPin(emp)} title="Resetar PIN para o código do empregado"
-            style={{padding:"5px 8px",borderRadius:6,border:"1px solid #f59e0b44",background:"transparent",color:"#f59e0b",cursor:"pointer",fontSize:10,fontFamily:"'DM Mono',monospace",whiteSpace:"nowrap"}}>
-            🔑
+            style={{padding:"5px 12px",borderRadius:6,border:"1px solid #f59e0b44",background:"#f59e0b11",color:"#f59e0b",cursor:"pointer",fontSize:11,fontFamily:"'DM Mono',monospace",whiteSpace:"nowrap",display:"flex",alignItems:"center",gap:4}}>
+            🔑 Resetar
           </button>
+        ) : (
+          <span style={{color:"var(--text3)",fontSize:10}}>Auto</span>
         )}
       </div>
 
@@ -3075,7 +3075,7 @@ Inclua apenas as ações solicitadas. Arrays vazios se não houver ação daquel
   const list = showInactive ? inactiveEmps : activeEmps;
 
   function getRow(emp) {
-    return { name:emp.name||"", cpf:emp.cpf||"", admission:emp.admission||"", pin:emp.pin||"", roleId:emp.roleId||"", inactiveFrom:emp.inactiveFrom||"", ...(editRows[emp.id]??{}) };
+    return { name:emp.name||"", cpf:emp.cpf||"", admission:emp.admission||"", roleId:emp.roleId||"", inactiveFrom:emp.inactiveFrom||"", ...(editRows[emp.id]??{}) };
   }
 
   function setField(id, field, val) {
@@ -3084,9 +3084,9 @@ Inclua apenas as ações solicitadas. Arrays vazios se não houver ação daquel
 
   function saveEmp(emp) {
     setEditRows(prev => {
-      const row = { name:emp.name||"", cpf:emp.cpf||"", admission:emp.admission||"", pin:emp.pin||"", roleId:emp.roleId||"", inactiveFrom:emp.inactiveFrom||"", ...(prev[emp.id]??{}) };
+      const row = { name:emp.name||"", cpf:emp.cpf||"", admission:emp.admission||"", roleId:emp.roleId||"", inactiveFrom:emp.inactiveFrom||"", ...(prev[emp.id]??{}) };
       if (!row.name.trim()) return prev;
-      onUpdate("employees", employees.map(x => x.id===emp.id ? {...emp, name:row.name.trim(), cpf:row.cpf, admission:row.admission, pin:row.pin, roleId:row.roleId, inactiveFrom:row.inactiveFrom} : x));
+      onUpdate("employees", employees.map(x => x.id===emp.id ? {...emp, name:row.name.trim(), cpf:row.cpf, admission:row.admission, roleId:row.roleId, inactiveFrom:row.inactiveFrom} : x));
       setSaved(p=>({...p,[emp.id]:true}));
       setTimeout(()=>setSaved(p=>({...p,[emp.id]:false})),1500);
       return prev;
@@ -3222,7 +3222,7 @@ Inclua apenas as ações solicitadas. Arrays vazios se não houver ação daquel
 
       {/* Cabeçalho */}
       <div style={{display:"grid",gridTemplateColumns:EMP_COLS,gap:6,padding:"4px 8px",marginBottom:4}}>
-        {["ID","Nome","CPF","Admissão","PIN","Cargo",""].map(h=>(
+        {["ID","Nome","CPF","Admissão","🔑","Cargo",""].map(h=>(
           <div key={h} style={{color:"var(--text3)",fontSize:10,fontWeight:700}}>{h}</div>
         ))}
       </div>
