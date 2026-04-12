@@ -6801,38 +6801,61 @@ function UnifiedLogin({ owners, managers, employees, restaurants, onLoginOwner, 
     const cleanCpf = clean.replace(/\D/g,"");
     const cleanPin = pin.trim();
 
-    // Coletar todos os papéis que batem com CPF/PIN
-    const found = [];
-
     if (!isEmpId) {
-      // Supergestor
+      // 1) Admin AppTip — acesso direto, sem tela de escolha
       const superUser = owners.find(s => s.cpf?.replace(/\D/g,"") === cleanCpf && String(s.pin) === cleanPin);
-      if (superUser) found.push({ label:"Admin AppTip", icon:"⭐", action:()=>{ setChoices(null); onLoginOwner(superUser); } });
+      if (superUser) { setErr(""); setAttempts(0); onLoginOwner(superUser); return; }
 
-      // Gestor (aceita PIN do gestor OU PIN do empregado com mesmo CPF)
-      const empByCpf = employees.find(e => e.cpf?.replace(/\D/g,"") === cleanCpf);
-      const mgr = managers.find(m => m.cpf?.replace(/\D/g,"") === cleanCpf && (String(m.pin) === cleanPin || (empByCpf && String(empByCpf.pin) === cleanPin)));
+      // 2) Buscar empregado e gestor pelo mesmo CPF (login unificado)
+      const emp = employees.find(e => e.cpf?.replace(/\D/g,"") === cleanCpf);
+      const mgr = managers.find(m => m.cpf?.replace(/\D/g,"") === cleanCpf);
+
+      // PIN unificado: aceita PIN do empregado OU do gestor
+      const pinMatch = (emp && String(emp.pin) === cleanPin) || (mgr && String(mgr.pin) === cleanPin);
+
+      if (!pinMatch) {
+        // Falhou
+        const na = attempts + 1;
+        setAttempts(na);
+        if (na >= 5) {
+          setBlockedUntil(new Date(Date.now() + 30000));
+          setAttempts(0);
+          setErr("Muitas tentativas. Aguarde 30 segundos.");
+        } else {
+          setErr(`Credenciais incorretas. ${5-na} tentativa${5-na!==1?"s":""} restante${5-na!==1?"s":""}.`);
+        }
+        return;
+      }
+
+      // PIN bateu — montar opções
+      const found = [];
+
       if (mgr) {
-        // Gestor sempre consegue logar — bloqueio por inadimplência acontece dentro do portal
         found.push({ label:"Gestor", icon:"📊", action:()=>{ setChoices(null); onLoginManager(mgr); } });
       }
 
-      // Empregado por CPF (aceita PIN do empregado, do gestor OU do supergestor com mesmo CPF)
-      const superByCpf = owners.find(s => s.cpf?.replace(/\D/g,"") === cleanCpf);
-      const mgrByCpf = managers.find(m => m.cpf?.replace(/\D/g,"") === cleanCpf);
-      const emp = employees.find(e => e.cpf?.replace(/\D/g,"") === cleanCpf && (
-        String(e.pin) === cleanPin ||
-        (mgrByCpf && String(mgrByCpf.pin) === cleanPin) ||
-        (superByCpf && String(superByCpf.pin) === cleanPin)
-      ));
       if (emp && !(emp.inactive && emp.inactiveFrom && emp.inactiveFrom <= today())) {
-        // Verifica inadimplência do restaurante
         const restDoEmp = restaurants.find(r=>r.id===emp.restaurantId);
         if (restDoEmp?.financeiro?.status === "inadimplente") {
-          setErr("⚠️ O acesso ao sistema está suspenso. Entre em contato com o administrador do restaurante.");
-          return;
+          if (!mgr) { setErr("⚠️ O acesso ao sistema está suspenso. Entre em contato com o administrador do restaurante."); return; }
+          // Se é gestor+empregado e restaurante inadimplente, permite só gestor
+        } else {
+          found.push({ label:"Empregado", icon:"👤", action:()=>{ setChoices(null); localStorage.setItem("apptip_empid", emp.id); localStorage.setItem("apptip_userid", emp.id); onLoginEmployee(emp); } });
         }
-        found.push({ label:"Empregado", icon:"👤", action:()=>{ setChoices(null); localStorage.setItem("apptip_empid", emp.id); localStorage.setItem("apptip_userid", emp.id); onLoginEmployee(emp); } });
+      }
+
+      if (found.length === 1) { setErr(""); setAttempts(0); found[0].action(); return; }
+      if (found.length > 1) {
+        const name = mgr?.name ?? emp?.name ?? "Usuário";
+        setErr(""); setAttempts(0); setChoices({ name, options: found }); return;
+      }
+      if (found.length === 0) {
+        // CPF existe mas sem papel ativo
+        const na = attempts + 1;
+        setAttempts(na);
+        if (na >= 5) { setBlockedUntil(new Date(Date.now() + 30000)); setAttempts(0); setErr("Muitas tentativas. Aguarde 30 segundos."); }
+        else setErr(`Credenciais incorretas. ${5-na} tentativa${5-na!==1?"s":""} restante${5-na!==1?"s":""}.`);
+        return;
       }
     } else {
       // Por ID — sempre empregado
@@ -6845,31 +6868,11 @@ function UnifiedLogin({ owners, managers, employees, restaurants, onLoginOwner, 
         localStorage.setItem("apptip_userid", emp.id);
         setErr(""); setAttempts(0); onLoginEmployee(emp); return;
       }
-    }
-
-    if (found.length === 1) {
-      setErr(""); setAttempts(0); found[0].action(); return;
-    }
-
-    if (found.length > 1) {
-      const cleanCpfForName = credential.replace(/\D/g,"");
-      const name =
-        owners.find(s => s.cpf?.replace(/\D/g,"") === cleanCpfForName)?.name ??
-        managers.find(m => m.cpf?.replace(/\D/g,"") === cleanCpfForName)?.name ??
-        employees.find(e => e.cpf?.replace(/\D/g,"") === cleanCpfForName)?.name ??
-        "Usuário";
-      setErr(""); setAttempts(0); setChoices({ name, options: found }); return;
-    }
-
-    // Falhou
-    const na = attempts + 1;
-    setAttempts(na);
-    if (na >= 5) {
-      setBlockedUntil(new Date(Date.now() + 30000));
-      setAttempts(0);
-      setErr("Muitas tentativas. Aguarde 30 segundos.");
-    } else {
-      setErr(`Credenciais incorretas. ${5-na} tentativa${5-na!==1?"s":""} restante${5-na!==1?"s":""}.`);
+      // Falhou
+      const na = attempts + 1;
+      setAttempts(na);
+      if (na >= 5) { setBlockedUntil(new Date(Date.now() + 30000)); setAttempts(0); setErr("Muitas tentativas. Aguarde 30 segundos."); }
+      else setErr(`Credenciais incorretas. ${5-na} tentativa${5-na!==1?"s":""} restante${5-na!==1?"s":""}.`);
     }
   }
 
