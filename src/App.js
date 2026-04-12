@@ -8006,6 +8006,14 @@ export default function App() {
     setView("login");
   }
 
+  // Fallback: se carregou mas sessão ficou sem usuário, redireciona pro login
+  useEffect(() => {
+    if (loaded && !currentUser && (view === "super" || view === "manager")) {
+      console.warn("Sessão inválida: view="+view+" sem currentUser. Redirecionando para login.");
+      doLogout();
+    }
+  }, [loaded, currentUser, view]); // eslint-disable-line react-hooks/exhaustive-deps
+
   if (!loaded) return (
     <div style={{minHeight:"100vh",background:"var(--bg)",display:"flex",alignItems:"center",justifyContent:"center",flexDirection:"column",gap:16}}>
       <div style={{fontSize:32}}>🍽️</div>
