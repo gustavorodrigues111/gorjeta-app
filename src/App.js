@@ -3139,6 +3139,11 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
 
   const [showExport, setShowExport]       = useState(false);
 
+  // DP gestor management
+  const [dpMgrModal, setDpMgrModal] = useState(false);
+  const [dpMgrEdit, setDpMgrEdit]   = useState(null);
+  const [dpMgrForm, setDpMgrForm]   = useState({name:"",cpf:"",pin:"",restaurantIds:[rid],perms:{tips:true,schedule:true},isDP:false,profile:"custom",areas:[]});
+
   // Config local state — save button approach
   const [localTabsConfig, setLocalTabsConfig] = useState(null); // admin: null means unchanged
   const [localTabsGestor, setLocalTabsGestor] = useState(null); // manager: null means unchanged
@@ -3373,6 +3378,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
     (isOwner || tabVisible("comunicados"))        && ["comunicados", "📢 Comunicados"],
     (isOwner || tabVisible("dp"))                && ["dp",          "💬 Fale com DP"],
     isDP                                       && ["notificacoes",`📬 Caixa${inboxUnread>0?` (${inboxUnread})`:""}`],
+    isDP                                       && ["dp_gestores", "👔 Gestores"],
     (canTips || isOwner)                       && ["config",       "⚙️ Configurações"],
   ].filter(Boolean);
 
@@ -4539,6 +4545,179 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
           <NotificacoesTab restaurantId={rid} dpMessages={data?.dpMessages??[]} notifications={data?.notifications??[]} onUpdate={onUpdate} />
         )}
 
+
+        {/* GESTORES (DP) */}
+        {tab === "dp_gestores" && isDP && (() => {
+          const managers = data?.managers ?? [];
+          const myId = currentUser?.id;
+          const myRestIds = currentUser?.restaurantIds ?? [];
+          const restMgrs = managers.filter(m => (m.restaurantIds??[]).includes(rid) && m.id !== myId);
+          const canEdit = (m) => m.createdBy === myId;
+
+          return (
+            <div style={{padding:"24px",maxWidth:700,margin:"0 auto"}}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20}}>
+                <div>
+                  <h3 style={{color:"var(--text)",fontSize:16,fontWeight:700,margin:"0 0 4px"}}>Gestores do restaurante</h3>
+                  <p style={{color:"var(--text3)",fontSize:12,margin:0}}>Crie e gerencie gestores para este restaurante</p>
+                </div>
+                <button onClick={()=>{
+                  setDpMgrEdit(null);
+                  setDpMgrForm({name:"",cpf:"",pin:"",restaurantIds:[rid],perms:{tips:true,schedule:true},isDP:false,profile:"custom",areas:[]});
+                  setDpMgrModal(true);
+                }} style={{...S.btnPrimary,width:"auto",padding:"10px 20px"}}>+ Novo Gestor</button>
+              </div>
+
+              {restMgrs.length === 0 && (
+                <div style={{...S.card,textAlign:"center",padding:40}}>
+                  <div style={{fontSize:36,marginBottom:12}}>👔</div>
+                  <p style={{color:"var(--text3)",fontSize:14}}>Nenhum outro gestor neste restaurante.</p>
+                </div>
+              )}
+
+              {restMgrs.map(m => {
+                const profileLabel = m.profile==="dp"?"📬 DP":m.profile==="lider"?"👔 Líder":"⚙️ Custom";
+                const mine = canEdit(m);
+                return (
+                  <div key={m.id} style={{...S.card,marginBottom:10,display:"flex",justifyContent:"space-between",alignItems:"center",gap:12}}>
+                    <div>
+                      <div style={{color:"var(--text)",fontWeight:700,fontSize:14}}>{m.name}</div>
+                      <div style={{color:"var(--text3)",fontSize:11}}>
+                        {profileLabel}
+                        {m.profile==="lider" && (m.areas??[]).length>0 && ` · ${m.areas.join(", ")}`}
+                        {m.cpf && ` · ${m.cpf}`}
+                      </div>
+                      {!mine && <div style={{color:"var(--text3)",fontSize:10,marginTop:2,fontStyle:"italic"}}>Criado pelo admin</div>}
+                    </div>
+                    {mine && (
+                      <div style={{display:"flex",gap:6,flexShrink:0}}>
+                        <button onClick={()=>{
+                          setDpMgrEdit(m.id);
+                          setDpMgrForm({name:m.name,cpf:m.cpf??"",pin:m.pin??"",restaurantIds:m.restaurantIds??[],perms:m.perms??{tips:true,schedule:true},isDP:m.isDP??false,profile:m.profile??"custom",areas:m.areas??[]});
+                          setDpMgrModal(true);
+                        }} style={{...S.btnSecondary,fontSize:11,padding:"5px 12px"}}>Editar</button>
+                        <button onClick={()=>{
+                          if(!window.confirm(`Excluir gestor "${m.name}"?`)) return;
+                          onUpdate("managers",managers.filter(x=>x.id!==m.id));
+                          onUpdate("_toast",`🗑️ ${m.name} excluído`);
+                        }} style={{...S.btnSecondary,fontSize:11,padding:"5px 10px",color:"var(--red)",borderColor:"var(--red)44"}}>✕</button>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          );
+        })()}
+
+        {/* Modal novo gestor (DP) */}
+        {dpMgrModal && isDP && (
+          <Modal title={dpMgrEdit?"Editar Gestor":"Novo Gestor"} onClose={()=>setDpMgrModal(false)} wide>
+            <div style={{display:"flex",flexDirection:"column",gap:12}}>
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+                <div><label style={S.label}>Nome completo</label><input value={dpMgrForm.name} onChange={e=>setDpMgrForm({...dpMgrForm,name:e.target.value})} style={S.input}/></div>
+                <div><label style={S.label}>CPF *</label><input value={dpMgrForm.cpf} onChange={e=>setDpMgrForm({...dpMgrForm,cpf:maskCpf(e.target.value)})} placeholder="000.000.000-00" style={S.input} inputMode="numeric"/></div>
+              </div>
+              <div><label style={S.label}>PIN (4–6 dígitos)</label><input type="password" value={dpMgrForm.pin} onChange={e=>setDpMgrForm({...dpMgrForm,pin:e.target.value})} maxLength={6} style={S.input}/></div>
+
+              {/* Perfil */}
+              <div>
+                <label style={S.label}>Perfil do gestor</label>
+                <div style={{display:"flex",flexDirection:"column",gap:8}}>
+                  {[
+                    {id:"dp",icon:"📬",title:"DP (Departamento Pessoal)",desc:"Acesso completo: gorjetas, escala, cargos, equipe, comunicados, FAQ, DP e notificações."},
+                    {id:"lider",icon:"👔",title:"Líder de Área",desc:"Acesso à escala e equipe da(s) sua(s) área(s). Sem gorjetas, sem DP."},
+                    {id:"custom",icon:"⚙️",title:"Personalizado",desc:"Escolha as permissões manualmente."},
+                  ].map(p=>{
+                    const on = dpMgrForm.profile === p.id;
+                    return (
+                      <button key={p.id} onClick={()=>{
+                        const presets = {
+                          dp: {perms:{tips:true,schedule:true,roles:true,employees:true,comunicados:true,faq:true,dp:true,horarios:true},isDP:true,areas:[]},
+                          lider: {perms:{tips:false,schedule:true,roles:false,employees:true,comunicados:true,faq:true,dp:false,horarios:false},isDP:false},
+                          custom: {isDP:dpMgrForm.isDP},
+                        };
+                        setDpMgrForm(f=>({...f,...presets[p.id],profile:p.id,areas:p.id==="lider"?f.areas:[]}));
+                      }}
+                        style={{width:"100%",padding:"12px 14px",borderRadius:10,border:`1px solid ${on?ac:"var(--border)"}`,background:on?"var(--ac-bg)":"transparent",color:on?"var(--ac-text)":"var(--text3)",cursor:"pointer",fontFamily:"'DM Sans',sans-serif",fontSize:13,textAlign:"left",display:"flex",alignItems:"center",gap:10}}>
+                        <span style={{fontSize:18}}>{p.icon}</span>
+                        <div>
+                          <div style={{fontWeight:700}}>{on?"✓ ":""}{p.title}</div>
+                          <div style={{fontSize:11,opacity:0.7,marginTop:2}}>{p.desc}</div>
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Áreas Líder */}
+              {dpMgrForm.profile === "lider" && (
+                <div>
+                  <label style={S.label}>Áreas do líder</label>
+                  <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+                    {AREAS.map(a=>{
+                      const on = (dpMgrForm.areas??[]).includes(a);
+                      return <button key={a} onClick={()=>setDpMgrForm(f=>({...f,areas:on?f.areas.filter(x=>x!==a):[...(f.areas??[]),a]}))}
+                        style={{padding:"8px 16px",borderRadius:20,border:`1px solid ${on?AREA_COLORS[a]??"#555":"var(--border)"}`,background:on?(AREA_COLORS[a]??"#555")+"22":"transparent",color:on?AREA_COLORS[a]??"var(--text)":"var(--text3)",cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:12,fontWeight:on?700:400}}>
+                        {on?"✓ ":""}{a}
+                      </button>;
+                    })}
+                  </div>
+                  {(dpMgrForm.areas??[]).length===0 && <p style={{color:"var(--red)",fontSize:11,marginTop:6}}>Selecione pelo menos uma área.</p>}
+                </div>
+              )}
+
+              {/* Custom perms */}
+              {dpMgrForm.profile === "custom" && (
+                <div>
+                  <label style={S.label}>Permissões</label>
+                  <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+                    {[["tips","💸 Gorjetas"],["schedule","📅 Escala"],["roles","🏷️ Cargos"],["employees","👥 Equipe"],["comunicados","📢 Comunicados"],["faq","❓ FAQ"],["dp","💬 Fale c/ DP"],["horarios","🕐 Horários"]].map(([k,lbl])=>{
+                      const on = dpMgrForm.perms?.[k] !== false;
+                      return (
+                        <button key={k} onClick={()=>setDpMgrForm({...dpMgrForm,perms:{...dpMgrForm.perms,[k]:!on}})}
+                          style={{padding:"10px",borderRadius:10,border:`1px solid ${on?"var(--green)":"var(--border)"}`,background:on?"var(--green-bg)":"transparent",color:on?"var(--green)":"var(--text3)",cursor:"pointer",fontFamily:"'DM Sans',sans-serif",fontSize:12,textAlign:"left"}}>
+                          {on?"✓":"○"} {lbl}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {/* Restaurantes */}
+              {(currentUser?.restaurantIds??[]).length > 1 && (
+                <div>
+                  <label style={S.label}>Restaurantes com acesso</label>
+                  <div style={{display:"flex",flexDirection:"column",gap:6}}>
+                    {restaurants.filter(r=>(currentUser?.restaurantIds??[]).includes(r.id)).map(r=>{
+                      const sel = (dpMgrForm.restaurantIds??[]).includes(r.id);
+                      return (
+                        <button key={r.id} onClick={()=>setDpMgrForm(f=>({...f,restaurantIds:sel?f.restaurantIds.filter(x=>x!==r.id):[...(f.restaurantIds??[]),r.id]}))}
+                          style={{padding:"10px 14px",borderRadius:10,border:`1px solid ${sel?ac:"var(--border)"}`,background:sel?"var(--ac-bg)":"transparent",color:sel?"var(--ac-text)":"var(--text3)",cursor:"pointer",fontFamily:"'DM Sans',sans-serif",fontSize:13,textAlign:"left"}}>
+                          {sel?"✓":"○"} {r.name} {r.id===rid?"(atual)":""}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              <button onClick={()=>{
+                if(!dpMgrForm.name.trim()||!dpMgrForm.pin.trim()) { onUpdate("_toast","⚠️ Nome e PIN são obrigatórios"); return; }
+                const cpfDigits = (dpMgrForm.cpf??"").replace(/\D/g,"");
+                if(cpfDigits.length<11) { onUpdate("_toast","⚠️ CPF é obrigatório (11 dígitos)"); return; }
+                if(dpMgrForm.profile==="lider"&&(dpMgrForm.areas??[]).length===0) { onUpdate("_toast","⚠️ Selecione pelo menos uma área"); return; }
+                const managers = data?.managers ?? [];
+                const m = { ...dpMgrForm, id: dpMgrEdit ?? Date.now().toString(), createdBy: currentUser?.id };
+                onUpdate("managers", dpMgrEdit ? managers.map(x=>x.id===dpMgrEdit?{...x,...m}:x) : [...managers,m]);
+                setDpMgrModal(false);
+                onUpdate("_toast", dpMgrEdit?"✅ Gestor atualizado":"✅ Gestor criado");
+              }} style={S.btnPrimary}>{dpMgrEdit?"Salvar":"Criar Gestor"}</button>
+            </div>
+          </Modal>
+        )}
 
         {/* CONFIG */}
         {tab === "config" && (
