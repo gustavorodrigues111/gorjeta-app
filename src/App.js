@@ -1,4 +1,4 @@
-// AppTip v4.9 — 2026-04-11 — escala 100% manual: removida IA, adicionado férias por formulário e reiniciar escala
+// AppTip v5.0 — 2026-04-11 — cadastro de horários reescrito: mobile-first, toggles trabalha/folga, rascunho automático, templates
 import { useState, useEffect } from "react";
 import { db } from "./firebase";
 import { doc, getDoc, setDoc, deleteDoc, collection, getDocs } from "firebase/firestore";
@@ -110,6 +110,8 @@ const K = {
   notifications: "v4:notifications",
   noTipDays:     "v4:noTipDays",
   trash:         "v4:trash",           // {restaurants:[], managers:[], employees:[]}
+  schedTemplates:"v4:schedTemplates",  // {[restaurantId]: [{id,name,days}]}
+  schedDrafts:   "v4:schedDrafts",     // {[restaurantId]: {[empId]: {days,savedAt}}}
 };
 
 //
@@ -1290,54 +1292,154 @@ function validateWeekSchedule(days) {
 }
 
 // ── Work Schedule Manager Tab ─────────────────────────────────────────────────
-function WorkScheduleManagerTab({ restaurantId, employees, workSchedules, notifications, managers, currentManagerName, onUpdate, communications, isOwner }) {
+function WorkScheduleManagerTab({ restaurantId, employees, workSchedules, notifications, managers, currentManagerName, onUpdate, communications, isOwner, schedTemplates, schedDrafts }) {
   const ac = "var(--ac)";
   const restEmps = employees.filter(e => e.restaurantId === restaurantId && !e.inactive);
-  const [selEmpId, setSelEmpId] = useState(null);
-  const [editDays, setEditDays] = useState({});
-  const [errors, setErrors] = useState([]);
-  const [showValidFrom, setShowValidFrom] = useState(false);
-  const [validFrom, setValidFrom] = useState(today());
+
+  // ── State ──
+  const [selEmpId, setSelEmpId]             = useState(null);
+  const [editDays, setEditDays]             = useState({});   // {dayIdx: {active:bool, in?, out?, break?}}
+  const [errors, setErrors]                 = useState([]);
+  const [showValidFrom, setShowValidFrom]   = useState(false);
+  const [validFrom, setValidFrom]           = useState(today());
   const [selectedSchedIds, setSelectedSchedIds] = useState(new Set());
+  const [showTemplates, setShowTemplates]   = useState(false);
+  const [tplName, setTplName]               = useState("");
+  const [draftSaved, setDraftSaved]         = useState(false);
 
   const selEmp = restEmps.find(e => e.id === selEmpId);
   const empSchedules = workSchedules?.[restaurantId]?.[selEmpId] ?? [];
-  const currentSched = empSchedules[empSchedules.length - 1];
 
+  // ── Helpers: convert between internal format (with active flag) and storage format ──
+  function toInternal(storedDays) {
+    const out = {};
+    for (let i = 0; i < 7; i++) {
+      const d = storedDays?.[i];
+      if (d && (d.in || d.out)) {
+        out[i] = { active: true, in: d.in || "", out: d.out || "", break: d.break ?? 0 };
+      } else if (d && d.active === false) {
+        out[i] = { active: false };
+      } else if (d && d.active === true) {
+        out[i] = { active: true, in: d.in || "", out: d.out || "", break: d.break ?? 0 };
+      } else {
+        out[i] = { active: !d ? true : !!d.active }; // default: work day
+      }
+    }
+    return out;
+  }
+  function toStorage(internalDays) {
+    const out = {};
+    Object.entries(internalDays).forEach(([idx, d]) => {
+      if (d.active && d.in && d.out) {
+        out[idx] = { in: d.in, out: d.out, break: d.break ?? 0 };
+      }
+      // inactive days (folga) → not stored (absence = folga)
+    });
+    return out;
+  }
+
+  // ── Check if hours are filled for all active days ──
+  function hasAllHours(days) {
+    return Object.values(days).every(d => !d.active || (d.in && d.out));
+  }
+
+  // ── Load employee (check for draft first) ──
   function loadEmp(empId) {
     setSelEmpId(empId);
     setErrors([]);
     setShowValidFrom(false);
+    setDraftSaved(false);
+    setShowTemplates(false);
+    // Check draft first
+    const draft = schedDrafts?.[restaurantId]?.[empId];
+    if (draft && draft.days) {
+      setEditDays(toInternal(draft.days));
+      setDraftSaved(true);
+      return;
+    }
+    // Load from current schedule
     const sched = (workSchedules?.[restaurantId]?.[empId] ?? []);
     const cur = sched[sched.length - 1];
-    setEditDays(cur ? { ...cur.days } : {});
+    if (cur) {
+      // Reconstruct: days present = active, days missing = folga
+      const internal = {};
+      for (let i = 0; i < 7; i++) {
+        const d = cur.days[i];
+        internal[i] = d && d.in ? { active: true, in: d.in, out: d.out, break: d.break ?? 0 } : { active: false };
+      }
+      setEditDays(internal);
+    } else {
+      // New employee: all days active, no hours
+      const fresh = {};
+      for (let i = 0; i < 7; i++) fresh[i] = { active: true };
+      setEditDays(fresh);
+    }
   }
 
+  // ── Toggle work/folga ──
+  function toggleDay(dayIdx) {
+    setEditDays(prev => {
+      const cur = prev[dayIdx] ?? { active: true };
+      return { ...prev, [dayIdx]: cur.active ? { active: false } : { active: true, in: "", out: "", break: 0 } };
+    });
+    setErrors([]);
+    setDraftSaved(false);
+  }
+
+  // ── Update time/break field ──
   function handleDayChange(dayIdx, field, val) {
     setEditDays(prev => ({
       ...prev,
-      [dayIdx]: { ...(prev[dayIdx] ?? {}), [field]: val }
+      [dayIdx]: { ...(prev[dayIdx] ?? { active: true }), [field]: val }
     }));
     setErrors([]);
+    setDraftSaved(false);
   }
 
-  function clearDay(dayIdx) {
-    setEditDays(prev => { const n = { ...prev }; delete n[dayIdx]; return n; });
+  // ── Auto-save draft ──
+  function saveDraft() {
+    const drafts = { ...(schedDrafts ?? {}) };
+    if (!drafts[restaurantId]) drafts[restaurantId] = {};
+    drafts[restaurantId][selEmpId] = { days: editDays, savedAt: new Date().toISOString() };
+    onUpdate("schedDrafts", drafts);
+    setDraftSaved(true);
   }
 
+  // ── Clear draft ──
+  function clearDraft() {
+    const drafts = { ...(schedDrafts ?? {}) };
+    if (drafts[restaurantId]) {
+      delete drafts[restaurantId][selEmpId];
+      onUpdate("schedDrafts", drafts);
+    }
+    setDraftSaved(false);
+  }
+
+  // ── Validate (only days with hours) ──
   function tryValidate() {
-    const { errors: errs } = validateWeekSchedule(editDays);
+    const storageDays = toStorage(editDays);
+    // Check: at least 1 active day
+    const activeDays = Object.values(editDays).filter(d => d.active);
+    if (activeDays.length === 0) { setErrors(["Selecione pelo menos um dia de trabalho."]); return; }
+    // If some active days have no hours → save as "partial" (days-only)
+    if (!hasAllHours(editDays)) {
+      setErrors(["Preencha os horários de todos os dias marcados como trabalho antes de salvar, ou salve como rascunho."]);
+      return;
+    }
+    const { errors: errs } = validateWeekSchedule(storageDays);
     setErrors(errs);
     if (errs.length === 0) setShowValidFrom(true);
   }
 
+  // ── Save schedule ──
   function saveSchedule() {
-    const { errors: errs, totalContract } = validateWeekSchedule(editDays);
+    const storageDays = toStorage(editDays);
+    const { errors: errs, totalContract } = validateWeekSchedule(storageDays);
     if (errs.length > 0) { setErrors(errs); return; }
 
     const newEntry = {
       id: `${Date.now()}-${Math.random().toString(36).slice(2,5)}`,
-      days: editDays,
+      days: storageDays,
       validFrom,
       createdBy: currentManagerName,
       createdAt: new Date().toISOString(),
@@ -1350,28 +1452,27 @@ function WorkScheduleManagerTab({ restaurantId, employees, workSchedules, notifi
       [restaurantId]: { ...(workSchedules?.[restaurantId] ?? {}), [selEmpId]: empScheds }
     });
 
-    // Notify all DP managers
+    // Clear draft
+    clearDraft();
+
+    // Notify DP managers
     const dpMgrs = managers.filter(m => m.isDP && (m.restaurantIds ?? []).includes(restaurantId));
     if (dpMgrs.length > 0) {
-      const body = `📋 Horário alterado\n\nEmpregado: ${selEmp?.name}\nAlterado por: ${currentManagerName}\nVigência a partir de: ${fmtDate(validFrom)}\n\nNovo horário:\n${[0,1,2,3,4,5,6].map(i=>{const d=editDays[i];return d?.in&&d?.out?`${WEEK_DAYS_LABEL[i]}: ${d.in} – ${d.out} (intervalo ${d.break??0}min)`:`${WEEK_DAYS_LABEL[i]}: Folga`;}).join("\n")}`;
+      const body = `Horario alterado\n\nEmpregado: ${selEmp?.name}\nAlterado por: ${currentManagerName}\nVigencia a partir de: ${fmtDate(validFrom)}\n\nNovo horario:\n${[0,1,2,3,4,5,6].map(i=>{const d=storageDays[i];return d?.in&&d?.out?`${WEEK_DAYS_LABEL[i]}: ${d.in} - ${d.out} (intervalo ${d.break??0}min)`:`${WEEK_DAYS_LABEL[i]}: Folga`;}).join("\n")}`;
       const notif = {
         id: `${Date.now()}-notif-${Math.random().toString(36).slice(2,5)}`,
-        restaurantId,
-        type: "horario",
-        body,
-        date: new Date().toISOString(),
-        read: false,
-        targetRole: "dp",
+        restaurantId, type: "horario", body,
+        date: new Date().toISOString(), read: false, targetRole: "dp",
       };
       onUpdate("notifications", [...(notifications ?? []), notif]);
     }
 
-    // Create comunicado only for this employee so they give ciência to new schedule
-    const schedBody = `Seu horário de trabalho foi atualizado por ${currentManagerName}.\nVigência a partir de: ${fmtDate(validFrom)}\n\nNovo horário:\n${[0,1,2,3,4,5,6].map(i=>{const d=editDays[i];return d?.in&&d?.out?`${WEEK_DAYS_LABEL[i]}: ${d.in} – ${d.out} (intervalo ${d.break??0}min)`:`${WEEK_DAYS_LABEL[i]}: Folga`;}).join("\n")}`;
+    // Comunicado for employee
+    const schedBody = `Seu horario de trabalho foi atualizado por ${currentManagerName}.\nVigencia a partir de: ${fmtDate(validFrom)}\n\nNovo horario:\n${[0,1,2,3,4,5,6].map(i=>{const d=storageDays[i];return d?.in&&d?.out?`${WEEK_DAYS_LABEL[i]}: ${d.in} - ${d.out} (intervalo ${d.break??0}min)`:`${WEEK_DAYS_LABEL[i]}: Folga`;}).join("\n")}`;
     const commForEmp = {
       id: `${Date.now()}-comm-${Math.random().toString(36).slice(2,5)}`,
       restaurantId,
-      title: `📋 Novo horário — vigência ${fmtDate(validFrom)}`,
+      title: `Novo horario - vigencia ${fmtDate(validFrom)}`,
       body: schedBody,
       createdAt: new Date().toISOString(),
       createdBy: currentManagerName,
@@ -1382,166 +1483,321 @@ function WorkScheduleManagerTab({ restaurantId, employees, workSchedules, notifi
 
     setShowValidFrom(false);
     setErrors([]);
-    onUpdate("_toast", `✅ Horário de ${selEmp?.name} salvo com vigência a partir de ${fmtDate(validFrom)}`);
+    onUpdate("_toast", `Horario de ${selEmp?.name} salvo com vigencia a partir de ${fmtDate(validFrom)}`);
   }
 
+  // ── Template functions ──
+  const restTemplates = schedTemplates?.[restaurantId] ?? [];
+
+  function saveTemplate() {
+    if (!tplName.trim()) return;
+    const tpl = {
+      id: `${Date.now()}-tpl-${Math.random().toString(36).slice(2,5)}`,
+      name: tplName.trim(),
+      days: editDays,
+      createdAt: new Date().toISOString(),
+      createdBy: currentManagerName,
+    };
+    const updated = { ...(schedTemplates ?? {}), [restaurantId]: [...restTemplates, tpl] };
+    onUpdate("schedTemplates", updated);
+    setTplName("");
+    setShowTemplates(false);
+    onUpdate("_toast", `Template "${tpl.name}" salvo`);
+  }
+
+  function applyTemplate(tpl) {
+    setEditDays(toInternal(tpl.days));
+    setShowTemplates(false);
+    setErrors([]);
+    setDraftSaved(false);
+    onUpdate("_toast", `Template "${tpl.name}" aplicado`);
+  }
+
+  function deleteTemplate(tplId) {
+    if (!window.confirm("Apagar este template?")) return;
+    const updated = { ...(schedTemplates ?? {}), [restaurantId]: restTemplates.filter(t => t.id !== tplId) };
+    onUpdate("schedTemplates", updated);
+  }
+
+  // ── Calculated values ──
+  const storageDays = toStorage(editDays);
+  const activeDayCount = Object.values(editDays).filter(d => d.active).length;
+  const folgaDayCount = 7 - activeDayCount;
+  const allHoursFilled = hasAllHours(editDays);
+  const { totalContract } = allHoursFilled && activeDayCount > 0 ? validateWeekSchedule(storageDays) : { totalContract: 0 };
+  const MIN_WEEK = 43*60+55, MAX_WEEK = 44*60;
+  const weekOk = allHoursFilled && activeDayCount > 0 && totalContract >= MIN_WEEK && totalContract <= MAX_WEEK;
+
+  // ── Styles ──
+  const cardS = { ...S.card, marginBottom: 12 };
+  const toggleOn = { width: 44, height: 24, borderRadius: 12, border: "none", cursor: "pointer", position: "relative", background: "var(--ac)", transition: "background .2s" };
+  const toggleOff = { ...toggleOn, background: "var(--border)" };
+  const toggleDot = (on) => ({ position: "absolute", top: 2, left: on ? 22 : 2, width: 20, height: 20, borderRadius: 10, background: "#fff", transition: "left .2s", boxShadow: "0 1px 3px rgba(0,0,0,.2)" });
+
+  // ═══ LIST VIEW (employee selection) ═══
   if (!selEmpId) return (
     <div>
-      <p style={{color:"var(--text3)",fontSize:13,marginBottom:16}}>Selecione um empregado para editar o horário:</p>
+      <p style={{color:"var(--text3)",fontSize:13,marginBottom:16}}>Selecione um empregado para editar o horario:</p>
       {restEmps.map(emp => {
         const sched = workSchedules?.[restaurantId]?.[emp.id] ?? [];
         const cur = sched[sched.length - 1];
+        const hasDraft = !!schedDrafts?.[restaurantId]?.[emp.id];
         return (
           <div key={emp.id} onClick={()=>loadEmp(emp.id)} style={{...S.card,marginBottom:8,cursor:"pointer",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-            <div>
-              <div style={{color:"var(--text)",fontWeight:600,fontSize:14}}>{emp.name}</div>
-              <div style={{color:"var(--text3)",fontSize:12}}>{cur ? `Vigente desde ${fmtDate(cur.validFrom)} · ${fmtHHMM(cur.totalContract)}/sem` : "Sem horário cadastrado"}</div>
+            <div style={{flex:1,minWidth:0}}>
+              <div style={{color:"var(--text)",fontWeight:600,fontSize:14,display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
+                {emp.name}
+                {hasDraft && <span style={{background:"#f59e0b22",color:"#f59e0b",fontSize:10,padding:"2px 8px",borderRadius:6,fontWeight:700}}>RASCUNHO</span>}
+              </div>
+              <div style={{color:"var(--text3)",fontSize:12}}>
+                {cur ? `Vigente desde ${fmtDate(cur.validFrom)} · ${fmtHHMM(cur.totalContract)}/sem` : "Sem horario cadastrado"}
+              </div>
             </div>
-            <span style={{color:ac,fontSize:13}}>›</span>
+            <span style={{color:ac,fontSize:16,fontWeight:700,flexShrink:0,paddingLeft:8}}>&rsaquo;</span>
           </div>
         );
       })}
+
+      {/* Template management shortcut */}
+      {restTemplates.length > 0 && (
+        <details style={{marginTop:16}}>
+          <summary style={{color:"var(--text3)",fontSize:12,cursor:"pointer",padding:"8px 12px",background:"var(--bg1)",borderRadius:8}}>
+            Templates salvos ({restTemplates.length})
+          </summary>
+          <div style={{paddingTop:8}}>
+            {restTemplates.map(t => (
+              <div key={t.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"8px 12px",borderBottom:"1px solid var(--border)",fontSize:12}}>
+                <span style={{color:"var(--text2)",fontWeight:600}}>{t.name}</span>
+                <button onClick={e=>{e.stopPropagation();deleteTemplate(t.id);}} style={{background:"none",border:"none",color:"var(--red)",cursor:"pointer",fontSize:11,fontFamily:"'DM Mono',monospace"}}>apagar</button>
+              </div>
+            ))}
+          </div>
+        </details>
+      )}
     </div>
   );
 
-  const { totalContract } = validateWeekSchedule(editDays);
-  const MIN_WEEK = 43*60+55, MAX_WEEK = 44*60;
-  const weekOk = totalContract >= MIN_WEEK && totalContract <= MAX_WEEK;
-
+  // ═══ EDIT VIEW (single employee) ═══
   return (
     <div>
-      <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:16}}>
-        <button onClick={()=>{setSelEmpId(null);setErrors([]);setShowValidFrom(false);}} style={{...S.btnSecondary,fontSize:12}}>← Voltar</button>
-        <div>
-          <span style={{color:"var(--text)",fontWeight:700,fontSize:15}}>{selEmp?.name}</span>
-          <span style={{color:"var(--text3)",fontSize:12,marginLeft:8}}>Horário semanal</span>
+      {/* Header */}
+      <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:16,flexWrap:"wrap"}}>
+        <button onClick={()=>{setSelEmpId(null);setErrors([]);setShowValidFrom(false);}} style={{...S.btnSecondary,fontSize:12,padding:"6px 14px"}}>← Voltar</button>
+        <div style={{flex:1,minWidth:0}}>
+          <div style={{color:"var(--text)",fontWeight:700,fontSize:15}}>{selEmp?.name}</div>
+          <div style={{color:"var(--text3)",fontSize:11}}>Horario semanal · {activeDayCount} dias · {folgaDayCount} folga(s)</div>
         </div>
       </div>
 
+      {/* Draft indicator */}
+      {draftSaved && (
+        <div style={{background:"#f59e0b11",border:"1px solid #f59e0b44",borderRadius:10,padding:"8px 14px",marginBottom:12,display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:8}}>
+          <span style={{color:"#f59e0b",fontSize:12,fontWeight:600}}>Rascunho salvo automaticamente</span>
+          <button onClick={()=>{clearDraft();loadEmp(selEmpId);}} style={{background:"none",border:"1px solid #f59e0b44",borderRadius:6,color:"#f59e0b",cursor:"pointer",padding:"3px 10px",fontSize:11,fontFamily:"'DM Mono',monospace"}}>Descartar rascunho</button>
+        </div>
+      )}
+
       {/* History */}
       {empSchedules.length > 1 && (
-        <details style={{marginBottom:16}}>
+        <details style={{marginBottom:12}}>
           <summary style={{color:"var(--text3)",fontSize:12,cursor:"pointer",padding:"8px 12px",background:"var(--bg1)",borderRadius:8}}>
-            📂 Histórico ({empSchedules.length} versões)
+            Historico ({empSchedules.length} versoes)
           </summary>
           <div style={{paddingTop:8}}>
             {isOwner && (
               <div style={{padding:"6px 12px 10px",display:"flex",alignItems:"center",gap:10,flexWrap:"wrap"}}>
-                <span style={{color:"var(--text3)",fontSize:11}}>Selecione versões para apagar (a versão atual não pode ser removida):</span>
+                <span style={{color:"var(--text3)",fontSize:11}}>Selecione versoes para apagar:</span>
                 {selectedSchedIds.size > 0 && (
                   <button onClick={()=>{
-                    if(!window.confirm(`Apagar ${selectedSchedIds.size} versão(ões) do histórico de ${selEmp?.name}? Esta ação não pode ser desfeita.`)) return;
+                    if(!window.confirm(`Apagar ${selectedSchedIds.size} versao(oes)?`)) return;
                     const remaining = empSchedules.filter(s => !selectedSchedIds.has(s.id));
                     onUpdate("workSchedules", {
                       ...workSchedules,
                       [restaurantId]: { ...(workSchedules?.[restaurantId]??{}), [selEmpId]: remaining }
                     });
                     setSelectedSchedIds(new Set());
-                    onUpdate("_toast", `🗑️ ${selectedSchedIds.size} versão(ões) apagada(s)`);
-                  }} style={{padding:"5px 12px",borderRadius:8,border:"none",background:"var(--red)",color:"var(--text)",fontWeight:700,cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:11}}>
-                    🗑️ Apagar selecionadas ({selectedSchedIds.size})
+                    onUpdate("_toast", `${selectedSchedIds.size} versao(oes) apagada(s)`);
+                  }} style={{padding:"5px 12px",borderRadius:8,border:"none",background:"var(--red)",color:"#fff",fontWeight:700,cursor:"pointer",fontSize:11}}>
+                    Apagar ({selectedSchedIds.size})
                   </button>
                 )}
               </div>
             )}
             {[...empSchedules].reverse().slice(1).map(s => (
-              <div key={s.id} style={{padding:"6px 12px",borderBottom:"1px solid var(--border)",fontSize:12,display:"flex",alignItems:"center",gap:10,background:selectedSchedIds.has(s.id)?"var(--red-bg)":"transparent"}}>
+              <div key={s.id} style={{padding:"6px 12px",borderBottom:"1px solid var(--border)",fontSize:12,display:"flex",alignItems:"center",gap:10}}>
                 {isOwner && (
                   <input type="checkbox" checked={selectedSchedIds.has(s.id)}
-                    onChange={e=>{
-                      const next = new Set(selectedSchedIds);
-                      e.target.checked ? next.add(s.id) : next.delete(s.id);
-                      setSelectedSchedIds(next);
-                    }}
+                    onChange={e=>{ const next = new Set(selectedSchedIds); e.target.checked ? next.add(s.id) : next.delete(s.id); setSelectedSchedIds(next); }}
                     style={{accentColor:"var(--red)",cursor:"pointer",width:14,height:14}}
                   />
                 )}
                 <span style={{color:"var(--text2)"}}>Vigente de {fmtDate(s.validFrom)}</span>
-                <span style={{color:"var(--text3)",marginLeft:4}}>por {s.createdBy}</span>
-                <span style={{color:"var(--text3)",marginLeft:4}}>{fmtHHMM(s.totalContract)}/sem</span>
+                <span style={{color:"var(--text3)"}}>por {s.createdBy}</span>
+                <span style={{color:"var(--text3)"}}>{fmtHHMM(s.totalContract)}/sem</span>
               </div>
             ))}
           </div>
         </details>
       )}
 
-      {/* Weekly schedule table */}
-      <div style={{...S.card,marginBottom:16,overflowX:"auto"}}>
-        <table style={{width:"100%",borderCollapse:"collapse",fontFamily:"'DM Mono',monospace",fontSize:13}}>
-          <thead>
-            <tr>
-              {["Dia","Entrada","Saída","Intervalo (min)","Hrs reais","Hrs diurnas","Hrs noturnas (real)","Hrs noturnas (ficta)","Hrs contratuais",""].map(h=>(
-                <th key={h} style={{padding:"8px 10px",textAlign:"left",color:"var(--text3)",fontSize:11,borderBottom:"1px solid var(--border)",whiteSpace:"nowrap"}}>{h}</th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {[0,1,2,3,4,5,6].map(dayIdx => {
-              const d = editDays[dayIdx] ?? {};
-              const hasDay = d.in && d.out;
-              const calc = hasDay ? calcDayHours(d.in, d.out, parseInt(d.break)||0) : null;
-              const dayErr = calc && calc.worked > 10*60;
-              return (
-                <tr key={dayIdx} style={{background:dayIdx%2===0?"#111":"var(--bg2)",opacity:hasDay?1:0.5}}>
-                  <td style={{padding:"6px 10px",color:([0,6].includes(dayIdx))?"#f59e0b":"#aaa",fontWeight:600,whiteSpace:"nowrap"}}>{WEEK_DAYS_LABEL[dayIdx]}</td>
-                  <td style={{padding:"4px 6px"}}>
-                    <input type="time" value={d.in||""} onChange={e=>handleDayChange(dayIdx,"in",e.target.value)}
-                      style={{...S.input,width:90,padding:"4px 6px",fontSize:12}}/>
-                  </td>
-                  <td style={{padding:"4px 6px"}}>
-                    <input type="time" value={d.out||""} onChange={e=>handleDayChange(dayIdx,"out",e.target.value)}
-                      style={{...S.input,width:90,padding:"4px 6px",fontSize:12}}/>
-                  </td>
-                  <td style={{padding:"4px 6px"}}>
-                    <input type="number" min="0" max="120" value={d.break||""} onChange={e=>handleDayChange(dayIdx,"break",parseInt(e.target.value)||0)}
-                      placeholder="30" style={{...S.input,width:70,padding:"4px 6px",fontSize:12}} disabled={!hasDay}/>
-                  </td>
-                  <td style={{padding:"6px 10px",color:calc&&calc.totalContract>10*60?"var(--red)":"var(--green)",fontWeight:calc?600:400}}>{calc?fmtHHMM(calc.worked):"—"}</td>
-                  <td style={{padding:"6px 10px",color:"var(--text2)"}}>{calc?fmtHHMM(calc.diurnal):"—"}</td>
-                  <td style={{padding:"6px 10px",color:"#8b5cf6"}}>{calc?fmtHHMM(calc.nocturnal):"—"}</td>
-                  <td style={{padding:"6px 10px",color:"#ec4899"}}>{calc?fmtHHMM(calc.nocturnalFicta):"—"}</td>
-                  <td style={{padding:"6px 10px",color:calc&&calc.totalContract>10*60?"var(--red)":"var(--ac)",fontWeight:700}}>{calc?fmtHHMM(calc.totalContract):"—"}</td>
-                  <td style={{padding:"4px 6px"}}>
-                    {hasDay && <button onClick={()=>clearDay(dayIdx)} style={{background:"none",border:"1px solid #e74c3c33",borderRadius:6,color:"var(--red)",cursor:"pointer",padding:"3px 8px",fontSize:11,fontFamily:"'DM Mono',monospace"}}>Folga</button>}
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-          <tfoot>
-            <tr style={{borderTop:"2px solid var(--border)"}}>
-              <td colSpan={4} style={{padding:"8px 10px",color:"var(--text3)",fontSize:12}}>Total semanal (contratual)</td>
-              <td colSpan={4} style={{padding:"8px 10px",color:"var(--text3)",fontSize:11}}></td>
-              <td style={{padding:"8px 10px",color:weekOk?"var(--green)":"var(--red)",fontWeight:700,fontSize:14}}>{fmtHHMM(totalContract)}</td>
-              <td style={{padding:"8px 10px",color:"var(--text3)",fontSize:11}}>{weekOk?"✅ OK":"⚠️ Fora do limite (43:55–44:00)"}</td>
-            </tr>
-          </tfoot>
-        </table>
+      {/* Template & draft actions */}
+      <div style={{display:"flex",gap:8,marginBottom:12,flexWrap:"wrap"}}>
+        <button onClick={()=>setShowTemplates(!showTemplates)} style={{...S.btnSecondary,fontSize:11,padding:"6px 12px"}}>
+          {showTemplates ? "Fechar templates" : `Templates${restTemplates.length>0?` (${restTemplates.length})`:""}`}
+        </button>
+        <button onClick={saveDraft} style={{...S.btnSecondary,fontSize:11,padding:"6px 12px",borderColor:"#f59e0b44",color:"#f59e0b"}}>
+          Salvar rascunho
+        </button>
       </div>
 
-      {/* Validation errors */}
-      {errors.length > 0 && (
-        <div style={{background:"#e74c3c11",border:"1px solid #e74c3c44",borderRadius:10,padding:"12px 16px",marginBottom:16}}>
-          <p style={{color:"var(--red)",fontWeight:700,fontSize:13,margin:"0 0 8px"}}>⚠️ Corrija os seguintes erros antes de salvar:</p>
-          {errors.map((e,i)=><div key={i} style={{color:"var(--red)",fontSize:12,marginBottom:4}}>• {e}</div>)}
-        </div>
-      )}
+      {/* Templates panel */}
+      {showTemplates && (
+        <div style={{...cardS,border:"1px solid var(--ac)22"}}>
+          <p style={{color:ac,fontWeight:700,fontSize:13,margin:"0 0 10px"}}>Templates de horario</p>
 
-      {/* Valid from modal */}
-      {showValidFrom && (
-        <div style={{...S.card,border:"1px solid var(--ac)44",marginBottom:16}}>
-          <p style={{color:ac,fontWeight:700,fontSize:14,margin:"0 0 10px"}}>📅 A partir de quando este horário entra em vigor?</p>
-          <input type="date" value={validFrom} onChange={e=>setValidFrom(e.target.value)} style={{...S.input,marginBottom:12}}/>
-          <p style={{color:"var(--text3)",fontSize:12,marginBottom:12}}>Todos os gestores marcados como DP receberão uma notificação com esta alteração.</p>
-          <div style={{display:"flex",gap:10}}>
-            <button onClick={saveSchedule} style={S.btnPrimary}>✅ Confirmar e Salvar</button>
-            <button onClick={()=>setShowValidFrom(false)} style={S.btnSecondary}>Cancelar</button>
+          {restTemplates.length > 0 && (
+            <div style={{marginBottom:12}}>
+              {restTemplates.map(t => (
+                <div key={t.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"8px 0",borderBottom:"1px solid var(--border)"}}>
+                  <div>
+                    <span style={{color:"var(--text)",fontWeight:600,fontSize:13}}>{t.name}</span>
+                    <span style={{color:"var(--text3)",fontSize:11,marginLeft:8}}>por {t.createdBy}</span>
+                  </div>
+                  <div style={{display:"flex",gap:6}}>
+                    <button onClick={()=>applyTemplate(t)} style={{padding:"4px 10px",borderRadius:6,border:"1px solid var(--ac)44",background:"transparent",color:ac,cursor:"pointer",fontSize:11}}>Aplicar</button>
+                    <button onClick={()=>deleteTemplate(t.id)} style={{padding:"4px 8px",borderRadius:6,border:"none",background:"transparent",color:"var(--red)",cursor:"pointer",fontSize:11}}>x</button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
+            <input value={tplName} onChange={e=>setTplName(e.target.value)} placeholder="Nome do template (ex: Cozinha manha)" style={{...S.input,flex:1,minWidth:140,fontSize:12,padding:"8px 12px"}}/>
+            <button onClick={saveTemplate} disabled={!tplName.trim()} style={{...S.btnSecondary,fontSize:11,padding:"6px 14px",opacity:tplName.trim()?1:0.4}}>Salvar atual como template</button>
           </div>
         </div>
       )}
 
+      {/* ═══ DAY CARDS (mobile-first) ═══ */}
+      <div style={{marginBottom:16}}>
+        {[0,1,2,3,4,5,6].map(dayIdx => {
+          const d = editDays[dayIdx] ?? { active: true };
+          const isActive = d.active;
+          const hasHours = isActive && d.in && d.out;
+          const calc = hasHours ? calcDayHours(d.in, d.out, parseInt(d.break)||0) : null;
+          const isWeekend = dayIdx === 0 || dayIdx === 6;
+          const contractOver = calc && calc.totalContract > 10*60;
+
+          return (
+            <div key={dayIdx} style={{
+              ...cardS,
+              borderColor: isActive ? (hasHours ? (contractOver ? "var(--red)" : "var(--ac)33") : "var(--border)") : "var(--border)",
+              opacity: isActive ? 1 : 0.6,
+              background: isActive ? "var(--card-bg)" : "var(--bg1)",
+            }}>
+              {/* Day header with toggle */}
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom: isActive ? 12 : 0}}>
+                <div style={{display:"flex",alignItems:"center",gap:10}}>
+                  <span style={{color:isWeekend?"#f59e0b":"var(--text)",fontWeight:700,fontSize:15,minWidth:36}}>{WEEK_DAYS_LABEL[dayIdx]}</span>
+                  <span style={{color:"var(--text3)",fontSize:12}}>{isActive ? (hasHours ? "Trabalha" : "Trabalha (sem horario)") : "Folga"}</span>
+                </div>
+                <button onClick={()=>toggleDay(dayIdx)} style={isActive ? toggleOn : toggleOff}>
+                  <div style={toggleDot(isActive)} />
+                </button>
+              </div>
+
+              {/* Time inputs (only if active) */}
+              {isActive && (
+                <div>
+                  <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8,marginBottom:8}}>
+                    <div>
+                      <label style={{color:"var(--text3)",fontSize:10,display:"block",marginBottom:3}}>Entrada</label>
+                      <input type="time" value={d.in||""} onChange={e=>handleDayChange(dayIdx,"in",e.target.value)}
+                        style={{...S.input,fontSize:14,padding:"10px 10px",textAlign:"center"}}/>
+                    </div>
+                    <div>
+                      <label style={{color:"var(--text3)",fontSize:10,display:"block",marginBottom:3}}>Saida</label>
+                      <input type="time" value={d.out||""} onChange={e=>handleDayChange(dayIdx,"out",e.target.value)}
+                        style={{...S.input,fontSize:14,padding:"10px 10px",textAlign:"center"}}/>
+                    </div>
+                    <div>
+                      <label style={{color:"var(--text3)",fontSize:10,display:"block",marginBottom:3}}>Intervalo</label>
+                      <input type="number" min="0" max="120" value={d.break||""} onChange={e=>handleDayChange(dayIdx,"break",parseInt(e.target.value)||0)}
+                        placeholder="30" style={{...S.input,fontSize:14,padding:"10px 10px",textAlign:"center"}}/>
+                    </div>
+                  </div>
+
+                  {/* Calculated hours (compact row) */}
+                  {calc && (
+                    <div style={{display:"flex",gap:6,flexWrap:"wrap",fontSize:11,fontFamily:"'DM Mono',monospace"}}>
+                      <span style={{color:"var(--text3)"}}>Real: <strong style={{color:"var(--text2)"}}>{fmtHHMM(calc.worked)}</strong></span>
+                      <span style={{color:"var(--text3)"}}>Diurna: <strong style={{color:"var(--text2)"}}>{fmtHHMM(calc.diurnal)}</strong></span>
+                      {calc.nocturnal > 0 && <span style={{color:"#8b5cf6"}}>Not.real: <strong>{fmtHHMM(calc.nocturnal)}</strong></span>}
+                      {calc.nocturnalFicta > 0 && <span style={{color:"#ec4899"}}>Not.ficta: <strong>{fmtHHMM(calc.nocturnalFicta)}</strong></span>}
+                      <span style={{color:contractOver?"var(--red)":ac,fontWeight:700}}>Contratual: {fmtHHMM(calc.totalContract)}</span>
+                    </div>
+                  )}
+
+                  {!hasHours && (
+                    <p style={{color:"var(--text3)",fontSize:11,margin:"4px 0 0",fontStyle:"italic"}}>Horarios podem ser preenchidos depois</p>
+                  )}
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Weekly total */}
+      {allHoursFilled && activeDayCount > 0 && (
+        <div style={{...cardS,display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:8,borderColor:weekOk?"var(--green)33":"var(--red)33"}}>
+          <span style={{color:"var(--text3)",fontSize:13}}>Total semanal contratual</span>
+          <div style={{display:"flex",alignItems:"center",gap:10}}>
+            <span style={{color:weekOk?"var(--green)":"var(--red)",fontWeight:700,fontSize:16,fontFamily:"'DM Mono',monospace"}}>{fmtHHMM(totalContract)}</span>
+            <span style={{color:weekOk?"var(--green)":"var(--red)",fontSize:12}}>{weekOk?"OK":"Fora do limite (43:55-44:00)"}</span>
+          </div>
+        </div>
+      )}
+
+      {!allHoursFilled && activeDayCount > 0 && (
+        <div style={{...cardS,borderColor:"#f59e0b33",display:"flex",alignItems:"center",gap:10,flexWrap:"wrap"}}>
+          <span style={{color:"#f59e0b",fontSize:12}}>Alguns dias de trabalho ainda nao tem horario preenchido. Salve como rascunho ou preencha para validar.</span>
+        </div>
+      )}
+
+      {/* Validation errors */}
+      {errors.length > 0 && (
+        <div style={{background:"#e74c3c11",border:"1px solid #e74c3c44",borderRadius:10,padding:"12px 16px",marginBottom:12}}>
+          <p style={{color:"var(--red)",fontWeight:700,fontSize:13,margin:"0 0 8px"}}>Corrija os erros antes de salvar:</p>
+          {errors.map((e,i)=><div key={i} style={{color:"var(--red)",fontSize:12,marginBottom:4}}>• {e}</div>)}
+        </div>
+      )}
+
+      {/* Valid from confirmation */}
+      {showValidFrom && (
+        <div style={{...cardS,border:"1px solid var(--ac)44"}}>
+          <p style={{color:ac,fontWeight:700,fontSize:14,margin:"0 0 10px"}}>A partir de quando este horario entra em vigor?</p>
+          <input type="date" value={validFrom} onChange={e=>setValidFrom(e.target.value)} style={{...S.input,marginBottom:12,fontSize:15,padding:"12px 14px"}}/>
+          <p style={{color:"var(--text3)",fontSize:12,marginBottom:12}}>Todos os gestores DP receberao uma notificacao com esta alteracao.</p>
+          <div style={{display:"flex",gap:10,flexWrap:"wrap"}}>
+            <button onClick={saveSchedule} style={{...S.btnPrimary,flex:1,minWidth:140}}>Confirmar e Salvar</button>
+            <button onClick={()=>setShowValidFrom(false)} style={{...S.btnSecondary,flex:1,minWidth:100}}>Cancelar</button>
+          </div>
+        </div>
+      )}
+
+      {/* Action buttons */}
       {!showValidFrom && (
-        <button onClick={tryValidate} style={S.btnPrimary}>Validar e Salvar Horário</button>
+        <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+          <button onClick={tryValidate} disabled={!allHoursFilled || activeDayCount === 0}
+            style={{...S.btnPrimary,flex:2,minWidth:160,opacity:allHoursFilled&&activeDayCount>0?1:0.4}}>
+            Validar e Salvar
+          </button>
+          <button onClick={saveDraft} style={{...S.btnSecondary,flex:1,minWidth:100,borderColor:"#f59e0b44",color:"#f59e0b"}}>
+            Salvar Rascunho
+          </button>
+        </div>
       )}
     </div>
   );
@@ -1555,23 +1811,38 @@ function WorkScheduleEmployeeTab({ empId, restaurantId, workSchedules }) {
 
   function scheduleBlock(s, validUntil) {
     return (
-      <div style={{fontFamily:"'DM Mono',monospace"}}>
+      <div>
         {[0,1,2,3,4,5,6].map(i => {
           const d = s.days[i];
           const hasShift = d?.in && d?.out;
           const isWeekend = i === 0 || i === 6;
+          const calc = hasShift ? calcDayHours(d.in, d.out, parseInt(d.break)||0) : null;
           return (
-            <div key={i} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"9px 14px",marginBottom:5,background:hasShift?"var(--card-bg)":"var(--bg1)",borderRadius:9,border:`1px solid ${hasShift?"var(--border)":"transparent"}`,opacity:hasShift?1:0.5}}>
-              <span style={{color:isWeekend?"#f59e0b":"var(--text)",fontWeight:700,fontSize:13,minWidth:36}}>{WEEK_DAYS_LABEL[i]}</span>
-              {hasShift
-                ? <span style={{color:"var(--text2)",fontSize:13}}>{d.in} – {d.out} <span style={{color:"var(--text3)",fontSize:11}}>({d.break||0}min intervalo)</span></span>
-                : <span style={{color:"var(--text3)",fontSize:12}}>Folga</span>
-              }
+            <div key={i} style={{
+              padding:"10px 14px",marginBottom:6,borderRadius:10,
+              background:hasShift?"var(--card-bg)":"var(--bg1)",
+              border:`1px solid ${hasShift?"var(--border)":"transparent"}`,
+              opacity:hasShift?1:0.5,
+            }}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                <span style={{color:isWeekend?"#f59e0b":"var(--text)",fontWeight:700,fontSize:14,minWidth:36}}>{WEEK_DAYS_LABEL[i]}</span>
+                {hasShift
+                  ? <span style={{color:"var(--text2)",fontSize:13,fontFamily:"'DM Mono',monospace"}}>{d.in} - {d.out}</span>
+                  : <span style={{color:"var(--text3)",fontSize:12}}>Folga</span>
+                }
+              </div>
+              {hasShift && calc && (
+                <div style={{display:"flex",gap:8,marginTop:4,fontSize:11,fontFamily:"'DM Mono',monospace",color:"var(--text3)",flexWrap:"wrap"}}>
+                  <span>Intervalo: {d.break||0}min</span>
+                  <span>Contratual: <strong style={{color:ac}}>{fmtHHMM(calc.totalContract)}</strong></span>
+                  {calc.nocturnal > 0 && <span style={{color:"#8b5cf6"}}>Noturna: {fmtHHMM(calc.nocturnalFicta)}</span>}
+                </div>
+              )}
             </div>
           );
         })}
         {validUntil && (
-          <p style={{color:"var(--text3)",fontSize:11,marginTop:6,textAlign:"right"}}>Vigente até {fmtDate(validUntil)}</p>
+          <p style={{color:"var(--text3)",fontSize:11,marginTop:6,textAlign:"right"}}>Vigente ate {fmtDate(validUntil)}</p>
         )}
       </div>
     );
@@ -1580,35 +1851,42 @@ function WorkScheduleEmployeeTab({ empId, restaurantId, workSchedules }) {
   if (!current) return (
     <div style={{textAlign:"center",marginTop:40}}>
       <div style={{fontSize:32,marginBottom:12}}>🕐</div>
-      <p style={{color:"var(--text3)",fontSize:14}}>Nenhum horário cadastrado ainda.</p>
+      <p style={{color:"var(--text3)",fontSize:14}}>Nenhum horario cadastrado ainda.</p>
     </div>
   );
 
   return (
-    <div style={{fontFamily:"'DM Mono',monospace"}}>
+    <div>
       {/* Current schedule */}
       <div style={{...S.card,marginBottom:20,borderColor:"var(--ac)33"}}>
-        <p style={{color:ac,fontSize:14,fontWeight:700,margin:"0 0 2px"}}>🕐 Horário atual</p>
-        <p style={{color:"var(--text3)",fontSize:12,marginBottom:14}}>Vigência a partir de {fmtDate(current.validFrom)}</p>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12,flexWrap:"wrap",gap:6}}>
+          <span style={{color:ac,fontSize:14,fontWeight:700}}>Horario atual</span>
+          <span style={{color:"var(--text3)",fontSize:12}}>Desde {fmtDate(current.validFrom)}</span>
+        </div>
+        {current.totalContract > 0 && (
+          <div style={{background:"var(--bg1)",borderRadius:8,padding:"8px 12px",marginBottom:12,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+            <span style={{color:"var(--text3)",fontSize:12}}>Carga semanal</span>
+            <span style={{color:ac,fontWeight:700,fontSize:14,fontFamily:"'DM Mono',monospace"}}>{fmtHHMM(current.totalContract)}/sem</span>
+          </div>
+        )}
         {scheduleBlock(current, null)}
       </div>
 
       {/* Previous schedules */}
       {empScheds.length > 1 && (
         <details>
-          <summary style={{color:"var(--text3)",fontSize:12,cursor:"pointer",padding:"8px 12px",background:"var(--bg1)",borderRadius:8,marginBottom:8,listStyle:"none"}}>
-            📂 Horários anteriores ({empScheds.length - 1}) ▾
+          <summary style={{color:"var(--text3)",fontSize:12,cursor:"pointer",padding:"8px 12px",background:"var(--bg1)",borderRadius:8,marginBottom:8}}>
+            Horarios anteriores ({empScheds.length - 1})
           </summary>
           <div style={{paddingTop:4}}>
-            {[...empScheds].reverse().slice(1).map((s, idx, arr) => {
-              // validUntil = day before the next (more recent) schedule's validFrom
-              const newerSched = [...empScheds].reverse()[idx]; // the one right after in reverse
+            {[...empScheds].reverse().slice(1).map((s, idx) => {
+              const newerSched = [...empScheds].reverse()[idx];
               const validUntil = newerSched?.validFrom
                 ? (() => { const d = new Date(newerSched.validFrom+"T12:00:00"); d.setDate(d.getDate()-1); return d.toISOString().slice(0,10); })()
                 : null;
               return (
                 <div key={s.id} style={{...S.card,marginBottom:10,opacity:0.7}}>
-                  <p style={{color:"var(--text3)",fontSize:12,fontWeight:700,margin:"0 0 10px"}}>Vigência a partir de {fmtDate(s.validFrom)}</p>
+                  <p style={{color:"var(--text3)",fontSize:12,fontWeight:700,margin:"0 0 10px"}}>Vigencia a partir de {fmtDate(s.validFrom)}</p>
                   {scheduleBlock(s, validUntil)}
                 </div>
               );
@@ -4509,7 +4787,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                 if(ok){ const w={...data?.workSchedules}; delete w[rid]; onUpdate("workSchedules",w); onUpdate("_toast","🗑️ Horários enviados para a lixeira"); }
               }} style={{...S.btnSecondary,fontSize:12,color:"var(--red)",borderColor:"var(--red)44"}}>🗑️ Resetar horários</button>
             </div>}
-            <WorkScheduleManagerTab restaurantId={rid} employees={employees} workSchedules={data?.workSchedules??{}} notifications={data?.notifications??[]} managers={data?.managers??[]} currentManagerName={currentUser?.name ?? (isOwner?"Admin AppTip":"Gestor")} onUpdate={onUpdate} communications={data?.communications??[]} isOwner={isOwner} />
+            <WorkScheduleManagerTab restaurantId={rid} employees={employees} workSchedules={data?.workSchedules??{}} notifications={data?.notifications??[]} managers={data?.managers??[]} currentManagerName={currentUser?.name ?? (isOwner?"Admin AppTip":"Gestor")} onUpdate={onUpdate} communications={data?.communications??[]} isOwner={isOwner} schedTemplates={data?.schedTemplates??{}} schedDrafts={data?.schedDrafts??{}} />
           </div>
         )}
 
@@ -7226,7 +7504,7 @@ hr{border:none;border-top:1px solid var(--border);margin:24px 0}
 <div class="main">
   <div class="topbar">
     <div><h1>Guia do Gestor</h1><div class="sub">Manual completo de uso do AppTip para gestores de restaurante</div></div>
-    <span class="ver">v4.9 · 2026</span>
+    <span class="ver">v5.0 · 2026</span>
   </div>
   <div class="content">
 
@@ -7588,13 +7866,15 @@ export default function App() {
   const [notifications, setNotifications] = useState([]);
   const [noTipDays,     setNoTipDays]     = useState({});
   const [trash,         setTrash]         = useState({ restaurants:[], managers:[], employees:[] });
+  const [schedTemplates,setSchedTemplates]= useState({});
+  const [schedDrafts,   setSchedDrafts]   = useState({});
 
   useEffect(() => {
     const savedId = currentUserId;
     (async () => {
       const vals = await Promise.all(Object.values(K).map(load));
       const keys = Object.keys(K);
-      const map = { owners:setOwners, managers:setManagers, restaurants:setRestaurants, employees:setEmployees, roles:setRoles, tips:setTips, splits:setSplits, schedules:setSchedules, communications:setCommunications, commAcks:setCommAcks, faq:setFaq, dpMessages:setDpMessages, workSchedules:setWorkSchedules, notifications:setNotifications, noTipDays:setNoTipDays, trash:setTrash };
+      const map = { owners:setOwners, managers:setManagers, restaurants:setRestaurants, employees:setEmployees, roles:setRoles, tips:setTips, splits:setSplits, schedules:setSchedules, communications:setCommunications, commAcks:setCommAcks, faq:setFaq, dpMessages:setDpMessages, workSchedules:setWorkSchedules, notifications:setNotifications, noTipDays:setNoTipDays, trash:setTrash, schedTemplates:setSchedTemplates, schedDrafts:setSchedDrafts };
       const loaded_data = {};
       keys.forEach((k, i) => { if (k !== "receipts" && vals[i]) { map[k]?.(vals[i]); loaded_data[k] = vals[i]; } });
 
@@ -7663,7 +7943,7 @@ export default function App() {
     })();
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const data = { owners, managers, restaurants, employees, roles, tips, splits, schedules, communications, commAcks, faq, dpMessages, receipts, workSchedules, notifications, noTipDays, trash };
+  const data = { owners, managers, restaurants, employees, roles, tips, splits, schedules, communications, commAcks, faq, dpMessages, receipts, workSchedules, notifications, noTipDays, trash, schedTemplates, schedDrafts };
 
   async function handleUpdate(field, value) {
     if (field === "_toast") { setToast(value); return; }
@@ -7681,12 +7961,12 @@ export default function App() {
       setToast("Recibos atualizados");
       return;
     }
-    const setters = { owners:setOwners, managers:setManagers, restaurants:setRestaurants, employees:setEmployees, roles:setRoles, tips:setTips, splits:setSplits, schedules:setSchedules, communications:setCommunications, commAcks:setCommAcks, faq:setFaq, dpMessages:setDpMessages, workSchedules:setWorkSchedules, notifications:setNotifications, noTipDays:setNoTipDays, trash:setTrash };
-    const keys    = { owners:K.owners, managers:K.managers, restaurants:K.restaurants, employees:K.employees, roles:K.roles, tips:K.tips, splits:K.splits, schedules:K.schedules, communications:K.communications, commAcks:K.commAcks, faq:K.faq, dpMessages:K.dpMessages, workSchedules:K.workSchedules, notifications:K.notifications, noTipDays:K.noTipDays, trash:K.trash };
+    const setters = { owners:setOwners, managers:setManagers, restaurants:setRestaurants, employees:setEmployees, roles:setRoles, tips:setTips, splits:setSplits, schedules:setSchedules, communications:setCommunications, commAcks:setCommAcks, faq:setFaq, dpMessages:setDpMessages, workSchedules:setWorkSchedules, notifications:setNotifications, noTipDays:setNoTipDays, trash:setTrash, schedTemplates:setSchedTemplates, schedDrafts:setSchedDrafts };
+    const keys    = { owners:K.owners, managers:K.managers, restaurants:K.restaurants, employees:K.employees, roles:K.roles, tips:K.tips, splits:K.splits, schedules:K.schedules, communications:K.communications, commAcks:K.commAcks, faq:K.faq, dpMessages:K.dpMessages, workSchedules:K.workSchedules, notifications:K.notifications, noTipDays:K.noTipDays, trash:K.trash, schedTemplates:K.schedTemplates, schedDrafts:K.schedDrafts };
     console.log("handleUpdate field:", field, "has setter:", !!setters[field], "has key:", !!keys[field]);
     setters[field]?.(value);
     if (keys[field]) await save(keys[field], value);
-    const labels = { owners:"Admins atualizados", managers:"Gestores atualizados", restaurants:"Restaurantes atualizados", employees:"Empregados atualizados", roles:"Cargos atualizados", tips:"Gorjetas atualizadas", splits:"Percentuais salvos", schedules:"Escala atualizada", communications:"Comunicados atualizados", commAcks:"Ciências atualizadas", faq:"FAQ atualizado", dpMessages:"Mensagem enviada", workSchedules:"Horários salvos", notifications:"Notificações atualizadas" };
+    const labels = { owners:"Admins atualizados", managers:"Gestores atualizados", restaurants:"Restaurantes atualizados", employees:"Empregados atualizados", roles:"Cargos atualizados", tips:"Gorjetas atualizadas", splits:"Percentuais salvos", schedules:"Escala atualizada", communications:"Comunicados atualizados", commAcks:"Ciências atualizadas", faq:"FAQ atualizado", dpMessages:"Mensagem enviada", workSchedules:"Horários salvos", notifications:"Notificações atualizadas", schedTemplates:"Template salvo", schedDrafts:"Rascunho salvo" };
     setToast(labels[field] ?? value ?? "Salvo!");
   }
 
@@ -7735,7 +8015,7 @@ export default function App() {
       {view === "home" && <Home onLogin={()=>setView("login")} />}
       <Toast msg={toast} onClose={()=>setToast("")} />
       {/* Rodapé de versão */}
-      <div style={{position:"fixed",bottom:8,right:12,fontSize:10,color:"var(--text3)",fontFamily:"'DM Mono',monospace",opacity:0.45,pointerEvents:"none",zIndex:100}}>v4.9</div>
+      <div style={{position:"fixed",bottom:8,right:12,fontSize:10,color:"var(--text3)",fontFamily:"'DM Mono',monospace",opacity:0.45,pointerEvents:"none",zIndex:100}}>v5.0</div>
 
       {/* Modal Política de Privacidade */}
       <div id="apptip-privacy" style={{display:"none",position:"fixed",inset:0,background:"rgba(0,0,0,0.5)",zIndex:9999,alignItems:"center",justifyContent:"center",padding:20}} onClick={e=>{if(e.target===e.currentTarget)e.currentTarget.style.display="none";}}>
