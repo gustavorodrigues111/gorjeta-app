@@ -1,4 +1,4 @@
-// AppTip v4.7 — 2026-04-11j — fix: AI escala (Gemini+Groq fallback, normalização IDs, deep copy schedules)
+// AppTip v4.8 — 2026-04-11k — rewrite: Assistente IA escala v2 (Groq+Gemini, normalização, dual mode)
 import { useState, useEffect } from "react";
 import { db } from "./firebase";
 import { doc, getDoc, setDoc, deleteDoc, collection, getDocs } from "firebase/firestore";
@@ -4145,249 +4145,325 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
               ))}
             </div>
 
-            {/* Assistente IA de Escala */}
+            {/* ═══ ASSISTENTE IA DE ESCALA v2 ═══ */}
             {(()=>{
               const mesLabel = monthLabel(year, month);
-              const mesKey = mk;
+              const daysInMonth = new Date(year, month+1, 0).getDate();
+              const mm = String(month+1).padStart(2,"0");
+              const diaSemana1 = ["Domingo","Segunda","Terça","Quarta","Quinta","Sexta","Sábado"][new Date(`${year}-${mm}-01T12:00:00`).getDay()];
+              const STATUS_VALID = {off:"Folga",vac:"Férias",faultj:"Falta Just.",faultu:"Falta Injust.",comp:"Compensação"};
 
-              // Helper: normalize date to YYYY-MM-DD with zero padding
-              function padDate(dateStr) {
-                const parts = dateStr.split("-");
-                if (parts.length !== 3) return dateStr;
-                return `${parts[0]}-${parts[1].padStart(2,"0")}-${parts[2].padStart(2,"0")}`;
-              }
+              // ── Utilitários de normalização ──
+              const strip = (s) => s.normalize("NFD").replace(/[\u0300-\u036f]/g,"").toLowerCase().trim();
+              const padD = (d) => { const p=d.split("-"); return p.length===3?`${p[0]}-${p[1].padStart(2,"0")}-${p[2].padStart(2,"0")}`:d; };
 
-              // Helper: normalize escala keys from names → employee IDs + fix date formats
-              function normalizeEscalaKeys(escala) {
-                const nomeParaId = {};
-                const semAcento = (s) => s.normalize("NFD").replace(/[\u0300-\u036f]/g,"").toLowerCase().trim();
+              function buildEmpIndex() {
+                const idx = {};
                 restEmps.forEach(e => {
-                  nomeParaId[e.id] = e.id; // ID direto
-                  nomeParaId[e.name.toLowerCase().trim()] = e.id;
-                  nomeParaId[e.name.split(" ")[0].toLowerCase().trim()] = e.id;
-                  nomeParaId[semAcento(e.name)] = e.id;
-                  nomeParaId[semAcento(e.name.split(" ")[0])] = e.id;
+                  [e.id, e.name.toLowerCase().trim(), e.name.split(" ")[0].toLowerCase().trim(),
+                   strip(e.name), strip(e.name.split(" ")[0])
+                  ].forEach(k => { if(k) idx[k] = e.id; });
+                  // Codigo do empregado (ex: QB0001)
+                  if (e.empCode) idx[e.empCode.toLowerCase()] = e.id;
                 });
-                const validStatuses = new Set(["off","vac","faultj","faultu","comp"]);
-                const expectedMonth = String(month+1).padStart(2,"0");
-                const normalized = {};
-                Object.entries(escala).forEach(([key, days]) => {
-                  const empId = nomeParaId[key] ?? nomeParaId[key.toLowerCase().trim()] ?? nomeParaId[semAcento(key)] ?? null;
-                  if (!empId || !days || typeof days !== "object") {
-                    console.warn("AI escala: chave não mapeada →", key);
-                    return;
-                  }
-                  const fixedDays = {};
-                  Object.entries(days).forEach(([dateStr, status]) => {
-                    // Normaliza data para YYYY-MM-DD com zero padding
-                    const fixed = padDate(dateStr);
-                    // Valida que é do mês correto e status válido
-                    if (fixed.slice(0,4) === String(year) && fixed.slice(5,7) === expectedMonth && validStatuses.has(status)) {
-                      fixedDays[fixed] = status;
-                    } else {
-                      console.warn("AI escala: data/status ignorado →", dateStr, status);
-                    }
-                  });
-                  if (Object.keys(fixedDays).length > 0) {
-                    normalized[empId] = { ...(normalized[empId] ?? {}), ...fixedDays };
-                  }
-                });
-                return normalized;
+                return idx;
               }
 
-              async function gerarEscalaIA() {
-                setAiSchedLoading(true); setAiSchedError(""); setAiSchedPreview(null);
+              function normalizeResult(raw) {
+                const empIdx = buildEmpIndex();
+                const out = {};
+                let unmapped = 0;
+                Object.entries(raw).forEach(([key, days]) => {
+                  const empId = empIdx[key] ?? empIdx[key.toLowerCase().trim()] ?? empIdx[strip(key)] ?? null;
+                  if (!empId || !days || typeof days !== "object") { unmapped++; return; }
+                  const fixed = {};
+                  Object.entries(days).forEach(([dt, st]) => {
+                    const d = padD(String(dt));
+                    if (d.slice(0,4)===String(year) && d.slice(5,7)===mm && STATUS_VALID[st]) fixed[d] = st;
+                  });
+                  if (Object.keys(fixed).length) out[empId] = { ...(out[empId]??{}), ...fixed };
+                });
+                return { escala: out, unmapped };
+              }
+
+              // ── Chamada à API ──
+              async function callGroq(prompt) {
+                if (!GROQ_KEY) throw new Error("Chave GROQ não configurada");
+                const controller = new AbortController();
+                const timeout = setTimeout(() => controller.abort(), 30000);
                 try {
-                  const daysInMonth = new Date(year, month+1, 0).getDate();
-                  const empList = areaEmps.map(e => {
-                    const role = restRoles.find(r => r.id === e.roleId);
-                    return `- id: "${e.id}" | nome: "${e.name}" | cargo: ${role?.name??"—"}`;
-                  }).join("\n");
+                  const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+                    method:"POST",
+                    headers:{"Content-Type":"application/json","Authorization":`Bearer ${GROQ_KEY}`},
+                    signal: controller.signal,
+                    body:JSON.stringify({
+                      model:"llama-3.3-70b-versatile",
+                      temperature:0.05,
+                      max_tokens:4096,
+                      response_format:{type:"json_object"},
+                      messages:[
+                        {role:"system",content:"Você gera escalas de restaurante em JSON. Responda APENAS com JSON válido."},
+                        {role:"user",content:prompt}
+                      ]
+                    })
+                  });
+                  clearTimeout(timeout);
+                  if (!res.ok) {
+                    const body = await res.text().catch(()=>"");
+                    throw new Error(`Groq ${res.status}: ${body.slice(0,200)}`);
+                  }
+                  const data = await res.json();
+                  const text = data?.choices?.[0]?.message?.content ?? "";
+                  if (!text) throw new Error("Resposta vazia do Groq");
+                  return JSON.parse(text.replace(/```json|```/g,"").trim());
+                } catch(e) {
+                  clearTimeout(timeout);
+                  if (e.name === "AbortError") throw new Error("Timeout — a IA demorou demais (>30s)");
+                  throw e;
+                }
+              }
 
-                  const diaSemana1 = ["Domingo","Segunda","Terça","Quarta","Quinta","Sexta","Sábado"][new Date(`${year}-${String(month+1).padStart(2,"0")}-01T12:00:00`).getDay()];
+              async function callGemini(prompt) {
+                if (!GEMINI_KEY) throw new Error("Chave Gemini não configurada");
+                const controller = new AbortController();
+                const timeout = setTimeout(() => controller.abort(), 30000);
+                try {
+                  const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_KEY}`, {
+                    method:"POST",
+                    headers:{"Content-Type":"application/json"},
+                    signal: controller.signal,
+                    body:JSON.stringify({
+                      contents:[{parts:[{text:prompt}]}],
+                      generationConfig:{temperature:0.05,responseMimeType:"application/json"}
+                    })
+                  });
+                  clearTimeout(timeout);
+                  if (!res.ok) throw new Error(`Gemini ${res.status}`);
+                  const data = await res.json();
+                  const text = data?.candidates?.[0]?.content?.parts?.[0]?.text ?? "";
+                  if (!text) throw new Error("Resposta vazia do Gemini");
+                  return JSON.parse(text.replace(/```json|```/g,"").trim());
+                } catch(e) {
+                  clearTimeout(timeout);
+                  if (e.name === "AbortError") throw new Error("Timeout — a IA demorou demais (>30s)");
+                  throw e;
+                }
+              }
 
-                  const prompt = `Você é um assistente de escalas de restaurante. Interprete a instrução abaixo e gere a escala.
+              // ── Montar prompt ──
+              function buildPrompt(instrucao, modo) {
+                const empList = areaEmps.map(e => {
+                  const role = restRoles.find(r => r.id === e.roleId);
+                  const ws = data?.workSchedules?.[rid]?.[e.id] ?? [];
+                  const curWs = ws[ws.length-1];
+                  let folgaDias = "";
+                  if (curWs) {
+                    const folgas = [0,1,2,3,4,5,6].filter(d => !curWs.days[d]?.in || !curWs.days[d]?.out);
+                    if (folgas.length) folgaDias = ` | folgas-contrato: ${folgas.map(d=>["Dom","Seg","Ter","Qua","Qui","Sex","Sáb"][d]).join(",")}`;
+                  }
+                  return `- id:"${e.id}" nome:"${e.name}" cargo:${role?.name??"—"}${folgaDias}`;
+                }).join("\n");
 
-EMPREGADOS:
+                const exemploId = areaEmps[0]?.id ?? "emp_abc123";
+
+                const base = `EMPREGADOS (${areaEmps.length}):
 ${empList}
 
-MÊS: ${mesLabel} de ${year} — ${daysInMonth} dias. Dia 1 = ${diaSemana1}.
+MÊS: ${mesLabel} ${year}, ${daysInMonth} dias. Dia 01 = ${diaSemana1}.
+Hoje: ${today()}
+
+FORMATO DE SAÍDA (JSON):
+{"resumo":"texto curto do que foi feito","escala":{"${exemploId}":{"${year}-${mm}-05":"off","${year}-${mm}-12":"off"}}}
+
+REGRAS OBRIGATÓRIAS:
+1. Chave de cada empregado = campo "id" (NÃO use o nome)
+2. Status: "off"=folga "vac"=férias "faultj"=falta justificada "faultu"=falta injustificada "comp"=compensação
+3. Inclua APENAS dias com status especial (trabalho normal NÃO aparece)
+4. Datas SEMPRE com zero: ${year}-${mm}-05 (não ${year}-${parseInt(mm)}-5)
+5. "toda segunda" = liste CADA segunda do mês explicitamente`;
+
+                if (modo === "gerar") {
+                  return `${base}
+
+TAREFA: Gere a escala completa do mês. Use as folgas do contrato de cada empregado como base.
+Para cada empregado, marque como "off" todos os dias em que ele tem folga no contrato.
+Se algum empregado não tem contrato cadastrado, dê 1 folga por semana (domingo).
+
+INSTRUÇÃO ADICIONAL DO GESTOR:
+"${instrucao}"`;
+                }
+                return `${base}
 
 INSTRUÇÃO DO GESTOR:
-"${aiSchedInput.trim()}"
+"${instrucao}"
 
-REGRAS:
-- Chave de cada empregado no JSON = campo "id" exato (ex: "${areaEmps[0]?.id ?? "abc123"}")
-- Status possíveis: "off"=folga, "vac"=férias, "faultj"=falta justificada, "faultu"=falta injustificada, "comp"=compensação
-- Inclua APENAS dias com status especial (dias normais de trabalho não devem aparecer)
-- Datas no formato YYYY-MM-DD (mês ${String(month+1).padStart(2,"0")}, ano ${year})
-- "toda segunda" = calcule todas as segundas-feiras do mês
-- "hoje" = ${new Date().toISOString().slice(0,10)}
+Interprete a instrução e gere o JSON. Se disser "toda segunda", calcule todas as segundas do mês.`;
+              }
 
-Responda SOMENTE com JSON:
-{"resumo":"resumo curto","escala":{"<id_do_empregado>":{"YYYY-MM-DD":"status"}}}`;
-
+              // ── Handler principal ──
+              async function executarIA(modo) {
+                setAiSchedLoading(true); setAiSchedError(""); setAiSchedPreview(null);
+                try {
+                  const prompt = buildPrompt(aiSchedInput.trim(), modo);
                   let result = null;
+                  let usedProvider = "";
 
-                  // Tenta Gemini primeiro (mais confiável para JSON)
-                  if (GEMINI_KEY) {
+                  // Tenta Groq primeiro (preferência do usuário)
+                  try {
+                    result = await callGroq(prompt);
+                    usedProvider = "Groq";
+                  } catch(groqErr) {
+                    console.warn("Groq falhou, tentando Gemini:", groqErr.message);
+                    // Fallback Gemini
                     try {
-                      const gRes = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_KEY}`, {
-                        method:"POST",
-                        headers:{"Content-Type":"application/json"},
-                        body:JSON.stringify({
-                          contents:[{parts:[{text:prompt}]}],
-                          generationConfig:{temperature:0.1,responseMimeType:"application/json"}
-                        })
-                      });
-                      if (gRes.ok) {
-                        const gData = await gRes.json();
-                        const raw = gData?.candidates?.[0]?.content?.parts?.[0]?.text ?? "";
-                        if (raw) result = JSON.parse(raw.replace(/```json|```/g,"").trim());
-                      }
+                      result = await callGemini(prompt);
+                      usedProvider = "Gemini";
                     } catch(gemErr) {
-                      console.warn("Gemini escala fallback:", gemErr);
+                      // Ambos falharam — mostra o erro do Groq (primário)
+                      throw new Error(`Groq: ${groqErr.message}`);
                     }
                   }
 
-                  // Fallback: Groq
-                  if (!result?.escala && GROQ_KEY) {
-                    const gqRes = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-                      method:"POST",
-                      headers:{"Content-Type":"application/json","Authorization":`Bearer ${GROQ_KEY}`},
-                      body:JSON.stringify({
-                        model:"llama-3.3-70b-versatile",
-                        temperature:0.1,
-                        response_format:{type:"json_object"},
-                        messages:[
-                          {role:"system",content:"Você é um assistente especializado em escalas de restaurantes. Sempre responda APENAS com JSON válido, sem texto adicional."},
-                          {role:"user",content:prompt}
-                        ]
-                      })
-                    });
-                    if (!gqRes.ok) {
-                      const errBody = await gqRes.text().catch(()=>"");
-                      console.error("Groq API error:", gqRes.status, errBody);
-                      throw new Error(`API retornou erro ${gqRes.status}`);
-                    }
-                    const gqData = await gqRes.json();
-                    const raw = gqData?.choices?.[0]?.message?.content ?? "";
-                    if (!raw) throw new Error("Resposta vazia da API");
-                    result = JSON.parse(raw.replace(/```json|```/g,"").trim());
+                  if (!result?.escala || typeof result.escala !== "object") {
+                    throw new Error("A IA não retornou uma escala válida. Tente reformular.");
                   }
 
-                  if (!result?.escala) throw new Error("Sem escala no retorno da IA");
+                  const { escala, unmapped } = normalizeResult(result.escala);
+                  const total = Object.values(escala).reduce((a,d) => a + Object.keys(d).length, 0);
 
-                  // Normaliza chaves: nome → id
-                  const escalaNorm = normalizeEscalaKeys(result.escala);
-                  const matched = Object.keys(escalaNorm).length;
-                  const original = Object.keys(result.escala).length;
-                  if (matched === 0 && original > 0) {
-                    throw new Error("Nenhum empregado reconhecido na resposta da IA");
+                  if (total === 0) {
+                    throw new Error("Nenhuma alteração reconhecida. Verifique se os nomes dos empregados estão corretos.");
                   }
-                  const warn = matched < original ? ` (${original - matched} empregado(s) não reconhecido(s))` : "";
 
-                  setAiSchedPreview({ escala: escalaNorm, resumo: (result.resumo ?? "Escala interpretada.") + warn });
+                  const warnings = [];
+                  if (unmapped > 0) warnings.push(`${unmapped} empregado(s) não reconhecido(s)`);
+
+                  setAiSchedPreview({
+                    escala,
+                    resumo: result.resumo ?? "Escala interpretada.",
+                    provider: usedProvider,
+                    totalChanges: total,
+                    warnings,
+                  });
                 } catch(e) {
-                  console.error("AI sched error:", e);
-                  setAiSchedError(e.message?.includes("API retornou") || e.message?.includes("Nenhum empregado")
-                    ? `❌ ${e.message}`
-                    : "Não foi possível interpretar. Reformule a instrução e tente novamente.");
+                  console.error("AI escala error:", e);
+                  setAiSchedError(e.message || "Erro desconhecido. Tente novamente.");
                 }
                 setAiSchedLoading(false);
               }
 
-              function confirmarEscala() {
-                if (!aiSchedPreview) return;
+              // ── Aplicar no calendário ──
+              function aplicarEscala() {
+                if (!aiSchedPreview?.escala) return;
+                const updated = JSON.parse(JSON.stringify(schedules ?? {}));
+                if (!updated[rid]) updated[rid] = {};
+                if (!updated[rid][mk]) updated[rid][mk] = {};
 
-                // As chaves já foram normalizadas para IDs reais no gerarEscalaIA
-                let updatedSched = JSON.parse(JSON.stringify(schedules ?? {})); // deep copy
                 Object.entries(aiSchedPreview.escala).forEach(([empId, days]) => {
-                  // Verifica se o empId realmente existe
                   if (!restEmps.find(e => e.id === empId)) return;
-                  if (!updatedSched[rid]) updatedSched[rid] = {};
-                  if (!updatedSched[rid][mk]) updatedSched[rid][mk] = {};
-                  const empDayMap = { ...(updatedSched[rid][mk][empId] ?? {}) };
-                  Object.entries(days).forEach(([dateStr, status]) => {
-                    if (status) empDayMap[dateStr] = status;
-                    else delete empDayMap[dateStr];
+                  const map = { ...(updated[rid][mk][empId] ?? {}) };
+                  Object.entries(days).forEach(([dt, st]) => {
+                    if (st) map[dt] = st; else delete map[dt];
                   });
-                  updatedSched[rid][mk][empId] = empDayMap;
+                  updated[rid][mk][empId] = map;
                 });
 
                 setShowAiSched(false);
                 setAiSchedPreview(null);
                 setAiSchedInput("");
-                onUpdate("schedules", updatedSched);
+                onUpdate("schedules", updated);
               }
 
+              // ── UI ──
               return (
                 <div style={{marginBottom:14}}>
-                  <button onClick={()=>{setShowAiSched(!showAiSched);setAiSchedError("");setAiSchedPreview(null);setAiSchedInput("");}}
+                  <button onClick={()=>{setShowAiSched(!showAiSched);setAiSchedError("");setAiSchedPreview(null);}}
                     style={{...S.btnSecondary,fontSize:12,display:"inline-flex",alignItems:"center",gap:6,padding:"7px 14px",
                       background:showAiSched?"var(--ac-bg)":undefined,borderColor:showAiSched?"var(--ac)":undefined,color:showAiSched?"var(--ac-text)":undefined}}>
-                    ✨ Assistente de escala
+                    ✨ Assistente de escala (IA)
                   </button>
 
                   {showAiSched && (
-                    <div style={{marginTop:10,padding:"16px",borderRadius:12,background:"var(--ac-bg)",border:"1px solid var(--ac)33"}}>
-                      <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:8}}>
+                    <div style={{marginTop:10,padding:"16px 18px",borderRadius:12,background:"var(--ac-bg)",border:"1px solid var(--ac)33"}}>
+                      <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:10}}>
                         <span style={{fontSize:16}}>✨</span>
                         <span style={{color:"var(--ac-text)",fontWeight:700,fontSize:14}}>Assistente de Escala — {mesLabel}</span>
+                        <span style={{fontSize:10,color:"var(--text3)",marginLeft:"auto"}}>Groq · Llama 3.3</span>
                       </div>
-                      <p style={{color:"var(--text3)",fontSize:12,margin:"0 0 12px",lineHeight:1.5}}>
-                        Fale ou escreva livremente. Exemplos: <em>"João folga segunda e quarta, Maria de férias do dia 5 ao 20, Pedro faltou hoje sem justificativa"</em>
-                      </p>
 
-                      {/* Campo de texto + microfone */}
                       <textarea
                         value={aiSchedInput}
                         onChange={e=>setAiSchedInput(e.target.value)}
-                        placeholder='Ex: "João folga toda segunda e quarta, Maria de férias do dia 5 ao 20, Pedro faltou hoje sem justificativa"'
-                        rows={4}
-                        style={{...S.input,resize:"vertical",fontSize:13,marginBottom:8}}
+                        placeholder='Ex: "João folga toda segunda e quarta" ou "gerar escala do mês baseada nos contratos"'
+                        rows={3}
+                        style={{...S.input,resize:"vertical",fontSize:13,marginBottom:10}}
                       />
-                      {aiSchedError && <p style={{color:"var(--red)",fontSize:12,margin:"0 0 8px"}}>{aiSchedError}</p>}
+
+                      {/* Botões de ação */}
+                      <div style={{display:"flex",gap:8,marginBottom:10}}>
+                        <button onClick={()=>executarIA("interpretar")} disabled={!aiSchedInput.trim()||aiSchedLoading}
+                          style={{...S.btnPrimary,flex:1,fontSize:13,padding:"10px",opacity:(!aiSchedInput.trim()||aiSchedLoading)?0.5:1}}>
+                          {aiSchedLoading?"⏳ Processando...":"✨ Interpretar instrução"}
+                        </button>
+                        <button onClick={()=>executarIA("gerar")} disabled={!aiSchedInput.trim()||aiSchedLoading}
+                          style={{...S.btnPrimary,flex:1,fontSize:13,padding:"10px",background:"#3b82f6",opacity:(!aiSchedInput.trim()||aiSchedLoading)?0.5:1}}>
+                          {aiSchedLoading?"⏳ Processando...":"📅 Gerar escala do mês"}
+                        </button>
+                      </div>
+
+                      <p style={{color:"var(--text3)",fontSize:11,margin:"0 0 10px",lineHeight:1.5}}>
+                        <strong>Interpretar:</strong> aplica comandos pontuais (folgas, férias, faltas).{" "}
+                        <strong>Gerar:</strong> monta a escala completa do mês usando os contratos.
+                      </p>
+
+                      {/* Erro */}
+                      {aiSchedError && (
+                        <div style={{background:"#e74c3c11",border:"1px solid #e74c3c44",borderRadius:10,padding:"10px 14px",marginBottom:10}}>
+                          <p style={{color:"var(--red)",fontSize:12,margin:0,lineHeight:1.5}}>❌ {aiSchedError}</p>
+                        </div>
+                      )}
 
                       {/* Preview */}
                       {aiSchedPreview && (
-                        <div style={{padding:"12px 14px",borderRadius:10,background:"var(--card-bg)",border:"1px solid var(--green)33",marginBottom:12}}>
-                          <p style={{color:"var(--green)",fontWeight:700,fontSize:13,margin:"0 0 6px"}}>✅ Escala interpretada!</p>
-                          <p style={{color:"var(--text2)",fontSize:13,margin:"0 0 10px",lineHeight:1.6}}>{aiSchedPreview.resumo}</p>
-                          <div style={{maxHeight:180,overflowY:"auto"}}>
+                        <div style={{borderRadius:10,background:"var(--card-bg)",border:"1px solid var(--green)44",marginBottom:12,overflow:"hidden"}}>
+                          <div style={{padding:"12px 14px",borderBottom:"1px solid var(--border)"}}>
+                            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                              <span style={{color:"var(--green)",fontWeight:700,fontSize:13}}>✅ Preview — {aiSchedPreview.totalChanges} alteração(ões)</span>
+                              <span style={{color:"var(--text3)",fontSize:10}}>{aiSchedPreview.provider}</span>
+                            </div>
+                            <p style={{color:"var(--text2)",fontSize:12,margin:"6px 0 0",lineHeight:1.5}}>{aiSchedPreview.resumo}</p>
+                            {aiSchedPreview.warnings?.length > 0 && (
+                              <p style={{color:"#f59e0b",fontSize:11,margin:"6px 0 0"}}>⚠️ {aiSchedPreview.warnings.join(" · ")}</p>
+                            )}
+                          </div>
+                          <div style={{maxHeight:200,overflowY:"auto",padding:"8px 14px"}}>
                             {Object.entries(aiSchedPreview.escala).map(([empId, days]) => {
                               const emp = restEmps.find(e => e.id === empId);
-                              const entries = Object.entries(days);
-                              if (!entries.length || !emp) return null;
+                              if (!emp) return null;
                               return (
                                 <div key={empId} style={{padding:"5px 0",borderBottom:"1px solid var(--border)",fontSize:12}}>
                                   <span style={{color:"var(--text)",fontWeight:600}}>{emp.name}:</span>{" "}
                                   <span style={{color:"var(--text3)"}}>
-                                    {entries.sort((a,b)=>a[0].localeCompare(b[0])).map(([date,status])=>{
-                                      const labels = {off:"Folga",comp:"Comp.",vac:"Férias",faultj:"Falta Just.",faultu:"Falta Injust."};
-                                      return `${date.slice(8)}/${date.slice(5,7)} ${labels[status]??status}`;
-                                    }).join(" · ")}
+                                    {Object.entries(days).sort((a,b)=>a[0].localeCompare(b[0])).map(([dt,st])=>
+                                      `${dt.slice(8)}/${dt.slice(5,7)} ${STATUS_VALID[st]??st}`
+                                    ).join(" · ")}
                                   </span>
                                 </div>
                               );
                             })}
                           </div>
+                          <div style={{padding:"10px 14px",borderTop:"1px solid var(--border)",display:"flex",gap:8}}>
+                            <button onClick={aplicarEscala} style={{...S.btnPrimary,flex:1,fontSize:13,background:"var(--green)"}}>
+                              ✅ Aplicar no calendário
+                            </button>
+                            <button onClick={()=>setAiSchedPreview(null)} style={{...S.btnSecondary,fontSize:12}}>Descartar</button>
+                          </div>
                         </div>
                       )}
 
-                      <div style={{display:"flex",gap:8}}>
-                        <button onClick={gerarEscalaIA} disabled={!aiSchedInput.trim()||aiSchedLoading}
-                          style={{...S.btnPrimary,flex:1,fontSize:13,opacity:(!aiSchedInput.trim()||aiSchedLoading)?0.6:1}}>
-                          {aiSchedLoading?"✨ Interpretando...":"✨ Interpretar"}
-                        </button>
-                        {aiSchedPreview && (
-                          <button onClick={confirmarEscala} style={{...S.btnPrimary,flex:1,fontSize:13,background:"var(--green)"}}>
-                            ✅ Aplicar
-                          </button>
-                        )}
-                        <button onClick={()=>{setShowAiSched(false);setAiSchedPreview(null);setAiSchedInput("");}} style={S.btnSecondary}>Fechar</button>
+                      <div style={{display:"flex",justifyContent:"flex-end"}}>
+                        <button onClick={()=>{setShowAiSched(false);setAiSchedPreview(null);setAiSchedInput("");setAiSchedError("");}} style={{...S.btnSecondary,fontSize:11}}>Fechar assistente</button>
                       </div>
-                      <p style={{color:"var(--text3)",fontSize:11,margin:"10px 0 0",fontStyle:"italic"}}>Revise sempre antes de aplicar. Ajustes manuais podem ser feitos depois.</p>
                     </div>
                   )}
                 </div>
@@ -7384,7 +7460,7 @@ hr{border:none;border-top:1px solid var(--border);margin:24px 0}
 <div class="main">
   <div class="topbar">
     <div><h1>Guia do Gestor</h1><div class="sub">Manual completo de uso do AppTip para gestores de restaurante</div></div>
-    <span class="ver">v4.7 · 2026</span>
+    <span class="ver">v4.8 · 2026</span>
   </div>
   <div class="content">
 
@@ -7893,7 +7969,7 @@ export default function App() {
       {view === "home" && <Home onLogin={()=>setView("login")} />}
       <Toast msg={toast} onClose={()=>setToast("")} />
       {/* Rodapé de versão */}
-      <div style={{position:"fixed",bottom:8,right:12,fontSize:10,color:"var(--text3)",fontFamily:"'DM Mono',monospace",opacity:0.45,pointerEvents:"none",zIndex:100}}>v4.7j</div>
+      <div style={{position:"fixed",bottom:8,right:12,fontSize:10,color:"var(--text3)",fontFamily:"'DM Mono',monospace",opacity:0.45,pointerEvents:"none",zIndex:100}}>v4.8k</div>
 
       {/* Modal Política de Privacidade */}
       <div id="apptip-privacy" style={{display:"none",position:"fixed",inset:0,background:"rgba(0,0,0,0.5)",zIndex:9999,alignItems:"center",justifyContent:"center",padding:20}} onClick={e=>{if(e.target===e.currentTarget)e.currentTarget.style.display="none";}}>
