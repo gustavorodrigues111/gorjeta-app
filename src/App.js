@@ -3,7 +3,7 @@ import { useState, useEffect, Component } from "react";
 import { db } from "./firebase";
 import { doc, getDoc, setDoc } from "firebase/firestore";
 
-const APP_VERSION = "5.2.0";
+const APP_VERSION = "5.3.0";
 
 /* eslint-disable no-unused-vars */
 
@@ -6846,6 +6846,18 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }
 
         {tab === "changelog" && (() => {
           const CHANGELOG = [
+            { version:"5.3.0", date:"2026-04-12", items:[
+              "Aba Horários: empregados agrupados por área",
+              "Alternância empregado/gestor: botão direto no header para usuários com perfil duplo",
+              "Tela do gestor agora inicia sempre pelo Dashboard",
+              "Correção: comunicados automáticos de horário não bloqueiam mais a tela do empregado",
+              "Correção: FAQ de gorjeta agora reflete corretamente o modo de divisão (Área+Pontos ou Global)",
+              "Percentuais de área: ao salvar, pergunta se deseja aplicar aos próximos meses",
+              "Novos percentuais padrão: Bar 12%, Cozinha 40%, Salão 40%, Limpeza 8%",
+              "Botão de salvar config agora fica fixo no rodapé da tela",
+              "Aviso ao sair da aba Config sem salvar alterações pendentes",
+              "Campo PIN substituído por botão 🔑 Resetar na aba Equipe",
+            ]},
             { version:"5.2.0", date:"2026-04-12", items:[
               "Novo status de escala: FREELA — empregado presente mas sem gorjeta",
               "Novo flag de empregado: Freela (🎯) — nunca participa do rateio de gorjeta",
