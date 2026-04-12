@@ -3,7 +3,7 @@ import { useState, useEffect, Component } from "react";
 import { db } from "./firebase";
 import { doc, getDoc, setDoc } from "firebase/firestore";
 
-const APP_VERSION = "5.3.1";
+const APP_VERSION = "5.3.2";
 
 /* eslint-disable no-unused-vars */
 
@@ -536,17 +536,43 @@ function FaqTab({ restaurantId, faq, emp, roles, restaurants, splits }) {
       a:(() => {
         if (!empRole) return "Cargo não identificado. Fale com o gestor.";
         if (empRole.noTip) return `Seu cargo (${empRole.name}) não participa da distribuição de gorjetas.`;
-        const vpp = totalPontos > 0 ? EX/totalPontos : 0;
-        const bruto = vpp * pontosCargo;
-        const liq = bruto * (1-taxRate);
-        return `A gorjeta é distribuída entre todos que trabalharam no dia, conforme a escala e os pontos do cargo.
+        if (splitType==="area") {
+          const pool = EX*(pctArea/100);
+          const bruto = totalPtsArea>0 ? (pool/totalPtsArea)*pontosCargo : 0;
+          const liq = bruto * (1-taxRate);
+          return `Modo atual: Área + Pontos
+A gorjeta total do dia é primeiro dividida pelo percentual de cada área. Depois, dentro da sua área, é dividida pelos pontos dos cargos.
+
+📌 Seu cargo: ${empRole.name} — ${pontosCargo} ponto${pontosCargo!==1?"s":""}
+📌 Sua área: ${empArea} — recebe ${pctArea}% do total
+📌 Dedução: ${taxLabel}
+
+Passo a passo:
+1. Gestor lança o valor total do dia
+2. Sistema separa o valor por área conforme os percentuais configurados
+3. Sua área (${empArea}) recebe ${pctArea}% do total
+4. Dentro da área, divide pelos pontos de quem trabalhou
+5. Multiplica pelos seus pontos → bruto
+6. Deduz ${(taxRate*100).toFixed(0)}% → líquido
+
+Exemplo (gorjeta R$${fmtR(EX)}):
+• ${empArea} recebe ${pctArea}% → R$${fmtR(pool)}
+• Pontos na área: ${totalPtsArea}pt · Seus: ${pontosCargo}pt
+• Seu bruto: R$${fmtR(bruto)}
+• Após ${(taxRate*100).toFixed(0)}%: R$${fmtR(liq)} líquido`;
+        } else {
+          const vpp = totalPontos > 0 ? EX/totalPontos : 0;
+          const bruto = vpp * pontosCargo;
+          const liq = bruto * (1-taxRate);
+          return `Modo atual: Pontos Global
+A gorjeta total do dia é somada e dividida diretamente pelos pontos de todos os empregados do restaurante que trabalharam no dia, sem separação por área.
 
 📌 Seu cargo: ${empRole.name} — ${pontosCargo} ponto${pontosCargo!==1?"s":""}
 📌 Dedução: ${taxLabel}
 
 Passo a passo:
 1. Gestor lança o valor total do dia
-2. Sistema soma pontos de quem trabalhou
+2. Sistema soma os pontos de todos que trabalharam no dia
 3. Divide o total pelos pontos → valor por ponto
 4. Multiplica pelos seus pontos → bruto
 5. Deduz ${(taxRate*100).toFixed(0)}% → líquido
@@ -554,7 +580,8 @@ Passo a passo:
 Exemplo (gorjeta R$${fmtR(EX)}, ${totalPontos}pt no total):
 • Valor por ponto: R$${fmtR(vpp)}
 • Seus ${pontosCargo}pt → R$${fmtR(bruto)} bruto
-• Após ${(taxRate*100).toFixed(0)}% → R$${fmtR(liq)} líquido`;
+• Após ${(taxRate*100).toFixed(0)}%: R$${fmtR(liq)} líquido`;
+        }
       })(),
     },
     {
@@ -573,7 +600,7 @@ Exemplo (gorjeta R$${fmtR(EX)}, ${totalPontos}pt no total):
           }).join("\n\n");
           const pool = EX*(pctArea/100);
           const bruto = totalPtsArea>0 ? (pool/totalPtsArea)*pontosCargo : 0;
-          return `Sistema: Área + Pontos\nA gorjeta é dividida primeiro por área (%), depois por pontos internamente.\n\nDistribuição:\n${linhas}${restRolesSemGorjeta.length>0?"\n\nSem gorjeta: "+restRolesSemGorjeta.map(r=>r.name).join(", "):""}\n\nSua situação (área: ${empArea}):\n• ${empArea} recebe ${pctArea}% → R$${fmtR(pool)} (de R$${fmtR(EX)})\n• Você tem ${pontosCargo}pt de ${totalPtsArea}pt da área\n• Bruto: R$${fmtR(bruto)} → Líquido: R$${fmtR(bruto*(1-taxRate))}`;
+          return `Sistema atual: Área + Pontos\n\nO valor total da gorjeta do dia é primeiro dividido pelo percentual configurado de cada área. Depois, dentro de cada área, o valor é dividido pelos pontos dos cargos dos empregados presentes.\n\nDistribuição por área:\n${linhas}${restRolesSemGorjeta.length>0?"\n\nCargos sem gorjeta: "+restRolesSemGorjeta.map(r=>r.name).join(", "):""}\n\nSua situação (área: ${empArea}):\n• ${empArea} recebe ${pctArea}% → R$${fmtR(pool)} (de R$${fmtR(EX)})\n• Você tem ${pontosCargo}pt de ${totalPtsArea}pt da área\n• Bruto: R$${fmtR(bruto)} → Líquido: R$${fmtR(bruto*(1-taxRate))}`;
         } else {
           const linhas = restRolesComGorjeta
             .sort((a,b)=>(parseFloat(b.points)||0)-(parseFloat(a.points)||0))
@@ -582,7 +609,7 @@ Exemplo (gorjeta R$${fmtR(EX)}, ${totalPontos}pt no total):
               const d = r.id===empRole?.id?" ◄ você":"";
               return `• ${r.name}: ${r.points}pt (${pct}%)${d}`;
             }).join("\n");
-          return `Sistema: Pontos Global\nTodos que trabalharam no dia dividem a gorjeta proporcionalmente aos pontos do cargo.\n\nTabela de cargos:\n${linhas}${restRolesSemGorjeta.length>0?"\n\nSem gorjeta: "+restRolesSemGorjeta.map(r=>r.name).join(", "):""}\n\nTotal de pontos (todos presentes): ${totalPontos}pt\nQuanto maior a pontuação, maior a fatia da gorjeta.`;
+          return `Sistema atual: Pontos Global\n\nTodos os pontos de todos os empregados do restaurante que trabalharam no dia são somados. O valor total da gorjeta é dividido por essa soma, e cada empregado recebe proporcionalmente aos pontos do seu cargo. Não há separação por área.\n\nTabela de cargos (${totalPontos}pt total):\n${linhas}${restRolesSemGorjeta.length>0?"\n\nCargos sem gorjeta: "+restRolesSemGorjeta.map(r=>r.name).join(", "):""}\n\nQuanto maior a pontuação, maior a fatia da gorjeta.`;
         }
       })(),
     },
@@ -4761,8 +4788,10 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                 {
                   id:"__gorjeta__",
                   tabKey: null,
-                  q:"💸 Como é calculada a minha gorjeta?",
-                  a:`A gorjeta é distribuída entre todos que trabalharam no dia conforme os pontos do cargo e a escala.\n\nDedução aplicada: ${taxLabel}\n\nPasso a passo:\n1. Gestor lança o valor total do dia\n2. Sistema soma pontos de quem trabalhou\n3. Divide o total pelos pontos → valor por ponto\n4. Multiplica pelos pontos do cargo → bruto\n5. Deduz ${(taxRate*100).toFixed(0)}% → líquido\n\nExemplo (gorjeta R$${fmtR2(EX)}, ${totalPts}pt totais):\n• Valor por ponto: R$${totalPts>0?fmtR2(EX/totalPts):"—"}\n• Cargo com 6pt → R$${totalPts>0?fmtR2(EX/totalPts*6):"—"} bruto → R$${totalPts>0?fmtR2(EX/totalPts*6*(1-taxRate)):"—"} líquido`,
+                  q:"💸 Como é calculada a gorjeta?",
+                  a: splitType==="area"
+                    ? `Modo atual: Área + Pontos\nA gorjeta total do dia é primeiro dividida pelo percentual de cada área. Depois, dentro de cada área, é dividida pelos pontos dos cargos presentes.\n\nDedução aplicada: ${taxLabel}\n\nPasso a passo:\n1. Gestor lança o valor total do dia\n2. Sistema separa o valor por área conforme os percentuais configurados (${AREAS.map(a=>`${a} ${curSplit2[a]??0}%`).join(", ")})\n3. Dentro de cada área, soma os pontos de quem trabalhou\n4. Divide o valor da área pelos pontos → valor por ponto da área\n5. Multiplica pelos pontos do cargo → bruto\n6. Deduz ${(taxRate*100).toFixed(0)}% → líquido\n\nExemplo (gorjeta R$${fmtR2(EX)}):\n• Salão recebe ${curSplit2["Salão"]??0}% → R$${fmtR2(EX*(curSplit2["Salão"]??0)/100)}\n• Cargo com 6pt de ${totalPts>0?totalPts:"X"}pt na área → bruto proporcional\n• Após ${(taxRate*100).toFixed(0)}% → líquido`
+                    : `Modo atual: Pontos Global\nA gorjeta total do dia é somada e dividida diretamente pelos pontos de todos os empregados do restaurante que trabalharam, sem separação por área.\n\nDedução aplicada: ${taxLabel}\n\nPasso a passo:\n1. Gestor lança o valor total do dia\n2. Sistema soma os pontos de todos que trabalharam (total: ${totalPts}pt)\n3. Divide o total pelos pontos → valor por ponto\n4. Multiplica pelos pontos do cargo → bruto\n5. Deduz ${(taxRate*100).toFixed(0)}% → líquido\n\nExemplo (gorjeta R$${fmtR2(EX)}, ${totalPts}pt totais):\n• Valor por ponto: R$${totalPts>0?fmtR2(EX/totalPts):"—"}\n• Cargo com 6pt → R$${totalPts>0?fmtR2(EX/totalPts*6):"—"} bruto → R$${totalPts>0?fmtR2(EX/totalPts*6*(1-taxRate)):"—"} líquido`,
                 },
                 {
                   id:"__sistema__",
@@ -4777,13 +4806,13 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                       const pts=cargos.reduce((s,r)=>s+(parseFloat(r.points)||0),0);
                       return `${a} — ${pct}%\n${cargos.map(r=>`   • ${r.name}: ${r.points}pt`).join("\n")}\n   Total: ${pts}pt`;
                     }).join("\n\n");
-                    return `Sistema: Área + Pontos\nA gorjeta é dividida primeiro por área (%), depois por pontos internamente.\n\nDistribuição:\n${linhas}${restRolesSem.length>0?"\n\nSem gorjeta: "+restRolesSem.map(r=>r.name).join(", "):""}`;
+                    return `Sistema atual: Área + Pontos\n\nO valor total da gorjeta do dia é primeiro dividido pelo percentual configurado de cada área. Depois, dentro de cada área, o valor é dividido pelos pontos dos cargos dos empregados presentes.\n\nDistribuição por área:\n${linhas}${restRolesSem.length>0?"\n\nCargos sem gorjeta: "+restRolesSem.map(r=>r.name).join(", "):""}`;
                   })() : (()=>{
                     const linhas=restRolesCom.sort((a,b)=>(parseFloat(b.points)||0)-(parseFloat(a.points)||0)).map(r=>{
                       const pct=totalPts>0?((parseFloat(r.points)||0)/totalPts*100).toFixed(1):"0";
                       return `• ${r.name}: ${r.points}pt (${pct}%)`;
                     }).join("\n");
-                    return `Sistema: Pontos Global\nTodos que trabalharam dividem a gorjeta proporcionalmente aos pontos do cargo.\n\nTabela de cargos:\n${linhas}${restRolesSem.length>0?"\n\nSem gorjeta: "+restRolesSem.map(r=>r.name).join(", "):""}`;
+                    return `Sistema atual: Pontos Global\n\nTodos os pontos de todos os empregados do restaurante que trabalharam no dia são somados. O valor total da gorjeta é dividido por essa soma, e cada empregado recebe proporcionalmente aos pontos do seu cargo. Não há separação por área.\n\nTabela de cargos (${totalPts}pt total):\n${linhas}${restRolesSem.length>0?"\n\nCargos sem gorjeta: "+restRolesSem.map(r=>r.name).join(", "):""}`;
                   })(),
                 },
                 { id:"__escala__", tabKey:null, q:"📅 Como funciona a escala e por que ela importa?", a:"A escala registra a presença em cada dia e define quem recebe gorjeta.\n\nRecebe gorjeta: trabalhando normalmente ou compensação (C).\nNÃO recebe: folga, freela (FL), falta injustificada (F) + penalidade, falta justificada (FJ), atestado (A), férias (V).\n\nExceções:\n• Produção (🏭): recebe gorjeta todos os dias, exceto férias. Penalidade com percentuais distintos para cada tipo de falta.\n• Freela (🎯): nunca participa do rateio de gorjeta.\n• Status Freela no dia: empregado presente mas sem gorjeta naquele dia.\n\nNenhum empregado recebe gorjeta durante férias, incluindo os de produção." },
@@ -6848,6 +6877,11 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }
 
         {tab === "changelog" && (() => {
           const CHANGELOG = [
+            { version:"5.3.2", date:"2026-04-12", items:[
+              "FAQ gorjeta: texto agora explica claramente o cálculo para cada modo (Área+Pontos vs Pontos Global)",
+              "FAQ sistema: descrição detalhada de como funciona cada modalidade de divisão",
+              "Botão Salvar Config movido para o topo da aba (sticky) — visível imediatamente",
+            ]},
             { version:"5.3.1", date:"2026-04-12", items:[
               "Aba Config unificada: todas as configurações agora salvam com botão explícito (retenção, penalidades, modalidade, abas)",
               "Botão Salvar Config fixo no rodapé (sticky) — sempre visível quando há alterações pendentes",
