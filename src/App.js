@@ -5082,6 +5082,18 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
         {/* CONFIG */}
         {tab === "config" && (
           <div>
+            {/* Salvar / Descartar configurações — topo fixo */}
+            {configDirty && (
+              <div style={{position:"sticky",top:0,zIndex:50,marginBottom:16}}>
+                <div style={{background:"var(--card-bg)",border:"2px solid var(--ac)",borderRadius:14,padding:"14px 18px",boxShadow:"0 4px 20px rgba(0,0,0,0.15)"}}>
+                  <p style={{color:"var(--ac)",fontSize:13,fontWeight:700,margin:"0 0 10px"}}>⚠️ Alterações não salvas</p>
+                  <div style={{display:"flex",gap:10}}>
+                    <button onClick={saveConfig} style={{...S.btnPrimary,flex:1,padding:"12px",fontSize:14,fontWeight:700}}>Salvar Configurações</button>
+                    <button onClick={discardConfig} style={{...S.btnSecondary,padding:"12px 16px",fontSize:13}}>Descartar</button>
+                  </div>
+                </div>
+              </div>
+            )}
             {/* Abas opcionais — só supergestor */}
             {isOwner && (
               <div style={{...S.card,marginBottom:20}}>
@@ -5266,18 +5278,6 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
               </div>
             )}
 
-            {/* Salvar / Descartar configurações — sticky no rodapé */}
-            {configDirty && (
-              <div style={{position:"sticky",bottom:0,zIndex:50,padding:"12px 0"}}>
-                <div style={{background:"var(--card-bg)",border:"2px solid var(--ac)",borderRadius:14,padding:"14px 18px",boxShadow:"0 -4px 20px rgba(0,0,0,0.15)"}}>
-                  <p style={{color:"var(--ac)",fontSize:13,fontWeight:700,margin:"0 0 10px"}}>⚠️ Alterações não salvas</p>
-                  <div style={{display:"flex",gap:10}}>
-                    <button onClick={saveConfig} style={{...S.btnPrimary,flex:1,padding:"12px",fontSize:14,fontWeight:700}}>Salvar Configurações</button>
-                    <button onClick={discardConfig} style={{...S.btnSecondary,padding:"12px 16px",fontSize:13}}>Descartar</button>
-                  </div>
-                </div>
-              </div>
-            )}
           </div>
         )}
       </div>
