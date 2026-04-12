@@ -1402,7 +1402,7 @@ function validateWeekSchedule(days) {
 }
 
 // ── Work Schedule Manager Tab ─────────────────────────────────────────────────
-function WorkScheduleManagerTab({ restaurantId, employees, workSchedules, notifications, managers, currentManagerName, onUpdate, communications, isOwner }) {
+function WorkScheduleManagerTab({ restaurantId, employees, roles, workSchedules, notifications, managers, currentManagerName, onUpdate, communications, isOwner }) {
   const ac = "var(--ac)";
   const restEmps = employees.filter(e => e.restaurantId === restaurantId && !e.inactive);
 
@@ -1611,37 +1611,73 @@ function WorkScheduleManagerTab({ restaurantId, employees, workSchedules, notifi
   const toggleOff = { ...toggleOn, background: "var(--border)" };
   const toggleDot = (on) => ({ position: "absolute", top: 2, left: on ? 22 : 2, width: 20, height: 20, borderRadius: 10, background: "#fff", transition: "left .2s", boxShadow: "0 1px 3px rgba(0,0,0,.2)" });
 
-  // ═══ LIST VIEW (employee selection) ═══
-  if (!selEmpId) return (
-    <div>
-      <p style={{color:"var(--text3)",fontSize:13,marginBottom:16}}>Selecione um empregado para cadastrar ou editar o horario:</p>
-      {restEmps.map(emp => {
-        const sched = workSchedules?.[restaurantId]?.[emp.id] ?? [];
-        const cur = sched[sched.length - 1];
-        const hasHoursComplete = cur?.hoursComplete !== false;
-        const workDays = cur ? Object.keys(cur.days).length : 0;
-        const folgaDays = cur ? 7 - workDays : 0;
-        return (
-          <div key={emp.id} onClick={()=>loadEmp(emp.id)} style={{...S.card,marginBottom:8,cursor:"pointer",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-            <div style={{flex:1,minWidth:0}}>
-              <div style={{color:"var(--text)",fontWeight:600,fontSize:14,display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
-                {emp.name}
-                {cur && !hasHoursComplete && <span style={{background:"#f59e0b22",color:"#f59e0b",fontSize:10,padding:"2px 8px",borderRadius:6,fontWeight:700}}>HORARIOS PENDENTES</span>}
-              </div>
-              <div style={{color:"var(--text3)",fontSize:12}}>
-                {cur
-                  ? (hasHoursComplete
-                    ? `Vigente desde ${fmtDate(cur.validFrom)} · ${fmtHHMM(cur.totalContract)}/sem`
-                    : `${workDays} dias trabalho, ${folgaDays} folga(s) · horarios pendentes`)
-                  : "Sem horario cadastrado"}
-              </div>
+  // ═══ LIST VIEW (employee selection) — grouped by area ═══
+  if (!selEmpId) {
+    const restRoles = roles?.filter(r => r.restaurantId === restaurantId) ?? [];
+    const byArea = {}; AREAS.forEach(a => { byArea[a] = []; });
+    const noArea = [];
+    restEmps.forEach(emp => {
+      const role = restRoles.find(r => r.id === emp.roleId);
+      const a = role?.area;
+      if (a && byArea[a]) byArea[a].push(emp);
+      else noArea.push(emp);
+    });
+
+    const renderEmpCard = (emp) => {
+      const sched = workSchedules?.[restaurantId]?.[emp.id] ?? [];
+      const cur = sched[sched.length - 1];
+      const hasHoursComplete = cur?.hoursComplete !== false;
+      const workDays = cur ? Object.keys(cur.days).length : 0;
+      const folgaDays = cur ? 7 - workDays : 0;
+      return (
+        <div key={emp.id} onClick={()=>loadEmp(emp.id)} style={{...S.card,marginBottom:8,cursor:"pointer",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+          <div style={{flex:1,minWidth:0}}>
+            <div style={{color:"var(--text)",fontWeight:600,fontSize:14,display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
+              {emp.name}
+              {cur && !hasHoursComplete && <span style={{background:"#f59e0b22",color:"#f59e0b",fontSize:10,padding:"2px 8px",borderRadius:6,fontWeight:700}}>HORARIOS PENDENTES</span>}
             </div>
-            <span style={{color:ac,fontSize:16,fontWeight:700,flexShrink:0,paddingLeft:8}}>&rsaquo;</span>
+            <div style={{color:"var(--text3)",fontSize:12}}>
+              {cur
+                ? (hasHoursComplete
+                  ? `Vigente desde ${fmtDate(cur.validFrom)} · ${fmtHHMM(cur.totalContract)}/sem`
+                  : `${workDays} dias trabalho, ${folgaDays} folga(s) · horarios pendentes`)
+                : "Sem horario cadastrado"}
+            </div>
           </div>
-        );
-      })}
-    </div>
-  );
+          <span style={{color:ac,fontSize:16,fontWeight:700,flexShrink:0,paddingLeft:8}}>&rsaquo;</span>
+        </div>
+      );
+    };
+
+    return (
+      <div>
+        <p style={{color:"var(--text3)",fontSize:13,marginBottom:16}}>Selecione um empregado para cadastrar ou editar o horario:</p>
+        {AREAS.map(area => {
+          const emps = byArea[area];
+          if (emps.length === 0) return null;
+          return (
+            <div key={area} style={{marginBottom:16}}>
+              <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:8,paddingBottom:4,borderBottom:`2px solid ${AREA_COLORS[area]}33`}}>
+                <span style={{width:8,height:8,borderRadius:"50%",background:AREA_COLORS[area],display:"inline-block"}}></span>
+                <span style={{color:AREA_COLORS[area],fontSize:12,fontWeight:700,letterSpacing:1}}>{area.toUpperCase()}</span>
+                <span style={{color:"var(--text3)",fontSize:11,marginLeft:4}}>({emps.length})</span>
+              </div>
+              {emps.map(renderEmpCard)}
+            </div>
+          );
+        })}
+        {noArea.length > 0 && (
+          <div style={{marginBottom:16}}>
+            <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:8,paddingBottom:4,borderBottom:"2px solid var(--border)"}}>
+              <span style={{color:"var(--text3)",fontSize:12,fontWeight:700,letterSpacing:1}}>SEM AREA</span>
+              <span style={{color:"var(--text3)",fontSize:11,marginLeft:4}}>({noArea.length})</span>
+            </div>
+            {noArea.map(renderEmpCard)}
+          </div>
+        )}
+      </div>
+    );
+  }
 
   // ═══ EDIT VIEW (single employee) ═══
   return (
@@ -2044,7 +2080,7 @@ function DpManagerTab({ restaurantId, dpMessages, onUpdate, isOwner }) {
   );
 }
 
-function EmployeePortal({ employees, roles, tips, schedules, splits, restaurants, communications, commAcks, faq, dpMessages, workSchedules, onBack, onUpdateEmployee, onUpdate, toggleTheme, theme }) {
+function EmployeePortal({ employees, roles, tips, schedules, splits, restaurants, communications, commAcks, faq, dpMessages, workSchedules, onBack, onUpdateEmployee, onUpdate, toggleTheme, theme, onSwitchToManager }) {
   const [empId, setEmpId] = useState(() => localStorage.getItem("apptip_empid") || null);
 
   useEffect(() => {
@@ -2091,6 +2127,7 @@ function EmployeePortal({ employees, roles, tips, schedules, splits, restaurants
   const empRole = roles?.find(r => r.id === emp?.roleId);
   const myComms = emp ? communications.filter(c => {
     if (c.restaurantId !== emp.restaurantId) return false;
+    if (c.autoSchedule || c.deleted) return false;
     if (!c.target || c.target === "all") return true;
     if (c.target.startsWith("emps:")) return c.target.replace("emps:","").split(",").includes(empId);
     if (c.target.startsWith("areas:")) return empRole && c.target.replace("areas:","").split(",").includes(empRole.area);
@@ -2193,6 +2230,7 @@ function EmployeePortal({ employees, roles, tips, schedules, splits, restaurants
           <button onClick={toggleTheme} style={{background:"none",border:"1px solid var(--border)",borderRadius:20,padding:"6px 10px",cursor:"pointer",fontSize:16,color:"var(--text2)"}}>
             {theme==="dark"?"☀️":"🌙"}
           </button>
+          {onSwitchToManager && <button onClick={onSwitchToManager} style={{...S.btnSecondary,fontSize:12,padding:"6px 14px",color:"var(--ac)",borderColor:"var(--ac)"}}>📊 Gestor</button>}
           <button onClick={() => { setEmpId(null); onBack(); }} style={{ ...S.btnSecondary, fontSize:12, padding:"6px 14px" }}>Sair</button>
         </div>
       </div>
@@ -3583,7 +3621,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
     (canTips || isOwner)                       && ["config",       "⚙️ Configurações"],
   ].filter(Boolean);
 
-  const [tab, setTab] = useState(isDP ? "notificacoes" : (perms.tips || isOwner) ? "dashboard" : "schedule");
+  const [tab, setTab] = useState("dashboard");
 
   // Reset de aba — só Admin AppTip (isOwner)
   function resetTab(tabKey, tabLabel, getSnapshot) {
@@ -4807,7 +4845,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                 if(ok){ const w={...data?.workSchedules}; delete w[rid]; onUpdate("workSchedules",w); onUpdate("_toast","🗑️ Horários enviados para a lixeira"); }
               }} style={{...S.btnSecondary,fontSize:12,color:"var(--red)",borderColor:"var(--red)44"}}>🗑️ Resetar horários</button>
             </div>}
-            <WorkScheduleManagerTab restaurantId={rid} employees={employees} workSchedules={data?.workSchedules??{}} notifications={data?.notifications??[]} managers={data?.managers??[]} currentManagerName={currentUser?.name ?? (isOwner?"Admin AppTip":"Gestor")} onUpdate={onUpdate} communications={data?.communications??[]} isOwner={isOwner} />
+            <WorkScheduleManagerTab restaurantId={rid} employees={employees} roles={roles} workSchedules={data?.workSchedules??{}} notifications={data?.notifications??[]} managers={data?.managers??[]} currentManagerName={currentUser?.name ?? (isOwner?"Admin AppTip":"Gestor")} onUpdate={onUpdate} communications={data?.communications??[]} isOwner={isOwner} />
           </div>
         )}
 
@@ -7002,7 +7040,7 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }
 //
 // MANAGER PORTAL (regular manager, single or multi restaurant)
 //
-function ManagerPortal({ manager, data, onUpdate, onBack, toggleTheme, theme }) {
+function ManagerPortal({ manager, data, onUpdate, onBack, toggleTheme, theme, onSwitchToEmployee }) {
   const { restaurants, employees, roles, tips, splits, schedules } = data;
   const myRestaurants = restaurants.filter(r => manager.restaurantIds?.includes(r.id));
   const [selId, setSelId] = useState(() => {
@@ -7069,6 +7107,7 @@ function ManagerPortal({ manager, data, onUpdate, onBack, toggleTheme, theme }) 
             style={{...S.btnSecondary,fontSize:11,textDecoration:"none",display:"flex",alignItems:"center",gap:3,padding:"5px 10px"}}>
             ❓ Ajuda
           </a>
+          {onSwitchToEmployee && <button onClick={onSwitchToEmployee} style={{...S.btnSecondary,fontSize:11,padding:"5px 10px",color:"var(--ac)",borderColor:"var(--ac)"}}>👤 Empregado</button>}
           <button onClick={onBack} style={{...S.btnSecondary,fontSize:11,padding:"5px 10px"}}>Sair</button>
         </div>
       </div>
@@ -8705,9 +8744,21 @@ export default function App() {
           setCurrentUser(updated);
         }} onBack={doLogout} />
       ) : (
-        <ManagerPortal manager={currentUser} data={data} onUpdate={handleUpdate} onBack={doLogout} toggleTheme={toggleTheme} theme={theme} />
+        <ManagerPortal manager={currentUser} data={data} onUpdate={handleUpdate} onBack={doLogout} toggleTheme={toggleTheme} theme={theme}
+          onSwitchToEmployee={(() => {
+            const cpf = currentUser?.cpf?.replace(/\D/g,"");
+            const emp = cpf ? employees.find(e => e.cpf?.replace(/\D/g,"") === cpf && !(e.inactive && e.inactiveFrom && e.inactiveFrom <= today())) : null;
+            if (!emp) return null;
+            return () => { setCurrentUser(emp); setUserRole("employee"); localStorage.setItem("apptip_role","employee"); localStorage.setItem("apptip_userid",emp.id); localStorage.setItem("apptip_empid",emp.id); setView("employee"); };
+          })()} />
       ))}
-      {view === "employee" && <EmployeePortal employees={employees} roles={roles} tips={tips} schedules={schedules} splits={splits} restaurants={restaurants} communications={communications} commAcks={commAcks} faq={faq} dpMessages={dpMessages} workSchedules={workSchedules} onBack={doLogout} onUpdateEmployee={emp=>{const next=employees.map(e=>e.id===emp.id?emp:e);handleUpdate("employees",next);}} onUpdate={handleUpdate} toggleTheme={toggleTheme} theme={theme} />}
+      {view === "employee" && <EmployeePortal employees={employees} roles={roles} tips={tips} schedules={schedules} splits={splits} restaurants={restaurants} communications={communications} commAcks={commAcks} faq={faq} dpMessages={dpMessages} workSchedules={workSchedules} onBack={doLogout} onUpdateEmployee={emp=>{const next=employees.map(e=>e.id===emp.id?emp:e);handleUpdate("employees",next);}} onUpdate={handleUpdate} toggleTheme={toggleTheme} theme={theme}
+        onSwitchToManager={(() => {
+          const cpf = currentUser?.cpf?.replace(/\D/g,"");
+          const mgr = cpf ? managers.find(m => m.cpf?.replace(/\D/g,"") === cpf) : null;
+          if (!mgr) return null;
+          return () => { setCurrentUser(mgr); setUserRole("manager"); localStorage.setItem("apptip_role","manager"); localStorage.setItem("apptip_userid",mgr.id); setView("manager"); };
+        })()} />}
       {view === "fatura" && <FaturaPage faturaId={faturaId} restaurants={restaurants} onUpdate={handleUpdate} loaded={loaded} />}
       {view === "guia-gestor" && <GuiaGestor />}
       {view === "home" && <Home onLogin={()=>setView("login")} />}
