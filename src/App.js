@@ -6925,6 +6925,7 @@ function Home({ onLogin }) {
     { icon:"💸", title:"Gorjetas transparentes", desc:"Cálculo e distribuição automática por área e cargo. Cada empregado vê exatamente o que recebeu, bruto e líquido, sem dúvidas." },
     { icon:"📅", title:"Escala inteligente", desc:"Controle de folgas, faltas, férias e compensações integrado ao cálculo de gorjetas. Escala base gerada automaticamente pelo horário contratual." },
     { icon:"👥", title:"Gestão de equipe", desc:"Cadastro completo, cargos, pontos e acesso individual para cada empregado. Histórico preservado mesmo após inativação." },
+    { icon:"🕐", title:"Horários contratuais", desc:"Cadastre dias de trabalho e folga primeiro, preencha horários quando tiver. Validação automática de carga semanal, interjornada e hora noturna." },
     { icon:"❓", title:"FAQ com assistente de IA", desc:"Base de perguntas e respostas para sua equipe. Perguntas automáticas sobre gorjetas e regras, mais IA para ajudar o gestor a redigir." },
     { icon:"📢", title:"Comunicados com IA", desc:"Envie avisos para toda a equipe ou áreas específicas. Assistente de IA ajuda a redigir. Acompanhe quem leu e confirmou." },
     { icon:"💬", title:"Canal com o DP", desc:"Canal direto, inclusive anônimo, para comunicação entre equipe e departamento pessoal. Sugestões, denúncias, atestados e dúvidas trabalhistas." },
@@ -7001,7 +7002,7 @@ function Home({ onLogin }) {
         <div style={{maxWidth:960,margin:"0 auto"}}>
           <div style={{textAlign:"center",marginBottom:56}}>
             <h2 style={{fontSize:"clamp(24px,4vw,38px)",fontWeight:800,margin:"0 0 12px",letterSpacing:-0.8,color:"#1c1208"}}>Tudo que sua equipe precisa</h2>
-            <p style={{color:"#8c7a5e",fontSize:16}}>Um sistema completo — gorjetas, escala, comunicados com IA e muito mais</p>
+            <p style={{color:"#8c7a5e",fontSize:16}}>Gorjetas, escala, horários, comunicados com IA e muito mais</p>
           </div>
           <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(280px,1fr))",gap:20}}>
             {FEATURES.map(f=>(
@@ -7022,10 +7023,10 @@ function Home({ onLogin }) {
           <p style={{color:"#8c7a5e",fontSize:16,marginBottom:56}}>Do cadastro ao extrato do empregado em minutos</p>
           <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(200px,1fr))",gap:32}}>
             {[
-              ["1","Configure o restaurante","Cadastre áreas, cargos com pontos, empregados e regras fiscais. Pronto para operar."],
+              ["1","Configure o restaurante","Cadastre cargos, empregados, horários e regras fiscais. Defina dias de trabalho e folga — horários depois."],
               ["2","Lance as gorjetas","Informe o valor diário. O sistema distribui automaticamente por cargo, área e escala."],
               ["3","Comunique a equipe","Envie comunicados com IA, gerencie o FAQ automático e mantenha todos informados."],
-              ["4","Equipe acompanha tudo","Cada empregado vê extrato, escala e comunicados direto pelo celular."],
+              ["4","Equipe acompanha tudo","Cada empregado vê extrato, escala, horários e comunicados direto pelo celular."],
             ].map(([n,t,d])=>(
               <div key={n}>
                 <div style={{width:52,height:52,borderRadius:"50%",background:ac,color:"#fff",fontSize:22,fontWeight:800,display:"flex",alignItems:"center",justifyContent:"center",margin:"0 auto 16px",fontFamily:"'DM Mono',monospace"}}>{n}</div>
@@ -7433,9 +7434,9 @@ hr{border:none;border-top:1px solid var(--border);margin:24px 0}
 
     <div class="hero">
       <h2>Bem-vindo ao AppTip 🍽️</h2>
-      <p>O AppTip centraliza a gestão de gorjetas. Como gestor, você lança gorjetas, gerencia equipe, escala, comunicados, FAQ com IA e configura as regras do restaurante.</p>
+      <p>O AppTip centraliza a gestão de gorjetas. Como gestor, você lança gorjetas, gerencia equipe, escala, horários, comunicados, FAQ com IA e configura as regras do restaurante.</p>
       <div class="chips">
-        <span class="chip">💸 Gorjetas automáticas</span><span class="chip">📅 Escala</span><span class="chip">👥 Equipe</span><span class="chip">❓ FAQ com IA</span><span class="chip">📢 Comunicados</span><span class="chip">⚙️ Configurações</span>
+        <span class="chip">💸 Gorjetas automáticas</span><span class="chip">📅 Escala</span><span class="chip">👥 Equipe</span><span class="chip">🕐 Horários</span><span class="chip">❓ FAQ com IA</span><span class="chip">📢 Comunicados com IA</span><span class="chip">⚙️ Configurações</span>
       </div>
     </div>
 
@@ -7564,9 +7565,33 @@ hr{border:none;border-top:1px solid var(--border);margin:24px 0}
     </div>
 
     <div class="sec" id="horarios">
-      <div class="sh"><div class="iw">🕐</div><div><h2>Horários</h2><p>Horários contratuais dos empregados</p></div></div>
-      <div class="card"><h3>Para que serve?</h3><p>Registra o horário contratual (entrada, saída, intervalo) de cada empregado. Usado para controle interno e geração automática da escala base.</p></div>
-      <div class="card"><h3>Aprovação de alterações</h3><p>Empregados podem solicitar alterações pelo app. As solicitações chegam como notificações na Caixa para o gestor de DP aprovar ou recusar.</p></div>
+      <div class="sh"><div class="iw">🕐</div><div><h2>Horários <span class="new">ATUALIZADO</span></h2><p>Horários contratuais dos empregados</p></div></div>
+      <div class="card"><h3>Para que serve?</h3><p>Registra os dias de trabalho/folga e horários contratuais (entrada, saída, intervalo) de cada empregado. Usado para controle interno e geração automática da escala base.</p></div>
+      <div class="card"><h3>Fluxo simplificado</h3>
+        <p>Você pode cadastrar em duas etapas:</p>
+        <div class="steps">
+          <div class="step"><div class="sn">1</div><div class="sc"><strong>Defina dias de trabalho e folga</strong><p>Use o toggle de cada dia: ON = trabalha, OFF = folga. Clique em <strong>"Salvar Dias"</strong> para registrar sem precisar preencher horários.</p></div></div>
+          <div class="step"><div class="sn">2</div><div class="sc"><strong>Preencha os horários quando tiver</strong><p>Volte ao empregado, preencha entrada/saída/intervalo e clique em <strong>"Validar e Salvar Horário"</strong>. O sistema valida carga semanal (43:55–44:00), interjornada (11h), máximo 10h/dia e intervalo mínimo.</p></div></div>
+        </div>
+        <div class="ib tip"><span class="ico">💡</span><span>A escala usa os dias de trabalho/folga mesmo sem horários preenchidos. Cadastre os dias primeiro para já gerar a escala base.</span></div>
+      </div>
+      <div class="card"><h3>Status na lista de empregados</h3>
+        <table>
+          <tr><th>Status</th><th>Significado</th></tr>
+          <tr><td><span class="tag am">HORÁRIOS PENDENTES</span></td><td>Dias definidos mas sem horários — escala funciona, validação pendente</td></tr>
+          <tr><td><span class="tag gr">XX:XX/sem</span></td><td>Horário completo e validado — carga semanal exibida</td></tr>
+          <tr><td><span class="tag gy">Sem horário</span></td><td>Nenhum cadastro ainda</td></tr>
+        </table>
+      </div>
+      <div class="card"><h3>Regras de validação</h3>
+        <ul>
+          <li><strong>Carga semanal:</strong> entre 43h55 e 44h00 contratuais (rígido)</li>
+          <li><strong>Interjornada:</strong> mínimo 11h entre saída e próxima entrada</li>
+          <li><strong>Máximo diário:</strong> 10h contratuais por dia</li>
+          <li><strong>Intervalo mínimo:</strong> 30 minutos em jornadas acima de 6h</li>
+          <li><strong>Hora noturna:</strong> 22:00–05:00 com conversão ficta (52.5min real = 60min contratual)</li>
+        </ul>
+      </div>
     </div>
       <div class="card"><h3>Como funciona?</h3><p>O gestor faz upload dos recibos em PDF. Cada empregado acessa o próprio recibo diretamente pelo app, sem necessidade de envio individual.</p>
         <div class="steps">
@@ -7577,11 +7602,11 @@ hr{border:none;border-top:1px solid var(--border);margin:24px 0}
     </div>
 
     <div class="sec" id="comunicados">
-      <div class="sh"><div class="iw">📢</div><div><h2>Comunicados</h2><p>Avisos e informações para a equipe</p></div></div>
+      <div class="sh"><div class="iw">📢</div><div><h2>Comunicados <span class="new">COM IA</span></h2><p>Avisos e informações para a equipe</p></div></div>
       <div class="card"><h3>Criar comunicado</h3>
         <div class="steps">
-          <div class="step"><div class="sn">1</div><div class="sc"><strong>Escreva título e mensagem</strong><p>O título aparece em destaque para os empregados.</p></div></div>
-          <div class="step"><div class="sn">2</div><div class="sc"><strong>Escolha o destinatário</strong><p>Toda a equipe ou áreas específicas (Bar, Cozinha, Salão...).</p></div></div>
+          <div class="step"><div class="sn">1</div><div class="sc"><strong>Descreva informalmente ou use a IA</strong><p>Escreva direto ou descreva o tema no assistente IA — ele gera título e texto profissional editável.</p></div></div>
+          <div class="step"><div class="sn">2</div><div class="sc"><strong>Escolha o destinatário</strong><p>Toda a equipe, áreas específicas ou empregados individuais.</p></div></div>
           <div class="step"><div class="sn">3</div><div class="sc"><strong>Publique</strong><p>Aparece imediatamente. Acompanhe confirmações de leitura na lista de enviados.</p></div></div>
         </div>
         <div class="ib green"><span class="ico">✅</span><span>Você visualiza quem leu e quem ainda não confirmou diretamente na lista de comunicados enviados.</span></div>
@@ -7705,7 +7730,7 @@ hr{border:none;border-top:1px solid var(--border);margin:24px 0}
     <hr>
     <div style="text-align:center;padding:20px 0 40px;color:var(--t3);font-size:13px">
       <div style="font-size:28px;margin-bottom:8px">🍽️</div>
-      <div>AppTip · Guia do Gestor · v4.7 · Abril 2026</div>
+      <div>AppTip · Guia do Gestor · v5.0 · Abril 2026</div>
       <div style="margin-top:4px">Dúvidas? <a href="/cdn-cgi/l/email-protection#9bf8f4f5effaeff4dbfaebebeff2ebb5faebeb" style="color:var(--ac)"><span class="__cf_email__" data-cfemail="3a5955544e5b4e557a5b4a4a4e534a145b4a4a">[email&#160;protected]</span></a> · Clientes: <strong style="color:var(--t2)">(11) 98549-9821</strong></div>
     </div>
 
