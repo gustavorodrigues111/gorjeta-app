@@ -796,21 +796,10 @@ function ComunicadosManagerTab({ restaurantId, communications, commAcks, employe
     if (!aiInput.trim()) return;
     setAiLoading(true); setAiError("");
     try {
-      const prompt = `Você é um assistente especializado em comunicação interna de restaurantes. O gestor quer enviar um comunicado para sua equipe. Baseado na descrição informal abaixo, redija um comunicado profissional, claro e direto para os empregados de um restaurante.
-
-Descrição do gestor: "${aiInput.trim()}"
-
-Responda APENAS com um JSON válido no formato:
-{"titulo": "título claro e objetivo", "corpo": "texto completo do comunicado, claro e profissional"}
-
-Sem markdown, sem explicações, apenas o JSON.`;
-      const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_KEY}`, {
-        method:"POST", headers:{"Content-Type":"application/json"},
-        body:JSON.stringify({contents:[{parts:[{text:prompt}]}],generationConfig:{temperature:0.1,responseMimeType:"application/json"}})
-      });
-      const data = await res.json();
-      const raw = data?.candidates?.[0]?.content?.parts?.[0]?.text ?? "";
-      const result = JSON.parse(raw.replace(/```json|```/g,"").trim());
+      const result = await groqGenerate(
+        `Você é um assistente de comunicação interna de restaurantes. O gestor quer enviar um comunicado para a equipe. Redija de forma profissional, clara e direta. Responda APENAS com JSON: {"titulo": "título objetivo", "corpo": "texto completo do comunicado"}`,
+        aiInput.trim()
+      );
       setTitle(result.titulo); setBody(result.corpo); setAiInput("");
     } catch(e) {
       setAiError("Não foi possível gerar sugestão. Tente novamente.");
@@ -945,7 +934,7 @@ Sem markdown, sem explicações, apenas o JSON.`;
             <div style={{padding:"12px 14px",borderRadius:10,background:"var(--ac-bg)",border:"1px solid var(--ac)33"}}>
               <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:6}}>
                 <span style={{fontSize:14}}>✨</span>
-                <span style={{color:"var(--ac-text)",fontWeight:700,fontSize:13}}>Assistente IA — Gemini</span>
+                <span style={{color:"var(--ac-text)",fontWeight:700,fontSize:13}}>Assistente IA</span>
               </div>
               <p style={{color:"var(--text3)",fontSize:12,margin:"0 0 8px"}}>Descreva informalmente o que quer comunicar. A IA redige o título e o texto de forma profissional.</p>
               <textarea value={aiInput} onChange={e=>setAiInput(e.target.value)}
@@ -987,30 +976,32 @@ Sem markdown, sem explicações, apenas o JSON.`;
 }
 
 //
-// FAQ MANAGER TAB
-//
-const GEMINI_KEY = process.env.REACT_APP_GEMINI_KEY ?? ""
-const GROQ_KEY = process.env.REACT_APP_GROQ_KEY ?? ""
+// ── AI helper (Groq — Llama 3) ────────────────────────────────────────────────
+const GROQ_KEY = process.env.REACT_APP_GROQ_KEY ?? "";
 
-async function geminiSuggestFaq(input) {
-  const prompt = `Você é um assistente especializado em restaurantes. O gestor de um restaurante descreveu informalmente uma pergunta e resposta para o FAQ dos seus empregados. Sua tarefa é reformular isso de forma clara, profissional e empática, adequada para empregados de restaurante lerem no app.
-
-Descrição do gestor: "${input}"
-
-Responda APENAS com um JSON válido no formato:
-{"q": "pergunta clara e objetiva", "a": "resposta completa, clara e profissional"}
-
-Sem markdown, sem explicações, apenas o JSON.`;
-
-  const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_KEY}`, {
+async function groqGenerate(systemPrompt, userInput) {
+  const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }], generationConfig:{temperature:0.1,responseMimeType:"application/json"} })
+    headers: { "Content-Type": "application/json", "Authorization": `Bearer ${GROQ_KEY}` },
+    body: JSON.stringify({
+      model: "llama-3.3-70b-versatile",
+      messages: [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: userInput },
+      ],
+      temperature: 0.15,
+      response_format: { type: "json_object" },
+      max_tokens: 2048,
+    }),
   });
   const data = await res.json();
-  const raw = data?.candidates?.[0]?.content?.parts?.[0]?.text ?? "";
+  if (data.error) throw new Error(data.error.message || "Groq error");
+  const raw = data.choices?.[0]?.message?.content ?? "";
   return JSON.parse(raw.replace(/```json|```/g, "").trim());
 }
+
+// FAQ MANAGER TAB
+//
 
 function FaqManagerTab({ restaurantId, faq, onUpdate }) {
   const items = faq?.[restaurantId] ?? [];
@@ -1049,7 +1040,10 @@ function FaqManagerTab({ restaurantId, faq, onUpdate }) {
     if (!aiInput.trim()) return;
     setAiLoading(true); setAiError("");
     try {
-      const result = await geminiSuggestFaq(aiInput.trim());
+      const result = await groqGenerate(
+        `Você é um assistente especializado em restaurantes. O gestor descreveu informalmente uma pergunta e resposta para o FAQ dos empregados. Reformule de forma clara, profissional e empática. Responda APENAS com JSON: {"q": "pergunta clara", "a": "resposta profissional"}`,
+        aiInput.trim()
+      );
       setForm({ q: result.q, a: result.a });
       setAiInput("");
     } catch (e) {
@@ -1071,7 +1065,7 @@ function FaqManagerTab({ restaurantId, faq, onUpdate }) {
           <div style={{ marginBottom: 14, padding: "12px 14px", borderRadius: 10, background: "var(--ac-bg)", border: "1px solid var(--ac)33" }}>
             <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 8 }}>
               <span style={{ fontSize: 16 }}>✨</span>
-              <span style={{ color: "var(--ac-text)", fontWeight: 700, fontSize: 13 }}>Assistente IA — Gemini</span>
+              <span style={{ color: "var(--ac-text)", fontWeight: 700, fontSize: 13 }}>Assistente IA</span>
             </div>
             <p style={{ color: "var(--text3)", fontSize: 12, margin: "0 0 8px" }}>
               Descreva informalmente a pergunta e resposta que quer criar. A IA redige de forma profissional.
@@ -2892,26 +2886,15 @@ function RoleSpreadsheet({ restRoles, rid, roles, onUpdate }) {
     if (!aiInput.trim()) return;
     setAiLoading(true); setAiError("");
     try {
-      const prompt = `Você é um assistente de gestão de restaurantes. O gestor forneceu uma lista de cargos. Extraia os cargos e estruture como JSON.
-
-Entrada do gestor: "${aiInput.trim()}"
-
+      const result = await groqGenerate(
+        `Você é um assistente de gestão de restaurantes. Extraia cargos e estruture como JSON.
 Regras:
-- "área" deve ser uma dessas: Bar, Cozinha, Salão, Limpeza, Produção
-- "pontos" deve ser um número entre 0 e 20 (0 = sem gorjeta)
-- Se não mencionar pontos, estime baseado na hierarquia do cargo (ex: Gerente=10, Subchef=9, Garçom=6, Auxiliar=3)
-- Se não mencionar área, deduza pelo nome do cargo
-
-Responda APENAS com JSON válido:
-{"cargos": [{"nome": "...", "area": "...", "pontos": 6, "semGorjeta": false}]}`;
-
-      const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_KEY}`, {
-        method:"POST", headers:{"Content-Type":"application/json"},
-        body:JSON.stringify({contents:[{parts:[{text:prompt}]}],generationConfig:{temperature:0.1,responseMimeType:"application/json"}})
-      });
-      const data = await res.json();
-      const raw = data?.candidates?.[0]?.content?.parts?.[0]?.text ?? "";
-      const result = JSON.parse(raw.replace(/```json|```/g,"").trim());
+- "área": Bar, Cozinha, Salão, Limpeza ou Produção
+- "pontos": 0 a 20 (0 = sem gorjeta). Se não informado, estime pela hierarquia (Gerente=10, Subchef=9, Garçom=6, Auxiliar=3)
+- Se não informar área, deduza pelo cargo
+Responda com JSON: {"cargos": [{"nome":"...", "area":"...", "pontos":6, "semGorjeta":false}]}`,
+        aiInput.trim()
+      );
       const novos = result.cargos.map(c => ({
         id: `role-${Date.now()}-${Math.random().toString(36).slice(2,6)}`,
         restaurantId: rid,
@@ -3005,7 +2988,7 @@ Responda APENAS com JSON válido:
         </button>
         {showAi && (
           <div style={{marginTop:10,padding:"14px",borderRadius:12,background:"var(--ac-bg)",border:"1px solid var(--ac)33"}}>
-            <p style={{color:"var(--text2)",fontSize:13,margin:"0 0 6px",fontWeight:600}}>✨ Assistente de cargos — Gemini</p>
+            <p style={{color:"var(--text2)",fontSize:13,margin:"0 0 6px",fontWeight:600}}>✨ Assistente de cargos</p>
             <p style={{color:"var(--text3)",fontSize:12,margin:"0 0 6px",lineHeight:1.5}}>Descreva os cargos livremente ou cole uma lista. A IA identifica nome, área e pontos.</p>
             <p style={{color:"var(--text3)",fontSize:11,margin:"0 0 10px",fontStyle:"italic"}}>Ex: "Garçom 6pts Salão, Barman 7pts Bar" ou "temos garçons, ajudantes de cozinha e um gerente"</p>
             <textarea value={aiInput} onChange={e=>setAiInput(e.target.value)}
@@ -3164,27 +3147,17 @@ function EmployeeSpreadsheet({ restEmps, restRoles, rid, employees, onUpdate, re
     setAiEmpLoading(true); setAiEmpError("");
     const cargosDisponiveis = restRoles.filter(r=>!r.inactive).map(r=>`${r.name} (id:${r.id})`).join(", ");
     try {
-      const prompt = `Você é um assistente de gestão de restaurantes. O gestor forneceu uma lista de empregados. Extraia e estruture como JSON.
-
-Cargos disponíveis no restaurante: ${cargosDisponiveis || "nenhum cadastrado"}
-Entrada do gestor: "${aiEmpInput.trim()}"
-
+      const result = await groqGenerate(
+        `Você é um assistente de gestão de restaurantes. Extraia empregados e estruture como JSON.
+Cargos disponíveis: ${cargosDisponiveis || "nenhum cadastrado"}
 Regras:
-- "nome" é obrigatório (nome completo)
-- "cargoId" deve ser o id do cargo da lista acima se conseguir identificar, senão null
-- "admissao" no formato YYYY-MM-DD, se não informado use hoje: ${today()}
+- "nome" obrigatório (nome completo)
+- "cargoId" = id do cargo da lista se identificável, senão null
+- "admissao" formato YYYY-MM-DD, se não informado use hoje: ${today()}
 - "cpf" só se explicitamente informado, senão null
-
-Responda APENAS com JSON válido:
-{"empregados": [{"nome": "...", "cargoId": "...", "admissao": "2025-01-15", "cpf": null}]}`;
-
-      const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_KEY}`, {
-        method:"POST", headers:{"Content-Type":"application/json"},
-        body:JSON.stringify({contents:[{parts:[{text:prompt}]}],generationConfig:{temperature:0.1,responseMimeType:"application/json"}})
-      });
-      const data = await res.json();
-      const raw = data?.candidates?.[0]?.content?.parts?.[0]?.text ?? "";
-      const result = JSON.parse(raw.replace(/```json|```/g,"").trim());
+Responda com JSON: {"empregados": [{"nome":"...", "cargoId":"...", "admissao":"2025-01-15", "cpf":null}]}`,
+        aiEmpInput.trim()
+      );
 
       const restCode = restCode_ || "XXX";
       let seq = nextEmpSeq(employees, restCode);
@@ -3298,7 +3271,7 @@ Responda APENAS com JSON válido:
           </button>
           {showAiEmp && (
             <div style={{marginTop:10,padding:"14px",borderRadius:12,background:"var(--ac-bg)",border:"1px solid var(--ac)33"}}>
-              <p style={{color:"var(--text2)",fontSize:13,margin:"0 0 6px",fontWeight:600}}>✨ Assistente de empregados — Gemini</p>
+              <p style={{color:"var(--text2)",fontSize:13,margin:"0 0 6px",fontWeight:600}}>✨ Assistente de empregados</p>
               <p style={{color:"var(--text3)",fontSize:12,margin:"0 0 6px",lineHeight:1.5}}>Cole uma lista de empregados. A IA identifica nome, cargo e data de admissão. PIN e CPF precisam ser ajustados manualmente.</p>
               <p style={{color:"var(--text3)",fontSize:11,margin:"0 0 10px",fontStyle:"italic"}}>Ex: "João Silva, garçom, admitido 01/03/2025; Maria Souza, barman; Pedro Lima, subchef desde jan/25"</p>
               <textarea value={aiEmpInput} onChange={e=>setAiEmpInput(e.target.value)}
@@ -6952,7 +6925,7 @@ function Home({ onLogin }) {
     { icon:"💸", title:"Gorjetas transparentes", desc:"Cálculo e distribuição automática por área e cargo. Cada empregado vê exatamente o que recebeu, bruto e líquido, sem dúvidas." },
     { icon:"📅", title:"Escala inteligente", desc:"Controle de folgas, faltas, férias e compensações integrado ao cálculo de gorjetas. Escala base gerada automaticamente pelo horário contratual." },
     { icon:"👥", title:"Gestão de equipe", desc:"Cadastro completo, cargos, pontos e acesso individual para cada empregado. Histórico preservado mesmo após inativação." },
-    { icon:"❓", title:"FAQ com assistente de IA", desc:"Base de perguntas e respostas para sua equipe. Perguntas automáticas sobre gorjetas e regras, mais IA (Gemini) para ajudar o gestor a redigir." },
+    { icon:"❓", title:"FAQ com assistente de IA", desc:"Base de perguntas e respostas para sua equipe. Perguntas automáticas sobre gorjetas e regras, mais IA para ajudar o gestor a redigir." },
     { icon:"📢", title:"Comunicados com IA", desc:"Envie avisos para toda a equipe ou áreas específicas. Assistente de IA ajuda a redigir. Acompanhe quem leu e confirmou." },
     { icon:"💬", title:"Canal com o DP", desc:"Canal direto, inclusive anônimo, para comunicação entre equipe e departamento pessoal. Sugestões, denúncias, atestados e dúvidas trabalhistas." },
 
@@ -7636,7 +7609,7 @@ hr{border:none;border-top:1px solid var(--border);margin:24px 0}
         </ul>
         <div class="ib tip"><span class="ico">💡</span><span>As perguntas sobre DP e comunicados só aparecem para o empregado se essas abas estiverem ativas nas suas configurações.</span></div>
       </div>
-      <div class="card"><h3>✨ Assistente de IA (Gemini) <span class="new">NOVO</span></h3>
+      <div class="card"><h3>✨ Assistente de IA <span class="new">NOVO</span></h3>
         <p>Ao criar uma nova pergunta, um campo de assistente IA aparece no formulário. Descreva informalmente o que quer comunicar e a IA redige uma versão profissional e editável.</p>
         <div class="steps">
           <div class="step"><div class="sn">1</div><div class="sc"><strong>Clique em "+ Nova Pergunta"</strong><p>O formulário abre com o assistente no topo.</p></div></div>
