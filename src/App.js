@@ -3687,11 +3687,11 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
     canSched                                          && ["schedule",    "📅 Escala"],
     (isOwner || tabVisible("roles"))           && ["roles",       "🏷️ Cargos"],
     (isOwner || canTips || tabVisible("employees")) && ["employees","👥 Equipe"],
-    tabVisible("horarios")                            && ["horarios",    "🕐 Horários"],
-    tabVisible("recibos")                             && ["recibos",     "📄 Recibos"],
-    tabVisible("faq")                                 && ["faq",         "❓ FAQ"],
-    tabVisible("comunicados")                         && ["comunicados", "📢 Comunicados"],
-    tabVisible("dp")                                  && ["dp",          "💬 Fale com DP"],
+    (isOwner || tabVisible("horarios"))          && ["horarios",    "🕐 Horários"],
+    (isOwner || tabVisible("recibos"))           && ["recibos",     "📄 Recibos"],
+    (isOwner || tabVisible("faq"))               && ["faq",         "❓ FAQ"],
+    (isOwner || tabVisible("comunicados"))        && ["comunicados", "📢 Comunicados"],
+    (isOwner || tabVisible("dp"))                && ["dp",          "💬 Fale com DP"],
     (isOwner || isDP)                          && ["notificacoes",`📬 Caixa${inboxUnread>0?` (${inboxUnread})`:""}`],
   ].filter(Boolean);
 
