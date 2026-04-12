@@ -3371,6 +3371,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
   function calcTipForDate(date, totalVal, noteVal) {
     const total = parseFloat(totalVal);
     if (!total || isNaN(total) || total <= 0) return 0;
+    if (restaurant.serviceStartDate && date < restaurant.serviceStartDate) { alert(`Não é possível lançar gorjeta antes da data de vigência (${new Date(restaurant.serviceStartDate+"T12:00:00").toLocaleDateString("pt-BR")})`); return 0; }
     const td = new Date(date + "T12:00:00");
     const tKey = monthKey(td.getFullYear(), td.getMonth());
     const taxRate = restaurant.taxRate ?? TAX;
@@ -4021,12 +4022,24 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
 
                       const weekday  = new Date(date+"T12:00:00").toLocaleDateString("pt-BR",{weekday:"short"});
                       const isWeekend = [0,6].includes(new Date(date+"T12:00:00").getDay());
+                      const isBeforeVigencia = restaurant.serviceStartDate && date < restaurant.serviceStartDate;
 
                       let bg = "#fff", border = "var(--border)";
-                      if      (isNoTip)               { bg = "#f5f0ff"; border = "#6366f133"; }
+                      if      (isBeforeVigencia)       { bg = "var(--bg3)"; border = "var(--border)"; }
+                      else if (isNoTip)               { bg = "#f5f0ff"; border = "#6366f133"; }
                       else if (isLaunched && !isDirty) { bg = "#f0fdf4"; border = "#10b98133"; }
                       else if (isDirty)                { bg = "#fffbeb"; border = "#f59e0b44"; }
                       else if (hasVal)                 { bg = "#faf8f4"; border = "var(--ac)33"; }
+
+                      if (isBeforeVigencia) return (
+                        <div key={date} style={{display:"grid",gridTemplateColumns:"40px 1fr",gap:4,padding:"5px 6px",marginBottom:4,borderRadius:10,background:bg,border:`1px solid ${border}`,alignItems:"center",opacity:0.4}}>
+                          <div style={{textAlign:"center"}}>
+                            <div style={{color:"var(--text3)",fontSize:13,fontWeight:700}}>{parseInt(date.slice(-2))}</div>
+                            <div style={{color:"var(--text3)",fontSize:9}}>{weekday}</div>
+                          </div>
+                          <div style={{color:"var(--text3)",fontSize:11}}>🔒 Antes da vigência</div>
+                        </div>
+                      );
 
                       return (
                         <div key={date} style={{display:"grid",gridTemplateColumns:"40px 1fr 56px 70px",gap:4,padding:"5px 6px",marginBottom:4,borderRadius:10,background:bg,border:`1px solid ${border}`,alignItems:"center"}}>
@@ -4522,6 +4535,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
               };
 
               function cycleStatus(empId, dateStr) {
+                if (restaurant.serviceStartDate && dateStr < restaurant.serviceStartDate) return; // bloqueia antes da vigência
                 const empDayMap = schedules?.[rid]?.[mk]?.[empId] ?? {};
                 const cur = empDayMap[dateStr];
                 const idx = DAY_CYCLE.indexOf(cur);
@@ -4595,10 +4609,11 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                               const label = STATUS_SHORT[status] ?? "•";
                               const wd = new Date(date+"T12:00:00").getDay();
                               const isWe = wd===0||wd===6;
+                              const locked = restaurant.serviceStartDate && date < restaurant.serviceStartDate;
                               return (
                                 <td key={d} onClick={()=>cycleStatus(emp.id, date)}
-                                  style={{textAlign:"center",padding:"3px 2px",cursor:"pointer",background:status?color+"22":(isWe?"var(--bg3)":"transparent"),borderRight:"1px solid var(--border)",width:30}}>
-                                  <span style={{color:color,fontSize:status?9:11,fontWeight:status?700:400}}>{label}</span>
+                                  style={{textAlign:"center",padding:"3px 2px",cursor:locked?"not-allowed":"pointer",background:locked?"var(--bg3)":(status?color+"22":(isWe?"var(--bg3)":"transparent")),borderRight:"1px solid var(--border)",width:30,opacity:locked?0.35:1}}>
+                                  <span style={{color:locked?"var(--text3)":color,fontSize:status?9:11,fontWeight:status?700:400}}>{locked?"🔒":label}</span>
                                 </td>
                               );
                             })}
@@ -4858,6 +4873,21 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
         {dpMgrModal && isDP && (
           <Modal title={dpMgrEdit?"Editar Gestor":"Novo Gestor"} onClose={()=>setDpMgrModal(false)} wide>
             <div style={{display:"flex",flexDirection:"column",gap:12}}>
+              {/* Puxar da equipe */}
+              {!dpMgrEdit && (() => {
+                const restEmpsList = restEmps.filter(e => !e.inactive);
+                if (restEmpsList.length === 0) return null;
+                return (
+                  <div style={{background:"var(--bg2)",border:"1px solid var(--border)",borderRadius:10,padding:"10px 14px"}}>
+                    <label style={{...S.label,margin:0}}>👥 Puxar dados de um empregado da equipe</label>
+                    <p style={{color:"var(--text3)",fontSize:11,margin:"4px 0 8px"}}>Selecione para pré-preencher nome e CPF. O empregado continua ativo na equipe.</p>
+                    <select onChange={e => { const emp = restEmpsList.find(x => x.id === e.target.value); if (!emp) return; setDpMgrForm(f => ({...f, name: emp.name, cpf: emp.cpf ?? ""})); }} style={{...S.input,cursor:"pointer"}} defaultValue="">
+                      <option value="" disabled>Selecionar empregado...</option>
+                      {restEmpsList.sort((a,b)=>a.name.localeCompare(b.name)).map(e => { const role = restRoles.find(r => r.id === e.roleId); return <option key={e.id} value={e.id}>{e.name}{role ? ` — ${role.name}` : ""}{e.cpf ? ` (${e.cpf})` : ""}</option>; })}
+                    </select>
+                  </div>
+                );
+              })()}
               <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
                 <div><label style={S.label}>Nome completo</label><input value={dpMgrForm.name} onChange={e=>setDpMgrForm({...dpMgrForm,name:e.target.value})} style={S.input}/></div>
                 <div><label style={S.label}>CPF *</label><input value={dpMgrForm.cpf} onChange={e=>setDpMgrForm({...dpMgrForm,cpf:maskCpf(e.target.value)})} placeholder="000.000.000-00" style={S.input} inputMode="numeric"/></div>
@@ -5082,10 +5112,10 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                   return (
                     <div key={area} style={{display:"flex",alignItems:"center",gap:10}}>
                       <div style={{minWidth:80}}><AreaBadge area={area}/></div>
-                      <input type="number" min="0" max="20" step="0.5" value={current}
+                      <input type="number" min="0" max="20" step="0.01" value={current}
                         onChange={e => {
                           const val = parseFloat(e.target.value) || 0;
-                          const updated = restaurants.map(r => r.id===rid ? {...r, faultPenalty:{...(r.faultPenalty??{}), [area]: val}} : r);
+                          const updated = restaurants.map(r => r.id===rid ? {...r, faultPenalty:{...(r.faultPenalty??{}), [area]: Math.round(val*100)/100}} : r);
                           onUpdate("restaurants", updated);
                         }}
                         style={{...S.input, width:70, textAlign:"center"}}
@@ -5100,10 +5130,10 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                     <div style={{minWidth:130}}>
                       <span style={{background:"#dc262611",color:"var(--red)",padding:"3px 10px",borderRadius:8,fontSize:11,fontWeight:700,fontFamily:"'DM Mono',monospace"}}>Falta injustificada</span>
                     </div>
-                    <input type="number" min="0" max="20" step="0.5" value={restaurant.producaoPenaltyU ?? 4}
+                    <input type="number" min="0" max="20" step="0.01" value={restaurant.producaoPenaltyU ?? 4}
                       onChange={e => {
                         const val = parseFloat(e.target.value) || 0;
-                        const updated = restaurants.map(r => r.id===rid ? {...r, producaoPenaltyU: val} : r);
+                        const updated = restaurants.map(r => r.id===rid ? {...r, producaoPenaltyU: Math.round(val*100)/100} : r);
                         onUpdate("restaurants", updated);
                       }}
                       style={{...S.input, width:70, textAlign:"center"}}
@@ -5114,10 +5144,10 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                     <div style={{minWidth:130}}>
                       <span style={{background:"#f59e0b11",color:"#f59e0b",padding:"3px 10px",borderRadius:8,fontSize:11,fontWeight:700,fontFamily:"'DM Mono',monospace"}}>Falta justificada</span>
                     </div>
-                    <input type="number" min="0" max="20" step="0.5" value={restaurant.producaoPenaltyJ ?? 2}
+                    <input type="number" min="0" max="20" step="0.01" value={restaurant.producaoPenaltyJ ?? 2}
                       onChange={e => {
                         const val = parseFloat(e.target.value) || 0;
-                        const updated = restaurants.map(r => r.id===rid ? {...r, producaoPenaltyJ: val} : r);
+                        const updated = restaurants.map(r => r.id===rid ? {...r, producaoPenaltyJ: Math.round(val*100)/100} : r);
                         onUpdate("restaurants", updated);
                       }}
                       style={{...S.input, width:70, textAlign:"center"}}
@@ -5200,7 +5230,7 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }
   // forms
   const [showRestModal, setShowRestModal]   = useState(false);
   const [editRestId, setEditRestId]         = useState(null);
-  const [restForm, setRestForm]             = useState({ name:"",shortCode:"",cnpj:"",address:"",whatsappFin:"",whatsappOp:"" });
+  const [restForm, setRestForm]             = useState({ name:"",shortCode:"",cnpj:"",address:"",whatsappFin:"",whatsappOp:"",serviceStartDate:"" });
   const [showMgrModal, setShowMgrModal]     = useState(false);
   const [editMgrId, setEditMgrId]           = useState(null);
   const [mgrForm, setMgrForm]               = useState({ name:"",cpf:"",pin:"",restaurantIds:[],perms:{tips:true,schedule:true},isDP:false,profile:"custom",areas:[] });
@@ -5884,6 +5914,32 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }
         {showMgrModal && (
           <Modal title={editMgrId?"Editar Gestor":"Novo Gestor"} onClose={()=>setShowMgrModal(false)} wide>
             <div style={{display:"flex",flexDirection:"column",gap:12}}>
+              {/* Puxar da equipe — só no modo criação */}
+              {!editMgrId && (() => {
+                const restEmps = employees.filter(e => e.restaurantId === selRestaurant && !e.inactive);
+                if (restEmps.length === 0) return null;
+                return (
+                  <div style={{background:"var(--bg2)",border:"1px solid var(--border)",borderRadius:10,padding:"10px 14px"}}>
+                    <label style={{...S.label,margin:0}}>👥 Puxar dados de um empregado da equipe</label>
+                    <p style={{color:"var(--text3)",fontSize:11,margin:"4px 0 8px"}}>Selecione para pré-preencher nome, CPF e PIN. O empregado continua ativo na equipe.</p>
+                    <select
+                      onChange={e => {
+                        const emp = restEmps.find(x => x.id === e.target.value);
+                        if (!emp) return;
+                        setMgrForm(f => ({...f, name: emp.name, cpf: emp.cpf ?? ""}));
+                      }}
+                      style={{...S.input,cursor:"pointer"}}
+                      defaultValue=""
+                    >
+                      <option value="" disabled>Selecionar empregado...</option>
+                      {restEmps.sort((a,b)=>a.name.localeCompare(b.name)).map(e => {
+                        const role = roles.find(r => r.id === e.roleId);
+                        return <option key={e.id} value={e.id}>{e.name}{role ? ` — ${role.name}` : ""}{e.cpf ? ` (${e.cpf})` : ""}</option>;
+                      })}
+                    </select>
+                  </div>
+                );
+              })()}
               <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
                 <div><label style={S.label}>Nome completo</label><input value={mgrForm.name} onChange={e=>setMgrForm({...mgrForm,name:e.target.value})} style={S.input}/></div>
                 <div><label style={S.label}>CPF *</label><input value={mgrForm.cpf} onChange={e=>setMgrForm({...mgrForm,cpf:maskCpf(e.target.value)})} placeholder="000.000.000-00" style={S.input} inputMode="numeric"/></div>
@@ -6431,7 +6487,7 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }
         {/* RESTAURANTES */}
         {tab === "restaurants" && (
           <div>
-            <button onClick={()=>{setEditRestId(null);setRestForm({name:"",cnpj:"",address:"",whatsappFin:"",whatsappOp:""});setShowRestModal(true);}} style={{...S.btnPrimary,marginBottom:20}}>+ Novo Restaurante</button>
+            <button onClick={()=>{setEditRestId(null);setRestForm({name:"",cnpj:"",address:"",whatsappFin:"",whatsappOp:"",serviceStartDate:""});setShowRestModal(true);}} style={{...S.btnPrimary,marginBottom:20}}>+ Novo Restaurante</button>
             {restaurants.length === 0 && <p style={{color:"var(--text3)",textAlign:"center"}}>Nenhum restaurante cadastrado.</p>}
             {/* Export geral */}
             {restaurants.length > 0 && (
@@ -6485,7 +6541,7 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }
                     <div style={{display:"flex",gap:8,flexWrap:"wrap",justifyContent:"flex-end"}}>
                       <button onClick={()=>setSelRestaurant(r.id)} style={{...S.btnSecondary,fontSize:12,color:ac,borderColor:ac}}>Abrir →</button>
                       <button onClick={()=>{setSelRestaurant(r.id);setRestTab("financeiro");}} style={{...S.btnSecondary,fontSize:12,color:"var(--green)",borderColor:"var(--green)"}}>💳</button>
-                      <button onClick={()=>{setEditRestId(r.id);setRestForm({name:r.name,shortCode:r.shortCode??"",cnpj:r.cnpj??"",address:r.address??"",whatsappFin:r.whatsappFin??"",whatsappOp:r.whatsappOp??""});setShowRestModal(true);}} style={{...S.btnSecondary,fontSize:12}}>Editar</button>
+                      <button onClick={()=>{setEditRestId(r.id);setRestForm({name:r.name,shortCode:r.shortCode??"",cnpj:r.cnpj??"",address:r.address??"",whatsappFin:r.whatsappFin??"",whatsappOp:r.whatsappOp??"",serviceStartDate:r.serviceStartDate??""});setShowRestModal(true);}} style={{...S.btnSecondary,fontSize:12}}>Editar</button>
                       <button onClick={()=>{
                         if(!window.confirm(`Mover "${r.name}" para a lixeira? Você poderá restaurar depois.`)) return;
                         softDelete("restaurants", r);
@@ -6793,6 +6849,12 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }
             </div>
             <div><label style={S.label}>CNPJ (opcional)</label><input value={restForm.cnpj} onChange={e=>setRestForm({...restForm,cnpj:e.target.value})} placeholder="00.000.000/0000-00" style={S.input}/></div>
             <div><label style={S.label}>Endereço (opcional)</label><input value={restForm.address} onChange={e=>setRestForm({...restForm,address:e.target.value})} style={S.input}/></div>
+            <div>
+              <label style={S.label}>📅 Data de início da vigência do serviço</label>
+              <input type="date" value={restForm.serviceStartDate??""} max={new Date().toISOString().split("T")[0]}
+                onChange={e=>setRestForm({...restForm,serviceStartDate:e.target.value})} style={S.input}/>
+              <p style={{color:"var(--text3)",fontSize:11,marginTop:4}}>Escala e gorjetas só podem ser lançadas a partir desta data. Admissão e horários não são afetados. Máximo: data de hoje.</p>
+            </div>
             <div style={{borderTop:"1px solid var(--border)",paddingTop:10}}>
               <p style={{color:"var(--text3)",fontSize:12,margin:"0 0 8px",fontWeight:600}}>📱 Contatos WhatsApp</p>
               <div style={{display:"flex",flexDirection:"column",gap:8}}>
@@ -6821,6 +6883,21 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }
       {showMgrModal && (
         <Modal title={editMgrId?"Editar Gestor":"Novo Gestor"} onClose={()=>setShowMgrModal(false)} wide>
           <div style={{display:"flex",flexDirection:"column",gap:12}}>
+            {/* Puxar da equipe */}
+            {!editMgrId && (() => {
+              const allActiveEmps = employees.filter(e => !e.inactive);
+              if (allActiveEmps.length === 0) return null;
+              return (
+                <div style={{background:"var(--bg2)",border:"1px solid var(--border)",borderRadius:10,padding:"10px 14px"}}>
+                  <label style={{...S.label,margin:0}}>👥 Puxar dados de um empregado da equipe</label>
+                  <p style={{color:"var(--text3)",fontSize:11,margin:"4px 0 8px"}}>Selecione para pré-preencher nome e CPF. O empregado continua ativo na equipe.</p>
+                  <select onChange={e => { const emp = allActiveEmps.find(x => x.id === e.target.value); if (!emp) return; setMgrForm(f => ({...f, name: emp.name, cpf: emp.cpf ?? "", restaurantIds: [...new Set([...(f.restaurantIds??[]), emp.restaurantId])]})); }} style={{...S.input,cursor:"pointer"}} defaultValue="">
+                    <option value="" disabled>Selecionar empregado...</option>
+                    {allActiveEmps.sort((a,b)=>a.name.localeCompare(b.name)).map(e => { const rest = restaurants.find(r => r.id === e.restaurantId); const role = roles.find(r => r.id === e.roleId); return <option key={e.id} value={e.id}>{e.name}{role ? ` — ${role.name}` : ""} ({rest?.name ?? "?"}){e.cpf ? ` (${e.cpf})` : ""}</option>; })}
+                  </select>
+                </div>
+              );
+            })()}
             <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
               <div><label style={S.label}>Nome completo</label><input value={mgrForm.name} onChange={e=>setMgrForm({...mgrForm,name:e.target.value})} style={S.input}/></div>
               <div><label style={S.label}>CPF *</label><input value={mgrForm.cpf} onChange={e=>setMgrForm({...mgrForm,cpf:maskCpf(e.target.value)})} placeholder="000.000.000-00" style={S.input} inputMode="numeric"/></div>
@@ -7741,8 +7818,9 @@ function FaturaPage({ faturaId, restaurants, onUpdate, loaded }) {
 
   if (!loaded) return (
     <div style={{minHeight:"100vh",background:"#faf8f4",display:"flex",alignItems:"center",justifyContent:"center",flexDirection:"column",gap:16,fontFamily:"'DM Sans',sans-serif"}}>
-      <div style={{fontSize:32}}>🍽️</div>
-      <div style={{color:"#8c7a5e",fontSize:15}}>Carregando fatura...</div>
+      <div style={{fontSize:40}}>🍽️</div>
+      <div style={{color:"#8c7a5e",fontSize:15,animation:"pulse 1.5s ease-in-out infinite"}}>Carregando fatura...</div>
+      <style>{`@keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.3} }`}</style>
     </div>
   );
 
@@ -8511,6 +8589,33 @@ export default function App() {
         console.log(`Migrados ${rolesWithProd.length} cargo(s) de Produção → Cozinha`);
       }
 
+      // Migração: empregados sem empCode ou sem PIN
+      {
+        const allEmps = loaded_data.employees ?? [];
+        const rests = loaded_data.restaurants ?? [];
+        const needsFix = allEmps.filter(e => !e.empCode || !e.pin);
+        if (needsFix.length > 0) {
+          let fixed = [...allEmps];
+          needsFix.forEach(emp => {
+            const rest = rests.find(r => r.id === emp.restaurantId);
+            const code = rest?.shortCode ?? "XXX";
+            const idx = fixed.findIndex(e => e.id === emp.id);
+            if (idx < 0) return;
+            if (!fixed[idx].empCode) {
+              const seq = nextEmpSeq(fixed, code);
+              fixed[idx] = { ...fixed[idx], empCode: makeEmpCode(code, seq) };
+            }
+            if (!fixed[idx].pin) {
+              const cpfDigits = (emp.cpf ?? "").replace(/\D/g, "");
+              fixed[idx] = { ...fixed[idx], pin: cpfDigits.slice(0, 4).padEnd(4, "0") };
+            }
+          });
+          await save(K.employees, fixed);
+          setEmployees(fixed);
+          console.log(`Migrados ${needsFix.length} empregado(s) sem empCode/PIN`);
+        }
+      }
+
       setLoaded(true);
     })();
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
@@ -8553,8 +8658,9 @@ export default function App() {
 
   if (!loaded) return (
     <div style={{minHeight:"100vh",background:"var(--bg)",display:"flex",alignItems:"center",justifyContent:"center",flexDirection:"column",gap:16}}>
-      <div style={{fontSize:32}}>🍽️</div>
-      <div style={{color:"var(--text3)",fontFamily:"'DM Sans',sans-serif",fontSize:15}}>Carregando…</div>
+      <div style={{fontSize:40}}>🍽️</div>
+      <div style={{color:"var(--text3)",fontFamily:"'DM Sans',sans-serif",fontSize:15,animation:"pulse 1.5s ease-in-out infinite"}}>Carregando…</div>
+      <style>{`@keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.3} }`}</style>
     </div>
   );
 
