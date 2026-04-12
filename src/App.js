@@ -3,7 +3,7 @@ import { useState, useEffect, Component } from "react";
 import { db } from "./firebase";
 import { doc, getDoc, setDoc } from "firebase/firestore";
 
-const APP_VERSION = "5.4.0";
+const APP_VERSION = "5.4.1";
 
 /* eslint-disable no-unused-vars */
 
@@ -4178,19 +4178,25 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                           </div>
 
                           {/* Valor */}
-                          <input
-                            type="number" min="0" step="0.01"
-                            value={isNoTip ? "" : row.total}
-                            disabled={isNoTip}
-                            onChange={e=>{ const nr=tipRows.filter(r=>r.date!==date); setTipRows([...nr,{...row,total:e.target.value}]); }}
-                            placeholder="0,00"
-                            style={{...S.input, fontSize:14, padding:"8px 10px",
-                              background:  isNoTip?"#f5f0ff"  : isDirty?"#fef9e7" : isLaunched?"#e8faf0" : "var(--bg2)",
-                              color:       isNoTip?"#6366f1"  : isDirty?"#f59e0b" : isLaunched?"var(--green)" : "var(--text)",
-                              borderColor: isNoTip?"transparent": isDirty?"#f59e0b44": isLaunched?"#10b98133": "var(--border)",
-                              cursor:      isNoTip?"not-allowed" : "text",
-                            }}
-                          />
+                          {privacyMask && isLaunched ? (
+                            <div style={{...S.input, fontSize:14, padding:"8px 10px", background:"#e8faf0", color:"var(--green)", borderColor:"#10b98133", display:"flex", alignItems:"center"}}>
+                              ••••,••
+                            </div>
+                          ) : (
+                            <input
+                              type="number" min="0" step="0.01"
+                              value={isNoTip ? "" : row.total}
+                              disabled={isNoTip}
+                              onChange={e=>{ const nr=tipRows.filter(r=>r.date!==date); setTipRows([...nr,{...row,total:e.target.value}]); }}
+                              placeholder="0,00"
+                              style={{...S.input, fontSize:14, padding:"8px 10px",
+                                background:  isNoTip?"#f5f0ff"  : isDirty?"#fef9e7" : isLaunched?"#e8faf0" : "var(--bg2)",
+                                color:       isNoTip?"#6366f1"  : isDirty?"#f59e0b" : isLaunched?"var(--green)" : "var(--text)",
+                                borderColor: isNoTip?"transparent": isDirty?"#f59e0b44": isLaunched?"#10b98133": "var(--border)",
+                                cursor:      isNoTip?"not-allowed" : "text",
+                              }}
+                            />
+                          )}
 
                           {/* Checkbox sem gorjeta */}
                           <label style={{display:"flex",justifyContent:"center",alignItems:"center",cursor:isLaunched?"default":"pointer",userSelect:"none",opacity:isLaunched?0.3:1}}>
@@ -6952,6 +6958,9 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }
 
         {tab === "changelog" && (() => {
           const CHANGELOG = [
+            { version:"5.4.1", date:"2026-04-12", items:[
+              "Privacidade: tabela diária de gorjetas — dias lançados mostram ••••,•• para o admin, dias vazios ficam normais",
+            ]},
             { version:"5.4.0", date:"2026-04-12", items:[
               "Novo: Modo Privacidade — gestor pode ocultar dados sensíveis da visão do admin",
               "Valores de gorjeta, CPFs, mensagens DP e comunicados ficam mascarados (•••) para o admin",
