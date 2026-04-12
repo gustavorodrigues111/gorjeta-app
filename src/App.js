@@ -40,12 +40,14 @@ async function save(key, value, retries = 3) {
   for (let i = 0; i < retries; i++) {
     try {
       await setDoc(doc(db, "appdata", key), { value });
-      return;
+      return true;
     } catch (e) {
-      console.error(`save error (tentativa ${i+1}):`, e);
+      console.error(`save error (tentativa ${i+1}/${retries}):`, key, e);
       if (i < retries - 1) await new Promise(r => setTimeout(r, 1000 * (i + 1)));
     }
   }
+  console.error(`save FAILED after ${retries} retries:`, key);
+  return false;
 }
 
 // Receipts stored per-document to avoid Firestore 1MB limit
@@ -7912,9 +7914,14 @@ export default function App() {
     }
     const setters = { owners:setOwners, managers:setManagers, restaurants:setRestaurants, employees:setEmployees, roles:setRoles, tips:setTips, splits:setSplits, schedules:setSchedules, communications:setCommunications, commAcks:setCommAcks, faq:setFaq, dpMessages:setDpMessages, workSchedules:setWorkSchedules, notifications:setNotifications, noTipDays:setNoTipDays, trash:setTrash, schedTemplates:setSchedTemplates, schedDrafts:setSchedDrafts };
     const keys    = { owners:K.owners, managers:K.managers, restaurants:K.restaurants, employees:K.employees, roles:K.roles, tips:K.tips, splits:K.splits, schedules:K.schedules, communications:K.communications, commAcks:K.commAcks, faq:K.faq, dpMessages:K.dpMessages, workSchedules:K.workSchedules, notifications:K.notifications, noTipDays:K.noTipDays, trash:K.trash, schedTemplates:K.schedTemplates, schedDrafts:K.schedDrafts };
-    console.log("handleUpdate field:", field, "has setter:", !!setters[field], "has key:", !!keys[field]);
     setters[field]?.(value);
-    if (keys[field]) await save(keys[field], value);
+    if (keys[field]) {
+      const ok = await save(keys[field], value);
+      if (!ok) {
+        setToast("Erro ao salvar — tente novamente");
+        return;
+      }
+    }
     const labels = { owners:"Admins atualizados", managers:"Gestores atualizados", restaurants:"Restaurantes atualizados", employees:"Empregados atualizados", roles:"Cargos atualizados", tips:"Gorjetas atualizadas", splits:"Percentuais salvos", schedules:"Escala atualizada", communications:"Comunicados atualizados", commAcks:"Ciências atualizadas", faq:"FAQ atualizado", dpMessages:"Mensagem enviada", workSchedules:"Horários salvos", notifications:"Notificações atualizadas", schedTemplates:"Template salvo", schedDrafts:"Rascunho salvo", trash:"Lixeira atualizada", noTipDays:"Dias sem gorjeta atualizados" };
     setToast(labels[field] ?? (typeof value === "string" ? value : "Salvo!"));
   }
