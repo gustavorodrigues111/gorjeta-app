@@ -3702,33 +3702,37 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
 
   // --- Gorjetas dirty check & save helper ---
   const tipsDirty = tipRows.some(r => {
-    const v = parseFloat(r.total);
+    const v = parseBR(r.total);
     const dayTips = (tips ?? []).filter(t => t.restaurantId === rid && t.date === r.date);
     const isLaunched = dayTips.length > 0;
     const launchedPool = isLaunched ? dayTips[0].poolTotal : null;
     return (v > 0 && !isNaN(v) && !isLaunched) || (isLaunched && launchedPool != null && v > 0 && !isNaN(v) && v !== launchedPool);
   });
 
+  function parseBR(v) { if (typeof v === "number") return v; return parseFloat(String(v).replace(/\./g,"").replace(",",".")); }
+
   function saveTipRows() {
     const dirtyRows = tipRows.filter(r => {
-      const v = parseFloat(r.total);
+      const v = parseBR(r.total);
       if (!v || isNaN(v) || v <= 0) return false;
       const dayTips = (tips ?? []).filter(t => t.restaurantId === rid && t.date === r.date);
       const isLaunched = dayTips.length > 0;
       const launchedPool = isLaunched ? dayTips[0].poolTotal : null;
       return !isLaunched || (launchedPool != null && v !== launchedPool);
     });
-    if (!dirtyRows.length) return;
+    if (!dirtyRows.length) { onUpdate("_toast","⚠️ Nenhum dia com valor alterado para salvar."); return; }
     let count = 0, currentTips = tips;
     dirtyRows.forEach(row => {
-      const result = calcTipForDate(row.date, parseFloat(row.total), row.note ?? "", currentTips);
+      const result = calcTipForDate(row.date, parseBR(row.total), row.note ?? "", currentTips);
       count += result.count;
       currentTips = result.updatedTips;
     });
     if (count > 0) {
       onUpdate("tips", currentTips);
       setTipRows([]);
-      onUpdate("_toast", `✅ ${dirtyRows.length} dia${dirtyRows.length>1?"s":""} salvo${dirtyRows.length>1?"s":""}!`);
+      onUpdate("_toast", `✅ ${dirtyRows.length} dia${dirtyRows.length>1?"s":""} salvo${dirtyRows.length>1?"s":""}! (${count} empregados)`);
+    } else {
+      onUpdate("_toast","⚠️ Nenhum empregado ativo encontrado para distribuir gorjeta. Verifique cargos e escalas.");
     }
   }
 
@@ -4163,8 +4167,8 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                       const launchedPool = isLaunched ? dayTips[0].poolTotal : null;
 
                       const localRow = tipRows.find(r => r.date === date);
-                      const displayVal = localRow ? localRow.total : (launchedPool != null ? String(launchedPool) : "");
-                      const val = parseFloat(displayVal);
+                      const displayVal = localRow ? localRow.total : (launchedPool != null ? String(launchedPool).replace(".",",") : "");
+                      const val = parseBR(displayVal);
                       const hasVal = val > 0 && !isNaN(val);
                       const isDirty = localRow && ((isLaunched && launchedPool != null && hasVal && val !== launchedPool) || (!isLaunched && hasVal));
 
@@ -4204,10 +4208,10 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                             </div>
                           ) : (
                             <input
-                              type="number" min="0" step="0.01"
+                              type="text" inputMode="decimal"
                               value={isNoTip ? "" : displayVal}
                               disabled={isNoTip}
-                              onChange={e=>{ setTipRows(prev => { const without = prev.filter(r => r.date !== date); return [...without, { date, total: e.target.value, note: "" }]; }); }}
+                              onChange={e=>{ const raw = e.target.value.replace(/[^0-9.,]/g,""); setTipRows(prev => { const without = prev.filter(r => r.date !== date); return [...without, { date, total: raw, note: "" }]; }); }}
                               placeholder="0,00"
                               style={{...S.input, fontSize:14, padding:"8px 10px",
                                 background:  isNoTip?"#f5f0ff" : isDirty?"#fef9e7" : isLaunched?"#e8faf0" : "var(--bg2)",
