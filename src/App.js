@@ -3485,7 +3485,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
             const currentSched = sched?.[sched.length-1];
             const dayIdx = new Date(todayStr+"T12:00:00").getDay();
             const dayData = currentSched?.days?.[dayIdx];
-            const entry = { name: e.name.split(" ")[0], role: role?.name, area: role?.area, in: dayData?.in, out: dayData?.out };
+            const entry = { name: e.name.split(" ")[0], role: role?.name, area: role?.area, in: dayData?.in, out: dayData?.out, break: dayData?.break, hasSchedule: !!currentSched && dayData?.active !== false };
             if (status === DAY_OFF) teamToday.off.push(entry);
             else if (status === DAY_VACATION) teamToday.vacation.push(entry);
             else if (status === DAY_COMP) teamToday.comp.push(entry);
@@ -3542,11 +3542,20 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                   </div>
                   {teamToday.work.length > 0 && (
                     <div style={{marginBottom:8}}>
-                      <div style={{color:"var(--green)",fontSize:11,fontWeight:700,marginBottom:4}}>Trabalhando ({teamToday.work.length})</div>
+                      <div style={{color:"var(--green)",fontSize:11,fontWeight:700,marginBottom:6}}>Trabalhando ({teamToday.work.length})</div>
                       {teamToday.work.map((e,i) => (
-                        <div key={i} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"3px 0",fontSize:12}}>
-                          <span style={{color:"var(--text2)"}}>{e.name} <span style={{color:"var(--text3)",fontSize:10}}>{e.role??""}</span></span>
-                          {e.in && e.out && <span style={{color:"var(--text3)",fontSize:10,fontFamily:"'DM Mono',monospace"}}>{e.in}–{e.out}</span>}
+                        <div key={i} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"4px 0",borderBottom:"1px solid var(--border)",fontSize:12}}>
+                          <div style={{minWidth:0}}>
+                            <span style={{color:"var(--text2)",fontWeight:500}}>{e.name}</span>
+                            {e.role && <span style={{color:"var(--text3)",fontSize:10,marginLeft:4}}>{e.role}</span>}
+                          </div>
+                          {e.hasSchedule && e.in && e.out
+                            ? <div style={{display:"flex",alignItems:"center",gap:6,flexShrink:0}}>
+                                <span style={{color:"var(--green)",fontSize:10,fontFamily:"'DM Mono',monospace",fontWeight:600}}>{e.in}–{e.out}</span>
+                                {e.break > 0 && <span style={{color:"var(--text3)",fontSize:9,background:"var(--bg2)",padding:"1px 5px",borderRadius:6}}>{e.break}min</span>}
+                              </div>
+                            : <span style={{color:"var(--text3)",fontSize:9,fontStyle:"italic"}}>sem horário</span>
+                          }
                         </div>
                       ))}
                     </div>
