@@ -4,7 +4,6 @@ import { db } from "./firebase";
 import { doc, getDoc, setDoc } from "firebase/firestore";
 
 const APP_VERSION = "5.1.0";
-const APP_VERSION_DATE = "2026-04-12";
 
 /* eslint-disable no-unused-vars */
 
