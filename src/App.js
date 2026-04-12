@@ -3457,29 +3457,32 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
     const toDistribute = total - totalTaxAmt;
     const mode = restaurant.divisionMode ?? MODE_AREA_POINTS;
     const empDayStatus = (empId) => { const m = schedules?.[rid]?.[tKey]?.[empId] ?? {}; return m[date]; };
+    let _dbgNoRole=0,_dbgFreela=0,_dbgAdm=0,_dbgInact=0,_dbgSched=0,_dbgOk=0;
     const activeEmps = restEmps.filter(emp => {
       const r = restRoles.find(r => r.id === emp.roleId);
-      if (!r) return false;
-      if (emp.isFreela) return false;
-      if (emp.admission && emp.admission > date) return false;
-      if (emp.inactive && emp.inactiveFrom && emp.inactiveFrom <= date) return false;
+      if (!r) { _dbgNoRole++; return false; }
+      if (emp.isFreela) { _dbgFreela++; return false; }
+      if (emp.admission && emp.admission > date) { _dbgAdm++; return false; }
+      if (emp.inactive && emp.inactiveFrom && emp.inactiveFrom <= date) { _dbgInact++; return false; }
       const status = empDayStatus(emp.id);
-      if (status === DAY_VACATION) return false;
-      if (status === DAY_FREELA) return false;
-      if (emp.isProducao) return true;
-      if (!status) return true;
-      if (status === DAY_COMP) return true;
-      if (status === DAY_FAULT_J || status === DAY_FAULT_U) return false;
-      return false;
+      if (status === DAY_VACATION || status === DAY_FREELA) { _dbgSched++; return false; }
+      if (emp.isProducao) { _dbgOk++; return true; }
+      if (!status || status === DAY_COMP) { _dbgOk++; return true; }
+      if (status === DAY_FAULT_J || status === DAY_FAULT_U) { _dbgSched++; return false; }
+      if (status === DAY_OFF) { _dbgSched++; return false; }
+      _dbgOk++; return true;
     }).map(emp => ({ ...emp, points: parseFloat(restRoles.find(r=>r.id===emp.roleId)?.points) || 0, area: restRoles.find(r=>r.id===emp.roleId)?.area }));
+    console.log("[calcTip]",date,"restEmps:",restEmps.length,"active:",activeEmps.length,"noRole:",_dbgNoRole,"freela:",_dbgFreela,"adm:",_dbgAdm,"inact:",_dbgInact,"sched:",_dbgSched,"ok:",_dbgOk);
     const newTips = [];
     if (mode === MODE_GLOBAL_POINTS) {
       const totalPoints = activeEmps.reduce((a,e)=>a+e.points,0);
+      console.log("[calcTip]","mode:global","totalPoints:",totalPoints,"emps:",activeEmps.map(e=>({name:e.name,pts:e.points,area:e.area})));
       if (!totalPoints) return { count: 0, updatedTips: allTips };
       activeEmps.forEach(emp => { const g=total*(emp.points/totalPoints),tx=totalTaxAmt*(emp.points/totalPoints); newTips.push({id:`${Date.now()}-${emp.id}-${Math.random().toString(36).slice(2,6)}`,restaurantId:rid,employeeId:emp.id,date,monthKey:tKey,poolTotal:total,areaPool:toDistribute,area:emp.area??"—",myShare:g,myTax:tx,myNet:g-tx,note:noteVal,taxRate}); });
     } else {
       const tSplit = splits?.[rid]?.[tKey] ?? DEFAULT_SPLIT;
       const byArea = {}; AREAS.forEach(a=>{byArea[a]=[];}); activeEmps.forEach(emp=>{if(emp.area)byArea[emp.area].push(emp);});
+      console.log("[calcTip]","mode:area","split:",JSON.stringify(tSplit),"byArea:",Object.fromEntries(AREAS.map(a=>[a,byArea[a].length])));
       AREAS.forEach(area => { const emps=byArea[area],tp=emps.reduce((a,e)=>a+e.points,0); if(!tp)return; const ap=toDistribute*(tSplit[area]/100); emps.forEach(emp=>{const g=total*(tSplit[area]/100)*(emp.points/tp),tx=totalTaxAmt*(tSplit[area]/100)*(emp.points/tp);newTips.push({id:`${Date.now()}-${emp.id}-${Math.random().toString(36).slice(2,6)}`,restaurantId:rid,employeeId:emp.id,date,monthKey:tKey,poolTotal:total,areaPool:ap,area,myShare:g,myTax:tx,myNet:g-tx,note:noteVal,taxRate});}); });
     }
     // Remove existing tips for this date before adding new ones (supports re-launch)
@@ -3732,7 +3735,8 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
       setTipRows([]);
       onUpdate("_toast", `✅ ${dirtyRows.length} dia${dirtyRows.length>1?"s":""} salvo${dirtyRows.length>1?"s":""}! (${count} empregados)`);
     } else {
-      onUpdate("_toast","⚠️ Nenhum empregado ativo encontrado para distribuir gorjeta. Verifique cargos e escalas.");
+      console.warn("[saveTipRows] count=0, dirtyRows:",dirtyRows.length,"tips após calc:",currentTips.length);
+      onUpdate("_toast","⚠️ Nenhum empregado ativo para distribuir. Verifique console (F12) para detalhes.");
     }
   }
 
