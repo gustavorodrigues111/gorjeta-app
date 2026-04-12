@@ -88,6 +88,15 @@ const DAYS_EARN_TIP = new Set([DAY_COMP]);
 // eslint-disable-next-line no-unused-vars
 const DAYS_NO_TIP   = new Set([DAY_OFF, DAY_VACATION, DAY_FAULT_J, DAY_FAULT_U, DAY_FREELA]);
 
+const STATUS_SHORT = {
+  [DAY_OFF]:"F",[DAY_FREELA]:"FL",[DAY_COMP]:"C",[DAY_VACATION]:"Fér",
+  [DAY_FAULT_J]:"FJ",[DAY_FAULT_U]:"FI",
+};
+const STATUS_COLORS = {
+  [DAY_OFF]:"var(--red)",[DAY_FREELA]:"#06b6d4",[DAY_COMP]:"#3b82f6",
+  [DAY_VACATION]:"#8b5cf6",[DAY_FAULT_J]:"#f59e0b",[DAY_FAULT_U]:"var(--red)",
+};
+
 // Division mode constants
 const MODE_AREA_POINTS = "area_points"; // default: split by area % then by points within area
 const MODE_GLOBAL_POINTS = "global_points"; // split only by total points across all employees
@@ -143,16 +152,16 @@ const S = {
 function Toast({ msg, onClose }) {
   useEffect(() => { if (msg) { const t = setTimeout(onClose, 3200); return () => clearTimeout(t); } }, [msg, onClose]); // eslint-disable-line react-hooks/exhaustive-deps
   if (!msg) return null;
-  return <div style={{ position:"fixed", bottom:32, left:"50%", transform:"translateX(-50%)", background:"var(--text)", color:"var(--bg)", padding:"12px 28px", borderRadius:40, fontFamily:"'DM Sans',sans-serif", fontWeight:600, fontSize:14, boxShadow:"0 8px 32px rgba(0,0,0,.15)", zIndex:9999, whiteSpace:"nowrap" }}>{msg}</div>;
+  return <div role="status" aria-live="polite" style={{ position:"fixed", bottom:32, left:"50%", transform:"translateX(-50%)", background:"var(--text)", color:"var(--bg)", padding:"12px 28px", borderRadius:40, fontFamily:"'DM Sans',sans-serif", fontWeight:600, fontSize:14, boxShadow:"0 8px 32px rgba(0,0,0,.15)", zIndex:9999, whiteSpace:"nowrap" }}>{msg}</div>;
 }
 
 function Modal({ title, onClose, children, wide }) {
   return (
-    <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,.4)", zIndex:8000, display:"flex", alignItems:"center", justifyContent:"center", padding:16, overflowY:"auto" }}>
+    <div role="dialog" aria-modal="true" aria-label={title} style={{ position:"fixed", inset:0, background:"rgba(0,0,0,.4)", zIndex:8000, display:"flex", alignItems:"center", justifyContent:"center", padding:16, overflowY:"auto" }} onKeyDown={e=>{if(e.key==="Escape")onClose();}}>
       <div style={{ background:"var(--card-bg)", borderRadius:20, padding:28, width:"100%", maxWidth:wide?680:480, border:"1px solid var(--border)", maxHeight:"92vh", overflowY:"auto", boxShadow:"0 20px 60px rgba(0,0,0,.15)" }}>
         <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:20 }}>
           <h3 style={{ color:"var(--text)", margin:0, fontFamily:"'DM Sans',sans-serif", fontSize:17, fontWeight:700 }}>{title}</h3>
-          <button onClick={onClose} style={{ background:"none", border:"none", color:"var(--text3)", fontSize:20, cursor:"pointer" }}>✕</button>
+          <button onClick={onClose} aria-label="Fechar" style={{ background:"none", border:"none", color:"var(--text3)", fontSize:20, cursor:"pointer" }}>✕</button>
         </div>
         {children}
       </div>
@@ -1303,7 +1312,7 @@ function NotificacoesTab({ restaurantId, dpMessages, notifications, onUpdate }) 
             <div style={{color:"var(--text)",fontSize:13,lineHeight:1.6,whiteSpace:"pre-wrap",marginBottom:8}}>{item.body}</div>
             <div style={{display:"flex",gap:8,alignItems:"center"}}>
               {!item.read && <button onClick={()=>markRead(item)} style={{...S.btnSecondary,fontSize:11,padding:"4px 12px"}}>Marcar como lida</button>}
-              <button onClick={()=>softDeleteItem(item)} style={{background:"none",border:"1px solid #e74c3c22",borderRadius:8,color:"var(--text3)",cursor:"pointer",fontSize:11,padding:"4px 10px",fontFamily:"'DM Mono',monospace"}}>🗑️</button>
+              <button onClick={()=>softDeleteItem(item)} aria-label="Excluir item" style={{background:"none",border:"1px solid #e74c3c22",borderRadius:8,color:"var(--text3)",cursor:"pointer",fontSize:11,padding:"4px 10px",fontFamily:"'DM Mono',monospace"}}>🗑️</button>
             </div>
           </div>
         );
@@ -2560,18 +2569,6 @@ function EmployeePortal({ employees, roles, tips, schedules, splits, restaurants
               }).sort((a,b) => a.name.localeCompare(b.name));
 
               const dim = new Date(year, month+1, 0).getDate();
-              const STATUS_COLORS = {
-                [DAY_OFF]:      "var(--red)",
-                [DAY_FREELA]:   "#06b6d4",
-                [DAY_COMP]:     "#3b82f6",
-                [DAY_VACATION]: "#8b5cf6",
-                [DAY_FAULT_J]:  "#f59e0b",
-                [DAY_FAULT_U]:  "var(--red)",
-              };
-              const STATUS_SHORT = {
-                [DAY_OFF]:"F",[DAY_FREELA]:"FL",[DAY_COMP]:"C",[DAY_VACATION]:"Fér",
-                [DAY_FAULT_J]:"FJ",[DAY_FAULT_U]:"FI",
-              };
               const LEGEND = [
                 ["var(--green)","Trabalho"],["var(--red)","Folga"],["#06b6d4","Freela"],["#3b82f6","Comp."],
                 ["#8b5cf6","Férias"],["#f59e0b","F.Just."],["var(--red)","F.Injust."],
@@ -4633,8 +4630,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                   const { jsPDF } = window.jspdf;
                   const doc = new jsPDF({ orientation:"landscape", unit:"mm", format:"a4" });
                   const daysInMonth = new Date(year, month+1, 0).getDate();
-                  const STATUS_SHORT = {off:"F",freela:"FL",comp:"C",vac:"FÉR",faultj:"FJ",faultu:"FI"};
-                  const STATUS_COLORS = {
+                  const PDF_STATUS_COLORS = {
                     work: [39,174,96],
                     off:  [231,76,60],
                     freela:[6,182,212],
@@ -4649,13 +4645,13 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                   doc.text(`Escala — ${schedArea} — ${monthLabel(year,month)} — ${restaurant.name}`, 14, 12);
 
                   const legend = [
-                    ["T  Trabalho", STATUS_COLORS.work],
-                    ["F  Folga", STATUS_COLORS.off],
-                    ["FL  Freela", STATUS_COLORS.freela],
-                    ["C  Compensação", STATUS_COLORS.comp],
-                    ["FÉR  Férias", STATUS_COLORS.vac],
-                    ["FJ  Falta Just.", STATUS_COLORS.faultj],
-                    ["FI  Falta Injust.", STATUS_COLORS.faultu],
+                    ["T  Trabalho", PDF_STATUS_COLORS.work],
+                    ["F  Folga", PDF_STATUS_COLORS.off],
+                    ["FL  Freela", PDF_STATUS_COLORS.freela],
+                    ["C  Compensação", PDF_STATUS_COLORS.comp],
+                    ["FÉR  Férias", PDF_STATUS_COLORS.vac],
+                    ["FJ  Falta Just.", PDF_STATUS_COLORS.faultj],
+                    ["FI  Falta Injust.", PDF_STATUS_COLORS.faultu],
                   ];
                   let lx = 14;
                   legend.forEach(([lbl, col]) => {
@@ -4700,7 +4696,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                           const k = `${year}-${String(month+1).padStart(2,"0")}-${String(dayIdx+1).padStart(2,"0")}`;
                           const s = schedules?.[rid]?.[mk]?.[emp.id]?.[k];
                           const {x,y,width,height} = data.cell;
-                          const color = !s ? STATUS_COLORS.work : STATUS_COLORS[s];
+                          const color = !s ? PDF_STATUS_COLORS.work : PDF_STATUS_COLORS[s];
                           const label = !s ? "T" : (STATUS_SHORT[s] ?? "");
                           if(color) {
                             doc.setFillColor(...color);
@@ -4830,18 +4826,6 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
 
             {areaEmps.length > 0 && (() => {
               const daysInMonth = dim;
-              const STATUS_COLORS = {
-                [DAY_OFF]:      "var(--red)",
-                [DAY_FREELA]:   "#06b6d4",
-                [DAY_COMP]:     "#3b82f6",
-                [DAY_VACATION]: "#8b5cf6",
-                [DAY_FAULT_J]:  "#f59e0b",
-                [DAY_FAULT_U]:  "var(--red)",
-              };
-              const STATUS_SHORT = {
-                [DAY_OFF]:"F",[DAY_FREELA]:"FL",[DAY_COMP]:"C",[DAY_VACATION]:"Fér",
-                [DAY_FAULT_J]:"FJ",[DAY_FAULT_U]:"FI",
-              };
 
               function cycleStatus(empId, dateStr) {
                 if (restaurant.serviceStartDate && dateStr < restaurant.serviceStartDate) return; // bloqueia antes da vigência
@@ -7135,6 +7119,19 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }
 
         {tab === "changelog" && (() => {
           const CHANGELOG = [
+            { version:"5.7.0", date:"2026-04-12", items:[
+              "Melhoria: dashboard gorjetas — label 'Dias preenchidos' + valores zerados exibem R$ 0,00",
+              "Melhoria: aba Escala agora disponível no mobile do gestor (Dashboard + Gorjetas + Escala)",
+              "Melhoria: arredondamento financeiro (2 casas) em todos os cálculos de gorjeta e penalidade",
+              "Melhoria: data de admissão padrão agora é dinâmica (ano corrente) em vez de fixa",
+              "Melhoria: PIX e nome agora lidos da config (data.pixChave / data.pixNome) com fallback",
+              "Correção: cor do 'Pool total' trocada de branco fixo para var(--text) — visível em ambos os temas",
+              "Correção: versão centralizada no rodapé em todas as telas",
+              "Limpeza: console.logs de debug removidos, variáveis mortas eliminadas, eslint granular",
+              "Acessibilidade: Toast com role=status, Modal com role=dialog + Escape, aria-labels em botões",
+              "Refatoração: STATUS_SHORT e STATUS_COLORS centralizados como constantes globais",
+              "Segurança: try-catch em calcTipForDate e applyFaultPenalty com feedback via toast",
+            ]},
             { version:"5.6.0", date:"2026-04-12", items:[
               "Novo: Admissão default — empregados sem data de admissão assumem 01/01/2026",
               "Novo: Privacidade de dados na landing page e no guia do gestor",
@@ -9203,7 +9200,7 @@ export default function App() {
       <div style={{position:"fixed",bottom:8,left:0,right:0,fontSize:10,color:"var(--text3)",fontFamily:"'DM Mono',monospace",opacity:0.45,pointerEvents:"none",zIndex:100,textAlign:"center"}}>v{APP_VERSION}</div>
 
       {/* Modal Política de Privacidade */}
-      <div id="apptip-privacy" style={{display:"none",position:"fixed",inset:0,background:"rgba(0,0,0,0.5)",zIndex:9999,alignItems:"center",justifyContent:"center",padding:20}} onClick={e=>{if(e.target===e.currentTarget)e.currentTarget.style.display="none";}}>
+      <div id="apptip-privacy" role="dialog" aria-modal="true" aria-label="Política de Privacidade" style={{display:"none",position:"fixed",inset:0,background:"rgba(0,0,0,0.5)",zIndex:9999,alignItems:"center",justifyContent:"center",padding:20}} onClick={e=>{if(e.target===e.currentTarget)e.currentTarget.style.display="none";}}>
         <div style={{background:"var(--card-bg)",borderRadius:16,padding:28,maxWidth:480,width:"100%",maxHeight:"85vh",overflowY:"auto",border:"1px solid var(--border)",fontFamily:"'DM Sans',sans-serif",boxShadow:"0 20px 60px rgba(0,0,0,.2)"}}>
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20}}>
             <h2 style={{color:"var(--text)",margin:0,fontSize:18,fontWeight:700}}>🔒 Política de Privacidade</h2>
