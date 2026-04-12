@@ -4050,25 +4050,25 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                   <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
                     <span style={{color:"var(--ac-text)",fontWeight:700,fontSize:13}}>📅 Hoje — {new Date().toLocaleDateString("pt-BR",{weekday:"long",day:"numeric",month:"long"})}</span>
                   </div>
-                  <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8}}>
-                    <div style={{background:"var(--card-bg)",borderRadius:10,padding:"12px 10px",textAlign:"center"}}>
-                      <div style={{fontSize:20,marginBottom:4}}>👥</div>
-                      <div style={{color:"var(--text)",fontWeight:700,fontSize:18}}>{trabalhando}</div>
-                      <div style={{color:"var(--text3)",fontSize:10,marginTop:2}}>trabalhando</div>
+                  <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:8}}>
+                    <div style={{background:"var(--card-bg)",borderRadius:10,padding:"10px 6px",textAlign:"center"}}>
+                      <div style={{fontSize:18,marginBottom:2}}>👥</div>
+                      <div style={{color:"var(--text)",fontWeight:700,fontSize:16}}>{trabalhando}</div>
+                      <div style={{color:"var(--text3)",fontSize:9,marginTop:2}}>trabalhando</div>
                     </div>
-                    <div style={{background:"var(--card-bg)",borderRadius:10,padding:"12px 10px",textAlign:"center"}}>
-                      <div style={{fontSize:20,marginBottom:4}}>💸</div>
-                      <div style={{color: gorjetaHoje!==null?"var(--green)":"var(--text3)", fontWeight:700,fontSize:gorjetaHoje!==null?15:13}}>
+                    <div style={{background:"var(--card-bg)",borderRadius:10,padding:"10px 6px",textAlign:"center"}}>
+                      <div style={{fontSize:18,marginBottom:2}}>💸</div>
+                      <div style={{color: gorjetaHoje!==null?"var(--green)":"var(--text3)", fontWeight:700,fontSize:gorjetaHoje!==null?13:12}}>
                         {gorjetaHoje !== null ? pFmt(gorjetaHoje) : "—"}
                       </div>
-                      <div style={{color:"var(--text3)",fontSize:10,marginTop:2}}>gorjeta lançada</div>
+                      <div style={{color:"var(--text3)",fontSize:9,marginTop:2}}>gorjeta</div>
                     </div>
-                    <div style={{background:"var(--card-bg)",borderRadius:10,padding:"12px 10px",textAlign:"center"}}>
-                      <div style={{fontSize:20,marginBottom:4}}>{diasSemLancamento>0?"⚠️":"✅"}</div>
-                      <div style={{color:diasSemLancamento>0?"#f59e0b":"var(--green)",fontWeight:700,fontSize:15}}>
-                        {diasSemLancamento>0 ? `${diasSemLancamento}d` : "Em dia"}
+                    <div style={{background:"var(--card-bg)",borderRadius:10,padding:"10px 6px",textAlign:"center"}}>
+                      <div style={{fontSize:18,marginBottom:2}}>{diasSemLancamento>0?"⚠️":"✅"}</div>
+                      <div style={{color:diasSemLancamento>0?"#f59e0b":"var(--green)",fontWeight:700,fontSize:14}}>
+                        {diasSemLancamento>0 ? `${diasSemLancamento}d` : "Ok"}
                       </div>
-                      <div style={{color:"var(--text3)",fontSize:10,marginTop:2}}>pendência gorjeta</div>
+                      <div style={{color:"var(--text3)",fontSize:9,marginTop:2}}>pendência</div>
                     </div>
                   </div>
                   {gorjetaHoje === null && isCurrentMonth && (
@@ -4181,16 +4181,16 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                   <span style={{color:ac,fontWeight:700,fontSize:13}}>💸 Gorjetas — {monthLabel(year,month)}</span>
                   <button onClick={()=>setTab("tips")} style={{...S.btnSecondary,fontSize:11,padding:"4px 10px"}}>Ver tudo →</button>
                 </div>
-                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr 1fr",gap:8}}>
+                <div style={{display:"grid",gridTemplateColumns:mobileOnly?"1fr 1fr":"1fr 1fr 1fr 1fr",gap:mobileOnly?6:8}}>
                   {[
                     ["Pool total",    pFmt(tipPoolTotal), "#fff"],
                     ["Retenção",      pFmt(totalTax),     "var(--red)"],
                     ["Distribuído",   pFmt(totalNet),     ac],
                     ["Dias resolvidos", `${diasResolvidos}/${dim}`, diasResolvidos===dim?"var(--green)":diasResolvidos>=diasUteisPassados?"var(--green)":"#f59e0b"],
                   ].map(([lbl,val,col])=>(
-                    <div key={lbl} style={{background:"var(--bg1)",borderRadius:10,padding:"10px 8px",textAlign:"center"}}>
-                      <div style={{color:"var(--text3)",fontSize:9,marginBottom:4,lineHeight:1.2}}>{lbl}</div>
-                      <div style={{color:col,fontWeight:700,fontSize:13}}>{val}</div>
+                    <div key={lbl} style={{background:"var(--bg1)",borderRadius:10,padding:mobileOnly?"8px 6px":"10px 8px",textAlign:"center"}}>
+                      <div style={{color:"var(--text3)",fontSize:mobileOnly?8:9,marginBottom:3,lineHeight:1.2}}>{lbl}</div>
+                      <div style={{color:col,fontWeight:700,fontSize:mobileOnly?12:13}}>{val}</div>
                     </div>
                   ))}
                 </div>
@@ -9181,7 +9181,7 @@ export default function App() {
       {view === "home" && <Home onLogin={()=>setView("login")} />}
       <Toast msg={toast} onClose={()=>setToast("")} />
       {/* Rodapé de versão */}
-      <div style={{position:"fixed",bottom:8,right:12,fontSize:10,color:"var(--text3)",fontFamily:"'DM Mono',monospace",opacity:0.45,pointerEvents:"none",zIndex:100}}>v{APP_VERSION}</div>
+      <div style={{position:"fixed",bottom:8,left:0,right:0,fontSize:10,color:"var(--text3)",fontFamily:"'DM Mono',monospace",opacity:0.45,pointerEvents:"none",zIndex:100,textAlign:"center"}}>v{APP_VERSION}</div>
 
       {/* Modal Política de Privacidade */}
       <div id="apptip-privacy" style={{display:"none",position:"fixed",inset:0,background:"rgba(0,0,0,0.5)",zIndex:9999,alignItems:"center",justifyContent:"center",padding:20}} onClick={e=>{if(e.target===e.currentTarget)e.currentTarget.style.display="none";}}>
