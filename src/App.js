@@ -1,7 +1,10 @@
-// AppTip v5.0 — 2026-04-11 — cadastro de horários reescrito: mobile-first, toggles trabalha/folga, rascunho automático, templates
+// AppTip — sistema de gestão de gorjetas e equipe para restaurantes
 import { useState, useEffect, Component } from "react";
 import { db } from "./firebase";
-import { doc, getDoc, setDoc, deleteDoc, collection, getDocs } from "firebase/firestore";
+import { doc, getDoc, setDoc } from "firebase/firestore";
+
+const APP_VERSION = "5.1.0";
+const APP_VERSION_DATE = "2026-04-12";
 
 /* eslint-disable no-unused-vars */
 
@@ -48,24 +51,6 @@ async function save(key, value, retries = 3) {
   }
   console.error(`save FAILED after ${retries} retries:`, key);
   return false;
-}
-
-// Receipts stored per-document to avoid Firestore 1MB limit
-async function saveReceipt(receipt) {
-  try {
-    await setDoc(doc(db, "receipts", receipt.id), receipt);
-  } catch (e) { console.error("saveReceipt error", e); }
-}
-async function deleteReceipt(id) {
-  try {
-    await deleteDoc(doc(db, "receipts", id));
-  } catch (e) { console.error("deleteReceipt error", e); }
-}
-async function loadReceipts() {
-  try {
-    const snap = await getDocs(collection(db, "receipts"));
-    return snap.docs.map(d => d.data());
-  } catch (e) { console.error("loadReceipts error", e); return []; }
 }
 
 //
@@ -132,7 +117,6 @@ const K = {
   commAcks:      "v4:commAcks",
   faq:           "v4:faq",
   dpMessages:    "v4:dpMessages",
-  receipts:      "v4:receipts",
   workSchedules: "v4:workSchedules",
   notifications: "v4:notifications",
   noTipDays:     "v4:noTipDays",
@@ -456,7 +440,7 @@ function ExportModal({ onClose, employees, roles, tips, restaurant }) {
 function ComunicadosTab({ empId, restaurantId, communications, commAcks, onUpdate, roles, emp }) {
   const empRole = roles?.find(r => r.id === emp?.roleId);
   const myComms = communications.filter(c => {
-    if (c.restaurantId !== restaurantId) return false;
+    if (c.restaurantId !== restaurantId || c.deleted) return false;
     if (!c.target || c.target === "all") return true;
     if (c.target.startsWith("emps:")) return c.target.replace("emps:","").split(",").includes(empId);
     if (c.target.startsWith("areas:")) return empRole && c.target.replace("areas:","").split(",").includes(empRole.area);
@@ -604,12 +588,6 @@ Exemplo (gorjeta R$${fmtR(EX)}, ${totalPontos}pt no total):
       tabKey: "escala",
       q:"📅 Como funciona a escala e por que ela importa?",
       a:"A escala registra sua presença em cada dia e define diretamente se você recebe gorjeta.\n\nVocê recebe gorjeta quando:\n✅ Trabalhando normalmente\n✅ Compensação de banco de horas (C)\n\nVocê NÃO recebe gorjeta quando:\n❌ Folga\n❌ Falta injustificada (F) — além de não receber, pode haver uma penalidade descontada da gorjeta do mês, caso o restaurante tenha essa regra ativa\n❌ Falta justificada (FJ)\n❌ Atestado médico (A)\n❌ Férias (V)\n\nSe notar algum erro na sua escala, avise o gestor o quanto antes — erros afetam diretamente o valor que você recebe.",
-    },
-    {
-      id:"__recibos__",
-      tabKey: "recibos",
-      q:"📄 Como acesso meus recibos de gorjeta?",
-      a:"Na aba Recibos do aplicativo você encontra todos os seus recibos. O gestor faz o upload e ficam disponíveis aqui para você.\n\nOs recibos podem incluir:\n• Gorjeta mensal\n• Adiantamento salarial\n• Pagamento de férias\n• Décimo terceiro salário\n• Outros pagamentos\n\nSe algum recibo não aparecer, fale com o gestor.",
     },
     {
       id:"__dp__",
@@ -779,9 +757,12 @@ function FaleDpTab({ empId, emp, restaurantId, dpMessages, onUpdate }) {
 //
 // COMUNICADOS MANAGER TAB (manager/super view)
 //
-function ComunicadosManagerTab({ restaurantId, communications, commAcks, employees, onUpdate, currentManagerName }) {
-  const myComms = communications.filter(c => c.restaurantId === restaurantId && !c.autoSchedule)
+function ComunicadosManagerTab({ restaurantId, communications, commAcks, employees, onUpdate, currentManagerName, isOwner, trash }) {
+  const myComms = communications.filter(c => c.restaurantId === restaurantId && !c.autoSchedule && !c.deleted)
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  const trashedComms = communications.filter(c => c.restaurantId === restaurantId && !c.autoSchedule && c.deleted)
+    .sort((a, b) => (b.deletedAt||b.createdAt).localeCompare(a.deletedAt||a.createdAt));
+  const [showTrash, setShowTrash] = useState(false);
   const restEmps = employees.filter(e => e.restaurantId === restaurantId && !(e.inactive && e.inactiveFrom && e.inactiveFrom <= today()));
   const [showNew, setShowNew] = useState(false);
   const [title, setTitle] = useState("");
@@ -825,11 +806,24 @@ function ComunicadosManagerTab({ restaurantId, communications, commAcks, employe
     setTitle(""); setBody(""); setSelAreas([]); setSelEmps([]); setShowNew(false);
   }
 
-  function remove(id) {
+  function softDelete(id) {
+    if(!window.confirm("Mover este comunicado para a lixeira?")) return;
+    onUpdate("communications", communications.map(c => c.id === id ? { ...c, deleted: true, deletedAt: new Date().toISOString() } : c));
+    onUpdate("_toast", "🗑️ Comunicado movido para a lixeira");
+  }
+
+  function permanentDelete(id) {
+    if(!window.confirm("Apagar permanentemente este comunicado? Esta ação não pode ser desfeita.")) return;
     onUpdate("communications", communications.filter(c => c.id !== id));
     const newAcks = { ...commAcks };
     delete newAcks[id];
     onUpdate("commAcks", newAcks);
+    onUpdate("_toast", "🗑️ Comunicado apagado permanentemente");
+  }
+
+  function restoreFromTrash(id) {
+    onUpdate("communications", communications.map(c => c.id === id ? { ...c, deleted: false, deletedAt: undefined } : c));
+    onUpdate("_toast", "♻️ Comunicado restaurado");
   }
 
   if (selComm) {
@@ -955,8 +949,8 @@ function ComunicadosManagerTab({ restaurantId, communications, commAcks, employe
           </div>
         </div>
       )}
-      {myComms.length === 0 && <p style={{ color: "var(--text3)", textAlign: "center" }}>Nenhum comunicado publicado.</p>}
-      {myComms.map(c => {
+      {myComms.length === 0 && !showTrash && <p style={{ color: "var(--text3)", textAlign: "center" }}>Nenhum comunicado publicado.</p>}
+      {!showTrash && myComms.map(c => {
         const ackCount = restEmps.filter(e => commAcks?.[c.id]?.[e.id]).length;
         return (
           <div key={c.id} style={{ ...S.card, marginBottom: 10 }}>
@@ -967,12 +961,35 @@ function ComunicadosManagerTab({ restaurantId, communications, commAcks, employe
               </div>
               <div style={{ display: "flex", gap: 8 }}>
                 <button onClick={() => setSelComm(c.id)} style={{ ...S.btnSecondary, fontSize: 12 }}>Ver ciências</button>
-                <button onClick={() => remove(c.id)} style={{ background: "none", border: "1px solid #e74c3c33", borderRadius: 8, color: "var(--red)", cursor: "pointer", fontSize: 12, padding: "6px 12px", fontFamily: "'DM Mono',monospace" }}>✕</button>
+                <button onClick={() => softDelete(c.id)} style={{ background: "none", border: "1px solid #e74c3c33", borderRadius: 8, color: "var(--red)", cursor: "pointer", fontSize: 12, padding: "6px 12px", fontFamily: "'DM Mono',monospace" }}>🗑️</button>
               </div>
             </div>
           </div>
         );
       })}
+
+      {/* Trash toggle */}
+      {trashedComms.length > 0 && (
+        <button onClick={() => setShowTrash(!showTrash)} style={{ ...S.btnSecondary, fontSize: 12, marginTop: 12, display: "flex", alignItems: "center", gap: 6 }}>
+          🗑️ Lixeira ({trashedComms.length}) {showTrash ? "▲" : "▼"}
+        </button>
+      )}
+
+      {/* Trash view */}
+      {showTrash && trashedComms.map(c => (
+        <div key={c.id} style={{ ...S.card, marginBottom: 10, marginTop: 10, opacity: 0.6, borderColor: "var(--border)" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+            <div style={{ flex: 1 }}>
+              <div style={{ color: "var(--text)", fontWeight: 600, marginBottom: 4 }}>{c.title}</div>
+              <div style={{ color: "var(--text3)", fontSize: 12 }}>Apagado em {c.deletedAt ? new Date(c.deletedAt).toLocaleDateString("pt-BR") : "—"}</div>
+            </div>
+            <div style={{ display: "flex", gap: 8 }}>
+              <button onClick={() => restoreFromTrash(c.id)} style={{ ...S.btnSecondary, fontSize: 12 }}>♻️ Restaurar</button>
+              {isOwner && <button onClick={() => permanentDelete(c.id)} style={{ background: "none", border: "1px solid #e74c3c33", borderRadius: 8, color: "var(--red)", cursor: "pointer", fontSize: 12, padding: "6px 12px", fontFamily: "'DM Mono',monospace" }}>✕ Apagar</button>}
+            </div>
+          </div>
+        </div>
+      ))}
     </div>
   );
 }
@@ -1145,16 +1162,22 @@ function FaqManagerTab({ restaurantId, faq, onUpdate }) {
 // ── Notificações Tab (DP only) ────────────────────────────────────────────────
 function NotificacoesTab({ restaurantId, dpMessages, notifications, onUpdate }) {
   const ac = "#3b82f6";
+  const [showTrash, setShowTrash] = useState(false);
 
-  // All DP messages for this restaurant
+  // All DP messages for this restaurant (exclude soft-deleted)
   const dpMsgs = (dpMessages ?? [])
-    .filter(m => m.restaurantId === restaurantId)
+    .filter(m => m.restaurantId === restaurantId && !m.deleted)
     .map(m => ({ ...m, _kind: "dp" }));
 
-  // System notifications (horário changes, etc)
+  // System notifications (horário changes, etc) — exclude admin-only items and soft-deleted
   const sysNots = (notifications ?? [])
-    .filter(n => n.restaurantId === restaurantId)
+    .filter(n => n.restaurantId === restaurantId && n.targetRole !== "admin" && n.type !== "upgrade_request" && !n.deleted)
     .map(n => ({ ...n, _kind: "sys" }));
+
+  // Trashed items
+  const trashedDp = (dpMessages ?? []).filter(m => m.restaurantId === restaurantId && m.deleted).map(m => ({ ...m, _kind: "dp" }));
+  const trashedSys = (notifications ?? []).filter(n => n.restaurantId === restaurantId && n.targetRole !== "admin" && n.type !== "upgrade_request" && n.deleted).map(n => ({ ...n, _kind: "sys" }));
+  const trashed = [...trashedDp, ...trashedSys].sort((a, b) => (b.deletedAt || b.date || "").localeCompare(a.deletedAt || a.date || ""));
 
   const all = [...dpMsgs, ...sysNots]
     .sort((a, b) => (b.date || b.createdAt || "").localeCompare(a.date || a.createdAt || ""));
@@ -1172,6 +1195,24 @@ function NotificacoesTab({ restaurantId, dpMessages, notifications, onUpdate }) 
   function markAllRead() {
     onUpdate("dpMessages", dpMessages.map(m => m.restaurantId === restaurantId ? { ...m, read: true } : m));
     onUpdate("notifications", notifications.map(n => n.restaurantId === restaurantId ? { ...n, read: true } : n));
+  }
+
+  function softDeleteItem(item) {
+    if (item._kind === "dp") {
+      onUpdate("dpMessages", dpMessages.map(m => m.id === item.id ? { ...m, deleted: true, deletedAt: new Date().toISOString(), read: true } : m));
+    } else {
+      onUpdate("notifications", notifications.map(n => n.id === item.id ? { ...n, deleted: true, deletedAt: new Date().toISOString(), read: true } : n));
+    }
+    onUpdate("_toast", "🗑️ Mensagem movida para a lixeira");
+  }
+
+  function restoreItem(item) {
+    if (item._kind === "dp") {
+      onUpdate("dpMessages", dpMessages.map(m => m.id === item.id ? { ...m, deleted: false, deletedAt: undefined } : m));
+    } else {
+      onUpdate("notifications", notifications.map(n => n.id === item.id ? { ...n, deleted: false, deletedAt: undefined } : n));
+    }
+    onUpdate("_toast", "♻️ Mensagem restaurada");
   }
 
   const CATS = { sugestao:"💡 Sugestão", elogio:"👏 Elogio", reclamacao:"⚠️ Reclamação", denuncia:"🚨 Denúncia" };
@@ -1202,11 +1243,36 @@ function NotificacoesTab({ restaurantId, dpMessages, notifications, onUpdate }) 
               <span style={{color:"var(--text3)",fontSize:11,whiteSpace:"nowrap"}}>{date ? new Date(date).toLocaleString("pt-BR") : ""}</span>
             </div>
             {isDP && <div style={{color:"var(--text2)",fontSize:12,marginBottom:6}}>De: <span style={{color:item.empName==="Anônimo"?"#8b5cf6":"#fff"}}>{item.empName}</span></div>}
-            <div style={{color:"var(--text)",fontSize:13,lineHeight:1.6,whiteSpace:"pre-wrap",marginBottom:item.read?0:8}}>{item.body}</div>
-            {!item.read && <button onClick={()=>markRead(item)} style={{...S.btnSecondary,fontSize:11,padding:"4px 12px"}}>Marcar como lida</button>}
+            <div style={{color:"var(--text)",fontSize:13,lineHeight:1.6,whiteSpace:"pre-wrap",marginBottom:8}}>{item.body}</div>
+            <div style={{display:"flex",gap:8,alignItems:"center"}}>
+              {!item.read && <button onClick={()=>markRead(item)} style={{...S.btnSecondary,fontSize:11,padding:"4px 12px"}}>Marcar como lida</button>}
+              <button onClick={()=>softDeleteItem(item)} style={{background:"none",border:"1px solid #e74c3c22",borderRadius:8,color:"var(--text3)",cursor:"pointer",fontSize:11,padding:"4px 10px",fontFamily:"'DM Mono',monospace"}}>🗑️</button>
+            </div>
           </div>
         );
       })}
+
+      {/* Trash toggle */}
+      {trashed.length > 0 && (
+        <button onClick={() => setShowTrash(!showTrash)} style={{ ...S.btnSecondary, fontSize: 12, marginTop: 12, display: "flex", alignItems: "center", gap: 6 }}>
+          🗑️ Lixeira ({trashed.length}) {showTrash ? "▲" : "▼"}
+        </button>
+      )}
+
+      {/* Trash view */}
+      {showTrash && trashed.map(item => (
+        <div key={item.id} style={{...S.card,marginBottom:10,marginTop:10,opacity:0.5,borderColor:"var(--border)"}}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
+            <div style={{flex:1}}>
+              <div style={{color:"var(--text3)",fontSize:11,marginBottom:4}}>
+                {item._kind==="dp"?"💬 Fale com DP":"⚙️ Sistema"} · Apagado em {item.deletedAt ? new Date(item.deletedAt).toLocaleDateString("pt-BR") : "—"}
+              </div>
+              <div style={{color:"var(--text2)",fontSize:13,lineHeight:1.5}}>{item.body?.slice(0,100)}{(item.body?.length??0)>100?"…":""}</div>
+            </div>
+            <button onClick={()=>restoreItem(item)} style={{...S.btnSecondary,fontSize:11,padding:"4px 10px",flexShrink:0}}>♻️ Restaurar</button>
+          </div>
+        </div>
+      ))}
     </div>
   );
 }
@@ -1649,21 +1715,21 @@ function WorkScheduleManagerTab({ restaurantId, employees, workSchedules, notifi
               {/* Time inputs (only if active) */}
               {isActive && (
                 <div>
-                  <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8,marginBottom:8}}>
-                    <div>
+                  <div style={{display:"flex",flexWrap:"wrap",gap:8,marginBottom:8}}>
+                    <div style={{flex:"1 1 80px",minWidth:80}}>
                       <label style={{color:"var(--text3)",fontSize:10,display:"block",marginBottom:3}}>Entrada</label>
                       <input type="time" value={d.in||""} onChange={e=>handleDayChange(dayIdx,"in",e.target.value)}
-                        style={{...S.input,fontSize:14,padding:"10px 10px",textAlign:"center"}}/>
+                        style={{...S.input,fontSize:14,padding:"10px 8px",textAlign:"center",width:"100%",boxSizing:"border-box"}}/>
                     </div>
-                    <div>
-                      <label style={{color:"var(--text3)",fontSize:10,display:"block",marginBottom:3}}>Saida</label>
+                    <div style={{flex:"1 1 80px",minWidth:80}}>
+                      <label style={{color:"var(--text3)",fontSize:10,display:"block",marginBottom:3}}>Saída</label>
                       <input type="time" value={d.out||""} onChange={e=>handleDayChange(dayIdx,"out",e.target.value)}
-                        style={{...S.input,fontSize:14,padding:"10px 10px",textAlign:"center"}}/>
+                        style={{...S.input,fontSize:14,padding:"10px 8px",textAlign:"center",width:"100%",boxSizing:"border-box"}}/>
                     </div>
-                    <div>
-                      <label style={{color:"var(--text3)",fontSize:10,display:"block",marginBottom:3}}>Intervalo</label>
+                    <div style={{flex:"1 1 80px",minWidth:80}}>
+                      <label style={{color:"var(--text3)",fontSize:10,display:"block",marginBottom:3}}>Intervalo (min)</label>
                       <input type="number" min="0" max="120" value={d.break||""} onChange={e=>handleDayChange(dayIdx,"break",parseInt(e.target.value)||0)}
-                        placeholder="30" style={{...S.input,fontSize:14,padding:"10px 10px",textAlign:"center"}}/>
+                        placeholder="30" style={{...S.input,fontSize:14,padding:"10px 8px",textAlign:"center",width:"100%",boxSizing:"border-box"}}/>
                     </div>
                   </div>
 
@@ -1845,10 +1911,13 @@ function WorkScheduleEmployeeTab({ empId, restaurantId, workSchedules }) {
 }
 
 function DpManagerTab({ restaurantId, dpMessages, onUpdate, isOwner }) {
-  const msgs = dpMessages.filter(m => m.restaurantId === restaurantId)
+  const msgs = dpMessages.filter(m => m.restaurantId === restaurantId && !m.deleted)
     .sort((a, b) => b.date.localeCompare(a.date));
+  const trashedMsgs = dpMessages.filter(m => m.restaurantId === restaurantId && m.deleted)
+    .sort((a, b) => (b.deletedAt||b.date).localeCompare(a.deletedAt||a.date));
   const [filter, setFilter] = useState("all");
   const [selectedIds, setSelectedIds] = useState(new Set());
+  const [showTrash, setShowTrash] = useState(false);
   const CATS = { all: "Todos", sugestao: "💡 Sugestões", elogio: "👏 Elogios", reclamacao: "⚠️ Reclamações", denuncia: "🚨 Denúncias" };
   const filtered = filter === "all" ? msgs : msgs.filter(m => m.category === filter);
   const unread = msgs.filter(m => !m.read).length;
@@ -1865,10 +1934,28 @@ function DpManagerTab({ restaurantId, dpMessages, onUpdate, isOwner }) {
   }
 
   function deleteSelected() {
-    if(!window.confirm(`Apagar ${selectedIds.size} mensagem(ns) permanentemente? Esta ação não pode ser desfeita.`)) return;
-    onUpdate("dpMessages", dpMessages.filter(m => !selectedIds.has(m.id)));
-    setSelectedIds(new Set());
-    onUpdate("_toast", `🗑️ ${selectedIds.size} mensagem(ns) apagada(s)`);
+    if (isOwner) {
+      if(!window.confirm(`Apagar ${selectedIds.size} mensagem(ns) permanentemente? Esta ação não pode ser desfeita.`)) return;
+      onUpdate("dpMessages", dpMessages.filter(m => !selectedIds.has(m.id)));
+      setSelectedIds(new Set());
+      onUpdate("_toast", `🗑️ ${selectedIds.size} mensagem(ns) apagada(s) permanentemente`);
+    } else {
+      if(!window.confirm(`Mover ${selectedIds.size} mensagem(ns) para a lixeira?`)) return;
+      onUpdate("dpMessages", dpMessages.map(m => selectedIds.has(m.id) ? { ...m, deleted: true, deletedAt: new Date().toISOString(), read: true } : m));
+      setSelectedIds(new Set());
+      onUpdate("_toast", `🗑️ ${selectedIds.size} mensagem(ns) movida(s) para a lixeira`);
+    }
+  }
+
+  function restoreFromTrash(id) {
+    onUpdate("dpMessages", dpMessages.map(m => m.id === id ? { ...m, deleted: false, deletedAt: undefined } : m));
+    onUpdate("_toast", "♻️ Mensagem restaurada");
+  }
+
+  function permanentDeleteFromTrash(id) {
+    if(!window.confirm("Apagar permanentemente? Esta ação não pode ser desfeita.")) return;
+    onUpdate("dpMessages", dpMessages.filter(m => m.id !== id));
+    onUpdate("_toast", "🗑️ Mensagem apagada permanentemente");
   }
 
   return (
@@ -1881,23 +1968,21 @@ function DpManagerTab({ restaurantId, dpMessages, onUpdate, isOwner }) {
             <button key={val} onClick={() => setFilter(val)} style={{ padding: "6px 12px", borderRadius: 20, border: `1px solid ${filter === val ? ac : "var(--border)"}`, background: filter === val ? ac + "22" : "transparent", color: filter === val ? ac : "#555", cursor: "pointer", fontFamily: "'DM Mono',monospace", fontSize: 11 }}>{lbl}</button>
           ))}
         </div>
-        {isOwner && selectedIds.size > 0 && (
+        {selectedIds.size > 0 && (
           <button onClick={deleteSelected} style={{padding:"6px 14px",borderRadius:8,border:"none",background:"var(--red)",color:"var(--text)",fontWeight:700,cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:12}}>
-            🗑️ Apagar selecionadas ({selectedIds.size})
+            🗑️ {isOwner ? "Apagar" : "Mover p/ lixeira"} ({selectedIds.size})
           </button>
         )}
       </div>
 
-      {filtered.length === 0 && <p style={{ color: "var(--text3)", textAlign: "center" }}>Nenhuma mensagem.</p>}
-      {filtered.map(m => (
+      {filtered.length === 0 && !showTrash && <p style={{ color: "var(--text3)", textAlign: "center" }}>Nenhuma mensagem.</p>}
+      {!showTrash && filtered.map(m => (
         <div key={m.id} style={{ ...S.card, marginBottom: 10, opacity: m.read ? 0.7 : 1, borderColor: selectedIds.has(m.id) ? "#ef444488" : m.read ? "var(--border)" : "var(--ac)44", background: selectedIds.has(m.id) ? "#1a0808" : undefined }}>
           <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8, alignItems:"flex-start" }}>
             <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-              {isOwner && (
-                <input type="checkbox" checked={selectedIds.has(m.id)} onChange={()=>toggleSelect(m.id)}
-                  style={{accentColor:"var(--red)",cursor:"pointer",width:14,height:14,flexShrink:0}}
-                />
-              )}
+              <input type="checkbox" checked={selectedIds.has(m.id)} onChange={()=>toggleSelect(m.id)}
+                style={{accentColor:"var(--red)",cursor:"pointer",width:14,height:14,flexShrink:0}}
+              />
               <span style={{ color: "var(--text2)", fontSize: 12 }}>{CATS[m.category] ?? m.category}</span>
               {!m.read && <span style={{ background: ac, color: "#111", borderRadius: 4, padding: "1px 6px", fontSize: 10, fontWeight: 700 }}>Novo</span>}
             </div>
@@ -1908,549 +1993,35 @@ function DpManagerTab({ restaurantId, dpMessages, onUpdate, isOwner }) {
           {!m.read && <button onClick={() => markRead(m.id)} style={{ ...S.btnSecondary, fontSize: 12 }}>Marcar como lida</button>}
         </div>
       ))}
-    </div>
-  );
-}
 
-// ── Recibos Manager Tab ──────────────────────────────────────────────────────
-function ReceibosManagerTab({ restaurantId, employees, roles, restaurants, receipts, onUpdate, onUpdateEmployees }) {
-  const restEmps = employees.filter(e => e.restaurantId === restaurantId);
-  const restRoles = roles.filter(r => r.restaurantId === restaurantId && !r.inactive);
-  const restaurant = restaurants.find(r => r.id === restaurantId);
-  const [uploading, setUploading] = useState(false);
-  const [progress, setProgress] = useState("");
-  const [selMonth, setSelMonth] = useState(() => {
-    const now = new Date();
-    return `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,"0")}`;
-  });
-  const [type, setType] = useState("pagamento");
-  const [assignTarget, setAssignTarget] = useState({}); // {receiptId: empId}
-  const [unmatchedAction, setUnmatchedAction] = useState({}); // {receiptId: "create"|"assign"}
-  const [newEmpForm, setNewEmpForm] = useState({}); // {receiptId: {name,cpf,admission,roleId}}
-  const ac = "var(--ac)";
-
-  async function handleUpload(e) {
-    const file = e.target.files[0];
-    if (!file) return;
-    setUploading(true);
-    setProgress("Carregando PDF...");
-
-    try {
-      if (!window.pdfjsLib) {
-        await new Promise((res, rej) => {
-          const s = document.createElement("script");
-          s.src = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js";
-          s.onload = res; s.onerror = rej;
-          document.head.appendChild(s);
-        });
-        window.pdfjsLib.GlobalWorkerOptions.workerSrc =
-          "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
-      }
-
-      const arrayBuffer = await file.arrayBuffer();
-      const pdf = await window.pdfjsLib.getDocument({ data: arrayBuffer }).promise;
-      const numPages = pdf.numPages;
-      setProgress(`Lendo ${numPages} páginas...`);
-
-      const newReceipts = [];
-      const pageTexts = []; // store fingerprints to detect duplicates
-
-      for (let p = 1; p <= numPages; p++) {
-        setProgress(`Processando página ${p} de ${numPages}...`);
-        const page = await pdf.getPage(p);
-        const textContent = await page.getTextContent();
-        const text = textContent.items.map(i => i.str).join(" ");
-
-        // Duplicate detection using CPF + page type as fingerprint
-        // Avoids false positives since all pages share same company header
-        const cpfForFp = (text.match(/CPF:\s*([\d.-]+)/) || [])[1]?.replace(/\D/g,"") ?? "";
-        const isContinuation = text.includes("Continua na próxima") ? "1" : "2";
-        const fingerprint = cpfForFp.length >= 11 ? `${cpfForFp}|${isContinuation}` : null;
-
-        // Only skip if we have a valid fingerprint AND already seen it
-        const isDuplicate = fingerprint && pageTexts.includes(fingerprint);
-
-        if (isDuplicate) {
-          setProgress(`Página ${p} de ${numPages} — cópia ignorada ✓`);
-          continue;
-        }
-        if (fingerprint) pageTexts.push(fingerprint);
-
-        // Auto-detect month from text (e.g. "Março/2026", "03/2026", "Referente ao mês: Março 2026")
-        let detectedMonth = selMonth; // fallback to selected
-        const MONTHS_PT = {janeiro:"01",fevereiro:"02",março:"03",abril:"04",maio:"05",junho:"06",julho:"07",agosto:"08",setembro:"09",outubro:"10",novembro:"11",dezembro:"12"};
-        const textLower = text.toLowerCase();
-        // Try "Mês/Ano" or "Mês Ano" patterns
-        for (const [name, num] of Object.entries(MONTHS_PT)) {
-          const patterns = [
-            new RegExp(name + "[/\\s]+(\\d{4})","i"),
-            new RegExp("referente.*" + name + ".*?(\\d{4})","i"),
-            new RegExp("compet.*" + name + ".*?(\\d{4})","i"),
-          ];
-          for (const pat of patterns) {
-            const m = textLower.match(pat);
-            if (m) { detectedMonth = `${m[1]}-${num}`; break; }
-          }
-          if (detectedMonth !== selMonth) break;
-        }
-        // Try numeric pattern MM/YYYY after "competência" or "referente"
-        if (detectedMonth === selMonth) {
-          const numPat = text.match(/(?:competência|compet\.|referente|ref\.|mês)[:\s]+(\d{2})\/(\d{4})/i);
-          if (numPat) detectedMonth = `${numPat[2]}-${numPat[1]}`;
-        }
-
-        // Type is set by user before upload — no auto-detection
-        const detectedType = type;
-        let matchedEmp = null;
-        let extractedName = "";
-        let extractedCpf = "";
-        let extractedAdmission = "";
-        let extractedRole = "";
-
-        // Extract ALL CPFs from text, pick the one labeled "CPF:"
-        const cpfInText = text.match(/CPF:\s*(\d{3}[.-]\d{3}[.-]\d{3}[.-]\d{2})/);
-        // Also try without separator (11 digits after CPF:)
-        const cpfRawInText = text.match(/CPF:\s*(\d{11})/);
-        const cpfStr = cpfInText ? cpfInText[1] : (cpfRawInText ? cpfRawInText[1] : null);
-        // Normalize to exactly 11 digits with leading zeros preserved
-        const cpfDigitsInText = cpfStr ? cpfStr.replace(/\D/g,"").padStart(11,"0") : null;
-
-        for (const emp of restEmps) {
-          if (emp.cpf && cpfDigitsInText) {
-            // Normalize stored CPF to 11 digits too
-            const cleanCpf = emp.cpf.replace(/\D/g,"").padStart(11,"0");
-            if (cleanCpf === cpfDigitsInText) {
-              matchedEmp = emp; break;
-            }
-          }
-        }
-        if (!matchedEmp) {
-          // Try raw text search for CPF digits
-          for (const emp of restEmps) {
-            if (emp.cpf) {
-              const cleanCpf = emp.cpf.replace(/\D/g,"").padStart(11,"0");
-              if (cleanCpf.length === 11 && text.replace(/\D/g,"").includes(cleanCpf)) {
-                matchedEmp = emp; break;
-              }
-            }
-          }
-        }
-        if (!matchedEmp) {
-          // Try name match — more flexible comparison
-          const nameInText = text.match(/Nome\s+do\s+Colaborador\s+([A-ZÁÉÍÓÚÃÕÂÊÎÔÛÇÀÜ][A-ZÁÉÍÓÚÃÕÂÊÎÔÛÇÀÜ\s]{3,60}?)(?=\s{2,}|PIS|CTPS|\d{3})/);
-          const nameFromPdf = nameInText ? nameInText[1].trim().toUpperCase().replace(/\s+/g," ") : null;
-          if (nameFromPdf) {
-            for (const emp of restEmps) {
-              const empUpper = emp.name.toUpperCase().replace(/\s+/g," ");
-              // Exact match
-              if (empUpper === nameFromPdf) { matchedEmp = emp; break; }
-              // PDF name contains emp name
-              if (nameFromPdf.includes(empUpper)) { matchedEmp = emp; break; }
-              // Emp name contains PDF name
-              if (empUpper.includes(nameFromPdf)) { matchedEmp = emp; break; }
-              // First + last name match
-              const pdfParts = nameFromPdf.split(" ");
-              const empParts = empUpper.split(" ");
-              if (pdfParts[0] === empParts[0] && pdfParts[pdfParts.length-1] === empParts[empParts.length-1]) {
-                matchedEmp = emp; break;
-              }
-            }
-          }
-          // Last resort: any word from PDF name (3+ chars) found in emp name
-          if (!matchedEmp && nameFromPdf) {
-            const pdfWords = nameFromPdf.split(" ").filter(w => w.length >= 4);
-            for (const emp of restEmps) {
-              const empUpper = emp.name.toUpperCase();
-              const matchCount = pdfWords.filter(w => empUpper.includes(w)).length;
-              if (matchCount >= 2) { matchedEmp = emp; break; }
-            }
-          }
-        }
-
-        // DEBUG — remove after fix
-        console.log(`[PDF p.${p}] CPF found: "${cpfDigitsInText}" | Name pattern: "${text.match(/Nome\s+do\s+Colaborador\s+(.{0,50})/)?.[1]?.trim()}" | matched: ${matchedEmp?.name ?? "NONE"}`);
-
-        // Extract using exact patterns from this payroll PDF format:
-        // "Nome do Colaborador\nNOME COMPLETO" or "Nome do Colaborador NOME COMPLETO"
-        // "CPF: 000.000.000-00"
-        // "Admissão: DD/MM/YYYY"
-        // "Função: CARGO"
-
-        // Name: appears right after "Nome do Colaborador"
-        const nameAfterLabel = text.match(/Nome\s+do\s+Colaborador\s+([A-ZÁÉÍÓÚÃÕÂÊÎÔÛÇÀÜ][A-ZÁÉÍÓÚÃÕÂÊÎÔÛÇÀÜ\s]{3,50}?)(?=\s{2,}|PIS|CTPS|CPF|\n\n)/);
-        if (nameAfterLabel) {
-          extractedName = nameAfterLabel[1].trim();
-        } else {
-          // Fallback: code + name pattern "000058 ROMILDO DE BRITO"
-          const codeNameMatch = text.match(/\b\d{5,6}\s+([A-ZÁÉÍÓÚÃÕÂÊÎÔÛÇÀÜ]{2,}(?:\s+[A-ZÁÉÍÓÚÃÕÂÊÎÔÛÇÀÜ]{2,})+)/);
-          if (codeNameMatch) extractedName = codeNameMatch[1].trim();
-        }
-
-        // CPF: labeled "CPF: 000.000.000-00"
-        const cpfLabelMatch = text.match(/CPF:\s*(\d{3}[.-]\d{3}[.-]\d{3}[.-]\d{2})/);
-        if (cpfLabelMatch) {
-          const digits = cpfLabelMatch[1].replace(/\D/g,"").padStart(11,"0");
-          if (digits.length === 11) extractedCpf = `${digits.slice(0,3)}.${digits.slice(3,6)}.${digits.slice(6,9)}-${digits.slice(9)}`;
-        }
-
-        // Admission: "Admissão: DD/MM/YYYY"
-        const admLabelMatch = text.match(/Admiss[aã]o:\s*(\d{2}[/]\d{2}[/]\d{4})/i);
-        if (admLabelMatch) {
-          const [d,m,y] = admLabelMatch[1].split("/");
-          extractedAdmission = `${y}-${m}-${d}`;
-        }
-
-        // Role: "Função: CARGO NAME"
-        const funcLabelMatch = text.match(/Fun[çc][aã]o:\s*([A-ZÁÉÍÓÚÃÕÂÊÎÔÛÇÀÜ][A-ZÁÉÍÓÚÃÕÂÊÎÔÛÇÀÜa-záéíóúãõâêîôûçàü\s()]{1,40}?)(?=\s{2,}|CPF|CBO|PIS|RUA|$)/);
-        if (funcLabelMatch) extractedRole = funcLabelMatch[1].trim();
-
-
-
-        const viewport = page.getViewport({ scale: 1.5 });
-        const canvas = document.createElement("canvas");
-        canvas.width = viewport.width; canvas.height = viewport.height;
-        await page.render({ canvasContext: canvas.getContext("2d"), viewport }).promise;
-        const dataUrl = canvas.toDataURL("image/jpeg", 0.8);
-
-        newReceipts.push({
-          id: `${Date.now()}-${p}-${Math.random().toString(36).slice(2,5)}`,
-          restaurantId,
-          empId: matchedEmp ? matchedEmp.id : null,
-          empName: matchedEmp ? matchedEmp.name : (extractedName || `Página ${p} — não identificado`),
-          unmatched: !matchedEmp,
-          extractedName: extractedName || "",
-          extractedCpf: extractedCpf || "",
-          extractedAdmission: extractedAdmission || "",
-          extractedRole: extractedRole || "",
-          month: detectedMonth, type: detectedType, dataUrl,
-          uploadedAt: new Date().toISOString(), page: p
-        });
-      }
-
-      const matched = newReceipts.filter(r => !r.unmatched).length;
-      const unmatched = newReceipts.filter(r => r.unmatched).length;
-      const skipped = numPages - newReceipts.length;
-
-      // Remove old receipts for same month+type combos found in this batch
-      const batchKeys = new Set(newReceipts.map(r => `${r.month}|${r.type}`));
-      const existing = receipts.filter(r =>
-        !(r.restaurantId === restaurantId && batchKeys.has(`${r.month}|${r.type}`))
-      );
-      onUpdate("receipts", [...existing, ...newReceipts]);
-
-      // Summary of detected months/types
-      const summary = [...new Set(newReceipts.map(r => `${r.month} · ${r.type==="pagamento"?"Pagamento":r.type==="adiantamento"?"Adiantamento":"13º Salário"}`))].join(", ");
-      setProgress(`✅ ${matched} identificados automaticamente.\n📅 Detectado: ${summary}${skipped ? `\n📋 ${skipped} duplicata(s) ignorada(s).` : ""}${unmatched ? `\n⚠️ ${unmatched} página(s) não identificada(s) — associe manualmente abaixo.` : ""}`);
-    } catch (err) {
-      setProgress(`❌ Erro: ${err.message}`);
-    }
-    setUploading(false);
-    e.target.value = "";
-  }
-
-  function assignReceipt(receiptId, empId) {
-    const emp = restEmps.find(e => e.id === empId);
-    if (!emp) return;
-    onUpdate("receipts", receipts.map(r =>
-      r.id === receiptId ? { ...r, empId: emp.id, empName: emp.name, unmatched: false } : r
-    ));
-  }
-
-  const myReceipts = receipts.filter(r => r.restaurantId === restaurantId);
-  const unmatched = myReceipts.filter(r => r.unmatched);
-  const months = [...new Set(myReceipts.filter(r=>!r.unmatched).map(r => r.month))].sort().reverse();
-
-  return (
-    <div style={{fontFamily:"'DM Mono',monospace"}}>
-      <div style={{...S.card, marginBottom:20}}>
-        <p style={{color:ac,fontSize:14,fontWeight:700,margin:"0 0 6px"}}>📤 Importar Recibos</p>
-        <p style={{color:"var(--text3)",fontSize:12,marginBottom:14}}>Selecione o tipo e o mês antes de enviar o PDF.</p>
-        <div style={{display:"flex",flexDirection:"column",gap:10}}>
-          <div>
-            <label style={S.label}>Tipo de recibo</label>
-            <div style={{display:"flex",gap:8}}>
-              {[["pagamento","💰 Pagamento"],["adiantamento","💵 Adiantamento"],["13salario","🎄 13º Salário"],["ferias","🏖️ Férias"]].map(([v,l])=>(
-                <button key={v} onClick={()=>setType(v)} style={{flex:1,padding:"10px 6px",borderRadius:10,border:`2px solid ${type===v?ac:"var(--border)"}`,background:type===v?ac+"22":"transparent",color:type===v?ac:"var(--text3)",cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:12,fontWeight:type===v?700:400}}>
-                  {l}
-                </button>
-              ))}
-            </div>
-          </div>
-          <div>
-            <label style={S.label}>Mês de referência</label>
-            <input type="month" value={selMonth} onChange={e=>setSelMonth(e.target.value)} style={S.input}/>
-          </div>
-          <div>
-            <label style={S.label}>Arquivo PDF</label>
-            <input type="file" accept=".pdf" onChange={handleUpload} disabled={uploading}
-              style={{...S.input, cursor:"pointer"}}/>
-          </div>
-          {progress && (
-            <div style={{background:"var(--bg1)",borderRadius:8,padding:"10px 12px",fontSize:12,color:progress.startsWith("✅")?"var(--green)":progress.startsWith("❌")?"var(--red)":"#aaa",whiteSpace:"pre-line"}}>
-              {progress}
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* Unmatched receipts */}
-      {unmatched.length > 0 && (
-        <div style={{...S.card,marginBottom:20,border:"1px solid #f59e0b44"}}>
-          <p style={{color:"#f59e0b",fontWeight:700,fontSize:13,margin:"0 0 12px"}}>⚠️ {unmatched.length} recibo(s) não identificado(s)</p>
-          {unmatched.map(r => {
-            const action = unmatchedAction[r.id]; // "create" | "assign" | undefined
-            const form = newEmpForm[r.id] ?? { name: r.extractedName||"", cpf: r.extractedCpf||"", admission: r.extractedAdmission||"", roleId:"" };
-
-            return (
-              <div key={r.id} style={{marginBottom:16,padding:12,background:"var(--bg2)",borderRadius:10,border:"1px solid #f59e0b33"}}>
-                {/* Preview info extracted */}
-                <div style={{marginBottom:8,display:"flex",gap:12,flexWrap:"wrap"}}>
-                  {r.extractedName && <span style={{color:"var(--text)",fontSize:13,fontWeight:600}}>👤 {r.extractedName}</span>}
-                  {r.extractedCpf && <span style={{color:"var(--text2)",fontSize:12}}>CPF: {r.extractedCpf}</span>}
-                  {r.extractedAdmission && <span style={{color:"var(--text2)",fontSize:12}}>Admissão: {fmtDate(r.extractedAdmission)}</span>}
-                  {!r.extractedName && <span style={{color:"var(--text3)",fontSize:12}}>Página {r.page} — dados não identificados</span>}
-                </div>
-                <img src={r.dataUrl} alt="" style={{width:"100%",borderRadius:6,marginBottom:10,maxHeight:160,objectFit:"cover"}}/>
-
-                {/* Action choice */}
-                {!action && (
-                  <div>
-                    <p style={{color:"var(--text2)",fontSize:12,marginBottom:8}}>O que deseja fazer com este recibo?</p>
-                    <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
-                      <button onClick={()=>{
-                        setUnmatchedAction(p=>({...p,[r.id]:"create"}));
-                        setNewEmpForm(p=>({...p,[r.id]:{name:r.extractedName||"",cpf:r.extractedCpf||"",admission:r.extractedAdmission||"",roleId:"",newRoleName:r.extractedRole||"",newRoleArea:"Salão",newRolePoints:"1",creatingRole:false}}));
-                      }} style={{padding:"8px 16px",borderRadius:8,border:"none",background:"var(--green)",color:"var(--text)",cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:12,fontWeight:700}}>
-                        ➕ Criar novo empregado
-                      </button>
-                      <button onClick={()=>setUnmatchedAction(p=>({...p,[r.id]:"assign"}))} style={{padding:"8px 16px",borderRadius:8,border:"1px solid var(--border)",background:"transparent",color:"var(--text2)",cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:12}}>
-                        🔗 Associar a existente
-                      </button>
-                      <button onClick={()=>onUpdate("receipts",receipts.filter(x=>x.id!==r.id))} style={{padding:"8px 12px",borderRadius:8,border:"1px solid #e74c3c33",background:"transparent",color:"var(--red)",cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:12}}>
-                        ✕ Descartar
-                      </button>
-                    </div>
-                  </div>
-                )}
-
-                {/* Create new employee */}
-                {action === "create" && (
-                  <div style={{display:"flex",flexDirection:"column",gap:8,marginTop:4}}>
-                    <p style={{color:"var(--green)",fontSize:12,fontWeight:700,margin:0}}>➕ Criar novo empregado</p>
-                    <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
-                      <div>
-                        <label style={S.label}>Nome completo</label>
-                        <input value={form.name} onChange={e=>setNewEmpForm(p=>({...p,[r.id]:{...form,name:e.target.value}}))} style={S.input} placeholder="Nome extraído do recibo"/>
-                      </div>
-                      <div>
-                        <label style={S.label}>CPF</label>
-                        <input value={form.cpf} onChange={e=>setNewEmpForm(p=>({...p,[r.id]:{...form,cpf:maskCpf(e.target.value)}}))} placeholder="000.000.000-00" style={S.input}/>
-                      </div>
-                      <div>
-                        <label style={S.label}>Data de admissão</label>
-                        <input type="date" value={form.admission} onChange={e=>setNewEmpForm(p=>({...p,[r.id]:{...form,admission:e.target.value}}))} style={S.input}/>
-                      </div>
-                      <div>
-                        <label style={S.label}>Cargo</label>
-                        {!form.creatingRole ? (
-                          <div style={{display:"flex",gap:6}}>
-                            <select value={form.roleId} onChange={e=>setNewEmpForm(p=>({...p,[r.id]:{...form,roleId:e.target.value}}))} style={{...S.input,flex:1}}>
-                              <option value="">Selecionar cargo…</option>
-                              {restRoles.map(role=><option key={role.id} value={role.id}>{role.name} ({role.area})</option>)}
-                            </select>
-                            <button onClick={()=>setNewEmpForm(p=>({...p,[r.id]:{...form,creatingRole:true,roleId:""}}))}
-                              title="Criar novo cargo" style={{padding:"8px 10px",borderRadius:8,border:"1px solid #10b98144",background:"#10b98111",color:"var(--green)",cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:13,whiteSpace:"nowrap"}}>+ Novo</button>
-                          </div>
-                        ) : (
-                          <div style={{display:"flex",flexDirection:"column",gap:6,padding:"10px 12px",background:"var(--bg3)",borderRadius:8,border:"1px solid #10b98133"}}>
-                            <p style={{color:"var(--green)",fontSize:11,fontWeight:700,margin:"0 0 4px"}}>Novo cargo</p>
-                            <input value={form.newRoleName} onChange={e=>setNewEmpForm(p=>({...p,[r.id]:{...form,newRoleName:e.target.value}}))} placeholder={r.extractedRole||"Nome do cargo"} style={{...S.input,fontSize:12}}/>
-                            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:6}}>
-                              <select value={form.newRoleArea} onChange={e=>setNewEmpForm(p=>({...p,[r.id]:{...form,newRoleArea:e.target.value}}))} style={{...S.input,fontSize:12}}>
-                                {AREAS.map(a=><option key={a} value={a}>{a}</option>)}
-                              </select>
-                              <input type="number" min="0" step="0.5" value={form.newRolePoints} onChange={e=>setNewEmpForm(p=>({...p,[r.id]:{...form,newRolePoints:e.target.value}}))} placeholder="Pontos" style={{...S.input,fontSize:12}}/>
-                            </div>
-                            <div style={{display:"flex",gap:6}}>
-                              <button onClick={()=>{
-                                if(!form.newRoleName.trim()){alert("Nome do cargo obrigatório");return;}
-                                const newRole = { id:`role-${Date.now()}-${Math.random().toString(36).slice(2,5)}`, restaurantId, name:form.newRoleName.trim(), area:form.newRoleArea, points:parseFloat(form.newRolePoints)??0, inactive:false };
-                                onUpdate("roles", [...roles, newRole]);
-                                setNewEmpForm(p=>({...p,[r.id]:{...form,roleId:newRole.id,creatingRole:false}}));
-                              }} style={{flex:1,padding:"6px",borderRadius:8,border:"none",background:"var(--green)",color:"var(--text)",cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:12,fontWeight:700}}>✅ Criar cargo</button>
-                              <button onClick={()=>setNewEmpForm(p=>({...p,[r.id]:{...form,creatingRole:false}}))} style={{...S.btnSecondary,fontSize:11,padding:"6px 10px"}}>Cancelar</button>
-                            </div>
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                    {r.extractedRole && !form.creatingRole && <p style={{color:"var(--text3)",fontSize:11}}>Cargo no recibo: <strong style={{color:"var(--text2)"}}>{r.extractedRole}</strong></p>}
-                    <div style={{display:"flex",gap:8,marginTop:4}}>
-                      <button onClick={()=>{
-                        if (!form.name.trim()) { alert("Nome obrigatório"); return; }
-                        const code = restaurant?.shortCode ?? "EMP";
-                        const seq = employees.filter(e=>e.restaurantId===restaurantId).length + 1;
-                        const empCode = code.toUpperCase() + String(seq).padStart(4,"0");
-                        const pin = empCode.slice(-4);
-                        const newEmp = { id:`${Date.now()}-${Math.random().toString(36).slice(2,5)}`, restaurantId, name:form.name.trim(), cpf:form.cpf.trim(), admission:form.admission||today(), roleId:form.roleId||null, empCode, pin, inactive:false };
-                        onUpdateEmployees([...employees, newEmp]);
-                        onUpdate("receipts", receipts.map(x=>x.id===r.id?{...x,empId:newEmp.id,empName:newEmp.name,unmatched:false}:x));
-                        setUnmatchedAction(p=>{const n={...p};delete n[r.id];return n;});
-                        alert(`✅ Empregado "${newEmp.name}" criado!\nCódigo: ${empCode} | PIN: ${pin}`);
-                      }} style={{padding:"8px 16px",borderRadius:8,border:"none",background:"var(--green)",color:"var(--text)",cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:12,fontWeight:700}}>
-                        ✅ Criar e associar
-                      </button>
-                      <button onClick={()=>setUnmatchedAction(p=>{const n={...p};delete n[r.id];return n;})} style={{...S.btnSecondary,fontSize:12}}>Voltar</button>
-                    </div>
-                  </div>
-                )}
-
-                {/* Assign to existing */}
-                {action === "assign" && (
-                  <div style={{display:"flex",flexDirection:"column",gap:8,marginTop:4}}>
-                    <p style={{color:"var(--text2)",fontSize:12,fontWeight:700,margin:0}}>🔗 Associar a empregado existente</p>
-                    <div style={{display:"flex",gap:8}}>
-                      <select value={assignTarget[r.id]??""} onChange={e=>setAssignTarget(p=>({...p,[r.id]:e.target.value}))} style={{...S.input,flex:1}}>
-                        <option value="">Selecionar empregado…</option>
-                        {restEmps.map(e=><option key={e.id} value={e.id}>{e.name}</option>)}
-                      </select>
-                      <button onClick={()=>{
-                        if(!assignTarget[r.id]) return;
-                        const emp = restEmps.find(e=>e.id===assignTarget[r.id]);
-                        if(!emp) return;
-                        onUpdate("receipts", receipts.map(x=>x.id===r.id?{...x,empId:emp.id,empName:emp.name,unmatched:false}:x));
-                        setUnmatchedAction(p=>{const n={...p};delete n[r.id];return n;});
-                      }} disabled={!assignTarget[r.id]} style={{padding:"8px 14px",borderRadius:8,border:"none",background:assignTarget[r.id]?ac:"var(--bg4)",color:"var(--text)",fontWeight:700,cursor:assignTarget[r.id]?"pointer":"default",fontFamily:"'DM Mono',monospace",fontSize:12}}>
-                        Associar
-                      </button>
-                      <button onClick={()=>setUnmatchedAction(p=>{const n={...p};delete n[r.id];return n;})} style={{...S.btnSecondary,fontSize:12}}>Voltar</button>
-                    </div>
-                  </div>
-                )}
-              </div>
-            );
-          })}
-        </div>
+      {/* Trash toggle */}
+      {trashedMsgs.length > 0 && (
+        <button onClick={() => setShowTrash(!showTrash)} style={{ ...S.btnSecondary, fontSize: 12, marginTop: 12, display: "flex", alignItems: "center", gap: 6 }}>
+          🗑️ Lixeira ({trashedMsgs.length}) {showTrash ? "▲" : "▼"}
+        </button>
       )}
 
-      {/* Recibos por mês */}
-      {months.length === 0 && <p style={{color:"var(--text3)",textAlign:"center"}}>Nenhum recibo importado.</p>}
-      {months.map(m => {
-        const mReceipts = myReceipts.filter(r => r.month === m && !r.unmatched);
-        const [y,mo] = m.split("-");
-        const mLabel = new Date(parseInt(y), parseInt(mo)-1, 1).toLocaleDateString("pt-BR",{month:"long",year:"numeric"});
-        const TYPE_INFO = {
-          pagamento:   { label:"💰 Pagamento",    color:"var(--green)" },
-          adiantamento:{ label:"💵 Adiantamento", color:"#3b82f6" },
-          "13salario": { label:"🎄 13º Salário",  color:"#f59e0b" },
-          ferias:      { label:"🏖️ Férias",       color:"#8b5cf6" },
-        };
-        const typeKeys = Object.keys(TYPE_INFO).filter(t => mReceipts.some(r=>r.type===t));
-
-        return (
-          <details key={m} open style={{marginBottom:12,background:"var(--card-bg)",borderRadius:14,border:"1px solid var(--border)",overflow:"hidden"}}>
-            <summary style={{padding:"12px 16px",cursor:"pointer",display:"flex",justifyContent:"space-between",alignItems:"center",listStyle:"none",userSelect:"none"}}>
-              <span style={{color:ac,fontWeight:700,fontSize:14,textTransform:"capitalize"}}>📁 {mLabel}</span>
-              <span style={{color:"var(--text3)",fontSize:12}}>{mReceipts.length} recibo(s)</span>
-            </summary>
-
-            <div style={{padding:"0 12px 12px"}}>
-              {typeKeys.map(t => {
-                const tReceipts = mReceipts.filter(r=>r.type===t);
-                const { label, color } = TYPE_INFO[t];
-                return (
-                  <details key={t} open style={{marginBottom:8,background:"var(--bg2)",borderRadius:10,border:`1px solid ${color}33`,overflow:"hidden"}}>
-                    <summary style={{padding:"8px 12px",cursor:"pointer",display:"flex",justifyContent:"space-between",alignItems:"center",listStyle:"none",userSelect:"none"}}>
-                      <span style={{color,fontSize:12,fontWeight:700}}>{label} ({tReceipts.length})</span>
-                      <button onClick={e=>{e.preventDefault();e.stopPropagation();if(window.confirm(`Excluir TODOS os ${tReceipts.length} recibos de ${label} de ${mLabel}?`)) onUpdate("receipts", receipts.filter(r=>!(r.month===m&&r.type===t&&r.restaurantId===restaurantId)));}} style={{background:"none",border:"1px solid #e74c3c33",borderRadius:6,color:"var(--red)",cursor:"pointer",fontSize:11,padding:"2px 8px",fontFamily:"'DM Mono',monospace"}}>
-                        Excluir todos
-                      </button>
-                    </summary>
-
-                    <div style={{padding:"4px 8px 8px"}}>
-                      {tReceipts.map(r=>(
-                        <div key={r.id} style={{display:"flex",alignItems:"center",gap:8,padding:"6px 8px",background:"var(--bg1)",borderRadius:8,marginBottom:4}}>
-                          <span style={{flex:1,color:"var(--text)",fontSize:13}}>{r.empName}</span>
-                          {/* Change type */}
-                          <select value={r.type} onChange={e=>{
-                            onUpdate("receipts", receipts.map(x=>x.id===r.id?{...x,type:e.target.value}:x));
-                          }} style={{...S.input,width:"auto",fontSize:11,padding:"3px 6px",color:"var(--text2)"}}>
-                            <option value="pagamento">💰 Pagamento</option>
-                            <option value="adiantamento">💵 Adiantamento</option>
-                            <option value="13salario">🎄 13º Salário</option>
-                            <option value="ferias">🏖️ Férias</option>
-                          </select>
-                          <button onClick={()=>{if(window.confirm(`Excluir recibo de ${r.empName}?`)) onUpdate("receipts", receipts.filter(x=>x.id!==r.id));}} style={{background:"none",border:"1px solid #e74c3c33",borderRadius:6,color:"var(--red)",cursor:"pointer",fontSize:12,padding:"4px 8px",fontFamily:"'DM Mono',monospace",flexShrink:0}}>✕</button>
-                        </div>
-                      ))}
-                    </div>
-                  </details>
-                );
-              })}
-              {typeKeys.length === 0 && <p style={{color:"var(--text3)",fontSize:12,textAlign:"center",padding:8}}>Nenhum recibo identificado neste mês.</p>}
+      {/* Trash view */}
+      {showTrash && trashedMsgs.map(m => (
+        <div key={m.id} style={{...S.card,marginBottom:10,marginTop:10,opacity:0.5,borderColor:"var(--border)"}}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
+            <div style={{flex:1}}>
+              <div style={{color:"var(--text3)",fontSize:11,marginBottom:4}}>{CATS[m.category]??m.category} · Apagado em {m.deletedAt ? new Date(m.deletedAt).toLocaleDateString("pt-BR") : "—"}</div>
+              <div style={{color:"var(--text2)",fontSize:12,marginBottom:2}}>De: {m.empName}</div>
+              <div style={{color:"var(--text2)",fontSize:13,lineHeight:1.5}}>{m.body?.slice(0,100)}{(m.body?.length??0)>100?"…":""}</div>
             </div>
-          </details>
-        );
-      })}
-    </div>
-  );
-}
-
-// ── Recibos Employee Tab ──────────────────────────────────────────────────────
-function ReceibosEmployeeTab({ empId, restaurantId, receipts }) {
-  const myReceipts = (receipts ?? [])
-    .filter(r => r.empId === empId && r.restaurantId === restaurantId && !r.unmatched)
-    .sort((a,b) => b.month.localeCompare(a.month));
-  const months = [...new Set(myReceipts.map(r => r.month))];
-  const [selReceipt, setSelReceipt] = useState(null);
-  const ac = "var(--ac)";
-
-  if (selReceipt) {
-    return (
-      <div>
-        <button onClick={()=>setSelReceipt(null)} style={{...S.btnSecondary,marginBottom:16}}>← Voltar</button>
-        <div style={{color:"var(--text)",fontWeight:700,marginBottom:4}}>{selReceipt.empName}</div>
-        <div style={{color:"var(--text3)",fontSize:12,marginBottom:12}}>{selReceipt.month} · {selReceipt.type==="pagamento"?"💰 Pagamento":"💵 Adiantamento"}</div>
-        <img src={selReceipt.dataUrl} alt="Recibo" style={{width:"100%",borderRadius:10,border:"1px solid var(--border)"}}/>
-        <a href={selReceipt.dataUrl} download={`recibo_${selReceipt.month}_${selReceipt.type}.jpg`}
-          style={{display:"block",marginTop:12,...S.btnPrimary,textAlign:"center",textDecoration:"none",padding:"12px",borderRadius:12,background:ac,color:"#1c1710",fontWeight:700,fontFamily:"'DM Mono',monospace",fontSize:14}}>
-          ⬇️ Baixar Recibo
-        </a>
-      </div>
-    );
-  }
-
-  if (myReceipts.length === 0) return (
-    <div style={{textAlign:"center",marginTop:30}}>
-      <div style={{fontSize:32,marginBottom:12}}>📄</div>
-      <p style={{color:"var(--text3)",fontSize:14}}>Nenhum recibo disponível ainda.</p>
-      <p style={{color:"var(--bg4)",fontSize:12,marginTop:8}}>Quando o gestor importar os recibos do mês, eles aparecerão aqui.</p>
-      {(receipts??[]).length > 0 && <p style={{color:"var(--bg4)",fontSize:11,marginTop:4}}>({(receipts??[]).length} recibos no sistema, nenhum para você)</p>}
-    </div>
-  );
-
-  return (
-    <div>
-      {months.map(m => {
-        const mR = myReceipts.filter(r => r.month === m);
-        return (
-          <div key={m} style={{...S.card,marginBottom:12}}>
-            <p style={{color:ac,fontWeight:700,margin:"0 0 10px",fontSize:13}}>{m}</p>
-            {mR.map(r=>(
-              <button key={r.id} onClick={()=>setSelReceipt(r)}
-                style={{width:"100%",display:"flex",justifyContent:"space-between",alignItems:"center",padding:"12px",borderRadius:10,border:"1px solid var(--border)",background:"var(--bg1)",cursor:"pointer",fontFamily:"'DM Mono',monospace",marginBottom:6}}>
-                <span style={{color:"var(--text)",fontSize:13}}>{r.type==="pagamento"?"💰 Recibo de Pagamento":r.type==="adiantamento"?"💵 Recibo de Adiantamento":r.type==="ferias"?"🏖️ Férias":"🎄 13º Salário"}</span>
-                <span style={{color:"var(--text3)",fontSize:11}}>Ver →</span>
-              </button>
-            ))}
+            <div style={{display:"flex",gap:6,flexShrink:0}}>
+              <button onClick={()=>restoreFromTrash(m.id)} style={{...S.btnSecondary,fontSize:11,padding:"4px 10px"}}>♻️</button>
+              {isOwner && <button onClick={()=>permanentDeleteFromTrash(m.id)} style={{background:"none",border:"1px solid #e74c3c33",borderRadius:8,color:"var(--red)",cursor:"pointer",fontSize:11,padding:"4px 10px",fontFamily:"'DM Mono',monospace"}}>✕</button>}
+            </div>
           </div>
-        );
-      })}
+        </div>
+      ))}
     </div>
   );
 }
 
-function EmployeePortal({ employees, roles, tips, schedules, splits, restaurants, communications, commAcks, faq, dpMessages, receipts, workSchedules, onBack, onUpdateEmployee, onUpdate, toggleTheme, theme }) {
+function EmployeePortal({ employees, roles, tips, schedules, splits, restaurants, communications, commAcks, faq, dpMessages, workSchedules, onBack, onUpdateEmployee, onUpdate, toggleTheme, theme }) {
   const [empId, setEmpId] = useState(() => localStorage.getItem("apptip_empid") || null);
 
   useEffect(() => {
@@ -2514,7 +2085,6 @@ function EmployeePortal({ employees, roles, tips, schedules, splits, restaurants
     ["escala",      "📅 Escala"],
     ["extrato",     "💸 Gorjeta"],
     empTabVisible("horarios") && ["horarios", "🕐 Horários"],
-    empTabVisible("recibos")  && ["recibos",  "📄 Recibos"],
     empTabVisible("faq")      && ["faq",      "❓ FAQ"],
     empTabVisible("dp")       && ["dp",       "💬 Fale com DP"],
   ].filter(Boolean);
@@ -2584,7 +2154,6 @@ function EmployeePortal({ employees, roles, tips, schedules, splits, restaurants
     ["escala","📅","Escala"],
     ["extrato","💸","Gorjeta"],
     empTabVisible("horarios") && ["horarios","🕐","Horários"],
-    empTabVisible("recibos")  && ["recibos","📄","Recibos"],
     empTabVisible("faq")      && ["faq","❓","FAQ"],
     empTabVisible("dp")       && ["dp","💬","Fale DP"],
   ].filter(Boolean);
@@ -2785,8 +2354,8 @@ function EmployeePortal({ employees, roles, tips, schedules, splits, restaurants
                           const dm = schedules?.[emp?.restaurantId]?.[mk]?.[e.id] ?? {};
                           const role = roles.find(r=>r.id===e.roleId);
                           return (
-                            <tr key={e.id} style={{background:isMe?"#1a1a0a":ei%2===0?"#111":"var(--bg2)"}}>
-                              <td style={{position:"sticky",left:0,background:isMe?"#1a1a0a":ei%2===0?"#111":"var(--bg2)",zIndex:1,padding:"5px 8px",borderRight:"1px solid var(--border)",minWidth:90}}>
+                            <tr key={e.id} style={{background:isMe?"var(--ac-bg)":ei%2===0?"var(--bg1)":"var(--bg2)"}}>
+                              <td style={{position:"sticky",left:0,background:isMe?"var(--ac-bg)":ei%2===0?"var(--bg1)":"var(--bg2)",zIndex:1,padding:"5px 8px",borderRight:"1px solid var(--border)",minWidth:90}}>
                                 <div style={{color:isMe?ac:"var(--text)",fontSize:10,fontWeight:isMe?700:600,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",maxWidth:85}}>
                                   {e.name.split(" ")[0]}{isMe?" ✦":""}
                                 </div>
@@ -2804,7 +2373,7 @@ function EmployeePortal({ employees, roles, tips, schedules, splits, restaurants
                                 return (
                                   <td key={d} style={{
                                     textAlign:"center",padding:"3px 1px",
-                                    background:isToday?"var(--ac)11":status?color+"22":(isWe?"#1a1a0a":"transparent"),
+                                    background:isToday?"var(--ac)11":status?color+"22":(isWe?"var(--bg1)":"transparent"),
                                     borderRight:"1px solid var(--border)",
                                     width:22,outline:isToday?`1px solid ${ac}44`:undefined
                                   }}>
@@ -2844,9 +2413,6 @@ function EmployeePortal({ employees, roles, tips, schedules, splits, restaurants
           <WorkScheduleEmployeeTab empId={empId} restaurantId={emp?.restaurantId} workSchedules={workSchedules ?? {}} />
         )}
 
-        {tab === "recibos" && (
-          <ReceibosEmployeeTab empId={empId} restaurantId={emp?.restaurantId} receipts={receipts ?? []} />
-        )}
 
       </div>
 
@@ -2874,60 +2440,127 @@ function EmployeePortal({ employees, roles, tips, schedules, splits, restaurants
 }
 //
 //
-function RoleSpreadsheet({ restRoles, rid, roles, onUpdate }) {
+function RoleSpreadsheet({ restRoles, rid, roles, employees, onUpdate }) {
   const blank = () => ({ id: null, name: "", area: "Bar", points: "1", restaurantId: rid });
   const [newRow, setNewRow] = useState(blank());
   const [editRows, setEditRows] = useState({});
-  const [saved, setSaved] = useState({});
   const [aiInput, setAiInput] = useState("");
   const [aiLoading, setAiLoading] = useState(false);
   const [aiError, setAiError] = useState("");
   const [showAi, setShowAi] = useState(false);
+  const [pendingNoTip, setPendingNoTip] = useState({}); // track noTip changes locally
+
+  const [aiPreview, setAiPreview] = useState(null); // {criar:[], modificar:[], inativar:[]}
 
   async function handleAiCargos() {
     if (!aiInput.trim()) return;
-    setAiLoading(true); setAiError("");
+    setAiLoading(true); setAiError(""); setAiPreview(null);
     try {
+      const existingList = restRoles.map(r => `- id:"${r.id}" nome:"${r.name}" area:"${r.area}" pontos:${r.points} semGorjeta:${!!r.noTip} inativo:${!!r.inactive}`).join("\n");
       const result = await groqGenerate(
-        `Você é um assistente de gestão de restaurantes. Extraia cargos e estruture como JSON.
+        `Você é um assistente de gestão de restaurantes. O usuário pode pedir para CRIAR novos cargos, MODIFICAR cargos existentes (renomear, mudar pontos, área, sem gorjeta) ou INATIVAR cargos.
+
+Cargos existentes:
+${existingList || "(nenhum)"}
+
 Regras:
-- "área": Bar, Cozinha, Salão, Limpeza ou Produção
-- "pontos": 0 a 20 (0 = sem gorjeta). Se não informado, estime pela hierarquia (Gerente=10, Subchef=9, Garçom=6, Auxiliar=3)
-- Se não informar área, deduza pelo cargo
-Responda com JSON: {"cargos": [{"nome":"...", "area":"...", "pontos":6, "semGorjeta":false}]}`,
+- "area" deve ser: Bar, Cozinha, Salão, Limpeza ou Produção
+- "pontos": 0 a 20 (0 = sem gorjeta). Se não informado ao criar, estime pela hierarquia (Gerente=10, Subchef=9, Garçom=6, Auxiliar=3)
+- Se não informar área ao criar, deduza pelo nome do cargo
+- Para modificar, use o "id" do cargo existente e inclua APENAS os campos que mudam
+- Para inativar, use o "id" do cargo existente
+
+Responda com JSON:
+{
+  "criar": [{"nome":"...", "area":"...", "pontos":6, "semGorjeta":false}],
+  "modificar": [{"id":"...", "nome":"...", "area":"...", "pontos":6, "semGorjeta":false}],
+  "inativar": ["id1", "id2"]
+}
+Inclua apenas as ações solicitadas. Arrays vazios se não houver ação daquele tipo.`,
         aiInput.trim()
       );
-      const novos = result.cargos.map(c => ({
-        id: `role-${Date.now()}-${Math.random().toString(36).slice(2,6)}`,
-        restaurantId: rid,
-        name: c.nome,
-        area: c.area,
-        points: c.semGorjeta ? 0 : (c.pontos ?? 1),
-        noTip: c.semGorjeta ?? false,
-        inactive: false,
-      }));
-      onUpdate("roles", [...roles, ...novos]);
-      setAiInput(""); setShowAi(false);
-      onUpdate("_toast", `✨ ${novos.length} cargo${novos.length>1?"s":""} adicionado${novos.length>1?"s":""} pela IA!`);
+      // Prepare preview
+      const preview = {
+        criar: (result.criar ?? []).map(c => ({
+          id: `role-${Date.now()}-${Math.random().toString(36).slice(2,6)}`,
+          name: c.nome, area: c.area, points: c.semGorjeta ? 0 : (c.pontos ?? 1), noTip: c.semGorjeta ?? false,
+        })),
+        modificar: (result.modificar ?? []).map(m => {
+          const existing = restRoles.find(r => r.id === m.id);
+          if (!existing) return null;
+          return {
+            id: m.id, oldName: existing.name,
+            name: m.nome ?? existing.name,
+            area: m.area ?? existing.area,
+            points: m.semGorjeta ? 0 : (m.pontos !== undefined ? m.pontos : existing.points),
+            noTip: m.semGorjeta !== undefined ? m.semGorjeta : !!existing.noTip,
+          };
+        }).filter(Boolean),
+        inativar: (result.inativar ?? []).map(id => restRoles.find(r => r.id === id)).filter(Boolean),
+      };
+      if (!preview.criar.length && !preview.modificar.length && !preview.inativar.length) {
+        setAiError("A IA não identificou nenhuma ação. Tente reformular.");
+      } else {
+        setAiPreview(preview);
+      }
     } catch(e) {
       setAiError("Não foi possível processar. Tente reformular.");
     }
     setAiLoading(false);
   }
 
+  function confirmAiChanges() {
+    if (!aiPreview) return;
+    let updated = [...roles];
+    // Create new roles
+    aiPreview.criar.forEach(c => {
+      updated.push({ id: c.id, restaurantId: rid, name: c.name, area: c.area, points: c.points, noTip: c.noTip, inactive: false });
+    });
+    // Modify existing
+    aiPreview.modificar.forEach(m => {
+      updated = updated.map(r => r.id === m.id ? { ...r, name: m.name, area: m.area, points: m.points, noTip: m.noTip } : r);
+    });
+    // Inactivate
+    aiPreview.inativar.forEach(r => {
+      updated = updated.map(x => x.id === r.id ? { ...x, inactive: true } : x);
+    });
+    onUpdate("roles", updated);
+    const total = aiPreview.criar.length + aiPreview.modificar.length + aiPreview.inativar.length;
+    onUpdate("_toast", `✨ ${total} ação(ões) aplicada(s) pela IA!`);
+    setAiPreview(null); setAiInput(""); setShowAi(false);
+  }
+
   const ROLE_COLS = "1.2fr 70px 120px 160px";
 
-  function getRow(r) { return editRows[r.id] ?? { name: r.name, area: r.area, points: r.points === 0 ? "0" : String(r.points || "") }; }
-  function setRow(id, field, val) { setEditRows(prev => ({ ...prev, [id]: { ...getRow({ id }), [field]: val } })); }
+  function getRow(r) { return editRows[r.id] ?? { name: r.name, area: r.area ?? "Bar", points: r.points === 0 ? "0" : String(r.points || "") }; }
+  function setRow(role, field, val) { setEditRows(prev => ({ ...prev, [role.id]: { ...getRow(role), [field]: val } })); }
+  function getNoTip(r) { return pendingNoTip[r.id] !== undefined ? pendingNoTip[r.id] : !!r.noTip; }
 
-  function saveRole(r) {
-    const row = getRow(r);
-    if (!row.name.trim()) return;
-    const pts = row.points === "" ? 0 : (Number(row.points) || 0);
-    const updated = { ...r, name: row.name.trim(), area: row.area, points: pts };
-    onUpdate("roles", roles.map(x => x.id === r.id ? updated : x));
-    setSaved(p => ({ ...p, [r.id]: true }));
-    setTimeout(() => setSaved(p => ({ ...p, [r.id]: false })), 1500);
+  // Check if any rows have unsaved changes
+  const isDirty = Object.keys(editRows).length > 0 || Object.keys(pendingNoTip).length > 0;
+
+  function saveAll() {
+    let updated = [...roles];
+    // Apply all editRows and pendingNoTip changes
+    for (const r of restRoles) {
+      const row = editRows[r.id];
+      const noTipChanged = pendingNoTip[r.id] !== undefined;
+      if (!row && !noTipChanged) continue;
+      const merged = row ?? { name: r.name, area: r.area ?? "Bar", points: r.points === 0 ? "0" : String(r.points || "") };
+      if (!merged.name.trim()) continue;
+      const noTip = noTipChanged ? pendingNoTip[r.id] : !!r.noTip;
+      const pts = noTip ? 0 : (merged.points === "" ? 0 : (Number(merged.points) || 0));
+      updated = updated.map(x => x.id === r.id ? { ...x, name: merged.name.trim(), area: merged.area, points: pts, noTip } : x);
+    }
+    onUpdate("roles", updated);
+    setEditRows({});
+    setPendingNoTip({});
+    onUpdate("_toast", "✅ Cargos salvos!");
+  }
+
+  function discardAll() {
+    setEditRows({});
+    setPendingNoTip({});
   }
 
   function saveNew() {
@@ -2940,6 +2573,18 @@ Responda com JSON: {"cargos": [{"nome":"...", "area":"...", "pontos":6, "semGorj
 
   function inactivateRole(id) { onUpdate("roles", roles.map(x => x.id === id ? {...x, inactive: true} : x)); }
   function reactivateRole(id) { onUpdate("roles", roles.map(x => x.id === id ? {...x, inactive: false} : x)); }
+
+  function deleteRole(id) {
+    const r = roles.find(x => x.id === id);
+    const empCount = (employees ?? []).filter(e => e.roleId === id && e.restaurantId === rid).length;
+    if (empCount > 0) {
+      onUpdate("_toast", `⚠️ Não é possível apagar: ${empCount} empregado(s) vinculado(s) a este cargo`);
+      return;
+    }
+    if (!window.confirm(`Apagar permanentemente o cargo "${r?.name ?? ""}"?`)) return;
+    onUpdate("roles", roles.filter(x => x.id !== id));
+    onUpdate("_toast", "🗑️ Cargo apagado");
+  }
 
   const inStyle = { background: "var(--bg1)", border: "1px solid var(--border)", borderRadius: 8, color: "var(--text)", fontFamily: "'DM Mono',monospace", fontSize: 12, padding: "6px 8px", outline: "none", width: "100%", boxSizing:"border-box" };
   const sel = { ...inStyle, cursor: "pointer" };
@@ -2957,19 +2602,22 @@ Responda com JSON: {"cargos": [{"nome":"...", "area":"...", "pontos":6, "semGorj
 
   const renderRow = (r) => {
     const row = getRow(r);
-    const isSaved = saved[r.id];
+    const noTip = getNoTip(r);
+    const hasEdit = !!editRows[r.id] || pendingNoTip[r.id] !== undefined;
     return (
-      <div key={r.id} style={{ display:"grid", gridTemplateColumns:ROLE_COLS, gap:6, marginBottom:4, background:"var(--card-bg)", borderRadius:10, padding:"6px 8px", border:`1px solid ${isSaved?"#10b98166":r.inactive?"#8b5cf622":"var(--border)"}`, opacity:r.inactive?0.6:1, alignItems:"center" }}>
-        <input value={row.name} onChange={e => setRow(r.id, "name", e.target.value)} style={inStyle} />
-        <input type="number" min="0" step="0.5" value={r.noTip ? 0 : row.points} disabled={r.noTip} onChange={e => setRow(r.id, "points", e.target.value)} style={{...inStyle, opacity: r.noTip ? 0.4 : 1, textAlign:"center"}} />
+      <div key={r.id} style={{ display:"grid", gridTemplateColumns:ROLE_COLS, gap:6, marginBottom:4, background:hasEdit?"var(--ac-bg)":"var(--card-bg)", borderRadius:10, padding:"6px 8px", border:`1px solid ${hasEdit?"var(--ac)44":r.inactive?"#8b5cf622":"var(--border)"}`, opacity:r.inactive?0.6:1, alignItems:"center" }}>
+        <input value={row.name} onChange={e => setRow(r, "name", e.target.value)} style={inStyle} />
+        <input type="number" min="0" step="0.5" value={noTip ? 0 : row.points} disabled={noTip} onChange={e => setRow(r, "points", e.target.value)} style={{...inStyle, opacity: noTip ? 0.4 : 1, textAlign:"center"}} />
         <label style={{display:"flex",alignItems:"center",gap:6,cursor:"pointer",color:"var(--text2)",fontSize:12,fontFamily:"'DM Mono',monospace",whiteSpace:"nowrap"}}>
-          <input type="checkbox" checked={!!r.noTip} onChange={e=>{onUpdate("roles",roles.map(x=>x.id===r.id?{...x,noTip:e.target.checked,points:e.target.checked?0:parseFloat(row.points)||1}:x));}} style={{width:14,height:14,cursor:"pointer",accentColor:ac}}/>
+          <input type="checkbox" checked={noTip} onChange={e=>{setPendingNoTip(p=>({...p,[r.id]:e.target.checked}));if(e.target.checked) setRow(r,"points","0");}} style={{width:14,height:14,cursor:"pointer",accentColor:ac}}/>
           Sem gorjeta
         </label>
         <div style={{display:"flex",gap:4,justifyContent:"flex-end"}}>
-          <button onClick={()=>saveRole(r)} style={{padding:"5px 10px",borderRadius:7,border:"none",background:isSaved?"var(--green)":ac,color:"var(--text)",fontWeight:700,fontSize:11,cursor:"pointer",fontFamily:"'DM Mono',monospace",whiteSpace:"nowrap"}}>{isSaved?"✓":"Salvar"}</button>
           {r.inactive
-            ? <button onClick={()=>reactivateRole(r.id)} style={{padding:"5px 10px",borderRadius:7,border:"1px solid #10b98144",background:"transparent",color:"var(--green)",cursor:"pointer",fontSize:11,fontFamily:"'DM Mono',monospace",whiteSpace:"nowrap"}}>Reativar</button>
+            ? <>
+                <button onClick={()=>reactivateRole(r.id)} style={{padding:"5px 10px",borderRadius:7,border:"1px solid #10b98144",background:"transparent",color:"var(--green)",cursor:"pointer",fontSize:11,fontFamily:"'DM Mono',monospace",whiteSpace:"nowrap"}}>Reativar</button>
+                <button onClick={()=>deleteRole(r.id)} style={{padding:"5px 10px",borderRadius:7,border:"1px solid #e74c3c33",background:"transparent",color:"var(--red)",cursor:"pointer",fontSize:11,fontFamily:"'DM Mono',monospace",whiteSpace:"nowrap"}}>✕</button>
+              </>
             : <button onClick={()=>inactivateRole(r.id)} style={{padding:"5px 10px",borderRadius:7,border:"1px solid #f59e0b44",background:"transparent",color:"#f59e0b",cursor:"pointer",fontSize:11,fontFamily:"'DM Mono',monospace",whiteSpace:"nowrap"}}>Inativar</button>
           }
         </div>
@@ -2979,31 +2627,90 @@ Responda com JSON: {"cargos": [{"nome":"...", "area":"...", "pontos":6, "semGorj
 
   return (
     <div style={{ fontFamily: "'DM Mono',monospace" }}>
-      <p style={{ color: "var(--text3)", fontSize: 12, marginBottom: 12 }}>Edite inline e clique em Salvar. Nova linha no topo para adicionar.</p>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
+        <p style={{ color: "var(--text3)", fontSize: 12, margin:0 }}>Edite inline. Salve tudo ao terminar.</p>
+        {isDirty && (
+          <div style={{display:"flex",gap:8}}>
+            <button onClick={discardAll} style={{...S.btnSecondary,fontSize:12,padding:"5px 12px"}}>Descartar</button>
+            <button onClick={saveAll} style={{padding:"5px 14px",borderRadius:8,border:"none",background:ac,color:"var(--text)",fontWeight:700,fontSize:12,cursor:"pointer",fontFamily:"'DM Mono',monospace"}}>💾 Salvar tudo</button>
+          </div>
+        )}
+      </div>
+
+      {/* Unsaved changes banner */}
+      {isDirty && (
+        <div style={{background:"#f59e0b22",border:"1px solid #f59e0b44",borderRadius:10,padding:"8px 14px",marginBottom:12,fontSize:12,color:"#f59e0b",fontFamily:"'DM Mono',monospace"}}>
+          ⚠️ Alterações não salvas — clique "Salvar tudo" para confirmar
+        </div>
+      )}
 
       {/* Assistente IA */}
       <div style={{marginBottom:14}}>
-        <button onClick={()=>{setShowAi(!showAi);setAiError("");}}
+        <button onClick={()=>{setShowAi(!showAi);setAiError("");setAiPreview(null);}}
           style={{...S.btnSecondary,fontSize:12,display:"inline-flex",alignItems:"center",gap:6,padding:"7px 14px",
             background:showAi?"var(--ac-bg)":undefined,borderColor:showAi?"var(--ac)":undefined,color:showAi?"var(--ac-text)":undefined}}>
-          ✨ Importar cargos com IA
+          ✨ Gerenciar cargos com IA
         </button>
         {showAi && (
           <div style={{marginTop:10,padding:"14px",borderRadius:12,background:"var(--ac-bg)",border:"1px solid var(--ac)33"}}>
             <p style={{color:"var(--text2)",fontSize:13,margin:"0 0 6px",fontWeight:600}}>✨ Assistente de cargos</p>
-            <p style={{color:"var(--text3)",fontSize:12,margin:"0 0 6px",lineHeight:1.5}}>Descreva os cargos livremente ou cole uma lista. A IA identifica nome, área e pontos.</p>
-            <p style={{color:"var(--text3)",fontSize:11,margin:"0 0 10px",fontStyle:"italic"}}>Ex: "Garçom 6pts Salão, Barman 7pts Bar" ou "temos garçons, ajudantes de cozinha e um gerente"</p>
+            <p style={{color:"var(--text3)",fontSize:12,margin:"0 0 6px",lineHeight:1.5}}>Crie, modifique, inative ou ajuste pontos dos cargos. A IA entende linguagem natural.</p>
+            <p style={{color:"var(--text3)",fontSize:11,margin:"0 0 10px",fontStyle:"italic"}}>Ex: "Adicione Garçom 6pts no Salão" · "Mude o Barman para 8 pontos" · "Inative o cargo Auxiliar" · "Cozinheiro agora é sem gorjeta"</p>
             <textarea value={aiInput} onChange={e=>setAiInput(e.target.value)}
-              placeholder="Cole ou descreva os cargos aqui..." rows={4}
+              placeholder="Descreva o que quer fazer com os cargos..." rows={3}
               style={{...S.input,resize:"vertical",marginBottom:8,fontSize:13}}/>
             {aiError && <p style={{color:"var(--red)",fontSize:12,margin:"0 0 8px"}}>{aiError}</p>}
-            <div style={{display:"flex",gap:8}}>
-              <button onClick={handleAiCargos} disabled={!aiInput.trim()||aiLoading}
-                style={{...S.btnPrimary,flex:1,fontSize:13,opacity:(!aiInput.trim()||aiLoading)?0.6:1}}>
-                {aiLoading?"✨ Processando...":"✨ Criar cargos"}
-              </button>
-              <button onClick={()=>{setShowAi(false);setAiInput("");setAiError("");}} style={S.btnSecondary}>Cancelar</button>
-            </div>
+
+            {/* AI Preview/Confirmation */}
+            {aiPreview && (
+              <div style={{background:"var(--bg1)",border:"1px solid var(--border)",borderRadius:10,padding:"12px",marginBottom:10}}>
+                <p style={{color:"var(--text)",fontWeight:700,fontSize:13,margin:"0 0 10px"}}>Confirme as alterações:</p>
+                {aiPreview.criar.length > 0 && (
+                  <div style={{marginBottom:8}}>
+                    <span style={{color:"var(--green)",fontSize:11,fontWeight:700}}>+ CRIAR</span>
+                    {aiPreview.criar.map(c => (
+                      <div key={c.id} style={{padding:"4px 8px",marginTop:4,borderRadius:6,background:"#10b98111",fontSize:12,color:"var(--text2)"}}>
+                        {c.name} · {c.area} · {c.noTip ? "Sem gorjeta" : `${c.points} pts`}
+                      </div>
+                    ))}
+                  </div>
+                )}
+                {aiPreview.modificar.length > 0 && (
+                  <div style={{marginBottom:8}}>
+                    <span style={{color:"#3b82f6",fontSize:11,fontWeight:700}}>✏️ MODIFICAR</span>
+                    {aiPreview.modificar.map(m => (
+                      <div key={m.id} style={{padding:"4px 8px",marginTop:4,borderRadius:6,background:"#3b82f611",fontSize:12,color:"var(--text2)"}}>
+                        {m.oldName !== m.name ? <><s>{m.oldName}</s> → {m.name}</> : m.name} · {m.area} · {m.noTip ? "Sem gorjeta" : `${m.points} pts`}
+                      </div>
+                    ))}
+                  </div>
+                )}
+                {aiPreview.inativar.length > 0 && (
+                  <div style={{marginBottom:8}}>
+                    <span style={{color:"#f59e0b",fontSize:11,fontWeight:700}}>⏸ INATIVAR</span>
+                    {aiPreview.inativar.map(r => (
+                      <div key={r.id} style={{padding:"4px 8px",marginTop:4,borderRadius:6,background:"#f59e0b11",fontSize:12,color:"var(--text2)"}}>
+                        {r.name} · {r.area}
+                      </div>
+                    ))}
+                  </div>
+                )}
+                <div style={{display:"flex",gap:8,marginTop:10}}>
+                  <button onClick={confirmAiChanges} style={{...S.btnPrimary,flex:1,fontSize:13}}>✅ Confirmar e aplicar</button>
+                  <button onClick={()=>setAiPreview(null)} style={S.btnSecondary}>Cancelar</button>
+                </div>
+              </div>
+            )}
+
+            {!aiPreview && (
+              <div style={{display:"flex",gap:8}}>
+                <button onClick={handleAiCargos} disabled={!aiInput.trim()||aiLoading}
+                  style={{...S.btnPrimary,flex:1,fontSize:13,opacity:(!aiInput.trim()||aiLoading)?0.6:1}}>
+                  {aiLoading?"✨ Processando...":"✨ Processar com IA"}
+                </button>
+                <button onClick={()=>{setShowAi(false);setAiInput("");setAiError("");setAiPreview(null);}} style={S.btnSecondary}>Cancelar</button>
+              </div>
+            )}
           </div>
         )}
       </div>
@@ -3052,6 +2759,14 @@ Responda com JSON: {"cargos": [{"nome":"...", "area":"...", "pontos":6, "semGorj
             INATIVOS · {inactiveList.length}
           </div>
           {inactiveList.map(renderRow)}
+        </div>
+      )}
+
+      {/* Bottom save bar */}
+      {isDirty && (
+        <div style={{position:"sticky",bottom:0,background:"var(--bg)",borderTop:"1px solid var(--ac)44",padding:"10px 0",marginTop:16,display:"flex",justifyContent:"flex-end",gap:8}}>
+          <button onClick={discardAll} style={{...S.btnSecondary,fontSize:12,padding:"6px 14px"}}>Descartar</button>
+          <button onClick={saveAll} style={{padding:"6px 16px",borderRadius:8,border:"none",background:ac,color:"var(--text)",fontWeight:700,fontSize:13,cursor:"pointer",fontFamily:"'DM Mono',monospace"}}>💾 Salvar tudo</button>
         </div>
       )}
     </div>
@@ -3401,8 +3116,13 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
   const totalNet   = monthTips.reduce((a, t) => a + t.myNet, 0);
   const totalTax   = monthTips.reduce((a, t) => a + t.myTax, 0);
 
-  const restEmps  = employees.filter(e => e.restaurantId === rid && !(e.inactive && e.inactiveFrom && e.inactiveFrom <= today()));
+  const managerAreas = perms.managerAreas ?? [];
+  const isLider = managerAreas.length > 0;
+  const allRestEmps = employees.filter(e => e.restaurantId === rid && !(e.inactive && e.inactiveFrom && e.inactiveFrom <= today()));
   const restRoles = roles.filter(r => r.restaurantId === rid);
+  const restEmps  = isLider
+    ? allRestEmps.filter(e => { const role = restRoles.find(r => r.id === e.roleId); return role && managerAreas.includes(role.area); })
+    : allRestEmps;
 
   // forms
   const [tipDate, setTipDate]   = useState(today());
@@ -3419,6 +3139,43 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
   const [vacTo, setVacTo]                   = useState("");
 
   const [showExport, setShowExport]       = useState(false);
+
+  // Config local state — save button approach
+  const [localTabsConfig, setLocalTabsConfig] = useState(null); // admin: null means unchanged
+  const [localTabsGestor, setLocalTabsGestor] = useState(null); // manager: null means unchanged
+  const configDirty = localTabsConfig !== null || localTabsGestor !== null;
+  function getTabsConfig(key) { return (localTabsConfig ?? restaurant.tabsConfig ?? {})[key] !== false; }
+  function getTabsGestor(key) { return (localTabsGestor ?? restaurant.tabsGestor ?? {})[key] !== false; }
+  function toggleAdminTab(key) {
+    const cur = localTabsConfig ?? { ...(restaurant.tabsConfig ?? {}) };
+    const novoValor = !(cur[key] !== false);
+    const tabFaqMap = { dp:"__dp__", comunicados:"__comunicados__" };
+    const faqId = tabFaqMap[key];
+    const curGestor = localTabsGestor ?? { ...(restaurant.tabsGestor ?? {}) };
+    const curFaqAuto = curGestor.faqAuto ?? {};
+    const novoFaqAuto = faqId ? { ...curFaqAuto, [faqId]: novoValor } : curFaqAuto;
+    setLocalTabsConfig({ ...cur, [key]: novoValor });
+    setLocalTabsGestor({ ...curGestor, faqAuto: novoFaqAuto });
+  }
+  function toggleGestorTab(key) {
+    const cur = localTabsGestor ?? { ...(restaurant.tabsGestor ?? {}) };
+    const novoValor = !(cur[key] !== false);
+    const tabFaqMap = { dp:"__dp__", comunicados:"__comunicados__" };
+    const faqId = tabFaqMap[key];
+    const curFaqAuto = cur.faqAuto ?? {};
+    const novoFaqAuto = faqId ? { ...curFaqAuto, [faqId]: novoValor } : curFaqAuto;
+    setLocalTabsGestor({ ...cur, [key]: novoValor, faqAuto: novoFaqAuto });
+  }
+  function saveConfig() {
+    const patch = {};
+    if (localTabsConfig) patch.tabsConfig = localTabsConfig;
+    if (localTabsGestor) patch.tabsGestor = localTabsGestor;
+    const updated = restaurants.map(r => r.id === rid ? { ...r, ...patch } : r);
+    onUpdate("restaurants", updated);
+    setLocalTabsConfig(null);
+    setLocalTabsGestor(null);
+  }
+  function discardConfig() { setLocalTabsConfig(null); setLocalTabsGestor(null); }
 
   const empSummary = restEmps.map(e => {
     const eT = monthTips.filter(t => t.employeeId === e.id);
@@ -3604,7 +3361,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
   const gestorAtivou  = (key) => restaurant.tabsGestor?.[key] !== false;
   const tabVisible    = (key) => adminAutoriza(key) && (isOwner || gestorAtivou(key));
 
-  const inboxUnread = ((data?.notifications??[]).filter(n=>n.restaurantId===rid&&!n.read).length + (data?.dpMessages??[]).filter(m=>m.restaurantId===rid&&!m.read).length);
+  const inboxUnread = ((data?.notifications??[]).filter(n=>n.restaurantId===rid&&!n.read&&!n.deleted&&n.targetRole!=="admin"&&n.type!=="upgrade_request").length + (data?.dpMessages??[]).filter(m=>m.restaurantId===rid&&!m.read&&!m.deleted).length);
 
   const TABS = [
     canTips                                           && ["dashboard",   "📊 Dashboard"],
@@ -3613,14 +3370,13 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
     (isOwner || tabVisible("roles"))           && ["roles",       "🏷️ Cargos"],
     (isOwner || canTips || tabVisible("employees")) && ["employees","👥 Equipe"],
     (isOwner || tabVisible("horarios"))          && ["horarios",    "🕐 Horários"],
-    (isOwner || tabVisible("recibos"))           && ["recibos",     "📄 Recibos"],
     (isOwner || tabVisible("faq"))               && ["faq",         "❓ FAQ"],
     (isOwner || tabVisible("comunicados"))        && ["comunicados", "📢 Comunicados"],
     (isOwner || tabVisible("dp"))                && ["dp",          "💬 Fale com DP"],
-    (isOwner || isDP)                          && ["notificacoes",`📬 Caixa${inboxUnread>0?` (${inboxUnread})`:""}`],
+    isDP                                       && ["notificacoes",`📬 Caixa${inboxUnread>0?` (${inboxUnread})`:""}`],
   ].filter(Boolean);
 
-  const [tab, setTab] = useState(isOwner ? "dashboard" : isDP ? "notificacoes" : (perms.tips ? "dashboard" : "schedule"));
+  const [tab, setTab] = useState(isDP ? "notificacoes" : (perms.tips || isOwner) ? "dashboard" : "schedule");
 
   // Reset de aba — só Admin AppTip (isOwner)
   function resetTab(tabKey, tabLabel, getSnapshot) {
@@ -3705,9 +3461,9 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
           const schedMonth = schedules?.[rid]?.[mk] ?? {};
           let totalFaltasU = 0;
           restEmps.forEach(emp => { Object.values(schedMonth[emp.id]??{}).forEach(v=>{ if(v===DAY_FAULT_U) totalFaltasU++; }); });
-          const dpNaoLidas = (data?.dpMessages??[]).filter(m=>m.restaurantId===rid&&!m.read).length;
+          const dpNaoLidas = (data?.dpMessages??[]).filter(m=>m.restaurantId===rid&&!m.read&&!m.deleted).length;
           const commsSemCiencia = (data?.communications??[]).filter(c=>
-            c.restaurantId===rid && !c.autoSchedule &&
+            c.restaurantId===rid && !c.autoSchedule && !c.deleted &&
             restEmps.some(e=>!(data?.commAcks??{})[`${c.id}_${e.id}`])
           ).length;
 
@@ -3727,11 +3483,11 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
 
           // — Mensagens / Notificações recentes —
           const recentDp = (data?.dpMessages??[])
-            .filter(m=>m.restaurantId===rid)
+            .filter(m=>m.restaurantId===rid&&!m.deleted)
             .sort((a,b)=>b.date.localeCompare(a.date))
             .slice(0,4);
           const recentNotifs = (data?.notifications??[])
-            .filter(n=>n.restaurantId===rid)
+            .filter(n=>n.restaurantId===rid&&!n.deleted)
             .sort((a,b)=>b.date.localeCompare(a.date))
             .slice(0,3);
           const CATS = { sugestao:"💡", elogio:"👏", reclamacao:"⚠️", denuncia:"🚨" };
@@ -3740,10 +3496,23 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
           const todayTips = monthTips.filter(t => t.date === todayStr);
           const gorjetaHoje = todayTips.length > 0 ? todayTips[0].poolTotal : null;
           const escalaHoje = schedules?.[rid]?.[mk] ?? {};
-          const trabalhando = restEmps.filter(e => {
+          const teamToday = { work:[], off:[], vacation:[], comp:[], faultJ:[], faultU:[] };
+          restEmps.forEach(e => {
             const status = (escalaHoje[e.id] ?? {})[todayStr];
-            return !status || status === "C"; // sem marcação ou compensação = trabalhando
-          }).length;
+            const role = restRoles.find(r => r.id === e.roleId);
+            const sched = data?.workSchedules?.[rid]?.[e.id];
+            const currentSched = sched?.[sched.length-1];
+            const dayIdx = new Date(todayStr+"T12:00:00").getDay();
+            const dayData = currentSched?.days?.[dayIdx];
+            const entry = { name: e.name.split(" ")[0], role: role?.name, area: role?.area, in: dayData?.in, out: dayData?.out };
+            if (status === DAY_OFF) teamToday.off.push(entry);
+            else if (status === DAY_VACATION) teamToday.vacation.push(entry);
+            else if (status === DAY_COMP) teamToday.comp.push(entry);
+            else if (status === DAY_FAULT_J) teamToday.faultJ.push(entry);
+            else if (status === DAY_FAULT_U) teamToday.faultU.push(entry);
+            else teamToday.work.push(entry);
+          });
+          const trabalhando = teamToday.work.length;
 
           return (
             <div>
@@ -3782,6 +3551,46 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                   )}
                 </div>
               )}
+
+              {/* Equipe hoje — detalhamento */}
+              {isCurrentMonth && teamToday.work.length + teamToday.off.length + teamToday.vacation.length > 0 && (
+                <div style={{...S.card,marginBottom:14}}>
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
+                    <span style={{color:ac,fontWeight:700,fontSize:13}}>👥 Equipe hoje</span>
+                    <button onClick={()=>setTab("schedule")} style={{...S.btnSecondary,fontSize:11,padding:"4px 10px"}}>Escala →</button>
+                  </div>
+                  {teamToday.work.length > 0 && (
+                    <div style={{marginBottom:8}}>
+                      <div style={{color:"var(--green)",fontSize:11,fontWeight:700,marginBottom:4}}>Trabalhando ({teamToday.work.length})</div>
+                      {teamToday.work.map((e,i) => (
+                        <div key={i} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"3px 0",fontSize:12}}>
+                          <span style={{color:"var(--text2)"}}>{e.name} <span style={{color:"var(--text3)",fontSize:10}}>{e.role??""}</span></span>
+                          {e.in && e.out && <span style={{color:"var(--text3)",fontSize:10,fontFamily:"'DM Mono',monospace"}}>{e.in}–{e.out}</span>}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  {teamToday.off.length > 0 && (
+                    <div style={{marginBottom:4}}>
+                      <div style={{color:"var(--red)",fontSize:11,fontWeight:700,marginBottom:2}}>Folga ({teamToday.off.length})</div>
+                      <div style={{color:"var(--text3)",fontSize:11}}>{teamToday.off.map(e=>e.name).join(", ")}</div>
+                    </div>
+                  )}
+                  {teamToday.vacation.length > 0 && (
+                    <div style={{marginBottom:4}}>
+                      <div style={{color:"#8b5cf6",fontSize:11,fontWeight:700,marginBottom:2}}>Férias ({teamToday.vacation.length})</div>
+                      <div style={{color:"var(--text3)",fontSize:11}}>{teamToday.vacation.map(e=>e.name).join(", ")}</div>
+                    </div>
+                  )}
+                  {teamToday.comp.length > 0 && (
+                    <div style={{marginBottom:4}}>
+                      <div style={{color:"#3b82f6",fontSize:11,fontWeight:700,marginBottom:2}}>Compensação ({teamToday.comp.length})</div>
+                      <div style={{color:"var(--text3)",fontSize:11}}>{teamToday.comp.map(e=>e.name).join(", ")}</div>
+                    </div>
+                  )}
+                </div>
+              )}
+
               <div style={{...S.card, marginBottom:14}}>
                 <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
                   <span style={{color:ac,fontWeight:700,fontSize:13}}>💸 Gorjetas — {monthLabel(year,month)}</span>
@@ -4126,7 +3935,16 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                         <div style={{marginBottom:4}}><AreaBadge area={a} /></div>
                         {aT.map(t => {
                           const emp = restEmps.find(e => e.id === t.employeeId);
-                          return <div key={t.id} style={{display:"flex",justifyContent:"space-between",fontSize:12,padding:"3px 0"}}><span style={{color:"var(--text2)"}}>{emp?.name??"—"}</span><div><span style={{color:"var(--text)"}}>{fmt(t.myShare)}</span><span style={{color:"var(--red)",marginLeft:8}}>-{fmt(t.myTax)}</span><span style={{color:ac,marginLeft:8,fontWeight:700}}>{fmt(t.myNet)}</span></div></div>;
+                          return (
+                            <div key={t.id} style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",fontSize:12,padding:"4px 0",flexWrap:"wrap",gap:"2px 12px"}}>
+                              <span style={{color:"var(--text2)",minWidth:80,flex:"1 1 auto"}}>{emp?.name??"—"}</span>
+                              <div style={{display:"flex",gap:8,flexShrink:0,fontSize:11}}>
+                                <span style={{color:"var(--text)"}}>{fmt(t.myShare)}</span>
+                                <span style={{color:"var(--red)"}}>-{fmt(t.myTax)}</span>
+                                <span style={{color:ac,fontWeight:700}}>{fmt(t.myNet)}</span>
+                              </div>
+                            </div>
+                          );
                         })}
                       </div>
                     );
@@ -4169,7 +3987,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
             </div>}
             <RoleSpreadsheet
               restRoles={restRoles} rid={rid}
-              roles={roles} onUpdate={onUpdate}
+              roles={roles} employees={employees} onUpdate={onUpdate}
             />
           </div>
         )}
@@ -4177,18 +3995,24 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
         {/* ESCALA */}
         {tab === "schedule" && (
           <div>
-            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12,flexWrap:"wrap",gap:8}}>
-              <div style={{flex:1}}><PillBar options={["Todos", ...AREAS]} value={schedArea} onChange={setSchedArea}/></div>
+            {/* Month navigation */}
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
+              <div style={{display:"flex",gap:4,alignItems:"center"}}>
+                <button onClick={()=>{setYear(month===0?year-1:year);setMonth(month===0?11:month-1);}} style={{...S.btnSecondary,padding:"6px 10px",fontSize:13}}>‹</button>
+                <span style={{color:"var(--text)",fontSize:14,fontWeight:700,padding:"6px 12px",background:"var(--card-bg)",borderRadius:8,whiteSpace:"nowrap"}}>{monthLabel(year,month)}</span>
+                <button onClick={()=>{setYear(month===11?year+1:year);setMonth(month===11?0:month+1);}} style={{...S.btnSecondary,padding:"6px 10px",fontSize:13}}>›</button>
+              </div>
+              {isOwner && <button onClick={()=>{
+                const ok = resetTab("schedule","Escala",()=>({schedules:schedules?.[rid]}));
+                if(ok){ const s={...schedules}; delete s[rid]; onUpdate("schedules",s); onUpdate("_toast","🗑️ Escala enviada para a lixeira"); }
+              }} style={{...S.btnSecondary,fontSize:11,color:"var(--red)",borderColor:"var(--red)44",padding:"5px 10px"}}>🗑️ Reset</button>}
+            </div>
+            {/* Area filter */}
+            <div style={{marginBottom:12}}>
+              <PillBar options={["Todos", ...AREAS]} value={schedArea} onChange={setSchedArea}/>
+            </div>
+            <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
               <div style={{display:"flex",gap:8}}>
-                {isOwner && <button onClick={()=>{
-                  const ok = resetTab("schedule","Escala",()=>({schedules:schedules?.[rid]}));
-                  if(ok){ const s={...schedules}; delete s[rid]; onUpdate("schedules",s); onUpdate("_toast","🗑️ Escala enviada para a lixeira"); }
-                }} style={{...S.btnSecondary,fontSize:12,color:"var(--red)",borderColor:"var(--red)44"}}>🗑️ Resetar escala</button>}
-                <div style={{display:"flex",gap:4}}>
-                  <button onClick={()=>{setYear(month===0?year-1:year);setMonth(month===0?11:month-1);}} style={{...S.btnSecondary,padding:"6px 10px",fontSize:13}}>‹</button>
-                  <span style={{color:"var(--text2)",fontSize:12,padding:"6px 8px",background:"var(--card-bg)",borderRadius:8,whiteSpace:"nowrap"}}>{monthLabel(year,month)}</span>
-                  <button onClick={()=>{setYear(month===11?year+1:year);setMonth(month===11?0:month+1);}} style={{...S.btnSecondary,padding:"6px 10px",fontSize:13}}>›</button>
-                </div>
 
                 {/* Pre-fill contract days off */}
                 <button onClick={()=>{
@@ -4276,56 +4100,81 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                   // Build head row: name + days + T
                   const head = [["Empregado", ...Array.from({length:daysInMonth},(_,i)=>String(i+1)), "T"]];
 
-                  // Build body rows
-                  const body = areaEmps.map(emp => {
-                    const role = restRoles.find(r=>r.id===emp.roleId);
-                    const dayMap = schedules?.[rid]?.[mk]?.[emp.id] ?? {};
-                    let workDays = 0;
-                    const dayCells = Array.from({length:daysInMonth},(_,i)=>{
-                      const k = `${year}-${String(month+1).padStart(2,"0")}-${String(i+1).padStart(2,"0")}`;
-                      const s = dayMap[k];
-                      if(!s) { workDays++; return "T"; }
-                      return STATUS_SHORT[s] ?? "";
-                    });
-                    return [`${emp.name}\n${role?.name??""}`, ...dayCells, String(workDays)];
-                  });
+                  // Group employees by area for section headers
+                  const areasToExport = schedArea === "Todos" ? AREAS.filter(a => areaEmps.some(e => { const r = restRoles.find(x=>x.id===e.roleId); return r?.area === a; })) : [schedArea];
 
-                  doc.autoTable({
-                    head, body,
-                    startY: 21,
-                    styles: { fontSize: 6, cellPadding: 1.2, halign:"center", textColor:[255,255,255], lineColor:[180,180,180], lineWidth:0.1 },
-                    headStyles: { fillColor:[40,40,40], textColor:[220,220,220], fontStyle:"bold", fontSize:6 },
-                    columnStyles: { 0: { halign:"left", cellWidth:30, fontSize:6.5, textColor:[30,30,30] } },
-                    didDrawCell: (data) => {
-                      if(data.section==="body" && data.column.index > 0 && data.column.index <= daysInMonth) {
-                        const dayIdx = data.column.index - 1;
-                        const emp = areaEmps[data.row.index];
-                        if(!emp) return;
-                        const k = `${year}-${String(month+1).padStart(2,"0")}-${String(dayIdx+1).padStart(2,"0")}`;
-                        const s = schedules?.[rid]?.[mk]?.[emp.id]?.[k];
-                        const {x,y,width,height} = data.cell;
-                        // Work day (no status) = green
-                        const color = !s ? STATUS_COLORS.work : STATUS_COLORS[s];
-                        const label = !s ? "T" : (STATUS_SHORT[s] ?? "");
-                        if(color) {
-                          doc.setFillColor(...color);
-                          doc.rect(x,y,width,height,"F");
-                          doc.setTextColor(255,255,255);
-                          doc.setFontSize(5);
-                          doc.text(label, x+width/2, y+height/2+1.2, {align:"center"});
+                  function buildAreaBody(empsForArea) {
+                    return empsForArea.map(emp => {
+                      const role = restRoles.find(r=>r.id===emp.roleId);
+                      const dayMap = schedules?.[rid]?.[mk]?.[emp.id] ?? {};
+                      let workDays = 0;
+                      const dayCells = Array.from({length:daysInMonth},(_,i)=>{
+                        const k = `${year}-${String(month+1).padStart(2,"0")}-${String(i+1).padStart(2,"0")}`;
+                        const s = dayMap[k];
+                        if(!s) { workDays++; return "T"; }
+                        return STATUS_SHORT[s] ?? "";
+                      });
+                      return [`${emp.name}\n${role?.name??""}`, ...dayCells, String(workDays)];
+                    });
+                  }
+
+                  const drawTable = (body, startY, empsForArea) => {
+                    doc.autoTable({
+                      head, body,
+                      startY,
+                      styles: { fontSize: 6, cellPadding: 1.2, halign:"center", textColor:[255,255,255], lineColor:[180,180,180], lineWidth:0.1 },
+                      headStyles: { fillColor:[40,40,40], textColor:[220,220,220], fontStyle:"bold", fontSize:6 },
+                      columnStyles: { 0: { halign:"left", cellWidth:30, fontSize:6.5, textColor:[30,30,30] } },
+                      didDrawCell: (data) => {
+                        if(data.section==="body" && data.column.index > 0 && data.column.index <= daysInMonth) {
+                          const dayIdx = data.column.index - 1;
+                          const emp = empsForArea[data.row.index];
+                          if(!emp) return;
+                          const k = `${year}-${String(month+1).padStart(2,"0")}-${String(dayIdx+1).padStart(2,"0")}`;
+                          const s = schedules?.[rid]?.[mk]?.[emp.id]?.[k];
+                          const {x,y,width,height} = data.cell;
+                          const color = !s ? STATUS_COLORS.work : STATUS_COLORS[s];
+                          const label = !s ? "T" : (STATUS_SHORT[s] ?? "");
+                          if(color) {
+                            doc.setFillColor(...color);
+                            doc.rect(x,y,width,height,"F");
+                            doc.setTextColor(255,255,255);
+                            doc.setFontSize(5);
+                            doc.text(label, x+width/2, y+height/2+1.2, {align:"center"});
+                          }
                         }
-                      }
-                      // Last column (T = work days count) - style it
-                      if(data.section==="body" && data.column.index === daysInMonth+1) {
-                        const {x,y,width,height} = data.cell;
-                        doc.setFillColor(40,40,40);
-                        doc.rect(x,y,width,height,"F");
-                        doc.setTextColor(245,200,66);
-                        doc.setFontSize(6);
-                        doc.text(data.cell.text[0]??""  , x+width/2, y+height/2+1.2, {align:"center"});
-                      }
-                    },
-                    theme: "grid",
+                        if(data.section==="body" && data.column.index === daysInMonth+1) {
+                          const {x,y,width,height} = data.cell;
+                          doc.setFillColor(40,40,40);
+                          doc.rect(x,y,width,height,"F");
+                          doc.setTextColor(245,200,66);
+                          doc.setFontSize(6);
+                          doc.text(data.cell.text[0]??"", x+width/2, y+height/2+1.2, {align:"center"});
+                        }
+                      },
+                      theme: "grid",
+                    });
+                    return doc.lastAutoTable.finalY;
+                  };
+
+                  let curY = 21;
+                  areasToExport.forEach((area, aIdx) => {
+                    const empsForArea = schedArea === "Todos"
+                      ? areaEmps.filter(e => { const r = restRoles.find(x=>x.id===e.roleId); return r?.area === area; })
+                      : areaEmps;
+                    if (empsForArea.length === 0) return;
+
+                    // Area header (when showing multiple areas)
+                    if (schedArea === "Todos") {
+                      if (aIdx > 0 && curY > 170) { doc.addPage(); curY = 12; }
+                      doc.setFontSize(9);
+                      doc.setTextColor(60,60,60);
+                      doc.text(`▸ ${area.toUpperCase()} (${empsForArea.length})`, 14, curY + 2);
+                      curY += 5;
+                    }
+
+                    const body = buildAreaBody(empsForArea);
+                    curY = drawTable(body, curY, empsForArea) + 4;
                   });
 
                   doc.save(`escala_${schedArea}_${year}_${String(month+1).padStart(2,"0")}.pdf`);
@@ -4564,6 +4413,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
               restaurantId={rid} communications={data?.communications ?? []}
               commAcks={data?.commAcks ?? {}} employees={employees}
               onUpdate={onUpdate} currentManagerName={currentUser?.name ?? "Gestor"}
+              isOwner={isOwner} trash={data?.trash}
             />
           </div>
         )}
@@ -4624,7 +4474,6 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                   })(),
                 },
                 { id:"__escala__", tabKey:null, q:"📅 Como funciona a escala e por que ela importa?", a:"A escala registra a presença em cada dia e define quem recebe gorjeta.\n\nRecebe gorjeta: trabalhando normalmente ou compensação (C).\nNÃO recebe: folga, falta injustificada (F) + possível penalidade, falta justificada (FJ), atestado (A), férias (V)." },
-                { id:"__recibos__", tabKey:"recibos", q:"📄 Como acesso meus recibos?", a:"Na aba Recibos do aplicativo o empregado encontra todos os recibos. Pode incluir gorjeta, adiantamento, férias, 13º e outros pagamentos. O gestor faz upload dos PDFs." },
                 { id:"__dp__", tabKey:"dp", q:"💬 Para que serve o Fale com DP?", a:"Canal direto com o DP. Use para: dúvidas trabalhistas, atestados, documentos, sugestões, elogios e denúncias anônimas. O gestor do DP responde pelo app." },
                 { id:"__comunicados__", tabKey:"comunicados", q:"📢 Como funcionam os comunicados?", a:"Avisos enviados pelo gestor para a equipe. O empregado recebe notificação, lê e confirma com \"Li e entendi\". O gestor acompanha quem confirmou." },
                 { id:"__pin__", tabKey:null, q:"🔐 O que é o PIN e como trocar?", a:"O PIN é a senha de 4 dígitos numéricos. Para login: ID de empregado (ex: LBZ0005) ou CPF + PIN. Para trocar o PIN, solicite ao gestor que faça o reset." },
@@ -4721,10 +4570,6 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
           <NotificacoesTab restaurantId={rid} dpMessages={data?.dpMessages??[]} notifications={data?.notifications??[]} onUpdate={onUpdate} />
         )}
 
-        {/* RECIBOS */}
-        {tab === "recibos" && (
-          <ReceibosManagerTab restaurantId={rid} employees={employees} roles={restRoles} restaurants={restaurants} receipts={data?.receipts ?? []} onUpdate={onUpdate} onUpdateEmployees={newEmps=>onUpdate("employees",newEmps)} />
-        )}
 
         {/* CONFIG */}
         {tab === "config" && (
@@ -4739,28 +4584,15 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                     ["roles",       "🏷️ Cargos"],
                     ["employees",   "👥 Equipe"],
                     ["horarios",    "🕐 Horários"],
-                    ["recibos",     "📄 Recibos"],
                     ["faq",         "❓ FAQ"],
                     ["comunicados", "📢 Comunicados"],
                     ["dp",          "💬 Fale com DP"],
                   ].map(([key, label]) => {
-                    const isOn = restaurant.tabsConfig?.[key] !== false;
+                    const isOn = getTabsConfig(key);
                     return (
                       <div key={key} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"10px 14px",background:"var(--bg1)",borderRadius:10,border:`1px solid ${isOn?"#10b98133":"var(--border)"}`}}>
                         <span style={{color:isOn?"var(--text)":"var(--text3)",fontSize:13,fontWeight:isOn?600:400}}>{label}</span>
-                        <button onClick={()=>{
-                          const novoValor = !isOn;
-                          // Sincroniza FAQ automática relacionada quando admin desativa
-                          const tabFaqMap = { recibos:"__recibos__", dp:"__dp__", comunicados:"__comunicados__" };
-                          const faqId = tabFaqMap[key];
-                          const curFaqAuto = restaurant.tabsGestor?.faqAuto ?? {};
-                          const novoFaqAuto = faqId ? { ...curFaqAuto, [faqId]: novoValor } : curFaqAuto;
-                          const updated = restaurants.map(r=>r.id===rid?{...r,
-                            tabsConfig:{...(r.tabsConfig??{}),[key]:novoValor},
-                            tabsGestor:{...(r.tabsGestor??{}),faqAuto:novoFaqAuto}
-                          }:r);
-                          onUpdate("restaurants",updated);
-                        }} style={{padding:"5px 14px",borderRadius:20,border:"none",background:isOn?"var(--green)":"var(--border)",color:isOn?"#fff":"#555",fontWeight:700,cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:12}}>
+                        <button onClick={()=>toggleAdminTab(key)} style={{padding:"5px 14px",borderRadius:20,border:"none",background:isOn?"var(--green)":"var(--border)",color:isOn?"#fff":"#555",fontWeight:700,cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:12}}>
                           {isOn?"Autorizada":"Bloqueada"}
                         </button>
                       </div>
@@ -4778,33 +4610,32 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                 <div style={{display:"flex",flexDirection:"column",gap:10}}>
                   {[
                     ["horarios",    "🕐 Horários"],
-                    ["recibos",     "📄 Recibos"],
                     ["faq",         "❓ FAQ"],
                     ["comunicados", "📢 Comunicados"],
                     ["dp",          "💬 Fale com DP"],
                   ].filter(([key]) => restaurant.tabsConfig?.[key] !== false)
                   .map(([key, label]) => {
-                    const gestorOn = restaurant.tabsGestor?.[key] !== false;
-                    const isOn     = gestorOn;
+                    const isOn = getTabsGestor(key);
                     return (
                       <div key={key} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"10px 14px",background:"var(--bg1)",borderRadius:10,border:`1px solid ${isOn?"#10b98133":"var(--border)"}`}}>
-                        <div>
-                          <span style={{color:isOn?"var(--text)":"var(--text3)",fontSize:13,fontWeight:isOn?600:400}}>{label}</span>
-                        </div>
-                        <button onClick={()=>{
-                          const novoValor = !gestorOn;
-                          const tabFaqMap = { recibos:"__recibos__", dp:"__dp__", comunicados:"__comunicados__" };
-                          const faqId = tabFaqMap[key];
-                          const curFaqAuto = restaurant.tabsGestor?.faqAuto ?? {};
-                          const novoFaqAuto = faqId ? { ...curFaqAuto, [faqId]: novoValor } : curFaqAuto;
-                          const updated = restaurants.map(r=>r.id===rid?{...r,tabsGestor:{...(r.tabsGestor??{}),[key]:novoValor,faqAuto:novoFaqAuto}}:r);
-                          onUpdate("restaurants",updated);
-                        }} style={{padding:"5px 14px",borderRadius:20,border:"none",background:isOn?"var(--green)":"var(--border)",color:isOn?"#fff":"#555",fontWeight:700,cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:12}}>
+                        <span style={{color:isOn?"var(--text)":"var(--text3)",fontSize:13,fontWeight:isOn?600:400}}>{label}</span>
+                        <button onClick={()=>toggleGestorTab(key)} style={{padding:"5px 14px",borderRadius:20,border:"none",background:isOn?"var(--green)":"var(--border)",color:isOn?"#fff":"#555",fontWeight:700,cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:12}}>
                           {isOn?"Visível":"Oculta"}
                         </button>
                       </div>
                     );
                   })}
+                </div>
+              </div>
+            )}
+
+            {/* Salvar / Descartar configuração de abas */}
+            {configDirty && (
+              <div style={{...S.card,marginBottom:20,background:"var(--ac-bg)",border:"1px solid var(--ac)33"}}>
+                <p style={{color:ac,fontSize:13,fontWeight:700,margin:"0 0 8px"}}>Alterações não salvas</p>
+                <div style={{display:"flex",gap:10}}>
+                  <button onClick={saveConfig} style={{...S.btnPrimary,flex:1,padding:"10px",fontSize:13}}>Salvar Config</button>
+                  <button onClick={discardConfig} style={{...S.btnSecondary,flex:1,padding:"10px",fontSize:13}}>Descartar</button>
                 </div>
               </div>
             )}
@@ -4943,10 +4774,17 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }
   const [restForm, setRestForm]             = useState({ name:"",shortCode:"",cnpj:"",address:"",whatsappFin:"",whatsappOp:"" });
   const [showMgrModal, setShowMgrModal]     = useState(false);
   const [editMgrId, setEditMgrId]           = useState(null);
-  const [mgrForm, setMgrForm]               = useState({ name:"",cpf:"",pin:"",restaurantIds:[],perms:{tips:true,schedule:true},isDP:false });
+  const [mgrForm, setMgrForm]               = useState({ name:"",cpf:"",pin:"",restaurantIds:[],perms:{tips:true,schedule:true},isDP:false,profile:"custom",areas:[] });
   const [showOwnerModal, setShowOwnerModal] = useState(false);
   const [editOwnerId, setEditOwnerId]       = useState(null);
   const [ownerForm, setOwnerForm]           = useState({ name:"",cpf:"",pin:"" });
+  const [viewOnly, setViewOnly]             = useState(false);
+  // View-only guard — shadow onUpdate to block writes when locked
+  const _realUpdate = onUpdate;
+  onUpdate = (field, value) => { // eslint-disable-line
+    if (viewOnly && field !== "_toast") { _realUpdate("_toast", "🔒 Modo somente leitura — desbloqueie para editar"); return; }
+    _realUpdate(field, value);
+  };
 
   function saveRest() {
     if (!restForm.name.trim()) return;
@@ -4961,6 +4799,11 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }
   }
   function saveMgr() {
     if (!mgrForm.name.trim()||!mgrForm.pin.trim()) return;
+    // CPF required for managers
+    const cpfDigits = (mgrForm.cpf??"").replace(/\D/g,"");
+    if (cpfDigits.length < 11) { onUpdate("_toast","⚠️ CPF é obrigatório para gestores (11 dígitos)"); return; }
+    // Líder must have at least one area
+    if (mgrForm.profile==="lider" && (mgrForm.areas??[]).length===0) { onUpdate("_toast","⚠️ Selecione pelo menos uma área para o Líder"); return; }
     const m = { ...mgrForm, id: editMgrId ?? Date.now().toString() };
     onUpdate("managers", editMgrId ? managers.map(x=>x.id===editMgrId?m:x) : [...managers,m]);
     setShowMgrModal(false);
@@ -5088,7 +4931,7 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }
               </div>
               <button onClick={()=>{
                 setEditMgrId(null);
-                setMgrForm({name:"",cpf:"",pin:"",restaurantIds:[selRestaurant],perms:{tips:true,schedule:true},isDP:false});
+                setMgrForm({name:"",cpf:"",pin:"",restaurantIds:[selRestaurant],perms:{tips:true,schedule:true},isDP:false,profile:"custom",areas:[]});
                 setShowMgrModal(true);
               }} style={{...S.btnPrimary,width:"auto",padding:"10px 20px"}}>+ Novo Gestor</button>
             </div>
@@ -5099,7 +4942,7 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }
                 <p style={{color:"var(--text3)",fontSize:14,marginBottom:16}}>Nenhum gestor atribuído a este restaurante.</p>
                 <button onClick={()=>{
                   setEditMgrId(null);
-                  setMgrForm({name:"",cpf:"",pin:"",restaurantIds:[selRestaurant],perms:{tips:true,schedule:true},isDP:false});
+                  setMgrForm({name:"",cpf:"",pin:"",restaurantIds:[selRestaurant],perms:{tips:true,schedule:true},isDP:false,profile:"custom",areas:[]});
                   setShowMgrModal(true);
                 }} style={{...S.btnPrimary,width:"auto",padding:"10px 24px"}}>Adicionar primeiro gestor</button>
               </div>
@@ -5110,13 +4953,20 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }
                 <div key={m.id} style={{...S.card}}>
                   <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
                     <div>
-                      <div style={{color:"var(--text)",fontWeight:700,fontSize:15,marginBottom:2}}>{m.name}</div>
-                      <div style={{color:"var(--text3)",fontSize:12,marginBottom:8}}>CPF: {m.cpf||"—"}</div>
+                      <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:2}}>
+                        <span style={{color:"var(--text)",fontWeight:700,fontSize:15}}>{m.name}</span>
+                        {m.profile==="dp" && <span style={{background:"var(--blue-bg)",color:"var(--blue)",borderRadius:6,padding:"2px 8px",fontSize:10,fontWeight:700}}>📬 DP</span>}
+                        {m.profile==="lider" && <span style={{background:"#f59e0b22",color:"#f59e0b",borderRadius:6,padding:"2px 8px",fontSize:10,fontWeight:700}}>👔 Líder</span>}
+                      </div>
+                      <div style={{color:"var(--text3)",fontSize:12,marginBottom:4}}>CPF: {m.cpf||"—"}</div>
+                      {m.profile==="lider" && (m.areas??[]).length>0 && (
+                        <div style={{color:"var(--text3)",fontSize:11,marginBottom:6}}>Áreas: {m.areas.join(", ")}</div>
+                      )}
                       <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:6}}>
                         {[["tips","💸 Gorjetas"],["schedule","📅 Escala"],["roles","🏷️ Cargos"],["employees","👥 Equipe"],["comunicados","📢 Comuns."],["faq","❓ FAQ"],["dp","💬 DP"],["horarios","🕐 Horários"]].map(([k,lbl])=>
                           m.perms?.[k]!==false ? <span key={k} style={{background:"var(--green-bg)",color:"var(--green)",borderRadius:6,padding:"2px 8px",fontSize:11,fontWeight:600}}>{lbl}</span> : null
                         )}
-                        {m.isDP && <span style={{background:"var(--blue-bg)",color:"var(--blue)",borderRadius:6,padding:"2px 8px",fontSize:11,fontWeight:600}}>📬 DP</span>}
+                        {m.isDP && !m.profile && <span style={{background:"var(--blue-bg)",color:"var(--blue)",borderRadius:6,padding:"2px 8px",fontSize:11,fontWeight:600}}>📬 DP</span>}
                       </div>
                       {/* Outros restaurantes que esse gestor acessa */}
                       {(m.restaurantIds??[]).filter(rid=>rid!==selRestaurant).length > 0 && (
@@ -5126,7 +4976,7 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }
                       )}
                     </div>
                     <div style={{display:"flex",gap:8,flexShrink:0}}>
-                      <button onClick={()=>{setEditMgrId(m.id);setMgrForm({name:m.name,cpf:m.cpf??"",pin:m.pin??"",restaurantIds:m.restaurantIds??[],perms:m.perms??{tips:true,schedule:true},isDP:m.isDP??false});setShowMgrModal(true);}} style={{...S.btnSecondary,fontSize:12}}>Editar</button>
+                      <button onClick={()=>{setEditMgrId(m.id);setMgrForm({name:m.name,cpf:m.cpf??"",pin:m.pin??"",restaurantIds:m.restaurantIds??[],perms:m.perms??{tips:true,schedule:true},isDP:m.isDP??false,profile:m.profile??"custom",areas:m.areas??[]});setShowMgrModal(true);}} style={{...S.btnSecondary,fontSize:12}}>Editar</button>
                       <button onClick={()=>{
                         if(!window.confirm(`Remover ${m.name} deste restaurante?`)) return;
                         const newIds = (m.restaurantIds??[]).filter(rid=>rid!==selRestaurant);
@@ -5574,23 +5424,89 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }
             <div style={{display:"flex",flexDirection:"column",gap:12}}>
               <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
                 <div><label style={S.label}>Nome completo</label><input value={mgrForm.name} onChange={e=>setMgrForm({...mgrForm,name:e.target.value})} style={S.input}/></div>
-                <div><label style={S.label}>CPF (opcional)</label><input value={mgrForm.cpf} onChange={e=>setMgrForm({...mgrForm,cpf:maskCpf(e.target.value)})} placeholder="000.000.000-00" style={S.input} inputMode="numeric"/></div>
+                <div><label style={S.label}>CPF *</label><input value={mgrForm.cpf} onChange={e=>setMgrForm({...mgrForm,cpf:maskCpf(e.target.value)})} placeholder="000.000.000-00" style={S.input} inputMode="numeric"/></div>
               </div>
               <div><label style={S.label}>PIN (4–6 dígitos)</label><input type="password" value={mgrForm.pin} onChange={e=>setMgrForm({...mgrForm,pin:e.target.value})} maxLength={6} style={S.input}/></div>
+              {/* Perfil do gestor */}
               <div>
-                <label style={S.label}>Permissões</label>
-                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
-                  {[["tips","💸 Gorjetas"],["schedule","📅 Escala"],["roles","🏷️ Cargos"],["employees","👥 Equipe"],["comunicados","📢 Comunicados"],["faq","❓ FAQ"],["dp","💬 Fale c/ DP"],["horarios","🕐 Horários"]].map(([k,lbl])=>{
-                    const on = mgrForm.perms?.[k] !== false;
+                <label style={S.label}>Perfil do gestor</label>
+                <div style={{display:"flex",flexDirection:"column",gap:8}}>
+                  {[
+                    {id:"dp",icon:"📬",title:"DP (Departamento Pessoal)",desc:"Acesso completo: gorjetas, escala, cargos, equipe, comunicados, FAQ, DP e notificações. Recebe mensagens do Fale com DP."},
+                    {id:"lider",icon:"👔",title:"Líder de Área",desc:"Acesso à escala e equipe da(s) sua(s) área(s). Sem gorjetas, sem DP."},
+                    {id:"custom",icon:"⚙️",title:"Personalizado",desc:"Escolha as permissões manualmente."},
+                  ].map(p=>{
+                    const on = mgrForm.profile === p.id;
                     return (
-                      <button key={k} onClick={()=>setMgrForm({...mgrForm,perms:{...mgrForm.perms,[k]:!on}})}
-                        style={{padding:"10px",borderRadius:10,border:`1px solid ${on?"var(--green)":"var(--border)"}`,background:on?"var(--green-bg)":"transparent",color:on?"var(--green)":"var(--text3)",cursor:"pointer",fontFamily:"'DM Sans',sans-serif",fontSize:12,textAlign:"left"}}>
-                        {on?"✓":"○"} {lbl}
+                      <button key={p.id} onClick={()=>{
+                        const presets = {
+                          dp: {perms:{tips:true,schedule:true,roles:true,employees:true,comunicados:true,faq:true,dp:true,horarios:true},isDP:true,areas:[]},
+                          lider: {perms:{tips:false,schedule:true,roles:false,employees:true,comunicados:true,faq:true,dp:false,horarios:false},isDP:false},
+                          custom: {isDP:mgrForm.isDP},
+                        };
+                        const preset = presets[p.id];
+                        setMgrForm(f=>({...f,...preset,profile:p.id,areas:p.id==="lider"?f.areas:[]}));
+                      }}
+                        style={{width:"100%",padding:"12px 14px",borderRadius:10,border:`1px solid ${on?ac:"var(--border)"}`,background:on?"var(--ac-bg)":"transparent",color:on?"var(--ac-text)":"var(--text3)",cursor:"pointer",fontFamily:"'DM Sans',sans-serif",fontSize:13,textAlign:"left",display:"flex",alignItems:"center",gap:10}}>
+                        <span style={{fontSize:18}}>{p.icon}</span>
+                        <div>
+                          <div style={{fontWeight:700}}>{on?"✓ ":""}{p.title}</div>
+                          <div style={{fontSize:11,opacity:0.7,marginTop:2}}>{p.desc}</div>
+                        </div>
                       </button>
                     );
                   })}
                 </div>
               </div>
+
+              {/* Area restriction for Líder */}
+              {mgrForm.profile === "lider" && (
+                <div>
+                  <label style={S.label}>Áreas do líder</label>
+                  <p style={{color:"var(--text3)",fontSize:11,margin:"0 0 8px"}}>O líder só verá empregados e escalas das áreas selecionadas.</p>
+                  <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+                    {AREAS.map(a=>{
+                      const on = (mgrForm.areas??[]).includes(a);
+                      return <button key={a} onClick={()=>setMgrForm(f=>({...f,areas:on?f.areas.filter(x=>x!==a):[...(f.areas??[]),a]}))}
+                        style={{padding:"8px 16px",borderRadius:20,border:`1px solid ${on?AREA_COLORS[a]??"#555":"var(--border)"}`,background:on?(AREA_COLORS[a]??"#555")+"22":"transparent",color:on?AREA_COLORS[a]??"var(--text)":"var(--text3)",cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:12,fontWeight:on?700:400}}>
+                        {on?"✓ ":""}{a}
+                      </button>;
+                    })}
+                  </div>
+                  {(mgrForm.areas??[]).length===0 && <p style={{color:"var(--red)",fontSize:11,marginTop:6}}>Selecione pelo menos uma área.</p>}
+                </div>
+              )}
+
+              {/* Custom permissions */}
+              {mgrForm.profile === "custom" && (
+                <div>
+                  <label style={S.label}>Permissões</label>
+                  <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+                    {[["tips","💸 Gorjetas"],["schedule","📅 Escala"],["roles","🏷️ Cargos"],["employees","👥 Equipe"],["comunicados","📢 Comunicados"],["faq","❓ FAQ"],["dp","💬 Fale c/ DP"],["horarios","🕐 Horários"]].map(([k,lbl])=>{
+                      const on = mgrForm.perms?.[k] !== false;
+                      return (
+                        <button key={k} onClick={()=>setMgrForm({...mgrForm,perms:{...mgrForm.perms,[k]:!on}})}
+                          style={{padding:"10px",borderRadius:10,border:`1px solid ${on?"var(--green)":"var(--border)"}`,background:on?"var(--green-bg)":"transparent",color:on?"var(--green)":"var(--text3)",cursor:"pointer",fontFamily:"'DM Sans',sans-serif",fontSize:12,textAlign:"left"}}>
+                          {on?"✓":"○"} {lbl}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+              {mgrForm.profile === "custom" && (
+                <div style={{borderTop:"1px solid var(--border)",paddingTop:12}}>
+                  <button onClick={()=>setMgrForm({...mgrForm,isDP:!mgrForm.isDP})}
+                    style={{width:"100%",padding:"12px 14px",borderRadius:10,border:`1px solid ${mgrForm.isDP?"var(--blue)":"var(--border)"}`,background:mgrForm.isDP?"var(--blue-bg)":"transparent",color:mgrForm.isDP?"var(--blue)":"var(--text3)",cursor:"pointer",fontFamily:"'DM Sans',sans-serif",fontSize:13,textAlign:"left",display:"flex",alignItems:"center",gap:10}}>
+                    <span style={{fontSize:18}}>📬</span>
+                    <div>
+                      <div style={{fontWeight:700}}>{mgrForm.isDP?"✓ É gestor do DP":"○ Não é gestor do DP"}</div>
+                      <div style={{fontSize:11,opacity:0.7,marginTop:2}}>Recebe notificações de horários e mensagens do Fale com DP</div>
+                    </div>
+                  </button>
+                </div>
+              )}
+
               <div>
                 <label style={S.label}>Outros restaurantes com acesso</label>
                 <div style={{display:"flex",flexDirection:"column",gap:6}}>
@@ -5605,16 +5521,6 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }
                   })}
                   {restaurants.filter(r=>r.id!==selRestaurant).length===0 && <p style={{color:"var(--text3)",fontSize:12}}>Nenhum outro restaurante cadastrado.</p>}
                 </div>
-              </div>
-              <div style={{borderTop:"1px solid var(--border)",paddingTop:12}}>
-                <button onClick={()=>setMgrForm({...mgrForm,isDP:!mgrForm.isDP})}
-                  style={{width:"100%",padding:"12px 14px",borderRadius:10,border:`1px solid ${mgrForm.isDP?"var(--blue)":"var(--border)"}`,background:mgrForm.isDP?"var(--blue-bg)":"transparent",color:mgrForm.isDP?"var(--blue)":"var(--text3)",cursor:"pointer",fontFamily:"'DM Sans',sans-serif",fontSize:13,textAlign:"left",display:"flex",alignItems:"center",gap:10}}>
-                  <span style={{fontSize:18}}>📬</span>
-                  <div>
-                    <div style={{fontWeight:700}}>{mgrForm.isDP?"✓ É gestor do DP":"○ Não é gestor do DP"}</div>
-                    <div style={{fontSize:11,opacity:0.7,marginTop:2}}>Recebe notificações de horários e mensagens do Fale com DP</div>
-                  </div>
-                </button>
               </div>
               <button onClick={saveMgr} style={S.btnPrimary}>{editMgrId?"Salvar":"Criar Gestor"}</button>
             </div>
@@ -5632,11 +5538,16 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }
           <span style={{ color:"var(--text)", fontWeight:800, fontSize:16 }}>Admin AppTip</span>
           <span style={{ color:"var(--text3)", fontSize:12 }}>· {currentUser?.name}</span>
         </div>
-        <div style={{display:"flex",gap:8,alignItems:"center"}}>
-          <button onClick={toggleTheme} style={{background:"none",border:"1px solid var(--border)",borderRadius:20,padding:"6px 10px",cursor:"pointer",fontSize:16,color:"var(--text2)"}}>{theme==="dark"?"☀️":"🌙"}</button>
+        <div style={{display:"flex",gap:6,alignItems:"center"}}>
+          <button onClick={()=>setViewOnly(!viewOnly)} title={viewOnly?"Modo somente leitura ativo — clique para desbloquear":"Clique para ativar modo somente leitura"}
+            style={{background:viewOnly?"var(--ac)22":"none",border:`1px solid ${viewOnly?"var(--ac)":"var(--border)"}`,borderRadius:20,padding:"6px 10px",cursor:"pointer",fontSize:14,color:viewOnly?"var(--ac)":"var(--text3)"}}>
+            {viewOnly?"🔒":"🔓"}
+          </button>
+          <button onClick={toggleTheme} style={{background:"none",border:"1px solid var(--border)",borderRadius:20,padding:"6px 10px",cursor:"pointer",fontSize:14,color:"var(--text2)"}}>{theme==="dark"?"☀️":"🌙"}</button>
           <button onClick={onBack} style={{ ...S.btnSecondary, fontSize:12 }}>Sair</button>
         </div>
       </div>
+      {viewOnly && <div style={{background:"var(--ac)11",borderBottom:"1px solid var(--ac)33",padding:"6px 20px",textAlign:"center",fontSize:12,color:"var(--ac)",fontWeight:600}}>🔒 Modo somente leitura — edições bloqueadas</div>}
       <div style={{ display:"flex", borderBottom:"1px solid var(--border)", background:"var(--header-bg)", overflowX:"auto" }}>
         {TABS.map(([id,lbl])=>(
           <button key={id} onClick={()=>setTab(id)} style={{ padding:"12px 20px", background:"none", border:"none", borderBottom:`2px solid ${tab===id?ac:"transparent"}`, color:tab===id?ac:"var(--text3)", cursor:"pointer", fontSize:14, fontFamily:"'DM Sans',sans-serif", fontWeight:tab===id?700:500, whiteSpace:"nowrap" }}>{lbl}</button>
@@ -5875,12 +5786,19 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }
                             )}
                           </div>
                         </div>
-                        {!n.read && (
+                        <div style={{display:"flex",flexDirection:"column",gap:4,flexShrink:0,alignItems:"flex-end"}}>
+                          {!n.read && (
+                            <button onClick={()=>{
+                              const updated = notifications.map(x => x.id===n.id ? {...x,read:true} : x);
+                              onUpdate("notifications", updated);
+                            }} style={{background:"none",border:"none",color:"var(--text3)",cursor:"pointer",fontSize:18,padding:4}}>✓</button>
+                          )}
                           <button onClick={()=>{
-                            const updated = notifications.map(x => x.id===n.id ? {...x,read:true} : x);
-                            onUpdate("notifications", updated);
-                          }} style={{background:"none",border:"none",color:"var(--text3)",cursor:"pointer",fontSize:18,flexShrink:0,padding:4}}>✓</button>
-                        )}
+                            if(!window.confirm("Apagar permanentemente esta notificação?")) return;
+                            onUpdate("notifications", notifications.filter(x => x.id!==n.id));
+                            onUpdate("_toast","🗑️ Notificação apagada");
+                          }} style={{background:"none",border:"1px solid #e74c3c22",borderRadius:6,color:"var(--text3)",cursor:"pointer",fontSize:11,padding:"3px 8px",fontFamily:"'DM Mono',monospace"}}>🗑️</button>
+                        </div>
                       </div>
                     </div>
                   );
@@ -6361,7 +6279,7 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }
           <div style={{display:"flex",flexDirection:"column",gap:12}}>
             <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
               <div><label style={S.label}>Nome completo</label><input value={mgrForm.name} onChange={e=>setMgrForm({...mgrForm,name:e.target.value})} style={S.input}/></div>
-              <div><label style={S.label}>CPF (opcional)</label><input value={mgrForm.cpf} onChange={e=>setMgrForm({...mgrForm,cpf:maskCpf(e.target.value)})} placeholder="000.000.000-00" style={S.input} inputMode="numeric"/></div>
+              <div><label style={S.label}>CPF *</label><input value={mgrForm.cpf} onChange={e=>setMgrForm({...mgrForm,cpf:maskCpf(e.target.value)})} placeholder="000.000.000-00" style={S.input} inputMode="numeric"/></div>
             </div>
             <div><label style={S.label}>PIN (4–6 dígitos)</label><input type="password" value={mgrForm.pin} onChange={e=>setMgrForm({...mgrForm,pin:e.target.value})} maxLength={6} style={S.input}/></div>
 
@@ -6471,9 +6389,9 @@ function ManagerPortal({ manager, data, onUpdate, onBack, toggleTheme, theme }) 
     const mk = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,"0")}`;
     const monthTips = tips.filter(t => t.restaurantId === rid && t.monthKey === mk);
     const diasComGorjeta = [...new Set(monthTips.map(t => t.date))].length;
-    const dpNaoLidas = (data?.dpMessages??[]).filter(m => m.restaurantId === rid && !m.read).length;
+    const dpNaoLidas = (data?.dpMessages??[]).filter(m => m.restaurantId === rid && !m.read && !m.deleted).length;
     const commsPendentes = (data?.communications??[]).filter(c =>
-      c.restaurantId === rid &&
+      c.restaurantId === rid && !c.deleted &&
       employees.filter(e => e.restaurantId === rid).some(e => !(data?.commAcks??{})[`${c.id}_${e.id}`])
     ).length;
     return { empAtivos, diasComGorjeta, dpNaoLidas, commsPendentes };
@@ -6482,34 +6400,34 @@ function ManagerPortal({ manager, data, onUpdate, onBack, toggleTheme, theme }) 
   return (
     <div style={{ minHeight:"100vh", background:"var(--bg)", fontFamily:"'DM Sans',sans-serif" }}>
 
-      {/* Header melhorado */}
-      <div style={{ background:"var(--header-bg)", borderBottom:"1px solid var(--border)", padding:"12px 20px", display:"flex", justifyContent:"space-between", alignItems:"center", boxShadow:"0 1px 4px rgba(0,0,0,0.04)" }}>
-        <div style={{ display:"flex", alignItems:"center", gap:10 }}>
+      {/* Header */}
+      <div style={{ background:"var(--header-bg)", borderBottom:"1px solid var(--border)", padding:"10px 16px", display:"flex", justifyContent:"space-between", alignItems:"center", flexWrap:"wrap", gap:"6px 12px", boxShadow:"0 1px 4px rgba(0,0,0,0.04)" }}>
+        <div style={{ display:"flex", alignItems:"center", gap:8, minWidth:0, flex:"1 1 auto" }}>
           {selId && myRestaurants.length > 1 && (
             <button onClick={()=>setSelId(null)}
-              style={{ background:"none", border:"1px solid var(--border)", borderRadius:8, padding:"5px 10px", cursor:"pointer", color:"var(--text3)", fontSize:12, display:"flex", alignItems:"center", gap:4 }}>
-              ‹ Trocar
+              style={{ background:"none", border:"1px solid var(--border)", borderRadius:8, padding:"4px 8px", cursor:"pointer", color:"var(--text3)", fontSize:11, flexShrink:0 }}>
+              ‹
             </button>
           )}
-          <div>
-            <div style={{ display:"flex", alignItems:"center", gap:6 }}>
-              <span style={{fontSize:16}}>📊</span>
-              <span style={{color:"var(--text)",fontWeight:800,fontSize:15}}>
+          <div style={{minWidth:0}}>
+            <div style={{ display:"flex", alignItems:"center", gap:5 }}>
+              <span style={{fontSize:14}}>📊</span>
+              <span style={{color:"var(--text)",fontWeight:800,fontSize:14,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
                 {selRest ? selRest.name : "Gestor"}
               </span>
             </div>
-            <div style={{color:"var(--text3)",fontSize:11,marginTop:1}}>{manager.name}</div>
+            <div style={{color:"var(--text3)",fontSize:10,marginTop:1}}>{manager.name}</div>
           </div>
         </div>
-        <div style={{display:"flex",gap:6,alignItems:"center"}}>
-          <button onClick={toggleTheme} style={{background:"none",border:"1px solid var(--border)",borderRadius:20,padding:"6px 10px",cursor:"pointer",fontSize:14,color:"var(--text2)"}}>
+        <div style={{display:"flex",gap:5,alignItems:"center",flexShrink:0}}>
+          <button onClick={toggleTheme} style={{background:"none",border:"1px solid var(--border)",borderRadius:20,padding:"5px 8px",cursor:"pointer",fontSize:13,color:"var(--text2)"}}>
             {theme==="dark"?"☀️":"🌙"}
           </button>
           <a href="/guia-gestor" target="_blank" rel="noreferrer"
-            style={{...S.btnSecondary,fontSize:12,textDecoration:"none",display:"flex",alignItems:"center",gap:4,padding:"6px 12px"}}>
+            style={{...S.btnSecondary,fontSize:11,textDecoration:"none",display:"flex",alignItems:"center",gap:3,padding:"5px 10px"}}>
             ❓ Ajuda
           </a>
-          <button onClick={onBack} style={{...S.btnSecondary,fontSize:12}}>Sair</button>
+          <button onClick={onBack} style={{...S.btnSecondary,fontSize:11,padding:"5px 10px"}}>Sair</button>
         </div>
       </div>
 
@@ -6588,7 +6506,7 @@ function ManagerPortal({ manager, data, onUpdate, onBack, toggleTheme, theme }) 
               restaurant={selRest} restaurants={restaurants} employees={employees}
               roles={roles} tips={tips} splits={splits} schedules={schedules}
               onUpdate={onUpdate}
-              perms={{...(manager.perms ?? {tips:true,schedule:true}), isDP: manager.isDP ?? false}}
+              perms={{...(manager.perms ?? {tips:true,schedule:true}), isDP: manager.isDP ?? false, managerAreas: manager.profile==="lider"?(manager.areas??[]):[] }}
               isOwner={false} data={data} currentUser={manager}
             />
           )}
@@ -6932,7 +6850,8 @@ function Home({ onLogin }) {
     { icon:"📢", title:"Comunicados com IA", desc:"Envie avisos para toda a equipe ou áreas específicas. Assistente de IA ajuda a redigir. Acompanhe quem leu e confirmou." },
     { icon:"💬", title:"Canal com o DP", desc:"Canal direto, inclusive anônimo, para comunicação entre equipe e departamento pessoal. Sugestões, denúncias, atestados e dúvidas trabalhistas." },
 
-    { icon:"🔒", title:"Gestão financeira integrada", desc:"Controle de ciclos, cobranças e pagamentos. Página de fatura para o cliente confirmar o pagamento com um clique." },
+    { icon:"👔", title:"Perfis de gestor", desc:"DP com acesso completo ou Líder de Área com visão restrita. Permissões granulares, criação de gestores por DP e CPF obrigatório para segurança." },
+    { icon:"🔒", title:"Segurança e controle", desc:"Acesso por PIN e CPF, permissões por perfil, modo somente leitura, lixeira com restauração e auditoria completa. Cada pessoa vê apenas o que deve." },
     { icon:"📱", title:"100% no celular", desc:"Sem app para instalar. Acessa pelo navegador em qualquer smartphone. Gestor e empregado com portais distintos e seguros." },
   ];
 
@@ -7430,7 +7349,7 @@ hr{border:none;border-top:1px solid var(--border);margin:24px 0}
 <div class="main">
   <div class="topbar">
     <div><h1>Guia do Gestor</h1><div class="sub">Manual completo de uso do AppTip para gestores de restaurante</div></div>
-    <span class="ver">v5.0 · 2026</span>
+    <span class="ver">v${APP_VERSION} · 2026</span>
   </div>
   <div class="content">
 
@@ -7536,10 +7455,13 @@ hr{border:none;border-top:1px solid var(--border);margin:24px 0}
       <div class="card"><h3>Gerenciar cargos</h3>
         <table>
           <tr><th>Ação</th><th>Como fazer</th></tr>
-          <tr><td>Criar</td><td>Preencha nome, pontos e área → clique "Add"</td></tr>
-          <tr><td>Editar</td><td>Edite diretamente na linha → clique "Salvar"</td></tr>
+          <tr><td>Criar</td><td>Preencha nome, pontos e área → clique "+ Add"</td></tr>
+          <tr><td>Editar</td><td>Edite diretamente na linha — alterações ficam em amarelo</td></tr>
+          <tr><td>Salvar</td><td>Clique "💾 Salvar tudo" para confirmar todas as alterações de uma vez</td></tr>
           <tr><td>Sem gorjeta</td><td>Marque "Sem gorjeta" para cargos que não participam (sócios, admin)</td></tr>
           <tr><td>Inativar</td><td>Clique "Inativar" — cargo some da lista ativa, histórico preservado</td></tr>
+          <tr><td>Apagar</td><td>Cargos inativos sem empregados vinculados podem ser apagados permanentemente</td></tr>
+          <tr><td>IA</td><td>Use "✨ Gerenciar cargos com IA" para criar, renomear, ajustar pontos ou inativar com linguagem natural. Revise antes de confirmar.</td></tr>
         </table>
       </div>
     </div>
@@ -7595,13 +7517,6 @@ hr{border:none;border-top:1px solid var(--border);margin:24px 0}
         </ul>
       </div>
     </div>
-      <div class="card"><h3>Como funciona?</h3><p>O gestor faz upload dos recibos em PDF. Cada empregado acessa o próprio recibo diretamente pelo app, sem necessidade de envio individual.</p>
-        <div class="steps">
-          <div class="step"><div class="sn">1</div><div class="sc"><strong>Selecione mês e empregado</strong><p>Escolha o mês de competência e a quem pertence.</p></div></div>
-          <div class="step"><div class="sn">2</div><div class="sc"><strong>Faça o upload</strong><p>Selecione o arquivo PDF. O empregado tem acesso imediatamente.</p></div></div>
-        </div>
-      </div>
-    </div>
 
     <div class="sec" id="comunicados">
       <div class="sh"><div class="iw">📢</div><div><h2>Comunicados <span class="new">COM IA</span></h2><p>Avisos e informações para a equipe</p></div></div>
@@ -7612,6 +7527,9 @@ hr{border:none;border-top:1px solid var(--border);margin:24px 0}
           <div class="step"><div class="sn">3</div><div class="sc"><strong>Publique</strong><p>Aparece imediatamente. Acompanhe confirmações de leitura na lista de enviados.</p></div></div>
         </div>
         <div class="ib green"><span class="ico">✅</span><span>Você visualiza quem leu e quem ainda não confirmou diretamente na lista de comunicados enviados.</span></div>
+      </div>
+      <div class="card"><h3>🗑️ Exclusão de comunicados</h3>
+        <p>Gestores podem mover comunicados para a lixeira. Na lixeira, é possível restaurar ou (admin) apagar permanentemente. Comunicados na lixeira não aparecem mais para os empregados.</p>
       </div>
     </div>
 
@@ -7655,7 +7573,7 @@ hr{border:none;border-top:1px solid var(--border);margin:24px 0}
       <div class="card"><h3>Como funciona?</h3><p>Canal direto entre empregados e o gestor de DP — férias, atestados, dúvidas trabalhistas e documentos. Empregados podem enviar anonimamente.</p>
         <div class="ib blue"><span class="ico">ℹ️</span><span>Somente gestores marcados como "Gestor do DP" pelo administrador AppTip recebem essas mensagens.</span></div>
       </div>
-      <div class="card"><h3>Responder mensagens</h3><p>As mensagens aparecem na aba "Fale com DP". Clique em uma mensagem para ver o histórico e responder. As respostas chegam diretamente no app do empregado.</p></div>
+      <div class="card"><h3>Gerenciar mensagens</h3><p>As mensagens aparecem na aba "Fale com DP". Selecione mensagens e mova para a lixeira. Na lixeira é possível restaurar ou (admin) apagar permanentemente.</p></div>
     </div>
 
     <div class="sec" id="caixa">
@@ -7704,7 +7622,16 @@ hr{border:none;border-top:1px solid var(--border);margin:24px 0}
 
     <div class="sec" id="permissoes">
       <div class="sh"><div class="iw">🔑</div><div><h2>Permissões</h2><p>O que cada gestor pode acessar</p></div></div>
-      <div class="card"><h3>Permissões definidas pelo Administrador</h3>
+      <div class="card"><h3>Perfis de gestor</h3>
+        <p>O administrador define o perfil ao criar o gestor:</p>
+        <table>
+          <tr><th>Perfil</th><th>Descrição</th></tr>
+          <tr><td>📬 DP</td><td>Acesso completo: gorjetas, escala, cargos, equipe, comunicados, FAQ, DP e notificações. Pode criar outros gestores.</td></tr>
+          <tr><td>👔 Líder de Área</td><td>Acesso a escala e equipe apenas da(s) sua(s) área(s). Sem gorjetas, sem DP.</td></tr>
+          <tr><td>⚙️ Personalizado</td><td>Permissões individuais escolhidas pelo admin.</td></tr>
+        </table>
+      </div>
+      <div class="card"><h3>Permissões granulares (perfil personalizado)</h3>
         <table>
           <tr><th>Permissão</th><th>Dá acesso a</th></tr>
           <tr><td>💸 Gorjetas</td><td>Dashboard, aba Gorjetas, exportação</td></tr>
@@ -7713,7 +7640,7 @@ hr{border:none;border-top:1px solid var(--border);margin:24px 0}
           <tr><td>👥 Equipe</td><td>Aba Equipe (se admin autorizou)</td></tr>
           <tr><td>📬 Gestor do DP</td><td>Aba Caixa, recebe mensagens do Fale com DP</td></tr>
         </table>
-        <div class="ib tip"><span class="ico">💡</span><span>Se alguma aba não aparece, seu perfil pode não ter permissão ou o admin não autorizou. Contate o administrador AppTip.</span></div>
+        <div class="ib tip"><span class="ico">💡</span><span>Se alguma aba não aparece, seu perfil pode não ter permissão ou o admin não autorizou. CPF é obrigatório para todos os gestores.</span></div>
       </div>
     </div>
 
@@ -7732,16 +7659,22 @@ hr{border:none;border-top:1px solid var(--border);margin:24px 0}
     <hr>
     <div style="text-align:center;padding:20px 0 40px;color:var(--t3);font-size:13px">
       <div style="font-size:28px;margin-bottom:8px">🍽️</div>
-      <div>AppTip · Guia do Gestor · v5.0 · Abril 2026</div>
+      <div>AppTip · Guia do Gestor · v${APP_VERSION} · Abril 2026</div>
       <div style="margin-top:4px">Dúvidas? <a href="/cdn-cgi/l/email-protection#9bf8f4f5effaeff4dbfaebebeff2ebb5faebeb" style="color:var(--ac)"><span class="__cf_email__" data-cfemail="3a5955544e5b4e557a5b4a4a4e534a145b4a4a">[email&#160;protected]</span></a> · Clientes: <strong style="color:var(--t2)">(11) 98549-9821</strong></div>
     </div>
 
   </div>
 </div>
 </div>
-<script data-cfasync="false" src="/cdn-cgi/scripts/5c5dd728/cloudflare-static/email-decode.min.js"></script><script>
+<script>
 const secs=document.querySelectorAll('.sec'),links=document.querySelectorAll('.sidebar a');
-const obs=new IntersectionObserver(e=>{e.forEach(en=>{if(en.isIntersecting){links.forEach(l=>l.cla`;
+// Highlight active sidebar link on scroll
+const obs=new IntersectionObserver(e=>{e.forEach(en=>{if(en.isIntersecting){links.forEach(l=>l.classList.remove('active'));const id=en.target.id;const match=[...links].find(l=>l.getAttribute('href')==='#'+id);if(match)match.classList.add('active');}});},{rootMargin:'-20% 0px -70% 0px'});
+secs.forEach(s=>obs.observe(s));
+// Smooth scroll for sidebar links
+links.forEach(l=>{l.addEventListener('click',e=>{e.preventDefault();const id=l.getAttribute('href')?.slice(1);const el=id&&document.getElementById(id);if(el)el.scrollIntoView({behavior:'smooth',block:'start'});});});
+</script>
+`;
   return (
     <iframe
       srcDoc={html}
@@ -7812,7 +7745,6 @@ export default function App() {
   const [commAcks,      setCommAcks]      = useState({});
   const [faq,           setFaq]           = useState({});
   const [dpMessages,    setDpMessages]    = useState([]);
-  const [receipts,      setReceipts]      = useState([]);
   const [workSchedules, setWorkSchedules] = useState({});
   const [notifications, setNotifications] = useState([]);
   const [noTipDays,     setNoTipDays]     = useState({});
@@ -7871,9 +7803,6 @@ export default function App() {
           }
         }
       }
-      const recs = await loadReceipts();
-      if (recs.length) setReceipts(recs);
-
       // Limpeza automática da lixeira — itens com mais de 30 dias
       if (loaded_data.trash) {
         const cutoff = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
@@ -7894,24 +7823,10 @@ export default function App() {
     })();
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const data = { owners, managers, restaurants, employees, roles, tips, splits, schedules, communications, commAcks, faq, dpMessages, receipts, workSchedules, notifications, noTipDays, trash, schedTemplates, schedDrafts };
+  const data = { owners, managers, restaurants, employees, roles, tips, splits, schedules, communications, commAcks, faq, dpMessages, workSchedules, notifications, noTipDays, trash, schedTemplates, schedDrafts };
 
   async function handleUpdate(field, value) {
     if (field === "_toast") { setToast(value); return; }
-    if (field === "receipts") {
-      const prev = receipts;
-      setReceipts(value);
-      const newOnes = value.filter(r => !prev.find(p => p.id === r.id));
-      const updated = value.filter(r => { const old = prev.find(p => p.id === r.id); return old && old.empId !== r.empId; });
-      const deleted = prev.filter(p => !value.find(r => r.id === p.id));
-      await Promise.all([
-        ...newOnes.map(r => saveReceipt(r)),
-        ...updated.map(r => saveReceipt(r)),
-        ...deleted.map(r => deleteReceipt(r.id)),
-      ]);
-      setToast("Recibos atualizados");
-      return;
-    }
     const setters = { owners:setOwners, managers:setManagers, restaurants:setRestaurants, employees:setEmployees, roles:setRoles, tips:setTips, splits:setSplits, schedules:setSchedules, communications:setCommunications, commAcks:setCommAcks, faq:setFaq, dpMessages:setDpMessages, workSchedules:setWorkSchedules, notifications:setNotifications, noTipDays:setNoTipDays, trash:setTrash, schedTemplates:setSchedTemplates, schedDrafts:setSchedDrafts };
     const keys    = { owners:K.owners, managers:K.managers, restaurants:K.restaurants, employees:K.employees, roles:K.roles, tips:K.tips, splits:K.splits, schedules:K.schedules, communications:K.communications, commAcks:K.commAcks, faq:K.faq, dpMessages:K.dpMessages, workSchedules:K.workSchedules, notifications:K.notifications, noTipDays:K.noTipDays, trash:K.trash, schedTemplates:K.schedTemplates, schedDrafts:K.schedDrafts };
     setters[field]?.(value);
@@ -7973,13 +7888,13 @@ export default function App() {
       {view === "setup" && <FirstSetup onDone={sm=>{handleUpdate("owners",[...owners,sm]);setCurrentUser(sm);setUserRole("super");setView("super");}} />}
       {view === "super" && currentUser && <OwnerPortal data={data} onUpdate={handleUpdate} onBack={doLogout} currentUser={currentUser} toggleTheme={toggleTheme} theme={theme} />}
       {view === "manager" && currentUser && <ManagerPortal manager={currentUser} data={data} onUpdate={handleUpdate} onBack={doLogout} toggleTheme={toggleTheme} theme={theme} />}
-      {view === "employee" && <EmployeePortal employees={employees} roles={roles} tips={tips} schedules={schedules} splits={splits} restaurants={restaurants} communications={communications} commAcks={commAcks} faq={faq} dpMessages={dpMessages} receipts={receipts} workSchedules={workSchedules} onBack={doLogout} onUpdateEmployee={emp=>{const next=employees.map(e=>e.id===emp.id?emp:e);handleUpdate("employees",next);}} onUpdate={handleUpdate} toggleTheme={toggleTheme} theme={theme} />}
+      {view === "employee" && <EmployeePortal employees={employees} roles={roles} tips={tips} schedules={schedules} splits={splits} restaurants={restaurants} communications={communications} commAcks={commAcks} faq={faq} dpMessages={dpMessages} workSchedules={workSchedules} onBack={doLogout} onUpdateEmployee={emp=>{const next=employees.map(e=>e.id===emp.id?emp:e);handleUpdate("employees",next);}} onUpdate={handleUpdate} toggleTheme={toggleTheme} theme={theme} />}
       {view === "fatura" && <FaturaPage faturaId={faturaId} restaurants={restaurants} onUpdate={handleUpdate} loaded={loaded} />}
       {view === "guia-gestor" && <GuiaGestor />}
       {view === "home" && <Home onLogin={()=>setView("login")} />}
       <Toast msg={toast} onClose={()=>setToast("")} />
       {/* Rodapé de versão */}
-      <div style={{position:"fixed",bottom:8,right:12,fontSize:10,color:"var(--text3)",fontFamily:"'DM Mono',monospace",opacity:0.45,pointerEvents:"none",zIndex:100}}>v5.0</div>
+      <div style={{position:"fixed",bottom:8,right:12,fontSize:10,color:"var(--text3)",fontFamily:"'DM Mono',monospace",opacity:0.45,pointerEvents:"none",zIndex:100}}>v{APP_VERSION}</div>
 
       {/* Modal Política de Privacidade */}
       <div id="apptip-privacy" style={{display:"none",position:"fixed",inset:0,background:"rgba(0,0,0,0.5)",zIndex:9999,alignItems:"center",justifyContent:"center",padding:20}} onClick={e=>{if(e.target===e.currentTarget)e.currentTarget.style.display="none";}}>
