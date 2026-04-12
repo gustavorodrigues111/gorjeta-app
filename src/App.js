@@ -3848,7 +3848,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
     isDP                                       && ["notificacoes",`📬 Caixa${inboxUnread>0?` (${inboxUnread})`:""}`],
     isDP                                       && ["dp_gestores", "👔 Gestores"],
     (canTips || isOwner)                       && ["config",       "⚙️ Configurações"],
-  ].filter(Boolean).filter(([id]) => !mobileOnly || ["dashboard","tips"].includes(id));
+  ].filter(Boolean).filter(([id]) => !mobileOnly || ["dashboard","tips","schedule"].includes(id));
 
   const [tab, setTab] = useState("dashboard");
 
@@ -7545,7 +7545,7 @@ function ManagerPortal({ manager, data, onUpdate, onBack, toggleTheme, theme, on
                 <span style={{fontSize:22,flexShrink:0}}>🖥️</span>
                 <div>
                   <p style={{color:"#92400e",fontSize:12,fontWeight:700,margin:0}}>Demais funcionalidades no computador</p>
-                  <p style={{color:"#92400e99",fontSize:11,margin:"2px 0 0",lineHeight:1.4}}>Escala, Equipe, Cargos, Horários, Comunicados, FAQ, DP e Config.</p>
+                  <p style={{color:"#92400e99",fontSize:11,margin:"2px 0 0",lineHeight:1.4}}>Equipe, Cargos, Horários, Comunicados, FAQ, DP e Config.</p>
                 </div>
               </div>
               <RestaurantPanel
