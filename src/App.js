@@ -3,7 +3,7 @@ import { useState, useEffect, Component } from "react";
 import { db } from "./firebase";
 import { doc, getDoc, setDoc } from "firebase/firestore";
 
-const APP_VERSION = "5.3.3";
+const APP_VERSION = "5.4.0";
 
 /* eslint-disable no-unused-vars */
 
@@ -2870,7 +2870,7 @@ const EMP_COLS        = "80px 2fr 1.2fr 100px auto 1.5fr auto";
 const EMP_COLS_HEADER = "80px 2fr 1.2fr 100px auto 1.5fr auto";
 const empInS2 = { background:"var(--bg1)", border:"1px solid var(--border)", borderRadius:6, color:"var(--text)", fontFamily:"'DM Mono',monospace", fontSize:12, padding:"6px 8px", outline:"none", width:"100%", boxSizing:"border-box" };
 
-function EmpRowLine({ emp, isNew, row, restRoles, isSaved, isOwner, onChange, onSave, onToggleInactive, onDelete, onAdd, onResetPin, onToggleProd, onToggleFreela, employees }) {
+function EmpRowLine({ emp, isNew, row, restRoles, isSaved, isOwner, onChange, onSave, onToggleInactive, onDelete, onAdd, onResetPin, onToggleProd, onToggleFreela, employees, privacyMask }) {
   const ac = "var(--ac)";
   const isInactive = !isNew && emp?.inactive && emp?.inactiveFrom <= today();
   return (
@@ -2885,7 +2885,10 @@ function EmpRowLine({ emp, isNew, row, restRoles, isSaved, isOwner, onChange, on
       </div>
 
       <input value={row.name||""} onChange={ev=>onChange("name",ev.target.value)} placeholder="Nome completo" style={empInS2}/>
-      <input value={row.cpf||""} onChange={ev=>onChange("cpf",maskCpf(ev.target.value))} placeholder="000.000.000-00" style={empInS2} inputMode="numeric"/>
+      {privacyMask
+        ? <div style={{...empInS2,display:"flex",alignItems:"center",color:"var(--text3)"}}>•••.•••.•••-••</div>
+        : <input value={row.cpf||""} onChange={ev=>onChange("cpf",maskCpf(ev.target.value))} placeholder="000.000.000-00" style={empInS2} inputMode="numeric"/>
+      }
       <input type="date" value={row.admission||""} onChange={ev=>onChange("admission",ev.target.value)} style={empInS2}/>
 
       {/* PIN — botão resetar */}
@@ -2944,7 +2947,7 @@ function EmpRowLine({ emp, isNew, row, restRoles, isSaved, isOwner, onChange, on
   );
 }
 
-function EmployeeSpreadsheet({ restEmps, restRoles, rid, employees, onUpdate, restCode: restCode_, isOwner, restaurant, notifications }) {
+function EmployeeSpreadsheet({ restEmps, restRoles, rid, employees, onUpdate, restCode: restCode_, isOwner, restaurant, notifications, privacyMask }) {
   const PLANOS = [
     { id:"p10",  empMax:10  },
     { id:"p20",  empMax:20  },
@@ -3259,7 +3262,7 @@ Inclua apenas as ações solicitadas. Arrays vazios se não houver ação daquel
         <EmpRowLine isNew emp={null} row={newRow} restRoles={restRoles}
           isSaved={false} isOwner={isOwner}
           onChange={(f,v)=>setNewRow(p=>({...p,[f]:v}))}
-          onAdd={saveNew} onSave={null} onToggleInactive={null} onDelete={null} onResetPin={null} onToggleProd={null} onToggleFreela={null} employees={employees}/>
+          onAdd={saveNew} onSave={null} onToggleInactive={null} onDelete={null} onResetPin={null} onToggleProd={null} onToggleFreela={null} employees={employees} privacyMask={privacyMask}/>
       )}
 
       {activeCount >= plano.empMax && (
@@ -3337,7 +3340,7 @@ Inclua apenas as ações solicitadas. Arrays vazios se não houver ação daquel
                   onToggleFreela={()=>{
                     onUpdate("employees", employees.map(x => x.id===emp.id ? {...x, isFreela:!x.isFreela} : x));
                   }}
-                  employees={employees}/>
+                  employees={employees} privacyMask={privacyMask}/>
               );
             })}
           </div>
@@ -3347,12 +3350,17 @@ Inclua apenas as ações solicitadas. Arrays vazios se não houver ação daquel
   );
 }
 
-function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, splits, schedules, onUpdate, perms, isOwner, data, currentUser }) {
+function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, splits, schedules, onUpdate, perms, isOwner, data, currentUser, privacyMask }) {
   const now = new Date();
   const [year, setYear] = useState(now.getFullYear());
   const [month, setMonth] = useState(now.getMonth());
   const mk = monthKey(year, month);
   const rid = restaurant.id;
+
+  // Privacy: mascarar dados quando ativo (admin vendo restaurante com privacyMode)
+  const pFmt = privacyMask ? () => "R$ ••••,••" : fmt;
+  const pCpf = privacyMask ? () => "•••.•••.•••-••" : (v => v || "—");
+  const pText = privacyMask ? () => "••••••••••••••••" : (v => v);
 
   const curSplit  = splits?.[rid]?.[mk] ?? DEFAULT_SPLIT;
   const monthTips = tips.filter(t => t.restaurantId === rid && t.monthKey === mk);
@@ -3717,6 +3725,17 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
           <div style={{ marginBottom: 20 }}><MonthNav year={year} month={month} onChange={(y,m)=>{setYear(y);setMonth(m);}} /></div>
         )}
 
+        {/* Banner de privacidade */}
+        {privacyMask && (
+          <div style={{background:"#f59e0b15",border:"1px solid #f59e0b44",borderRadius:12,padding:"12px 16px",marginBottom:16,display:"flex",alignItems:"center",gap:10}}>
+            <span style={{fontSize:18}}>🔒</span>
+            <div>
+              <div style={{color:"#f59e0b",fontSize:13,fontWeight:700}}>Modo Privacidade ativo</div>
+              <div style={{color:"var(--text3)",fontSize:12}}>Valores de gorjeta, CPFs e mensagens estão ocultos para o administrador.</div>
+            </div>
+          </div>
+        )}
+
         {/* DASHBOARD */}
         {tab === "dashboard" && (() => {
           const dim = new Date(year, month+1, 0).getDate();
@@ -3818,7 +3837,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                     <div style={{background:"var(--card-bg)",borderRadius:10,padding:"12px 10px",textAlign:"center"}}>
                       <div style={{fontSize:20,marginBottom:4}}>💸</div>
                       <div style={{color: gorjetaHoje!==null?"var(--green)":"var(--text3)", fontWeight:700,fontSize:gorjetaHoje!==null?15:13}}>
-                        {gorjetaHoje !== null ? fmt(gorjetaHoje) : "—"}
+                        {gorjetaHoje !== null ? pFmt(gorjetaHoje) : "—"}
                       </div>
                       <div style={{color:"var(--text3)",fontSize:10,marginTop:2}}>gorjeta lançada</div>
                     </div>
@@ -3942,9 +3961,9 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                 </div>
                 <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr 1fr",gap:8}}>
                   {[
-                    ["Pool total",    fmt(tipPoolTotal), "#fff"],
-                    ["Retenção",      fmt(totalTax),     "var(--red)"],
-                    ["Distribuído",   fmt(totalNet),     ac],
+                    ["Pool total",    pFmt(tipPoolTotal), "#fff"],
+                    ["Retenção",      pFmt(totalTax),     "var(--red)"],
+                    ["Distribuído",   pFmt(totalNet),     ac],
                     ["Dias resolvidos", `${diasResolvidos}/${dim}`, diasResolvidos===dim?"var(--green)":diasResolvidos>=diasUteisPassados?"var(--green)":"#f59e0b"],
                   ].map(([lbl,val,col])=>(
                     <div key={lbl} style={{background:"var(--bg1)",borderRadius:10,padding:"10px 8px",textAlign:"center"}}>
@@ -3964,7 +3983,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                           <div style={{flex:1,background:"var(--bg2)",borderRadius:4,height:5,overflow:"hidden"}}>
                             <div style={{width:`${(aNet/totalNet)*100}%`,height:"100%",background:AREA_COLORS[a],borderRadius:4}}/>
                           </div>
-                          <span style={{color:"var(--text2)",fontSize:11,minWidth:70,textAlign:"right"}}>{fmt(aNet)}</span>
+                          <span style={{color:"var(--text2)",fontSize:11,minWidth:70,textAlign:"right"}}>{pFmt(aNet)}</span>
                         </div>
                       );
                     })}
@@ -4007,7 +4026,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                           <span style={{color:m.read?"var(--text3)":"var(--text)",fontSize:12,fontWeight:m.read?400:600,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{m.empName}</span>
                           <span style={{color:"var(--text3)",fontSize:10,flexShrink:0}}>{new Date(m.date).toLocaleDateString("pt-BR")}</span>
                         </div>
-                        <p style={{color:"var(--text3)",fontSize:11,margin:"2px 0 0",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{m.body}</p>
+                        <p style={{color:"var(--text3)",fontSize:11,margin:"2px 0 0",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{pText(m.body)}</p>
                       </div>
                       {!m.read && <span style={{background:"#3b82f6",borderRadius:4,padding:"1px 5px",fontSize:9,color:"var(--text)",fontWeight:700,flexShrink:0}}>Novo</span>}
                     </div>
@@ -4017,7 +4036,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                       <span style={{fontSize:14,flexShrink:0}}>📋</span>
                       <div style={{flex:1,minWidth:0}}>
                         <div style={{display:"flex",justifyContent:"space-between",gap:6}}>
-                          <span style={{color:n.read?"var(--text3)":"var(--text)",fontSize:12,fontWeight:n.read?400:600,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{n.body?.split("\n")[0]?.replace("📋 ","")}</span>
+                          <span style={{color:n.read?"var(--text3)":"var(--text)",fontSize:12,fontWeight:n.read?400:600,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{pText(n.body?.split("\n")[0]?.replace("📋 ",""))}</span>
                           <span style={{color:"var(--text3)",fontSize:10,flexShrink:0}}>{new Date(n.date).toLocaleDateString("pt-BR")}</span>
                         </div>
                       </div>
@@ -4266,7 +4285,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                 <div key={d} style={{ ...S.card, marginBottom: 10 }}>
                   <div style={{ display:"flex",justifyContent:"space-between",marginBottom:10 }}>
                     <span style={{color:"var(--text2)"}}>{fmtDate(d)}</span>
-                    <div style={{textAlign:"right"}}><div style={{color:"var(--text)",fontSize:12}}>Pool: {fmt(dT[0]?.poolTotal)}</div><div style={{color:ac,fontSize:12}}>Dist: {fmt(dT.reduce((a,t)=>a+t.myNet,0))}</div></div>
+                    <div style={{textAlign:"right"}}><div style={{color:"var(--text)",fontSize:12}}>Pool: {pFmt(dT[0]?.poolTotal)}</div><div style={{color:ac,fontSize:12}}>Dist: {pFmt(dT.reduce((a,t)=>a+t.myNet,0))}</div></div>
                   </div>
                   {AREAS.map(a => {
                     const aT = dT.filter(t => t.area === a);
@@ -4280,9 +4299,9 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                             <div key={t.id} style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",fontSize:12,padding:"4px 0",flexWrap:"wrap",gap:"2px 12px"}}>
                               <span style={{color:"var(--text2)",minWidth:80,flex:"1 1 auto"}}>{emp?.name??"—"}</span>
                               <div style={{display:"flex",gap:8,flexShrink:0,fontSize:11}}>
-                                <span style={{color:"var(--text)"}}>{fmt(t.myShare)}</span>
-                                <span style={{color:"var(--red)"}}>-{fmt(t.myTax)}</span>
-                                <span style={{color:ac,fontWeight:700}}>{fmt(t.myNet)}</span>
+                                <span style={{color:"var(--text)"}}>{pFmt(t.myShare)}</span>
+                                <span style={{color:"var(--red)"}}>-{pFmt(t.myTax)}</span>
+                                <span style={{color:ac,fontWeight:700}}>{pFmt(t.myNet)}</span>
                               </div>
                             </div>
                           );
@@ -4313,6 +4332,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
               employees={employees} onUpdate={onUpdate} restCode={restaurant.shortCode}
               isOwner={isOwner} restaurant={restaurant}
               notifications={data?.notifications??[]}
+              privacyMask={privacyMask}
             />
           </div>
         )}
@@ -4749,12 +4769,19 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                 if(ok){ onUpdate("communications",(data?.communications??[]).filter(c=>c.restaurantId!==rid)); onUpdate("_toast","🗑️ Comunicados enviados para a lixeira"); }
               }} style={{...S.btnSecondary,fontSize:12,color:"var(--red)",borderColor:"var(--red)44"}}>🗑️ Resetar comunicados</button>
             </div>}
-            <ComunicadosManagerTab
-              restaurantId={rid} communications={data?.communications ?? []}
-              commAcks={data?.commAcks ?? {}} employees={employees}
-              onUpdate={onUpdate} currentManagerName={currentUser?.name ?? "Gestor"}
-              isOwner={isOwner} trash={data?.trash}
-            />
+            {privacyMask ? (
+              <div style={{...S.card,textAlign:"center",padding:40}}>
+                <div style={{fontSize:36,marginBottom:12}}>🔒</div>
+                <p style={{color:"var(--text3)",fontSize:14}}>Conteúdo dos comunicados oculto pelo modo privacidade.</p>
+              </div>
+            ) : (
+              <ComunicadosManagerTab
+                restaurantId={rid} communications={data?.communications ?? []}
+                commAcks={data?.commAcks ?? {}} employees={employees}
+                onUpdate={onUpdate} currentManagerName={currentUser?.name ?? "Gestor"}
+                isOwner={isOwner} trash={data?.trash}
+              />
+            )}
           </div>
         )}
 
@@ -4891,7 +4918,14 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                 if(ok){ onUpdate("dpMessages",(data?.dpMessages??[]).filter(m=>m.restaurantId!==rid)); onUpdate("_toast","🗑️ Mensagens DP enviadas para a lixeira"); }
               }} style={{...S.btnSecondary,fontSize:12,color:"var(--red)",borderColor:"var(--red)44"}}>🗑️ Resetar Fale com DP</button>
             </div>}
-            <DpManagerTab restaurantId={rid} dpMessages={data?.dpMessages ?? []} onUpdate={onUpdate} isOwner={isOwner} />
+            {privacyMask ? (
+              <div style={{...S.card,textAlign:"center",padding:40}}>
+                <div style={{fontSize:36,marginBottom:12}}>🔒</div>
+                <p style={{color:"var(--text3)",fontSize:14}}>Mensagens do DP ocultas pelo modo privacidade.</p>
+              </div>
+            ) : (
+              <DpManagerTab restaurantId={rid} dpMessages={data?.dpMessages ?? []} onUpdate={onUpdate} isOwner={isOwner} />
+            )}
           </div>
         )}
 
@@ -4911,7 +4945,14 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
 
         {/* NOTIFICAÇÕES */}
         {tab === "notificacoes" && (
-          <NotificacoesTab restaurantId={rid} dpMessages={data?.dpMessages??[]} notifications={data?.notifications??[]} onUpdate={onUpdate} />
+          privacyMask ? (
+            <div style={{...S.card,textAlign:"center",padding:40,margin:20}}>
+              <div style={{fontSize:36,marginBottom:12}}>🔒</div>
+              <p style={{color:"var(--text3)",fontSize:14}}>Notificações ocultas pelo modo privacidade.</p>
+            </div>
+          ) : (
+            <NotificacoesTab restaurantId={rid} dpMessages={data?.dpMessages??[]} notifications={data?.notifications??[]} onUpdate={onUpdate} />
+          )
         )}
 
 
@@ -4954,7 +4995,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                       <div style={{color:"var(--text3)",fontSize:11}}>
                         {profileLabel}
                         {m.profile==="lider" && (m.areas??[]).length>0 && ` · ${m.areas.join(", ")}`}
-                        {m.cpf && ` · ${m.cpf}`}
+                        {m.cpf && ` · ${privacyMask ? "•••.•••.•••-••" : m.cpf}`}
                       </div>
                       {!mine && <div style={{color:"var(--text3)",fontSize:10,marginTop:2,fontStyle:"italic"}}>Criado pelo admin</div>}
                     </div>
@@ -5287,6 +5328,17 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                 })}
               </div>
             </div>
+            {/* Privacidade */}
+            <div style={{...S.card,marginBottom:20}}>
+              <p style={{color:ac,fontSize:14,fontWeight:700,margin:"0 0 8px"}}>🔒 Privacidade</p>
+              <p style={{color:"var(--text3)",fontSize:12,marginBottom:14}}>Quando ativo, oculta dados sensíveis (valores de gorjeta, CPFs, mensagens DP e comunicados) da visão do administrador AppTip.</p>
+              <label style={{display:"flex",alignItems:"center",gap:12,cursor:"pointer"}}>
+                <div onClick={()=>patchConfig({ privacyMode: !localRest.privacyMode })} style={{width:48,height:26,borderRadius:13,background:localRest.privacyMode?ac:"var(--border)",position:"relative",cursor:"pointer",transition:"background 0.2s"}}>
+                  <div style={{width:22,height:22,borderRadius:11,background:"#fff",position:"absolute",top:2,left:localRest.privacyMode?24:2,transition:"left 0.2s",boxShadow:"0 1px 3px rgba(0,0,0,0.2)"}}/>
+                </div>
+                <span style={{color:"var(--text)",fontSize:14,fontWeight:600}}>{localRest.privacyMode ? "Ativo — dados ocultos para o admin" : "Desativado"}</span>
+              </label>
+            </div>
             {(localRest.divisionMode ?? MODE_AREA_POINTS) === MODE_AREA_POINTS && (
               <div style={{...S.card,marginBottom:20}}>
                 <p style={{color:ac,fontSize:14,fontWeight:700,margin:"0 0 4px"}}>Distribuição por Área</p>
@@ -5400,6 +5452,29 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }
   ];
   function getPlano(r) { return PLANOS.find(p=>p.id===(r.planoId??"p10")) ?? PLANOS[0]; }
 
+  // Privacy helpers — mascarar dados sensíveis quando restaurante tem privacyMode
+  function isPrivate(restId) {
+    const r = restaurants.find(x => x.id === restId);
+    return r?.privacyMode === true;
+  }
+  function maskMoney(val, restId) {
+    if (!isPrivate(restId)) return typeof val === "number" ? val.toLocaleString("pt-BR",{minimumFractionDigits:2}) : val;
+    return "••••,••";
+  }
+  function maskCpfPriv(cpf, restId) {
+    if (!isPrivate(restId)) return cpf || "—";
+    return cpf ? "•••.•••.•••-••" : "—";
+  }
+  function maskText(text, restId) {
+    if (!isPrivate(restId)) return text;
+    return text ? "••••••••••••••••" : "";
+  }
+  // Check if ANY selected restaurant is private
+  function anyPrivate() {
+    if (selRestaurant) return isPrivate(selRestaurant);
+    return restaurants.some(r => r.privacyMode === true);
+  }
+
   const notifications = data?.notifications ?? [];
   const unreadNotifs = notifications.filter(n => !n.read && n.targetRole === "admin").length;
   const isMaster = currentUser?.isMaster === true;
@@ -5489,7 +5564,7 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }
 
         {/* Operacional */}
         {restTab === "operacional" && (
-          <RestaurantPanel restaurant={rest} restaurants={restaurants} employees={employees} roles={roles} tips={tips} splits={splits} schedules={schedules} onUpdate={onUpdate} perms={{ tips:true, schedule:true }} isOwner data={data} currentUser={currentUser} />
+          <RestaurantPanel restaurant={rest} restaurants={restaurants} employees={employees} roles={roles} tips={tips} splits={splits} schedules={schedules} onUpdate={onUpdate} perms={{ tips:true, schedule:true }} isOwner data={data} currentUser={currentUser} privacyMask={rest?.privacyMode === true} />
         )}
 
         {/* Gestores deste restaurante */}
@@ -5529,7 +5604,7 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }
                         {m.profile==="dp" && <span style={{background:"var(--blue-bg)",color:"var(--blue)",borderRadius:6,padding:"2px 8px",fontSize:10,fontWeight:700}}>📬 DP</span>}
                         {m.profile==="lider" && <span style={{background:"#f59e0b22",color:"#f59e0b",borderRadius:6,padding:"2px 8px",fontSize:10,fontWeight:700}}>👔 Líder</span>}
                       </div>
-                      <div style={{color:"var(--text3)",fontSize:12,marginBottom:4}}>CPF: {m.cpf||"—"}</div>
+                      <div style={{color:"var(--text3)",fontSize:12,marginBottom:4}}>CPF: {isPrivate(selRestaurant) ? "•••.•••.•••-••" : (m.cpf||"—")}</div>
                       {m.profile==="lider" && (m.areas??[]).length>0 && (
                         <div style={{color:"var(--text3)",fontSize:11,marginBottom:6}}>Áreas: {m.areas.join(", ")}</div>
                       )}
@@ -6041,7 +6116,7 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }
                       <option value="" disabled>Selecionar empregado...</option>
                       {restEmps.sort((a,b)=>a.name.localeCompare(b.name)).map(e => {
                         const role = roles.find(r => r.id === e.roleId);
-                        return <option key={e.id} value={e.id}>{e.name}{role ? ` — ${role.name}` : ""}{e.cpf ? ` (${e.cpf})` : ""}</option>;
+                        return <option key={e.id} value={e.id}>{e.name}{role ? ` — ${role.name}` : ""}{e.cpf ? ` (${isPrivate(selRestaurant) ? "•••.•••.•••-••" : e.cpf})` : ""}</option>;
                       })}
                     </select>
                   </div>
@@ -6679,7 +6754,7 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }
                       <span style={{color:"var(--text)",fontWeight:700,fontSize:15}}>{m.name}</span>
                       {m.isDP && <span style={{background:"var(--blue-bg)",color:"var(--blue)",borderRadius:6,padding:"2px 8px",fontSize:11,fontWeight:700}}>📬 DP</span>}
                     </div>
-                    <div style={{color:"var(--text3)",fontSize:12,marginBottom:8}}>CPF: {m.cpf||"—"}</div>
+                    <div style={{color:"var(--text3)",fontSize:12,marginBottom:8}}>CPF: {(m.restaurantIds??[]).some(rid=>isPrivate(rid)) ? maskCpfPriv(m.cpf, (m.restaurantIds??[])[0]) : (m.cpf||"—")}</div>
                     <div style={{display:"flex",gap:4,flexWrap:"wrap"}}>
                       {(m.restaurantIds??[]).map(rid=>{
                         const r=restaurants.find(x=>x.id===rid);
@@ -6711,7 +6786,7 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }
                     {s.isMaster && <span style={{background:"var(--ac-bg)",color:"var(--ac-text)",borderRadius:6,padding:"2px 8px",fontSize:11,fontWeight:700}}>👑 Master</span>}
                     {s.id===currentUser?.id&&<span style={{color:"var(--text3)",fontSize:11}}>← você</span>}
                   </div>
-                  <div style={{color:"var(--text3)",fontSize:12}}>CPF: {s.cpf||"—"}</div>
+                  <div style={{color:"var(--text3)",fontSize:12}}>CPF: {anyPrivate() ? "•••.•••.•••-••" : (s.cpf||"—")}</div>
                 </div>
                 <div style={{display:"flex",gap:8}}>
                   <button onClick={()=>{setEditOwnerId(s.id);setOwnerForm({name:s.name,cpf:s.cpf??"",pin:s.pin??"",isMaster:s.isMaster??false});setShowOwnerModal(true);}} style={{...S.btnSecondary,fontSize:12}}>Editar</button>
@@ -6877,6 +6952,12 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }
 
         {tab === "changelog" && (() => {
           const CHANGELOG = [
+            { version:"5.4.0", date:"2026-04-12", items:[
+              "Novo: Modo Privacidade — gestor pode ocultar dados sensíveis da visão do admin",
+              "Valores de gorjeta, CPFs, mensagens DP e comunicados ficam mascarados (•••) para o admin",
+              "Toggle na aba Config do gestor: 🔒 Privacidade",
+              "Banner visual no topo quando admin acessa restaurante com privacidade ativa",
+            ]},
             { version:"5.3.3", date:"2026-04-12", items:[
               "Login por ID (ex: LBZ0001): agora mostra tela de escolha Gestor/Empregado quando o CPF do empregado também é de um gestor",
             ]},
