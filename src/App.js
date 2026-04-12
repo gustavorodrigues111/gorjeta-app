@@ -1317,7 +1317,7 @@ function validateWeekSchedule(days) {
 }
 
 // ── Work Schedule Manager Tab ─────────────────────────────────────────────────
-function WorkScheduleManagerTab({ restaurantId, employees, workSchedules, notifications, managers, currentManagerName, onUpdate, communications, isOwner, schedTemplates, schedDrafts }) {
+function WorkScheduleManagerTab({ restaurantId, employees, workSchedules, notifications, managers, currentManagerName, onUpdate, communications, isOwner }) {
   const ac = "var(--ac)";
   const restEmps = employees.filter(e => e.restaurantId === restaurantId && !e.inactive);
 
@@ -1328,35 +1328,43 @@ function WorkScheduleManagerTab({ restaurantId, employees, workSchedules, notifi
   const [showValidFrom, setShowValidFrom]   = useState(false);
   const [validFrom, setValidFrom]           = useState(today());
   const [selectedSchedIds, setSelectedSchedIds] = useState(new Set());
-  const [showTemplates, setShowTemplates]   = useState(false);
-  const [tplName, setTplName]               = useState("");
-  const [draftSaved, setDraftSaved]         = useState(false);
+  const [saveMode, setSaveMode]             = useState(null); // "days" or "full"
 
   const selEmp = restEmps.find(e => e.id === selEmpId);
   const empSchedules = workSchedules?.[restaurantId]?.[selEmpId] ?? [];
 
   // ── Helpers: convert between internal format (with active flag) and storage format ──
-  function toInternal(storedDays) {
+  function toInternal(storedEntry) {
+    const storedDays = storedEntry?.days;
+    const hoursComplete = storedEntry?.hoursComplete !== false; // legacy entries default true
     const out = {};
     for (let i = 0; i < 7; i++) {
       const d = storedDays?.[i];
       if (d && (d.in || d.out)) {
         out[i] = { active: true, in: d.in || "", out: d.out || "", break: d.break ?? 0 };
-      } else if (d && d.active === false) {
+      } else if (d && d.active) {
+        // days-only save: active but no hours
+        out[i] = { active: true, in: "", out: "", break: 0 };
+      } else if (storedDays && !d) {
+        // missing from stored = folga
         out[i] = { active: false };
-      } else if (d && d.active === true) {
-        out[i] = { active: true, in: d.in || "", out: d.out || "", break: d.break ?? 0 };
       } else {
-        out[i] = { active: !d ? true : !!d.active }; // default: work day
+        out[i] = { active: true }; // fresh default
       }
     }
     return out;
   }
-  function toStorage(internalDays) {
+
+  function toStorage(internalDays, daysOnly) {
     const out = {};
     Object.entries(internalDays).forEach(([idx, d]) => {
-      if (d.active && d.in && d.out) {
-        out[idx] = { in: d.in, out: d.out, break: d.break ?? 0 };
+      if (d.active) {
+        if (!daysOnly && d.in && d.out) {
+          out[idx] = { in: d.in, out: d.out, break: d.break ?? 0 };
+        } else {
+          // days-only: store just active flag so we know it's a work day
+          out[idx] = { active: true };
+        }
       }
       // inactive days (folga) → not stored (absence = folga)
     });
@@ -1368,31 +1376,21 @@ function WorkScheduleManagerTab({ restaurantId, employees, workSchedules, notifi
     return Object.values(days).every(d => !d.active || (d.in && d.out));
   }
 
-  // ── Load employee (check for draft first) ──
+  // ── Check if ANY active day has hours ──
+  function hasAnyHours(days) {
+    return Object.values(days).some(d => d.active && d.in && d.out);
+  }
+
+  // ── Load employee ──
   function loadEmp(empId) {
     setSelEmpId(empId);
     setErrors([]);
     setShowValidFrom(false);
-    setDraftSaved(false);
-    setShowTemplates(false);
-    // Check draft first
-    const draft = schedDrafts?.[restaurantId]?.[empId];
-    if (draft && draft.days) {
-      setEditDays(toInternal(draft.days));
-      setDraftSaved(true);
-      return;
-    }
-    // Load from current schedule
+    setSaveMode(null);
     const sched = (workSchedules?.[restaurantId]?.[empId] ?? []);
     const cur = sched[sched.length - 1];
     if (cur) {
-      // Reconstruct: days present = active, days missing = folga
-      const internal = {};
-      for (let i = 0; i < 7; i++) {
-        const d = cur.days[i];
-        internal[i] = d && d.in ? { active: true, in: d.in, out: d.out, break: d.break ?? 0 } : { active: false };
-      }
-      setEditDays(internal);
+      setEditDays(toInternal(cur));
     } else {
       // New employee: all days active, no hours
       const fresh = {};
@@ -1408,7 +1406,6 @@ function WorkScheduleManagerTab({ restaurantId, employees, workSchedules, notifi
       return { ...prev, [dayIdx]: cur.active ? { active: false } : { active: true, in: "", out: "", break: 0 } };
     });
     setErrors([]);
-    setDraftSaved(false);
   }
 
   // ── Update time/break field ──
@@ -1418,49 +1415,42 @@ function WorkScheduleManagerTab({ restaurantId, employees, workSchedules, notifi
       [dayIdx]: { ...(prev[dayIdx] ?? { active: true }), [field]: val }
     }));
     setErrors([]);
-    setDraftSaved(false);
   }
 
-  // ── Auto-save draft ──
-  function saveDraft() {
-    const drafts = { ...(schedDrafts ?? {}) };
-    if (!drafts[restaurantId]) drafts[restaurantId] = {};
-    drafts[restaurantId][selEmpId] = { days: editDays, savedAt: new Date().toISOString() };
-    onUpdate("schedDrafts", drafts);
-    setDraftSaved(true);
-  }
-
-  // ── Clear draft ──
-  function clearDraft() {
-    const drafts = { ...(schedDrafts ?? {}) };
-    if (drafts[restaurantId]) {
-      delete drafts[restaurantId][selEmpId];
-      onUpdate("schedDrafts", drafts);
-    }
-    setDraftSaved(false);
-  }
-
-  // ── Validate (only days with hours) ──
-  function tryValidate() {
-    const storageDays = toStorage(editDays);
-    // Check: at least 1 active day
+  // ── "Salvar Dias" (days-only, no hours required) ──
+  function trySaveDays() {
     const activeDays = Object.values(editDays).filter(d => d.active);
     if (activeDays.length === 0) { setErrors(["Selecione pelo menos um dia de trabalho."]); return; }
-    // If some active days have no hours → save as "partial" (days-only)
+    setErrors([]);
+    setSaveMode("days");
+    setShowValidFrom(true);
+  }
+
+  // ── "Validar e Salvar" (full hours + validation) ──
+  function tryValidateFull() {
+    const activeDays = Object.values(editDays).filter(d => d.active);
+    if (activeDays.length === 0) { setErrors(["Selecione pelo menos um dia de trabalho."]); return; }
     if (!hasAllHours(editDays)) {
-      setErrors(["Preencha os horários de todos os dias marcados como trabalho antes de salvar, ou salve como rascunho."]);
+      setErrors(["Preencha os horarios de todos os dias marcados como trabalho para validar a carga semanal."]);
       return;
     }
+    const storageDays = toStorage(editDays, false);
     const { errors: errs } = validateWeekSchedule(storageDays);
     setErrors(errs);
-    if (errs.length === 0) setShowValidFrom(true);
+    if (errs.length === 0) { setSaveMode("full"); setShowValidFrom(true); }
   }
 
   // ── Save schedule ──
   function saveSchedule() {
-    const storageDays = toStorage(editDays);
-    const { errors: errs, totalContract } = validateWeekSchedule(storageDays);
-    if (errs.length > 0) { setErrors(errs); return; }
+    const daysOnly = saveMode === "days";
+    const storageDays = toStorage(editDays, daysOnly);
+
+    let totalContract = 0;
+    if (!daysOnly) {
+      const { errors: errs, totalContract: tc } = validateWeekSchedule(storageDays);
+      if (errs.length > 0) { setErrors(errs); return; }
+      totalContract = tc;
+    }
 
     const newEntry = {
       id: `${Date.now()}-${Math.random().toString(36).slice(2,5)}`,
@@ -1469,6 +1459,7 @@ function WorkScheduleManagerTab({ restaurantId, employees, workSchedules, notifi
       createdBy: currentManagerName,
       createdAt: new Date().toISOString(),
       totalContract,
+      hoursComplete: !daysOnly,
     };
 
     const empScheds = [...(workSchedules?.[restaurantId]?.[selEmpId] ?? []), newEntry];
@@ -1477,13 +1468,18 @@ function WorkScheduleManagerTab({ restaurantId, employees, workSchedules, notifi
       [restaurantId]: { ...(workSchedules?.[restaurantId] ?? {}), [selEmpId]: empScheds }
     });
 
-    // Clear draft
-    clearDraft();
+    // Format schedule description for notifications
+    function fmtSchedLine(i) {
+      const d = storageDays[i];
+      if (!d) return `${WEEK_DAYS_LABEL[i]}: Folga`;
+      if (d.in && d.out) return `${WEEK_DAYS_LABEL[i]}: ${d.in} - ${d.out} (intervalo ${d.break??0}min)`;
+      return `${WEEK_DAYS_LABEL[i]}: Trabalha (horario a definir)`;
+    }
 
     // Notify DP managers
     const dpMgrs = managers.filter(m => m.isDP && (m.restaurantIds ?? []).includes(restaurantId));
     if (dpMgrs.length > 0) {
-      const body = `Horario alterado\n\nEmpregado: ${selEmp?.name}\nAlterado por: ${currentManagerName}\nVigencia a partir de: ${fmtDate(validFrom)}\n\nNovo horario:\n${[0,1,2,3,4,5,6].map(i=>{const d=storageDays[i];return d?.in&&d?.out?`${WEEK_DAYS_LABEL[i]}: ${d.in} - ${d.out} (intervalo ${d.break??0}min)`:`${WEEK_DAYS_LABEL[i]}: Folga`;}).join("\n")}`;
+      const body = `Horario alterado\n\nEmpregado: ${selEmp?.name}\nAlterado por: ${currentManagerName}\nVigencia a partir de: ${fmtDate(validFrom)}${daysOnly ? "\n(Apenas dias definidos, horarios pendentes)" : ""}\n\nNovo horario:\n${[0,1,2,3,4,5,6].map(fmtSchedLine).join("\n")}`;
       const notif = {
         id: `${Date.now()}-notif-${Math.random().toString(36).slice(2,5)}`,
         restaurantId, type: "horario", body,
@@ -1493,7 +1489,7 @@ function WorkScheduleManagerTab({ restaurantId, employees, workSchedules, notifi
     }
 
     // Comunicado for employee
-    const schedBody = `Seu horario de trabalho foi atualizado por ${currentManagerName}.\nVigencia a partir de: ${fmtDate(validFrom)}\n\nNovo horario:\n${[0,1,2,3,4,5,6].map(i=>{const d=storageDays[i];return d?.in&&d?.out?`${WEEK_DAYS_LABEL[i]}: ${d.in} - ${d.out} (intervalo ${d.break??0}min)`:`${WEEK_DAYS_LABEL[i]}: Folga`;}).join("\n")}`;
+    const schedBody = `Seu horario de trabalho foi atualizado por ${currentManagerName}.\nVigencia a partir de: ${fmtDate(validFrom)}${daysOnly ? "\n(Dias de trabalho e folga definidos, horarios serao preenchidos em breve)" : ""}\n\nNovo horario:\n${[0,1,2,3,4,5,6].map(fmtSchedLine).join("\n")}`;
     const commForEmp = {
       id: `${Date.now()}-comm-${Math.random().toString(36).slice(2,5)}`,
       restaurantId,
@@ -1507,49 +1503,20 @@ function WorkScheduleManagerTab({ restaurantId, employees, workSchedules, notifi
     onUpdate("communications", [...(communications ?? []), commForEmp]);
 
     setShowValidFrom(false);
+    setSaveMode(null);
     setErrors([]);
-    onUpdate("_toast", `Horario de ${selEmp?.name} salvo com vigencia a partir de ${fmtDate(validFrom)}`);
-  }
-
-  // ── Template functions ──
-  const restTemplates = schedTemplates?.[restaurantId] ?? [];
-
-  function saveTemplate() {
-    if (!tplName.trim()) return;
-    const tpl = {
-      id: `${Date.now()}-tpl-${Math.random().toString(36).slice(2,5)}`,
-      name: tplName.trim(),
-      days: editDays,
-      createdAt: new Date().toISOString(),
-      createdBy: currentManagerName,
-    };
-    const updated = { ...(schedTemplates ?? {}), [restaurantId]: [...restTemplates, tpl] };
-    onUpdate("schedTemplates", updated);
-    setTplName("");
-    setShowTemplates(false);
-    onUpdate("_toast", `Template "${tpl.name}" salvo`);
-  }
-
-  function applyTemplate(tpl) {
-    setEditDays(toInternal(tpl.days));
-    setShowTemplates(false);
-    setErrors([]);
-    setDraftSaved(false);
-    onUpdate("_toast", `Template "${tpl.name}" aplicado`);
-  }
-
-  function deleteTemplate(tplId) {
-    if (!window.confirm("Apagar este template?")) return;
-    const updated = { ...(schedTemplates ?? {}), [restaurantId]: restTemplates.filter(t => t.id !== tplId) };
-    onUpdate("schedTemplates", updated);
+    onUpdate("_toast", daysOnly
+      ? `Dias de ${selEmp?.name} salvos (horarios pendentes)`
+      : `Horario completo de ${selEmp?.name} salvo com vigencia a partir de ${fmtDate(validFrom)}`
+    );
   }
 
   // ── Calculated values ──
-  const storageDays = toStorage(editDays);
   const activeDayCount = Object.values(editDays).filter(d => d.active).length;
   const folgaDayCount = 7 - activeDayCount;
   const allHoursFilled = hasAllHours(editDays);
-  const { totalContract } = allHoursFilled && activeDayCount > 0 ? validateWeekSchedule(storageDays) : { totalContract: 0 };
+  const storageDaysCalc = allHoursFilled && activeDayCount > 0 ? toStorage(editDays, false) : {};
+  const { totalContract } = allHoursFilled && activeDayCount > 0 ? validateWeekSchedule(storageDaysCalc) : { totalContract: 0 };
   const MIN_WEEK = 43*60+55, MAX_WEEK = 44*60;
   const weekOk = allHoursFilled && activeDayCount > 0 && totalContract >= MIN_WEEK && totalContract <= MAX_WEEK;
 
@@ -1562,43 +1529,32 @@ function WorkScheduleManagerTab({ restaurantId, employees, workSchedules, notifi
   // ═══ LIST VIEW (employee selection) ═══
   if (!selEmpId) return (
     <div>
-      <p style={{color:"var(--text3)",fontSize:13,marginBottom:16}}>Selecione um empregado para editar o horario:</p>
+      <p style={{color:"var(--text3)",fontSize:13,marginBottom:16}}>Selecione um empregado para cadastrar ou editar o horario:</p>
       {restEmps.map(emp => {
         const sched = workSchedules?.[restaurantId]?.[emp.id] ?? [];
         const cur = sched[sched.length - 1];
-        const hasDraft = !!schedDrafts?.[restaurantId]?.[emp.id];
+        const hasHoursComplete = cur?.hoursComplete !== false;
+        const workDays = cur ? Object.keys(cur.days).length : 0;
+        const folgaDays = cur ? 7 - workDays : 0;
         return (
           <div key={emp.id} onClick={()=>loadEmp(emp.id)} style={{...S.card,marginBottom:8,cursor:"pointer",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
             <div style={{flex:1,minWidth:0}}>
               <div style={{color:"var(--text)",fontWeight:600,fontSize:14,display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
                 {emp.name}
-                {hasDraft && <span style={{background:"#f59e0b22",color:"#f59e0b",fontSize:10,padding:"2px 8px",borderRadius:6,fontWeight:700}}>RASCUNHO</span>}
+                {cur && !hasHoursComplete && <span style={{background:"#f59e0b22",color:"#f59e0b",fontSize:10,padding:"2px 8px",borderRadius:6,fontWeight:700}}>HORARIOS PENDENTES</span>}
               </div>
               <div style={{color:"var(--text3)",fontSize:12}}>
-                {cur ? `Vigente desde ${fmtDate(cur.validFrom)} · ${fmtHHMM(cur.totalContract)}/sem` : "Sem horario cadastrado"}
+                {cur
+                  ? (hasHoursComplete
+                    ? `Vigente desde ${fmtDate(cur.validFrom)} · ${fmtHHMM(cur.totalContract)}/sem`
+                    : `${workDays} dias trabalho, ${folgaDays} folga(s) · horarios pendentes`)
+                  : "Sem horario cadastrado"}
               </div>
             </div>
             <span style={{color:ac,fontSize:16,fontWeight:700,flexShrink:0,paddingLeft:8}}>&rsaquo;</span>
           </div>
         );
       })}
-
-      {/* Template management shortcut */}
-      {restTemplates.length > 0 && (
-        <details style={{marginTop:16}}>
-          <summary style={{color:"var(--text3)",fontSize:12,cursor:"pointer",padding:"8px 12px",background:"var(--bg1)",borderRadius:8}}>
-            Templates salvos ({restTemplates.length})
-          </summary>
-          <div style={{paddingTop:8}}>
-            {restTemplates.map(t => (
-              <div key={t.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"8px 12px",borderBottom:"1px solid var(--border)",fontSize:12}}>
-                <span style={{color:"var(--text2)",fontWeight:600}}>{t.name}</span>
-                <button onClick={e=>{e.stopPropagation();deleteTemplate(t.id);}} style={{background:"none",border:"none",color:"var(--red)",cursor:"pointer",fontSize:11,fontFamily:"'DM Mono',monospace"}}>apagar</button>
-              </div>
-            ))}
-          </div>
-        </details>
-      )}
     </div>
   );
 
@@ -1607,20 +1563,12 @@ function WorkScheduleManagerTab({ restaurantId, employees, workSchedules, notifi
     <div>
       {/* Header */}
       <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:16,flexWrap:"wrap"}}>
-        <button onClick={()=>{setSelEmpId(null);setErrors([]);setShowValidFrom(false);}} style={{...S.btnSecondary,fontSize:12,padding:"6px 14px"}}>← Voltar</button>
+        <button onClick={()=>{setSelEmpId(null);setErrors([]);setShowValidFrom(false);setSaveMode(null);}} style={{...S.btnSecondary,fontSize:12,padding:"6px 14px"}}>← Voltar</button>
         <div style={{flex:1,minWidth:0}}>
           <div style={{color:"var(--text)",fontWeight:700,fontSize:15}}>{selEmp?.name}</div>
           <div style={{color:"var(--text3)",fontSize:11}}>Horario semanal · {activeDayCount} dias · {folgaDayCount} folga(s)</div>
         </div>
       </div>
-
-      {/* Draft indicator */}
-      {draftSaved && (
-        <div style={{background:"#f59e0b11",border:"1px solid #f59e0b44",borderRadius:10,padding:"8px 14px",marginBottom:12,display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:8}}>
-          <span style={{color:"#f59e0b",fontSize:12,fontWeight:600}}>Rascunho salvo automaticamente</span>
-          <button onClick={()=>{clearDraft();loadEmp(selEmpId);}} style={{background:"none",border:"1px solid #f59e0b44",borderRadius:6,color:"#f59e0b",cursor:"pointer",padding:"3px 10px",fontSize:11,fontFamily:"'DM Mono',monospace"}}>Descartar rascunho</button>
-        </div>
-      )}
 
       {/* History */}
       {empSchedules.length > 1 && (
@@ -1649,7 +1597,7 @@ function WorkScheduleManagerTab({ restaurantId, employees, workSchedules, notifi
               </div>
             )}
             {[...empSchedules].reverse().slice(1).map(s => (
-              <div key={s.id} style={{padding:"6px 12px",borderBottom:"1px solid var(--border)",fontSize:12,display:"flex",alignItems:"center",gap:10}}>
+              <div key={s.id} style={{padding:"6px 12px",borderBottom:"1px solid var(--border)",fontSize:12,display:"flex",alignItems:"center",gap:10,flexWrap:"wrap"}}>
                 {isOwner && (
                   <input type="checkbox" checked={selectedSchedIds.has(s.id)}
                     onChange={e=>{ const next = new Set(selectedSchedIds); e.target.checked ? next.add(s.id) : next.delete(s.id); setSelectedSchedIds(next); }}
@@ -1658,57 +1606,20 @@ function WorkScheduleManagerTab({ restaurantId, employees, workSchedules, notifi
                 )}
                 <span style={{color:"var(--text2)"}}>Vigente de {fmtDate(s.validFrom)}</span>
                 <span style={{color:"var(--text3)"}}>por {s.createdBy}</span>
-                <span style={{color:"var(--text3)"}}>{fmtHHMM(s.totalContract)}/sem</span>
+                <span style={{color:"var(--text3)"}}>{s.hoursComplete !== false ? `${fmtHHMM(s.totalContract)}/sem` : "dias apenas"}</span>
               </div>
             ))}
           </div>
         </details>
       )}
 
-      {/* Template & draft actions */}
-      <div style={{display:"flex",gap:8,marginBottom:12,flexWrap:"wrap"}}>
-        <button onClick={()=>setShowTemplates(!showTemplates)} style={{...S.btnSecondary,fontSize:11,padding:"6px 12px"}}>
-          {showTemplates ? "Fechar templates" : `Templates${restTemplates.length>0?` (${restTemplates.length})`:""}`}
-        </button>
-        <button onClick={saveDraft} style={{...S.btnSecondary,fontSize:11,padding:"6px 12px",borderColor:"#f59e0b44",color:"#f59e0b"}}>
-          Salvar rascunho
-        </button>
-      </div>
-
-      {/* Templates panel */}
-      {showTemplates && (
-        <div style={{...cardS,border:"1px solid var(--ac)22"}}>
-          <p style={{color:ac,fontWeight:700,fontSize:13,margin:"0 0 10px"}}>Templates de horario</p>
-
-          {restTemplates.length > 0 && (
-            <div style={{marginBottom:12}}>
-              {restTemplates.map(t => (
-                <div key={t.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"8px 0",borderBottom:"1px solid var(--border)"}}>
-                  <div>
-                    <span style={{color:"var(--text)",fontWeight:600,fontSize:13}}>{t.name}</span>
-                    <span style={{color:"var(--text3)",fontSize:11,marginLeft:8}}>por {t.createdBy}</span>
-                  </div>
-                  <div style={{display:"flex",gap:6}}>
-                    <button onClick={()=>applyTemplate(t)} style={{padding:"4px 10px",borderRadius:6,border:"1px solid var(--ac)44",background:"transparent",color:ac,cursor:"pointer",fontSize:11}}>Aplicar</button>
-                    <button onClick={()=>deleteTemplate(t.id)} style={{padding:"4px 8px",borderRadius:6,border:"none",background:"transparent",color:"var(--red)",cursor:"pointer",fontSize:11}}>x</button>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-
-          <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
-            <input value={tplName} onChange={e=>setTplName(e.target.value)} placeholder="Nome do template (ex: Cozinha manha)" style={{...S.input,flex:1,minWidth:140,fontSize:12,padding:"8px 12px"}}/>
-            <button onClick={saveTemplate} disabled={!tplName.trim()} style={{...S.btnSecondary,fontSize:11,padding:"6px 14px",opacity:tplName.trim()?1:0.4}}>Salvar atual como template</button>
-          </div>
-        </div>
-      )}
-
       {/* ═══ DAY CARDS (mobile-first) ═══ */}
-      <div style={{background:"var(--bg1)",borderRadius:10,padding:"10px 14px",marginBottom:12,display:"flex",alignItems:"center",gap:12,flexWrap:"wrap"}}>
-        <span style={{color:"var(--text3)",fontSize:12}}>Use o switch de cada dia para definir:</span>
-        <span style={{color:"var(--green)",fontSize:12,fontWeight:600}}>ON = Trabalha</span>
-        <span style={{color:"var(--text3)",fontSize:12,fontWeight:600}}>OFF = Folga</span>
+      <div style={{background:"var(--bg1)",borderRadius:10,padding:"10px 14px",marginBottom:12}}>
+        <div style={{display:"flex",alignItems:"center",gap:12,flexWrap:"wrap"}}>
+          <span style={{color:"var(--green)",fontSize:12,fontWeight:600}}>ON = Trabalha</span>
+          <span style={{color:"var(--text3)",fontSize:12,fontWeight:600}}>OFF = Folga</span>
+        </div>
+        <p style={{color:"var(--text3)",fontSize:11,margin:"6px 0 0"}}>Defina os dias de trabalho e folga. Horarios podem ser preenchidos agora ou depois.</p>
       </div>
       <div style={{marginBottom:16}}>
         {[0,1,2,3,4,5,6].map(dayIdx => {
@@ -1730,8 +1641,8 @@ function WorkScheduleManagerTab({ restaurantId, employees, workSchedules, notifi
               <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom: isActive ? 12 : 0}}>
                 <div style={{display:"flex",alignItems:"center",gap:10}}>
                   <span style={{color:isWeekend?"#f59e0b":"var(--text)",fontWeight:700,fontSize:15,minWidth:36}}>{WEEK_DAYS_LABEL[dayIdx]}</span>
-                  <span style={{color: isActive ? (hasHours ? "var(--green)" : "#f59e0b") : "var(--text3)", fontSize:12, fontWeight: isActive ? 600 : 400}}>
-                    {isActive ? (hasHours ? "Trabalha" : "Preencha os horarios abaixo") : "FOLGA"}
+                  <span style={{color: isActive ? (hasHours ? "var(--green)" : "var(--text3)") : "var(--text3)", fontSize:12, fontWeight: isActive ? 600 : 400}}>
+                    {isActive ? (hasHours ? "Trabalha" : "Trabalha (sem horario)") : "FOLGA"}
                   </span>
                 </div>
                 <button onClick={()=>toggleDay(dayIdx)} style={isActive ? toggleOn : toggleOff}>
@@ -1770,10 +1681,6 @@ function WorkScheduleManagerTab({ restaurantId, employees, workSchedules, notifi
                       <span style={{color:contractOver?"var(--red)":ac,fontWeight:700}}>Contratual: {fmtHHMM(calc.totalContract)}</span>
                     </div>
                   )}
-
-                  {!hasHours && (
-                    <p style={{color:"var(--text3)",fontSize:11,margin:"4px 0 0",fontStyle:"italic"}}>Horarios podem ser preenchidos depois</p>
-                  )}
                 </div>
               )}
             </div>
@@ -1781,7 +1688,7 @@ function WorkScheduleManagerTab({ restaurantId, employees, workSchedules, notifi
         })}
       </div>
 
-      {/* Weekly total */}
+      {/* Weekly total (only if all hours filled) */}
       {allHoursFilled && activeDayCount > 0 && (
         <div style={{...cardS,display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:8,borderColor:weekOk?"var(--green)33":"var(--red)33"}}>
           <span style={{color:"var(--text3)",fontSize:13}}>Total semanal contratual</span>
@@ -1792,16 +1699,10 @@ function WorkScheduleManagerTab({ restaurantId, employees, workSchedules, notifi
         </div>
       )}
 
-      {!allHoursFilled && activeDayCount > 0 && (
-        <div style={{...cardS,borderColor:"#f59e0b33",display:"flex",alignItems:"center",gap:10,flexWrap:"wrap"}}>
-          <span style={{color:"#f59e0b",fontSize:12}}>Alguns dias de trabalho ainda nao tem horario preenchido. Salve como rascunho ou preencha para validar.</span>
-        </div>
-      )}
-
       {/* Validation errors */}
       {errors.length > 0 && (
         <div style={{background:"#e74c3c11",border:"1px solid #e74c3c44",borderRadius:10,padding:"12px 16px",marginBottom:12}}>
-          <p style={{color:"var(--red)",fontWeight:700,fontSize:13,margin:"0 0 8px"}}>Corrija os erros antes de salvar:</p>
+          <p style={{color:"var(--red)",fontWeight:700,fontSize:13,margin:"0 0 8px"}}>Corrija antes de salvar:</p>
           {errors.map((e,i)=><div key={i} style={{color:"var(--red)",fontSize:12,marginBottom:4}}>• {e}</div>)}
         </div>
       )}
@@ -1809,12 +1710,20 @@ function WorkScheduleManagerTab({ restaurantId, employees, workSchedules, notifi
       {/* Valid from confirmation */}
       {showValidFrom && (
         <div style={{...cardS,border:"1px solid var(--ac)44"}}>
-          <p style={{color:ac,fontWeight:700,fontSize:14,margin:"0 0 10px"}}>A partir de quando este horario entra em vigor?</p>
+          <p style={{color:ac,fontWeight:700,fontSize:14,margin:"0 0 10px"}}>
+            {saveMode === "days" ? "Salvar dias de trabalho e folga" : "Salvar horario completo"}
+          </p>
+          <p style={{color:"var(--text3)",fontSize:12,marginBottom:10}}>A partir de quando entra em vigor?</p>
           <input type="date" value={validFrom} onChange={e=>setValidFrom(e.target.value)} style={{...S.input,marginBottom:12,fontSize:15,padding:"12px 14px"}}/>
-          <p style={{color:"var(--text3)",fontSize:12,marginBottom:12}}>Todos os gestores DP receberao uma notificacao com esta alteracao.</p>
+          {saveMode === "days" && (
+            <p style={{color:"#f59e0b",fontSize:12,marginBottom:12}}>Os horarios de cada dia poderao ser preenchidos depois. A escala usara os dias de trabalho/folga.</p>
+          )}
+          {saveMode === "full" && (
+            <p style={{color:"var(--text3)",fontSize:12,marginBottom:12}}>Todos os gestores DP receberao uma notificacao com esta alteracao.</p>
+          )}
           <div style={{display:"flex",gap:10,flexWrap:"wrap"}}>
             <button onClick={saveSchedule} style={{...S.btnPrimary,flex:1,minWidth:140}}>Confirmar e Salvar</button>
-            <button onClick={()=>setShowValidFrom(false)} style={{...S.btnSecondary,flex:1,minWidth:100}}>Cancelar</button>
+            <button onClick={()=>{setShowValidFrom(false);setSaveMode(null);}} style={{...S.btnSecondary,flex:1,minWidth:100}}>Cancelar</button>
           </div>
         </div>
       )}
@@ -1822,12 +1731,13 @@ function WorkScheduleManagerTab({ restaurantId, employees, workSchedules, notifi
       {/* Action buttons */}
       {!showValidFrom && (
         <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
-          <button onClick={tryValidate} disabled={!allHoursFilled || activeDayCount === 0}
-            style={{...S.btnPrimary,flex:2,minWidth:160,opacity:allHoursFilled&&activeDayCount>0?1:0.4}}>
-            Validar e Salvar
+          <button onClick={trySaveDays} disabled={activeDayCount === 0}
+            style={{...S.btnSecondary,flex:1,minWidth:120,opacity:activeDayCount>0?1:0.4}}>
+            Salvar Dias
           </button>
-          <button onClick={saveDraft} style={{...S.btnSecondary,flex:1,minWidth:100,borderColor:"#f59e0b44",color:"#f59e0b"}}>
-            Salvar Rascunho
+          <button onClick={tryValidateFull} disabled={!allHoursFilled || activeDayCount === 0}
+            style={{...S.btnPrimary,flex:2,minWidth:160,opacity:allHoursFilled&&activeDayCount>0?1:0.4}}>
+            Validar e Salvar Horario
           </button>
         </div>
       )}
@@ -1847,20 +1757,23 @@ function WorkScheduleEmployeeTab({ empId, restaurantId, workSchedules }) {
         {[0,1,2,3,4,5,6].map(i => {
           const d = s.days[i];
           const hasShift = d?.in && d?.out;
+          const isWorkDay = !!d; // day exists in storage = work day
           const isWeekend = i === 0 || i === 6;
           const calc = hasShift ? calcDayHours(d.in, d.out, parseInt(d.break)||0) : null;
           return (
             <div key={i} style={{
               padding:"10px 14px",marginBottom:6,borderRadius:10,
-              background:hasShift?"var(--card-bg)":"var(--bg1)",
-              border:`1px solid ${hasShift?"var(--border)":"transparent"}`,
-              opacity:hasShift?1:0.5,
+              background:isWorkDay?"var(--card-bg)":"var(--bg1)",
+              border:`1px solid ${isWorkDay?"var(--border)":"transparent"}`,
+              opacity:isWorkDay?1:0.5,
             }}>
               <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
                 <span style={{color:isWeekend?"#f59e0b":"var(--text)",fontWeight:700,fontSize:14,minWidth:36}}>{WEEK_DAYS_LABEL[i]}</span>
                 {hasShift
                   ? <span style={{color:"var(--text2)",fontSize:13,fontFamily:"'DM Mono',monospace"}}>{d.in} - {d.out}</span>
-                  : <span style={{color:"var(--text3)",fontSize:12}}>Folga</span>
+                  : isWorkDay
+                    ? <span style={{color:"#f59e0b",fontSize:12}}>Trabalha (horario pendente)</span>
+                    : <span style={{color:"var(--text3)",fontSize:12}}>Folga</span>
                 }
               </div>
               {hasShift && calc && (
@@ -1895,6 +1808,11 @@ function WorkScheduleEmployeeTab({ empId, restaurantId, workSchedules }) {
           <span style={{color:ac,fontSize:14,fontWeight:700}}>Horario atual</span>
           <span style={{color:"var(--text3)",fontSize:12}}>Desde {fmtDate(current.validFrom)}</span>
         </div>
+        {current.hoursComplete === false && (
+          <div style={{background:"#f59e0b11",borderRadius:8,padding:"8px 12px",marginBottom:12,border:"1px solid #f59e0b33"}}>
+            <span style={{color:"#f59e0b",fontSize:12,fontWeight:600}}>Dias de trabalho e folga definidos. Horarios ainda nao preenchidos pelo gestor.</span>
+          </div>
+        )}
         {current.totalContract > 0 && (
           <div style={{background:"var(--bg1)",borderRadius:8,padding:"8px 12px",marginBottom:12,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
             <span style={{color:"var(--text3)",fontSize:12}}>Carga semanal</span>
@@ -4310,8 +4228,8 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                     const empScheds = data?.workSchedules?.[rid]?.[emp.id] ?? [];
                     const currentSched = empScheds[empScheds.length - 1];
                     if (!currentSched) return;
-                    // Dias SEM turno no contrato = folga fixa
-                    const folgaDays = new Set([0,1,2,3,4,5,6].filter(d => !currentSched.days[d]?.in || !currentSched.days[d]?.out));
+                    // Dias SEM presença no contrato = folga fixa (suporta days-only e formato completo)
+                    const folgaDays = new Set([0,1,2,3,4,5,6].filter(d => !currentSched.days[d]));
                     const empDayMap = { ...(newSchedules?.[rid]?.[mk]?.[emp.id] ?? {}) };
                     for (let d = 1; d <= daysInMonth; d++) {
                       const date = `${year}-${String(month+1).padStart(2,"0")}-${String(d).padStart(2,"0")}`;
@@ -4819,7 +4737,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                 if(ok){ const w={...data?.workSchedules}; delete w[rid]; onUpdate("workSchedules",w); onUpdate("_toast","🗑️ Horários enviados para a lixeira"); }
               }} style={{...S.btnSecondary,fontSize:12,color:"var(--red)",borderColor:"var(--red)44"}}>🗑️ Resetar horários</button>
             </div>}
-            <WorkScheduleManagerTab restaurantId={rid} employees={employees} workSchedules={data?.workSchedules??{}} notifications={data?.notifications??[]} managers={data?.managers??[]} currentManagerName={currentUser?.name ?? (isOwner?"Admin AppTip":"Gestor")} onUpdate={onUpdate} communications={data?.communications??[]} isOwner={isOwner} schedTemplates={data?.schedTemplates??{}} schedDrafts={data?.schedDrafts??{}} />
+            <WorkScheduleManagerTab restaurantId={rid} employees={employees} workSchedules={data?.workSchedules??{}} notifications={data?.notifications??[]} managers={data?.managers??[]} currentManagerName={currentUser?.name ?? (isOwner?"Admin AppTip":"Gestor")} onUpdate={onUpdate} communications={data?.communications??[]} isOwner={isOwner} />
           </div>
         )}
 
