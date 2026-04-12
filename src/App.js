@@ -597,8 +597,8 @@ Exemplo (gorjeta R$${fmtR(EX)}, ${totalPontos}pt no total):
       tabKey: null,
       q:"🏭 O que é empregado de produção?",
       a:(() => {
-        const penU = rest?.producaoPenaltyU ?? 4;
-        const penJ = rest?.producaoPenaltyJ ?? 2;
+        const penU = rest?.producaoPenaltyU ?? 6.66;
+        const penJ = rest?.producaoPenaltyJ ?? 3.33;
         const isEmpProd = emp?.isProducao;
         return `Empregados marcados como "Produção" têm regras especiais de gorjeta:\n\n✅ Recebem gorjeta TODOS os dias (trabalhando, folga, compensação, etc.)\n❌ NÃO recebem gorjeta durante férias — assim como qualquer outro empregado\n✅ A distribuição segue os pontos do cargo normalmente\n\n⚠️ Penalidades por falta (sobre o pool mensal, por dia):\n• Falta injustificada: ${penU}% por dia\n• Falta justificada: ${penJ}% por dia\n\nExemplo: pool mensal de R$${fmtR(10000)}, 2 faltas injustificadas + 1 justificada → desconto de ${penU*2}% + ${penJ}% = ${penU*2+penJ}% = R$${fmtR(10000*(penU*2+penJ)/100)}\n\n${isEmpProd ? "📌 Você está marcado como empregado de produção. Essas regras se aplicam a você." : "Essas regras só se aplicam a empregados marcados como produção pelo gestor."}\n\nO status de produção é definido pelo gestor na aba Equipe e pode ser atribuído a empregados de qualquer área.`;
       })(),
@@ -3412,8 +3412,8 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
 
   function applyFaultPenalty(tKey, allTips) {
     const monthSchedule = schedules?.[rid]?.[tKey] ?? {};
-    const prodPenaltyU = restaurant.producaoPenaltyU ?? 4; // % falta injustificada produção
-    const prodPenaltyJ = restaurant.producaoPenaltyJ ?? 2; // % falta justificada produção
+    const prodPenaltyU = restaurant.producaoPenaltyU ?? 6.66; // % falta injustificada produção
+    const prodPenaltyJ = restaurant.producaoPenaltyJ ?? 3.33; // % falta justificada produção
 
     // Empregados com penalidade aplicável
     const penaltyEmps = restEmps.filter(emp => {
@@ -4718,7 +4718,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                   })(),
                 },
                 { id:"__escala__", tabKey:null, q:"📅 Como funciona a escala e por que ela importa?", a:"A escala registra a presença em cada dia e define quem recebe gorjeta.\n\nRecebe gorjeta: trabalhando normalmente ou compensação (C).\nNÃO recebe: folga, freela (FL), falta injustificada (F) + penalidade, falta justificada (FJ), atestado (A), férias (V).\n\nExceções:\n• Produção (🏭): recebe gorjeta todos os dias, exceto férias. Penalidade com percentuais distintos para cada tipo de falta.\n• Freela (🎯): nunca participa do rateio de gorjeta.\n• Status Freela no dia: empregado presente mas sem gorjeta naquele dia.\n\nNenhum empregado recebe gorjeta durante férias, incluindo os de produção." },
-                { id:"__producao__", tabKey:null, q:`🏭 O que é empregado de produção?`, a:`Empregados marcados como "Produção" têm regras especiais de gorjeta:\n\n1. Recebem gorjeta TODOS os dias (trabalhando, folga, compensação, etc.)\n2. NÃO recebem gorjeta durante férias — assim como qualquer outro empregado\n3. A distribuição segue os pontos do cargo normalmente\n4. Penalidade por falta injustificada: ${restaurant.producaoPenaltyU??4}% do pool mensal por dia\n5. Penalidade por falta justificada: ${restaurant.producaoPenaltyJ??2}% do pool mensal por dia\n\nExemplo: pool mensal de R$10.000, 2 faltas injustificadas (${restaurant.producaoPenaltyU??4}%) + 1 justificada (${restaurant.producaoPenaltyJ??2}%) → desconto de ${((restaurant.producaoPenaltyU??4)*2+(restaurant.producaoPenaltyJ??2))}% = R$${fmtR2(10000*((restaurant.producaoPenaltyU??4)*2+(restaurant.producaoPenaltyJ??2))/100)}\n\nO status de produção é definido pelo gestor na aba Equipe, usando o ícone 🏭 ao lado do cargo. Pode ser atribuído a empregados de qualquer área.` },
+                { id:"__producao__", tabKey:null, q:`🏭 O que é empregado de produção?`, a:`Empregados marcados como "Produção" têm regras especiais de gorjeta:\n\n1. Recebem gorjeta TODOS os dias (trabalhando, folga, compensação, etc.)\n2. NÃO recebem gorjeta durante férias — assim como qualquer outro empregado\n3. A distribuição segue os pontos do cargo normalmente\n4. Penalidade por falta injustificada: ${restaurant.producaoPenaltyU??6.66}% do pool mensal por dia\n5. Penalidade por falta justificada: ${restaurant.producaoPenaltyJ??3.33}% do pool mensal por dia\n\nExemplo: pool mensal de R$10.000, 2 faltas injustificadas (${restaurant.producaoPenaltyU??6.66}%) + 1 justificada (${restaurant.producaoPenaltyJ??3.33}%) → desconto de ${((restaurant.producaoPenaltyU??6.66)*2+(restaurant.producaoPenaltyJ??3.33))}% = R$${fmtR2(10000*((restaurant.producaoPenaltyU??6.66)*2+(restaurant.producaoPenaltyJ??3.33))/100)}\n\nO status de produção é definido pelo gestor na aba Equipe, usando o ícone 🏭 ao lado do cargo. Pode ser atribuído a empregados de qualquer área.` },
                 { id:"__freela__", tabKey:null, q:"🎯 O que é empregado freela?", a:"Empregados marcados como 'Freela' são colaboradores esporádicos que cobrem a equipe:\n\n1. Aparecem normalmente na escala\n2. Nunca participam do rateio de gorjeta\n3. Cargo e área são atribuídos normalmente\n\nAlém do flag no cadastro, existe o status 'Freela' (FL) na escala: marca um empregado regular como presente sem gorjeta naquele dia (ex: veio cobrir na folga).\n\nDefina o flag na aba Equipe usando o ícone 🎯 ao lado do cargo." },
                 { id:"__dp__", tabKey:"dp", q:"💬 Para que serve o Fale com DP?", a:"Canal direto com o DP. Use para: dúvidas trabalhistas, atestados, documentos, sugestões, elogios e denúncias anônimas. O gestor do DP responde pelo app." },
                 { id:"__comunicados__", tabKey:"comunicados", q:"📢 Como funcionam os comunicados?", a:"Avisos enviados pelo gestor para a equipe. O empregado recebe notificação, lê e confirma com \"Li e entendi\". O gestor acompanha quem confirmou." },
@@ -5142,7 +5142,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                     <div style={{minWidth:130}}>
                       <span style={{background:"#dc262611",color:"var(--red)",padding:"3px 10px",borderRadius:8,fontSize:11,fontWeight:700,fontFamily:"'DM Mono',monospace"}}>Falta injustificada</span>
                     </div>
-                    <input type="number" min="0" max="20" step="0.01" value={restaurant.producaoPenaltyU ?? 4}
+                    <input type="number" min="0" max="20" step="0.01" value={restaurant.producaoPenaltyU ?? 6.66}
                       onChange={e => {
                         const val = parseFloat(e.target.value) || 0;
                         const updated = restaurants.map(r => r.id===rid ? {...r, producaoPenaltyU: Math.round(val*100)/100} : r);
@@ -5156,7 +5156,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                     <div style={{minWidth:130}}>
                       <span style={{background:"#f59e0b11",color:"#f59e0b",padding:"3px 10px",borderRadius:8,fontSize:11,fontWeight:700,fontFamily:"'DM Mono',monospace"}}>Falta justificada</span>
                     </div>
-                    <input type="number" min="0" max="20" step="0.01" value={restaurant.producaoPenaltyJ ?? 2}
+                    <input type="number" min="0" max="20" step="0.01" value={restaurant.producaoPenaltyJ ?? 3.33}
                       onChange={e => {
                         const val = parseFloat(e.target.value) || 0;
                         const updated = restaurants.map(r => r.id===rid ? {...r, producaoPenaltyJ: Math.round(val*100)/100} : r);
@@ -6792,7 +6792,7 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }
             ]},
             { version:"5.1.0", date:"2026-04-10", items:[
               "Produção deixa de ser área e passa a ser flag no empregado (🏭)",
-              "Penalidade de produção com percentual configurável (padrão 4%)",
+              "Penalidade de produção com percentual configurável (padrão 6,66% / 3,33%)",
               "PIN de 4 dígitos para gestores e empregados com login unificado",
               "Forçar troca de PIN no primeiro acesso do gestor",
               "IA de cadastro de empregados com preview, edição e inativação",
@@ -8222,8 +8222,8 @@ hr{border:none;border-top:1px solid var(--border);margin:24px 0}
           <tr><th>Regra</th><th>Descrição</th></tr>
           <tr><td>Gorjeta</td><td>Recebe gorjeta <strong>todos os dias</strong> (trabalhando, folga, compensação, etc.), <strong>exceto férias</strong></td></tr>
           <tr><td>Distribuição</td><td>Segue os pontos do cargo normalmente, como qualquer empregado</td></tr>
-          <tr><td>Penalidade injustificada</td><td>Falta injustificada: padrão <strong>4%</strong> do pool mensal por dia de falta</td></tr>
-          <tr><td>Penalidade justificada</td><td>Falta justificada: padrão <strong>2%</strong> do pool mensal por dia de falta</td></tr>
+          <tr><td>Penalidade injustificada</td><td>Falta injustificada: padrão <strong>6,66%</strong> do pool mensal por dia de falta</td></tr>
+          <tr><td>Penalidade justificada</td><td>Falta justificada: padrão <strong>3,33%</strong> do pool mensal por dia de falta</td></tr>
           <tr><td>Configuração</td><td>Os percentuais de penalidade são configuráveis em <strong>Configurações → Penalidade por Falta</strong></td></tr>
         </table>
         <div class="ib tip"><span class="ico">💡</span><span>Use esse flag para empregados que participam da produção geral do restaurante e devem receber gorjeta diariamente, independente da escala individual.</span></div>
@@ -8385,10 +8385,10 @@ hr{border:none;border-top:1px solid var(--border);margin:24px 0}
         <table>
           <tr><th>Tipo</th><th>Como funciona</th></tr>
           <tr><td><strong>Por área</strong></td><td>Cada área (Bar, Cozinha, Salão, Limpeza) tem seu percentual de penalidade para faltas injustificadas. Padrão: 0%.</td></tr>
-          <tr><td><strong>🏭 Produção (injustificada)</strong></td><td>Percentual próprio para faltas injustificadas (padrão: 4% por dia).</td></tr>
-          <tr><td><strong>🏭 Produção (justificada)</strong></td><td>Percentual próprio para faltas justificadas (padrão: 2% por dia).</td></tr>
+          <tr><td><strong>🏭 Produção (injustificada)</strong></td><td>Percentual próprio para faltas injustificadas (padrão: 6,66% por dia).</td></tr>
+          <tr><td><strong>🏭 Produção (justificada)</strong></td><td>Percentual próprio para faltas justificadas (padrão: 3,33% por dia).</td></tr>
         </table>
-        <div class="ib blue"><span class="ico">📐</span><span>Exemplo: pool mensal de R$10.000, empregado de produção com 2 faltas injustificadas (4%) + 1 justificada (2%) → desconto de 8% + 2% = 10% = R$1.000 do total de gorjetas dele no mês.</span></div>
+        <div class="ib blue"><span class="ico">📐</span><span>Exemplo: pool mensal de R$10.000, empregado de produção com 2 faltas injustificadas (6,66%) + 1 justificada (3,33%) → desconto de 13,32% + 3,33% = 16,65% = R$1.665 do total de gorjetas dele no mês.</span></div>
         <div class="ib warn"><span class="ico">⚠️</span><span>Nenhum empregado recebe gorjeta durante férias, incluindo os de produção.</span></div>
       </div>
     </div>
