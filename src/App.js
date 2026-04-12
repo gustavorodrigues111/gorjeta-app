@@ -3,7 +3,7 @@ import { useState, useEffect, Component } from "react";
 import { db } from "./firebase";
 import { doc, getDoc, setDoc } from "firebase/firestore";
 
-const APP_VERSION = "5.4.1";
+const APP_VERSION = "5.4.2";
 
 /* eslint-disable no-unused-vars */
 
@@ -3448,10 +3448,12 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
     return { ...e, roleName: r?.name, area: r?.area, gross: eT.reduce((a, t) => a + t.myShare, 0), net: eT.reduce((a, t) => a + t.myNet, 0) };
   }).sort((a, b) => b.net - a.net);
 
-  function calcTipForDate(date, totalVal, noteVal) {
+  // calcTipForDate agora aceita currentTips para evitar stale closure em batch
+  function calcTipForDate(date, totalVal, noteVal, currentTips) {
+    const allTips = currentTips ?? tips;
     const total = parseFloat(totalVal);
-    if (!total || isNaN(total) || total <= 0) return 0;
-    if (restaurant.serviceStartDate && date < restaurant.serviceStartDate) { alert(`Não é possível lançar gorjeta antes da data de vigência (${new Date(restaurant.serviceStartDate+"T12:00:00").toLocaleDateString("pt-BR")})`); return 0; }
+    if (!total || isNaN(total) || total <= 0) return { count: 0, updatedTips: allTips };
+    if (restaurant.serviceStartDate && date < restaurant.serviceStartDate) { alert(`Não é possível lançar gorjeta antes da data de vigência (${new Date(restaurant.serviceStartDate+"T12:00:00").toLocaleDateString("pt-BR")})`); return { count: 0, updatedTips: allTips }; }
     const td = new Date(date + "T12:00:00");
     const tKey = monthKey(td.getFullYear(), td.getMonth());
     const taxRate = restaurant.taxRate ?? TAX;
@@ -3462,13 +3464,13 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
     const activeEmps = restEmps.filter(emp => {
       const r = restRoles.find(r => r.id === emp.roleId);
       if (!r) return false;
-      if (emp.isFreela) return false; // freela nunca entra na gorjeta
+      if (emp.isFreela) return false;
       if (emp.admission && emp.admission > date) return false;
       if (emp.inactive && emp.inactiveFrom && emp.inactiveFrom <= date) return false;
       const status = empDayStatus(emp.id);
-      if (status === DAY_VACATION) return false; // férias = ninguém entra, nem produção
-      if (status === DAY_FREELA) return false; // freela no dia = não entra
-      if (emp.isProducao) return true; // produção entra em todos os outros dias
+      if (status === DAY_VACATION) return false;
+      if (status === DAY_FREELA) return false;
+      if (emp.isProducao) return true;
       if (!status) return true;
       if (status === DAY_COMP) return true;
       if (status === DAY_FAULT_J || status === DAY_FAULT_U) return false;
@@ -3477,7 +3479,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
     const newTips = [];
     if (mode === MODE_GLOBAL_POINTS) {
       const totalPoints = activeEmps.reduce((a,e)=>a+e.points,0);
-      if (!totalPoints) return 0;
+      if (!totalPoints) return { count: 0, updatedTips: allTips };
       activeEmps.forEach(emp => { const g=total*(emp.points/totalPoints),tx=totalTaxAmt*(emp.points/totalPoints); newTips.push({id:`${Date.now()}-${emp.id}-${Math.random().toString(36).slice(2,6)}`,restaurantId:rid,employeeId:emp.id,date,monthKey:tKey,poolTotal:total,areaPool:toDistribute,area:emp.area??"—",myShare:g,myTax:tx,myNet:g-tx,note:noteVal,taxRate}); });
     } else {
       const tSplit = splits?.[rid]?.[tKey] ?? DEFAULT_SPLIT;
@@ -3485,9 +3487,9 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
       AREAS.forEach(area => { const emps=byArea[area],tp=emps.reduce((a,e)=>a+e.points,0); if(!tp)return; const ap=toDistribute*(tSplit[area]/100); emps.forEach(emp=>{const g=total*(tSplit[area]/100)*(emp.points/tp),tx=totalTaxAmt*(tSplit[area]/100)*(emp.points/tp);newTips.push({id:`${Date.now()}-${emp.id}-${Math.random().toString(36).slice(2,6)}`,restaurantId:rid,employeeId:emp.id,date,monthKey:tKey,poolTotal:total,areaPool:ap,area,myShare:g,myTax:tx,myNet:g-tx,note:noteVal,taxRate});}); });
     }
     // Remove existing tips for this date before adding new ones (supports re-launch)
-    const tipsWithoutDate = tips.filter(t => !(t.restaurantId === rid && t.date === date));
-    onUpdate("tips", [...tipsWithoutDate, ...newTips]);
-    return newTips.length;
+    const tipsWithoutDate = allTips.filter(t => !(t.restaurantId === rid && t.date === date));
+    const updatedTips = [...tipsWithoutDate, ...newTips];
+    return { count: newTips.length, updatedTips };
   }
 
   function applyFaultPenalty(tKey, allTips) {
@@ -3545,9 +3547,10 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
     onUpdate("tips", updated);
   }
 
-  function recalcTipDay(date) {
+  function recalcTipDay(date, currentTips) {
+    const allTips = currentTips ?? tips;
     // Find existing tips for this date
-    const existing = tips.filter(t => t.restaurantId === rid && t.date === date);
+    const existing = allTips.filter(t => t.restaurantId === rid && t.date === date);
     if (!existing.length) return 0;
     const poolTotal = existing[0].poolTotal;
     const noteVal   = existing[0].note ?? "";
@@ -3615,9 +3618,9 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
       });
     }
     // Remove old tips for this date and add new ones
-    const remaining = tips.filter(t => !(t.restaurantId === rid && t.date === date));
-    onUpdate("tips", [...remaining, ...newTips]);
-    return newTips.length;
+    const remaining = allTips.filter(t => !(t.restaurantId === rid && t.date === date));
+    const updatedTips = [...remaining, ...newTips];
+    return { count: newTips.length, updatedTips };
   }
 
   function saveSplit() {
@@ -4092,7 +4095,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                 <div><label style={S.label}>Data</label><input type="date" value={tipDate} onChange={e => setTipDate(e.target.value)} style={S.input} /></div>
                 <div><label style={S.label}>Valor Total (R$)</label><input type="number" min="0" step="0.01" value={tipTotal} onChange={e => setTipTotal(e.target.value)} placeholder="Ex: 1500.00" style={S.input} /></div>
                 <div><label style={S.label}>Observação</label><input value={tipNote} onChange={e => setTipNote(e.target.value)} placeholder="Ex: Sábado à noite" style={S.input} /></div>
-                <button onClick={() => { const n = calcTipForDate(tipDate, tipTotal, tipNote); if (n > 0) { setTipTotal(""); setTipNote(""); onUpdate("_toast", `✅ Distribuído para ${n} empregados!`); } }} style={S.btnPrimary}>Calcular e Distribuir</button>
+                <button onClick={() => { const { count, updatedTips } = calcTipForDate(tipDate, tipTotal, tipNote); if (count > 0) { onUpdate("tips", updatedTips); setTipTotal(""); setTipNote(""); onUpdate("_toast", `✅ Distribuído para ${count} empregados!`); } }} style={S.btnPrimary}>Calcular e Distribuir</button>
               </div>
               ) : (
               /* MODO TABELA */
@@ -4213,16 +4216,16 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                           <div style={{display:"flex",justifyContent:"center",gap:2,alignItems:"center"}}>
                             {!isLaunched && !isNoTip && hasVal && (
                               <button onClick={()=>{
-                                const n=calcTipForDate(date,val,row.note);
-                                if(n>0){setTipRows(prev=>prev.filter(r=>r.date!==date));onUpdate("_toast",`✅ ${fmtDate(date)}: ${n} emp.`);}
+                                const { count, updatedTips }=calcTipForDate(date,val,row.note);
+                                if(count>0){onUpdate("tips", updatedTips);setTipRows(prev=>prev.filter(r=>r.date!==date));onUpdate("_toast",`✅ ${fmtDate(date)}: ${count} emp.`);}
                               }} style={{padding:"4px 8px",borderRadius:8,border:"none",background:ac,color:"#1c1710",fontWeight:700,cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:11,whiteSpace:"nowrap"}}>
                                 ✓
                               </button>
                             )}
                             {isLaunched && isDirty && hasVal && (
                               <button onClick={()=>{
-                                const n=calcTipForDate(date,val,row.note);
-                                if(n>0){setTipRows(prev=>prev.filter(r=>r.date!==date));onUpdate("_toast",`✏️ atualizado`);}
+                                const { count, updatedTips }=calcTipForDate(date,val,row.note);
+                                if(count>0){onUpdate("tips", updatedTips);setTipRows(prev=>prev.filter(r=>r.date!==date));onUpdate("_toast",`✏️ atualizado`);}
                               }} style={{padding:"4px 8px",borderRadius:8,border:"none",background:"#f59e0b",color:"var(--text)",fontWeight:700,cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:11,whiteSpace:"nowrap"}}>
                                 ✓
                               </button>
@@ -4245,10 +4248,13 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
 
                     {pendingRows.length > 0 && (
                       <button onClick={()=>{
-                        let count=0;
-                        pendingRows.forEach(row=>{ count+=calcTipForDate(row.date,parseFloat(row.total),row.note); });
-                        setTipRows(prev=>prev.filter(r=>!pendingRows.some(p=>p.date===r.date)));
-                        if(count>0) onUpdate("_toast",`✅ ${pendingRows.length} dias lançados!`);
+                        let count=0, currentTips=tips;
+                        pendingRows.forEach(row=>{
+                          const result=calcTipForDate(row.date,parseFloat(row.total),row.note,currentTips);
+                          count+=result.count;
+                          currentTips=result.updatedTips;
+                        });
+                        if(count>0){onUpdate("tips",currentTips);setTipRows(prev=>prev.filter(r=>!pendingRows.some(p=>p.date===r.date)));onUpdate("_toast",`✅ ${pendingRows.length} dias lançados!`);}
                       }} style={{...S.btnPrimary,marginTop:8}}>
                         Lançar Todos Preenchidos ({pendingRows.length})
                       </button>
@@ -4274,11 +4280,11 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                   {tipDates.map(d => (
                     <div key={d} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"8px 0",borderBottom:"1px solid var(--border)"}}>
                       <span style={{color:"var(--text2)",fontSize:13}}>{fmtDate(d)}</span>
-                      <button onClick={()=>{const n=recalcTipDay(d);onUpdate("_toast",`🔄 Dia ${fmtDate(d)} recalculado para ${n} empregados`);}} style={{padding:"6px 14px",borderRadius:8,border:"1px solid #f59e0b44",background:"transparent",color:"#f59e0b",cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:12}}>Recalcular</button>
+                      <button onClick={()=>{const { count, updatedTips }=recalcTipDay(d);if(count>0)onUpdate("tips",updatedTips);onUpdate("_toast",`🔄 Dia ${fmtDate(d)} recalculado para ${count} empregados`);}} style={{padding:"6px 14px",borderRadius:8,border:"1px solid #f59e0b44",background:"transparent",color:"#f59e0b",cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:12}}>Recalcular</button>
                     </div>
                   ))}
                   {tipDates.length > 1 && (
-                    <button onClick={()=>{let total=0;tipDates.forEach(d=>{total+=recalcTipDay(d);});onUpdate("_toast",`🔄 ${tipDates.length} dias recalculados!`);}} style={{...S.btnPrimary,marginTop:12,background:"#f59e0b"}}>Recalcular Todos os Dias do Mês</button>
+                    <button onClick={()=>{let total=0,currentTips=tips;tipDates.forEach(d=>{const r=recalcTipDay(d,currentTips);total+=r.count;currentTips=r.updatedTips;});if(total>0)onUpdate("tips",currentTips);onUpdate("_toast",`🔄 ${tipDates.length} dias recalculados!`);}} style={{...S.btnPrimary,marginTop:12,background:"#f59e0b"}}>Recalcular Todos os Dias do Mês</button>
                   )}
                 </div>
               )}
@@ -6958,6 +6964,11 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }
 
         {tab === "changelog" && (() => {
           const CHANGELOG = [
+            { version:"5.4.2", date:"2026-04-12", items:[
+              "Correção: gorjeta lançada não sumia mais — refatoração de calcTipForDate e recalcTipDay para evitar stale closure",
+              "Correção: 'Lançar Todos Preenchidos' agora acumula tips corretamente em batch",
+              "Correção: 'Recalcular Todos os Dias' agora preserva todas as gorjetas ao recalcular em batch",
+            ]},
             { version:"5.4.1", date:"2026-04-12", items:[
               "Privacidade: tabela diária de gorjetas — dias lançados mostram ••••,•• para o admin, dias vazios ficam normais",
             ]},
