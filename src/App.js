@@ -1,9 +1,34 @@
 // AppTip v5.0 — 2026-04-11 — cadastro de horários reescrito: mobile-first, toggles trabalha/folga, rascunho automático, templates
-import { useState, useEffect } from "react";
+import { useState, useEffect, Component } from "react";
 import { db } from "./firebase";
 import { doc, getDoc, setDoc, deleteDoc, collection, getDocs } from "firebase/firestore";
 
 /* eslint-disable no-unused-vars */
+
+// Error Boundary — evita tela branca mostrando mensagem de erro
+class ErrorBoundary extends Component {
+  constructor(props) { super(props); this.state = { hasError: false, error: null }; }
+  static getDerivedStateFromError(error) { return { hasError: true, error }; }
+  componentDidCatch(error, info) { console.error("AppTip ErrorBoundary:", error, info); }
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div style={{minHeight:"100vh",background:"#1a1510",display:"flex",alignItems:"center",justifyContent:"center",padding:32}}>
+          <div style={{background:"#211c16",borderRadius:20,padding:32,maxWidth:480,width:"100%",border:"1px solid #3d3325",textAlign:"center",fontFamily:"'DM Sans',sans-serif"}}>
+            <div style={{fontSize:40,marginBottom:16}}>⚠️</div>
+            <h2 style={{color:"#f0ece4",margin:"0 0 8px",fontSize:18}}>Algo deu errado</h2>
+            <p style={{color:"#7a6e5a",fontSize:13,marginBottom:16}}>{this.state.error?.message || "Erro desconhecido"}</p>
+            <button onClick={()=>{ this.setState({hasError:false,error:null}); window.location.reload(); }}
+              style={{padding:"10px 24px",borderRadius:10,background:"#d4a017",border:"none",color:"#1a1510",fontWeight:700,cursor:"pointer",fontSize:14}}>
+              Recarregar
+            </button>
+          </div>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
 //
 async function load(key) {
   try {
@@ -7804,6 +7829,7 @@ const obs=new IntersectionObserver(e=>{e.forEach(en=>{if(en.isIntersecting){link
 //
 // APP ROOT
 //
+export { ErrorBoundary as AppErrorBoundary };
 export default function App() {
   const [theme, setTheme] = useState(() => localStorage.getItem("apptip_theme") || "light");
 
@@ -8007,8 +8033,8 @@ export default function App() {
       )}
       {/* Setup acessível apenas via /setup — protegido por senha de convite */}
       {view === "setup" && <FirstSetup onDone={sm=>{handleUpdate("owners",[...owners,sm]);setCurrentUser(sm);setUserRole("super");setView("super");}} />}
-      {view === "super" && <OwnerPortal data={data} onUpdate={handleUpdate} onBack={doLogout} currentUser={currentUser} toggleTheme={toggleTheme} theme={theme} />}
-      {view === "manager" && <ManagerPortal manager={currentUser} data={data} onUpdate={handleUpdate} onBack={doLogout} toggleTheme={toggleTheme} theme={theme} />}
+      {view === "super" && currentUser && <OwnerPortal data={data} onUpdate={handleUpdate} onBack={doLogout} currentUser={currentUser} toggleTheme={toggleTheme} theme={theme} />}
+      {view === "manager" && currentUser && <ManagerPortal manager={currentUser} data={data} onUpdate={handleUpdate} onBack={doLogout} toggleTheme={toggleTheme} theme={theme} />}
       {view === "employee" && <EmployeePortal employees={employees} roles={roles} tips={tips} schedules={schedules} splits={splits} restaurants={restaurants} communications={communications} commAcks={commAcks} faq={faq} dpMessages={dpMessages} receipts={receipts} workSchedules={workSchedules} onBack={doLogout} onUpdateEmployee={emp=>{const next=employees.map(e=>e.id===emp.id?emp:e);handleUpdate("employees",next);}} onUpdate={handleUpdate} toggleTheme={toggleTheme} theme={theme} />}
       {view === "fatura" && <FaturaPage faturaId={faturaId} restaurants={restaurants} onUpdate={handleUpdate} loaded={loaded} />}
       {view === "guia-gestor" && <GuiaGestor />}
