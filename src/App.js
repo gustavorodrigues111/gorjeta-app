@@ -3692,7 +3692,9 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
             const currentSched = sched?.[sched.length-1];
             const dayIdx = new Date(todayStr+"T12:00:00").getDay();
             const dayData = currentSched?.days?.[dayIdx];
-            const entry = { name: e.name.split(" ")[0], role: role?.name, area: role?.area, in: dayData?.in, out: dayData?.out, break: dayData?.break, hasSchedule: !!currentSched && dayData?.active !== false, isProducao: !!e.isProducao, isFreela: !!e.isFreela };
+            const parts = (e.name??"").split(" ").filter(Boolean);
+            const shortName = parts.length > 1 ? `${parts[0]} ${parts[parts.length-1]}` : parts[0] ?? "";
+            const entry = { name: shortName, role: role?.name, area: role?.area, in: dayData?.in, out: dayData?.out, break: dayData?.break, hasSchedule: !!currentSched && dayData?.active !== false, isProducao: !!e.isProducao, isFreela: !!e.isFreela };
             if (status === DAY_OFF) teamToday.off.push(entry);
             else if (status === DAY_FREELA) teamToday.freela.push(entry);
             else if (status === DAY_VACATION) teamToday.vacation.push(entry);
@@ -3757,7 +3759,12 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                   if (e.isProducao) prodSection.push({...e, isComp:true});
                   else if (e.area && byArea[e.area]) byArea[e.area].push({...e, isComp:true});
                 });
-                const offSection = [...teamToday.off, ...teamToday.freela.map(e=>({...e,isFreelaDia:true})), ...teamToday.vacation.map(e=>({...e,isVac:true})), ...teamToday.faultJ.map(e=>({...e,isFJ:true})), ...teamToday.faultU.map(e=>({...e,isFU:true}))];
+                // Freela-day employees go to their area with badge
+                teamToday.freela.forEach(e => {
+                  if (e.isProducao) prodSection.push({...e, isFreelaDia:true});
+                  else if (e.area && byArea[e.area]) byArea[e.area].push({...e, isFreelaDia:true});
+                });
+                const offSection = [...teamToday.off.map(e=>({...e,isFolga:true})), ...teamToday.vacation.map(e=>({...e,isVac:true})), ...teamToday.faultJ.map(e=>({...e,isFJ:true})), ...teamToday.faultU.map(e=>({...e,isFU:true}))];
 
                 const EmpLine = ({e,i,color}) => (
                   <div key={i} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"4px 0",borderBottom:"1px solid var(--border)",fontSize:12}}>
@@ -3807,18 +3814,23 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                         {prodSection.map((e,i) => <EmpLine key={i} e={e} i={i} color="#ec4899" />)}
                       </div>
                     )}
-                    {/* Folga / Freela / Férias / Faltas */}
+                    {/* Folga / Férias / Faltas */}
                     {offSection.length > 0 && (
                       <div style={{marginBottom:4}}>
-                        <div style={{color:"var(--text3)",fontSize:11,fontWeight:700,marginBottom:4}}>Fora ({offSection.length})</div>
+                        <div style={{color:"var(--text3)",fontSize:11,fontWeight:700,marginBottom:4,display:"flex",alignItems:"center",gap:4}}>
+                          <span style={{width:8,height:8,borderRadius:"50%",background:"var(--text3)",display:"inline-block"}}></span>
+                          Folga ({offSection.length})
+                        </div>
                         {offSection.map((e,i) => (
-                          <div key={i} style={{display:"flex",alignItems:"center",gap:4,padding:"2px 0",fontSize:11,color:"var(--text3)"}}>
-                            <span>{e.name}</span>
-                            {e.isFreelaDia && <span style={{fontSize:9,color:"#06b6d4",background:"#06b6d422",padding:"1px 5px",borderRadius:4}}>freela</span>}
-                            {e.isVac && <span style={{fontSize:9,color:"#8b5cf6",background:"#8b5cf622",padding:"1px 5px",borderRadius:4}}>férias</span>}
-                            {e.isFJ && <span style={{fontSize:9,color:"#f59e0b",background:"#f59e0b22",padding:"1px 5px",borderRadius:4}}>falta just.</span>}
-                            {e.isFU && <span style={{fontSize:9,color:"var(--red)",background:"#ef444422",padding:"1px 5px",borderRadius:4}}>falta inj.</span>}
-                            {!e.isFreelaDia && !e.isVac && !e.isFJ && !e.isFU && <span style={{fontSize:9,color:"var(--red)",background:"#ef444422",padding:"1px 5px",borderRadius:4}}>folga</span>}
+                          <div key={i} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"4px 0",borderBottom:"1px solid var(--border)",fontSize:12}}>
+                            <div style={{minWidth:0}}>
+                              <span style={{color:"var(--text3)",fontWeight:500}}>{e.name}</span>
+                              {e.role && <span style={{color:"var(--text3)",fontSize:10,marginLeft:4,opacity:0.7}}>{e.role}</span>}
+                              {e.isVac && <span style={{fontSize:9,marginLeft:4,color:"#8b5cf6",background:"#8b5cf622",padding:"1px 5px",borderRadius:4}}>férias</span>}
+                              {e.isFJ && <span style={{fontSize:9,marginLeft:4,color:"#f59e0b",background:"#f59e0b22",padding:"1px 5px",borderRadius:4}}>falta just.</span>}
+                              {e.isFU && <span style={{fontSize:9,marginLeft:4,color:"var(--red)",background:"#ef444422",padding:"1px 5px",borderRadius:4}}>falta inj.</span>}
+                              {e.isFolga && <span style={{fontSize:9,marginLeft:4,color:"var(--red)",background:"#ef444422",padding:"1px 5px",borderRadius:4}}>folga</span>}
+                            </div>
                           </div>
                         ))}
                       </div>
