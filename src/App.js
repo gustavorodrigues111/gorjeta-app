@@ -7541,6 +7541,13 @@ function ManagerPortal({ manager, data, onUpdate, onBack, toggleTheme, theme, on
             </div>
           ) : isMobile ? (
             <div>
+              <div style={{margin:"16px 16px 0",padding:"14px 16px",borderRadius:12,background:"#fffbeb",border:"1px solid #f59e0b44",display:"flex",alignItems:"center",gap:12}}>
+                <span style={{fontSize:22,flexShrink:0}}>🖥️</span>
+                <div>
+                  <p style={{color:"#92400e",fontSize:12,fontWeight:700,margin:0}}>Demais funcionalidades no computador</p>
+                  <p style={{color:"#92400e99",fontSize:11,margin:"2px 0 0",lineHeight:1.4}}>Escala, Equipe, Cargos, Horários, Comunicados, FAQ, DP e Config.</p>
+                </div>
+              </div>
               <RestaurantPanel
                 restaurant={selRest} restaurants={restaurants} employees={employees}
                 roles={roles} tips={tips} splits={splits} schedules={schedules}
@@ -7548,13 +7555,6 @@ function ManagerPortal({ manager, data, onUpdate, onBack, toggleTheme, theme, on
                 perms={{...(manager.perms ?? {tips:true,schedule:true}), isDP: manager.isDP ?? false, managerAreas: manager.profile==="lider"?(manager.areas??[]):[] }}
                 isOwner={false} data={data} currentUser={manager} mobileOnly
               />
-              <div style={{margin:"20px 16px",padding:"20px 18px",borderRadius:14,background:"#fffbeb",border:"1px solid #f59e0b44",textAlign:"center"}}>
-                <div style={{fontSize:32,marginBottom:10}}>🖥️</div>
-                <p style={{color:"#92400e",fontSize:14,fontWeight:700,margin:"0 0 8px"}}>Demais funcionalidades disponíveis no computador</p>
-                <p style={{color:"#92400e99",fontSize:12,margin:0,lineHeight:1.5}}>
-                  Para acessar Escala, Equipe, Cargos, Horários, Comunicados, FAQ, DP e Configurações, utilize o AppTip em um computador ou tablet.
-                </p>
-              </div>
             </div>
           ) : (
             <RestaurantPanel
