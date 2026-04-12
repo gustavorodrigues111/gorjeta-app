@@ -2875,54 +2875,133 @@ function EmployeeSpreadsheet({ restEmps, restRoles, rid, employees, onUpdate, re
   const [aiEmpInput, setAiEmpInput] = useState("");
   const [aiEmpLoading, setAiEmpLoading] = useState(false);
   const [aiEmpError, setAiEmpError] = useState("");
+  const [aiEmpPreview, setAiEmpPreview] = useState(null);
 
   async function handleAiEmpregados() {
     if (!aiEmpInput.trim()) return;
-    setAiEmpLoading(true); setAiEmpError("");
-    const cargosDisponiveis = restRoles.filter(r=>!r.inactive).map(r=>`${r.name} (id:${r.id})`).join(", ");
+    setAiEmpLoading(true); setAiEmpError(""); setAiEmpPreview(null);
+    const cargosDisponiveis = restRoles.filter(r=>!r.inactive).map(r=>`- cargo:"${r.name}" area:"${r.area}" id:"${r.id}"`).join("\n");
+    const empregadosExistentes = restEmps.map(e => {
+      const r = restRoles.find(r=>r.id===e.roleId);
+      return `- id:"${e.id}" nome:"${e.name}" cargo:"${r?.name??"(sem cargo)"}" cpf:"${e.cpf||""}" producao:${!!e.isProducao} inativo:${!!e.inactive}`;
+    }).join("\n");
     try {
       const result = await groqGenerate(
-        `Você é um assistente de gestão de restaurantes. Extraia empregados e estruture como JSON.
-Cargos disponíveis: ${cargosDisponiveis || "nenhum cadastrado"}
+        `Você é um assistente de gestão de restaurantes. O usuário pode pedir para CRIAR novos empregados, MODIFICAR empregados existentes (trocar cargo, CPF, admissão, produção) ou INATIVAR empregados.
+
+Cargos disponíveis:
+${cargosDisponiveis || "(nenhum)"}
+
+Empregados existentes:
+${empregadosExistentes || "(nenhum)"}
+
 Regras:
-- "nome" obrigatório (nome completo)
-- "cargoId" = id do cargo da lista se identificável, senão null
-- "admissao" formato YYYY-MM-DD, se não informado use hoje: ${today()}
-- "cpf" só se explicitamente informado, senão null
-Responda com JSON: {"empregados": [{"nome":"...", "cargoId":"...", "admissao":"2025-01-15", "cpf":null}]}`,
+- Para CRIAR: "nome" obrigatório (nome completo). "cargo" = nome do cargo (deve ser um da lista acima). "admissao" no formato YYYY-MM-DD, se não informado use ${today()}. "cpf" apenas se explicitamente mencionado. "producao" = true/false (se o empregado é da produção).
+- Para MODIFICAR: use o "id" do empregado existente, inclua APENAS os campos que mudam. "cargo" = nome do novo cargo.
+- Para INATIVAR: use o "id" do empregado existente.
+- Deduza o cargo pelo nome/função quando possível (garçom→Garçom, barman→Barman, cozinheiro→Cozinheiro, etc.)
+- Se o usuário mencionar "produção" para um empregado, marque producao:true
+
+Responda com JSON:
+{
+  "criar": [{"nome":"...", "cargo":"nome do cargo", "admissao":"YYYY-MM-DD", "cpf":null, "producao":false}],
+  "modificar": [{"id":"...", "cargo":"novo cargo", "cpf":"...", "producao":true}],
+  "inativar": ["id1", "id2"]
+}
+Inclua apenas as ações solicitadas. Arrays vazios se não houver ação daquele tipo.`,
         aiEmpInput.trim()
       );
 
+      // Build preview
       const restCode = restCode_ || "XXX";
       let seq = nextEmpSeq(employees, restCode);
-      const novos = result.empregados.map(e => {
-        const empCode = makeEmpCode(restCode, seq);
-        const pin = String(seq).padStart(4,"0");
-        seq++;
-        return {
-          id: empCode,
-          restaurantId: rid,
-          name: e.nome,
-          cpf: e.cpf || "",
-          admission: e.admissao || today(),
-          pin,
-          roleId: e.cargoId || "",
-          mustChangePin: true,
-        };
-      });
+      const matchCargo = (nomeCargo) => {
+        if (!nomeCargo) return null;
+        const lower = nomeCargo.toLowerCase().trim();
+        return restRoles.find(r => !r.inactive && r.name.toLowerCase() === lower)
+          ?? restRoles.find(r => !r.inactive && r.name.toLowerCase().includes(lower))
+          ?? restRoles.find(r => !r.inactive && lower.includes(r.name.toLowerCase()))
+          ?? null;
+      };
 
-      if (activeCount + novos.length > plano.empMax) {
-        setAiEmpError(`Limite do plano: ${plano.empMax} empregados. Você tem ${activeCount} ativos e está tentando adicionar ${novos.length}.`);
-        setAiEmpLoading(false); return;
+      const preview = {
+        criar: (result.criar ?? []).map(e => {
+          const role = matchCargo(e.cargo);
+          const empCode = makeEmpCode(restCode, seq);
+          const pin = String(seq).padStart(4,"0");
+          seq++;
+          return {
+            id: Date.now().toString() + Math.random().toString(36).slice(2,6),
+            empCode, pin,
+            name: e.nome,
+            cpf: e.cpf || "",
+            admission: e.admissao || today(),
+            roleId: role?.id || "",
+            roleName: role?.name || e.cargo || "(não encontrado)",
+            roleMatched: !!role,
+            isProducao: !!e.producao,
+            restaurantId: rid,
+            mustChangePin: true,
+          };
+        }),
+        modificar: (result.modificar ?? []).map(m => {
+          const existing = restEmps.find(e => e.id === m.id);
+          if (!existing) return null;
+          const existingRole = restRoles.find(r => r.id === existing.roleId);
+          const newRole = m.cargo ? matchCargo(m.cargo) : null;
+          return {
+            id: m.id,
+            name: existing.name,
+            oldRoleName: existingRole?.name ?? "(sem cargo)",
+            newRoleName: newRole?.name ?? m.cargo ?? null,
+            newRoleId: newRole?.id ?? null,
+            roleMatched: m.cargo ? !!newRole : true,
+            cpf: m.cpf !== undefined ? m.cpf : null,
+            producao: m.producao !== undefined ? m.producao : null,
+          };
+        }).filter(Boolean),
+        inativar: (result.inativar ?? []).map(id => restEmps.find(e => e.id === id)).filter(Boolean),
+      };
+
+      if (!preview.criar.length && !preview.modificar.length && !preview.inativar.length) {
+        setAiEmpError("A IA não identificou nenhuma ação. Tente reformular.");
+      } else if (activeCount + preview.criar.length > plano.empMax) {
+        setAiEmpError(`Limite do plano: ${plano.empMax} empregados. Você tem ${activeCount} ativos e está tentando adicionar ${preview.criar.length}.`);
+      } else {
+        setAiEmpPreview(preview);
       }
-
-      onUpdate("employees", [...employees, ...novos]);
-      setAiEmpInput(""); setShowAiEmp(false);
-      onUpdate("_toast", `✨ ${novos.length} empregado${novos.length>1?"s":""} adicionado${novos.length>1?"s":""} pela IA!`);
     } catch(e) {
       setAiEmpError("Não foi possível processar. Tente reformular.");
     }
     setAiEmpLoading(false);
+  }
+
+  function confirmAiEmpChanges() {
+    if (!aiEmpPreview) return;
+    let updated = [...employees];
+    // Criar
+    aiEmpPreview.criar.forEach(e => {
+      updated.push({ id: e.id, restaurantId: e.restaurantId, empCode: e.empCode, name: e.name, cpf: e.cpf, admission: e.admission, pin: e.pin, roleId: e.roleId, mustChangePin: true, isProducao: e.isProducao || undefined });
+    });
+    // Modificar
+    aiEmpPreview.modificar.forEach(m => {
+      updated = updated.map(e => {
+        if (e.id !== m.id) return e;
+        const changes = {};
+        if (m.newRoleId) changes.roleId = m.newRoleId;
+        if (m.cpf !== null) changes.cpf = m.cpf;
+        if (m.producao !== null) changes.isProducao = m.producao;
+        return { ...e, ...changes };
+      });
+    });
+    // Inativar
+    aiEmpPreview.inativar.forEach(e => {
+      updated = updated.map(x => x.id === e.id ? { ...x, inactive: true, inactiveFrom: today() } : x);
+    });
+    onUpdate("employees", updated);
+    const total = aiEmpPreview.criar.length + aiEmpPreview.modificar.length + aiEmpPreview.inativar.length;
+    onUpdate("_toast", `✨ ${total} ação(ões) aplicada(s) pela IA!`);
+    setAiEmpPreview(null); setAiEmpInput(""); setShowAiEmp(false);
   }
 
   const sorted = [...restEmps].sort((a,b) => {
@@ -2998,28 +3077,83 @@ Responda com JSON: {"empregados": [{"nome":"...", "cargoId":"...", "admissao":"2
       {/* Assistente IA para empregados */}
       {!showInactive && (
         <div style={{marginBottom:14}}>
-          <button onClick={()=>{setShowAiEmp(!showAiEmp);setAiEmpError("");}}
+          <button onClick={()=>{setShowAiEmp(!showAiEmp);setAiEmpError("");setAiEmpPreview(null);}}
             style={{...S.btnSecondary,fontSize:12,display:"inline-flex",alignItems:"center",gap:6,padding:"7px 14px",
               background:showAiEmp?"var(--ac-bg)":undefined,borderColor:showAiEmp?"var(--ac)":undefined,color:showAiEmp?"var(--ac-text)":undefined}}>
-            ✨ Importar empregados com IA
+            ✨ Gerenciar empregados com IA
           </button>
           {showAiEmp && (
             <div style={{marginTop:10,padding:"14px",borderRadius:12,background:"var(--ac-bg)",border:"1px solid var(--ac)33"}}>
               <p style={{color:"var(--text2)",fontSize:13,margin:"0 0 6px",fontWeight:600}}>✨ Assistente de empregados</p>
-              <p style={{color:"var(--text3)",fontSize:12,margin:"0 0 6px",lineHeight:1.5}}>Cole uma lista de empregados. A IA identifica nome, cargo e data de admissão. PIN e CPF precisam ser ajustados manualmente.</p>
-              <p style={{color:"var(--text3)",fontSize:11,margin:"0 0 10px",fontStyle:"italic"}}>Ex: "João Silva, garçom, admitido 01/03/2025; Maria Souza, barman; Pedro Lima, subchef desde jan/25"</p>
+              <p style={{color:"var(--text3)",fontSize:12,margin:"0 0 6px",lineHeight:1.5}}>Crie, modifique ou inative empregados com linguagem natural. A IA identifica nome, cargo, CPF, admissão e produção. Revise antes de confirmar.</p>
+              <p style={{color:"var(--text3)",fontSize:11,margin:"0 0 10px",fontStyle:"italic"}}>Ex: "Adicionar João Silva como garçom; trocar Maria para barman; inativar Pedro Lima"</p>
               <textarea value={aiEmpInput} onChange={e=>setAiEmpInput(e.target.value)}
-                placeholder="Cole ou descreva os empregados aqui..." rows={4}
+                placeholder="Descreva as alterações aqui..." rows={4}
                 style={{...S.input,resize:"vertical",marginBottom:8,fontSize:13}}/>
               {aiEmpError && <p style={{color:"var(--red)",fontSize:12,margin:"0 0 8px"}}>{aiEmpError}</p>}
-              <div style={{display:"flex",gap:8}}>
-                <button onClick={handleAiEmpregados} disabled={!aiEmpInput.trim()||aiEmpLoading}
-                  style={{...S.btnPrimary,flex:1,fontSize:13,opacity:(!aiEmpInput.trim()||aiEmpLoading)?0.6:1}}>
-                  {aiEmpLoading?"✨ Processando...":"✨ Adicionar empregados"}
-                </button>
-                <button onClick={()=>{setShowAiEmp(false);setAiEmpInput("");setAiEmpError("");}} style={S.btnSecondary}>Cancelar</button>
-              </div>
-              <p style={{color:"var(--text3)",fontSize:11,margin:"10px 0 0",fontStyle:"italic"}}>⚠️ Revise os dados após importar — PIN inicial = sequência numérica, empregado deve trocar no 1º acesso.</p>
+
+              {aiEmpPreview && (
+                <div style={{marginBottom:10,padding:"12px",borderRadius:10,background:"var(--card-bg)",border:"1px solid var(--border)"}}>
+                  <p style={{color:"var(--text)",fontSize:13,fontWeight:700,margin:"0 0 8px"}}>Pré-visualização — revise antes de confirmar:</p>
+                  {aiEmpPreview.criar.length > 0 && (
+                    <div style={{marginBottom:8}}>
+                      <span style={{color:"var(--green)",fontSize:11,fontWeight:700}}>+ CRIAR ({aiEmpPreview.criar.length})</span>
+                      {aiEmpPreview.criar.map(e => (
+                        <div key={e.id} style={{padding:"6px 8px",marginTop:4,borderRadius:6,background:"#10b98111",fontSize:12,color:"var(--text2)",display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:4}}>
+                          <div>
+                            <strong>{e.name}</strong>
+                            <span style={{color:"var(--text3)",marginLeft:6}}>→ {e.roleMatched ? <span style={{color:"var(--green)"}}>{e.roleName}</span> : <span style={{color:"var(--red)"}}>{e.roleName} ⚠️</span>}</span>
+                            {e.cpf && <span style={{color:"var(--text3)",marginLeft:6,fontSize:11}}>CPF: {e.cpf}</span>}
+                            {e.isProducao && <span style={{color:"#ec4899",marginLeft:6,fontSize:11}}>🏭 Produção</span>}
+                          </div>
+                          <span style={{color:"var(--text3)",fontSize:10,fontFamily:"'DM Mono',monospace"}}>{e.empCode} · PIN:{e.pin}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  {aiEmpPreview.modificar.length > 0 && (
+                    <div style={{marginBottom:8}}>
+                      <span style={{color:"#3b82f6",fontSize:11,fontWeight:700}}>✏️ MODIFICAR ({aiEmpPreview.modificar.length})</span>
+                      {aiEmpPreview.modificar.map(m => (
+                        <div key={m.id} style={{padding:"6px 8px",marginTop:4,borderRadius:6,background:"#3b82f611",fontSize:12,color:"var(--text2)"}}>
+                          <strong>{m.name}</strong>
+                          {m.newRoleName && <span style={{marginLeft:6}}>{m.oldRoleName} → {m.roleMatched ? <span style={{color:"#3b82f6"}}>{m.newRoleName}</span> : <span style={{color:"var(--red)"}}>{m.newRoleName} ⚠️</span>}</span>}
+                          {m.cpf !== null && <span style={{color:"var(--text3)",marginLeft:6,fontSize:11}}>CPF: {m.cpf}</span>}
+                          {m.producao !== null && <span style={{color:"#ec4899",marginLeft:6,fontSize:11}}>{m.producao?"🏭 Marcar produção":"🏭 Remover produção"}</span>}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  {aiEmpPreview.inativar.length > 0 && (
+                    <div style={{marginBottom:8}}>
+                      <span style={{color:"#f59e0b",fontSize:11,fontWeight:700}}>⏸ INATIVAR ({aiEmpPreview.inativar.length})</span>
+                      {aiEmpPreview.inativar.map(e => (
+                        <div key={e.id} style={{padding:"4px 8px",marginTop:4,borderRadius:6,background:"#f59e0b11",fontSize:12,color:"var(--text2)"}}>
+                          {e.name} {e.empCode && <span style={{color:"var(--text3)",fontSize:10}}>({e.empCode})</span>}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  {aiEmpPreview.criar.some(e=>!e.roleMatched) || aiEmpPreview.modificar.some(m=>!m.roleMatched) ? (
+                    <p style={{color:"var(--red)",fontSize:11,margin:"0 0 8px"}}>⚠️ Itens com cargo não encontrado ficarão sem cargo atribuído. Ajuste manualmente após confirmar.</p>
+                  ) : null}
+                  <div style={{display:"flex",gap:8,marginTop:10}}>
+                    <button onClick={confirmAiEmpChanges} style={{...S.btnPrimary,flex:1,fontSize:13}}>✅ Confirmar e aplicar</button>
+                    <button onClick={()=>setAiEmpPreview(null)} style={S.btnSecondary}>Cancelar</button>
+                  </div>
+                </div>
+              )}
+
+              {!aiEmpPreview && (
+                <div style={{display:"flex",gap:8}}>
+                  <button onClick={handleAiEmpregados} disabled={!aiEmpInput.trim()||aiEmpLoading}
+                    style={{...S.btnPrimary,flex:1,fontSize:13,opacity:(!aiEmpInput.trim()||aiEmpLoading)?0.6:1}}>
+                    {aiEmpLoading?"✨ Processando...":"✨ Processar com IA"}
+                  </button>
+                  <button onClick={()=>{setShowAiEmp(false);setAiEmpInput("");setAiEmpError("");setAiEmpPreview(null);}} style={S.btnSecondary}>Cancelar</button>
+                </div>
+              )}
+              <p style={{color:"var(--text3)",fontSize:11,margin:"10px 0 0",fontStyle:"italic"}}>⚠️ PIN inicial = sequência numérica. Empregado deve trocar no 1º acesso.</p>
             </div>
           )}
         </div>
