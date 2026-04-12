@@ -6971,12 +6971,46 @@ function Home({ onLogin }) {
         </div>
       </section>
 
+      {/* EARLY ADOPTER */}
+      <section style={{padding:"60px 24px",background:"linear-gradient(135deg,#1c1208 0%,#2d1f0e 50%,#1a1005 100%)",position:"relative",overflow:"hidden"}}>
+        <div style={{position:"absolute",top:0,left:0,right:0,bottom:0,background:"radial-gradient(ellipse at 30% 20%,#d4a01715 0%,transparent 60%)",pointerEvents:"none"}}/>
+        <div style={{maxWidth:800,margin:"0 auto",textAlign:"center",position:"relative",zIndex:1}}>
+          <div style={{display:"inline-block",background:"linear-gradient(135deg,#d4a017,#e8b84a)",color:"#1c1208",fontSize:13,fontWeight:800,padding:"6px 20px",borderRadius:24,marginBottom:20,letterSpacing:0.5}}>🚀 OFERTA LIMITADA</div>
+          <h2 style={{fontSize:"clamp(26px,5vw,44px)",fontWeight:900,color:"#fff",margin:"0 0 12px",letterSpacing:-1,lineHeight:1.15}}>
+            Primeiros <span style={{color:"#d4a017"}}>30 clientes</span>
+          </h2>
+          <p style={{fontSize:"clamp(18px,3vw,24px)",fontWeight:700,color:"#e8d5a8",margin:"0 0 8px"}}>
+            30% de desconto <span style={{color:"#d4a017",fontWeight:900}}>permanente</span>
+          </p>
+          <p style={{color:"#a08060",fontSize:14,maxWidth:500,margin:"0 auto 28px",lineHeight:1.6}}>
+            Assine agora e garanta o desconto de 30% para sempre — enquanto sua assinatura estiver ativa, o preço nunca muda.
+          </p>
+          <div style={{display:"flex",justifyContent:"center",gap:16,flexWrap:"wrap",marginBottom:28}}>
+            {[
+              {plano:"Starter",  de:"R$97",    por:"R$67,90"},
+              {plano:"Básico",   de:"R$187",   por:"R$130,90"},
+              {plano:"Profissional", de:"R$397", por:"R$277,90"},
+            ].map(p=>(
+              <div key={p.plano} style={{background:"rgba(212,160,23,0.1)",border:"1px solid #d4a01733",borderRadius:12,padding:"14px 20px",minWidth:140}}>
+                <div style={{color:"#d4c4a0",fontSize:11,fontWeight:600,marginBottom:4}}>{p.plano}</div>
+                <div style={{color:"#8c7a5e",fontSize:13,textDecoration:"line-through",marginBottom:2}}>{p.de}/mês</div>
+                <div style={{color:"#d4a017",fontSize:20,fontWeight:800,fontFamily:"'DM Mono',monospace"}}>{p.por}<span style={{fontSize:11,color:"#a08060",fontWeight:400}}>/mês</span></div>
+              </div>
+            ))}
+          </div>
+          <a href="#contato" style={{display:"inline-block",padding:"14px 40px",borderRadius:28,background:"linear-gradient(135deg,#d4a017,#e8b84a)",color:"#1c1208",fontWeight:800,fontSize:16,textDecoration:"none",letterSpacing:-0.3,boxShadow:"0 4px 24px #d4a01744"}}>
+            Garantir meu desconto →
+          </a>
+          <p style={{color:"#6b5a3e",fontSize:11,marginTop:14}}>Vagas limitadas · Desconto válido enquanto a assinatura estiver ativa</p>
+        </div>
+      </section>
+
       {/* PREÇOS */}
       <section id="precos" style={{padding:"48px 24px 80px",background:"#faf8f4"}}>
         <div style={{maxWidth:1000,margin:"0 auto"}}>
           <div style={{textAlign:"center",marginBottom:48}}>
             <h2 style={{fontSize:"clamp(24px,4vw,38px)",fontWeight:800,margin:"0 0 12px",letterSpacing:-0.8,color:"#1c1208"}}>Planos e preços</h2>
-            <p style={{color:"#8c7a5e",fontSize:16}}>Plano anual com <strong style={{color:ac}}>10% de desconto</strong> · Máx. 1 unidade no Starter</p>
+            <p style={{color:"#8c7a5e",fontSize:16}}>Plano anual com <strong style={{color:ac}}>10% de desconto</strong> · Máx. 1 unidade no Starter · <strong style={{color:"#d4a017"}}>30% off para os 30 primeiros</strong></p>
           </div>
           <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(170px,1fr))",gap:16}}>
             {PLANOS.map(p=>(
