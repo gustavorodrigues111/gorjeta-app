@@ -3,7 +3,7 @@ import { useState, useEffect, Component } from "react";
 import { db } from "./firebase";
 import { doc, getDoc, setDoc } from "firebase/firestore";
 
-const APP_VERSION = "5.5.0";
+const APP_VERSION = "5.6.0";
 
 /* eslint-disable no-unused-vars */
 
@@ -1632,6 +1632,122 @@ function WorkScheduleManagerTab({ restaurantId, employees, roles, workSchedules,
   const MIN_WEEK = 43*60+55, MAX_WEEK = 44*60;
   const weekOk = allHoursFilled && activeDayCount > 0 && totalContract >= MIN_WEEK && totalContract <= MAX_WEEK;
 
+  // ── IA Assistant state ──
+  const [aiOpen, setAiOpen] = useState(false);
+  const [aiPrompt, setAiPrompt] = useState("");
+  const [aiResult, setAiResult] = useState(null); // { days: {}, message: "" }
+  const [aiLoading, setAiLoading] = useState(false);
+
+  function parseAiCommand(text) {
+    const DIAS_MAP = {"dom":0,"domingo":0,"seg":1,"segunda":1,"ter":2,"terca":2,"terça":2,"qua":3,"quarta":3,"qui":4,"quinta":4,"sex":5,"sexta":5,"sab":6,"sabado":6,"sábado":6};
+    const lower = text.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g,"");
+    const newDays = JSON.parse(JSON.stringify(editDays));
+    const changes = [];
+
+    // Parse "folga" days
+    const folgaMatch = lower.match(/folga(?:s)?(?:\s+(?:nos?\s+dias?\s+|em\s+|no\s+|na\s+|nas?\s+)?)([\w\s,e]+)/);
+    if (folgaMatch) {
+      const daysText = folgaMatch[1];
+      Object.entries(DIAS_MAP).forEach(([name, idx]) => {
+        if (daysText.includes(name)) {
+          newDays[idx] = { active: false };
+          changes.push(`${WEEK_DAYS_LABEL[idx]}: Folga`);
+        }
+      });
+    }
+
+    // Parse "trabalha" days
+    const trabMatch = lower.match(/trabalh[ao](?:r)?(?:\s+(?:nos?\s+dias?\s+|em\s+|no\s+|na\s+)?)([\w\s,e]+)/);
+    if (trabMatch) {
+      const daysText = trabMatch[1];
+      Object.entries(DIAS_MAP).forEach(([name, idx]) => {
+        if (daysText.includes(name)) {
+          newDays[idx] = { active: true, in: newDays[idx]?.in || "", out: newDays[idx]?.out || "", break: newDays[idx]?.break || 0 };
+          changes.push(`${WEEK_DAYS_LABEL[idx]}: Trabalha`);
+        }
+      });
+    }
+
+    // Parse time patterns like "entra 08:00" / "sai 17:00" / "entrada as 08:00" / "saida 17:00"
+    const entradaMatch = lower.match(/entra(?:da)?(?:\s+(?:as?\s*)?)?(\d{1,2})[:.]?(\d{2})?/);
+    const saidaMatch = lower.match(/sa(?:i(?:da)?|ída)(?:\s+(?:as?\s*)?)?(\d{1,2})[:.]?(\d{2})?/);
+    const intervaloMatch = lower.match(/intervalo(?:\s+(?:de\s+)?)(\d+)\s*(?:min|minutos|h|hora)/);
+
+    if (entradaMatch || saidaMatch) {
+      const entH = entradaMatch ? `${String(parseInt(entradaMatch[1])).padStart(2,"0")}:${entradaMatch[2]||"00"}` : null;
+      const saiH = saidaMatch ? `${String(parseInt(saidaMatch[1])).padStart(2,"0")}:${saidaMatch[2]||"00"}` : null;
+      const breakMin = intervaloMatch ? parseInt(intervaloMatch[1]) * (intervaloMatch[0].includes("h")?60:1) : null;
+
+      // Apply to specific days mentioned or all active days
+      let targetDays = [];
+      Object.entries(DIAS_MAP).forEach(([name, idx]) => {
+        if (lower.includes(name)) targetDays.push(idx);
+      });
+      if (targetDays.length === 0) targetDays = [0,1,2,3,4,5,6].filter(i => newDays[i]?.active);
+
+      targetDays.forEach(idx => {
+        if (!newDays[idx]?.active) return;
+        if (entH) { newDays[idx] = { ...newDays[idx], in: entH }; }
+        if (saiH) { newDays[idx] = { ...newDays[idx], out: saiH }; }
+        if (breakMin !== null) { newDays[idx] = { ...newDays[idx], break: breakMin }; }
+      });
+      if (entH) changes.push(`Entrada: ${entH}${targetDays.length<7?" (dias específicos)":""}`);
+      if (saiH) changes.push(`Saída: ${saiH}`);
+      if (breakMin!==null) changes.push(`Intervalo: ${breakMin}min`);
+    }
+
+    // Parse "escala 6x1" patterns
+    const escalaMatch = lower.match(/escala\s+(\d)x(\d)/);
+    if (escalaMatch) {
+      const trab = parseInt(escalaMatch[1]), folg = parseInt(escalaMatch[2]);
+      let count = 0;
+      for (let i = 1; i <= 6; i++) { // seg-sab
+        if (count < trab) { newDays[i] = { active: true, in: newDays[i]?.in||"", out: newDays[i]?.out||"", break: newDays[i]?.break||0 }; count++; }
+        else { newDays[i] = { active: false }; }
+      }
+      newDays[0] = { active: false }; // dom folga
+      changes.push(`Escala ${trab}x${folg}: ${trab} dias de trabalho, ${folg} de folga (dom folga)`);
+    }
+
+    // Validate the suggestion
+    const warnings = [];
+    const activeDays = Object.values(newDays).filter(d => d.active);
+    if (activeDays.length === 0) warnings.push("Nenhum dia de trabalho definido.");
+    if (activeDays.length > 6) warnings.push("Mais de 6 dias de trabalho pode violar a CLT.");
+
+    const allHaveHours = activeDays.every(d => d.in && d.out);
+    if (allHaveHours && activeDays.length > 0) {
+      const stDays = {};
+      Object.entries(newDays).forEach(([idx, d]) => { if (d.active && d.in && d.out) stDays[idx] = { in:d.in, out:d.out, break:d.break??0 }; });
+      const { errors: errs, totalContract: tc } = validateWeekSchedule(stDays);
+      if (tc > 0) changes.push(`Carga semanal: ${fmtHHMM(tc)}`);
+      errs.forEach(e => warnings.push(e));
+    }
+
+    if (changes.length === 0) return { days: null, message: "Não consegui entender. Tente algo como:\n• \"folga domingo e segunda\"\n• \"entra 08:00 sai 17:00 intervalo 60min\"\n• \"escala 6x1\"\n• \"trabalha seg a sex, folga sab dom\"", warnings: [] };
+    return { days: newDays, message: changes.join("\n"), warnings };
+  }
+
+  function handleAiSubmit() {
+    if (!aiPrompt.trim()) return;
+    setAiLoading(true);
+    setTimeout(() => {
+      const result = parseAiCommand(aiPrompt);
+      setAiResult(result);
+      setAiLoading(false);
+    }, 300);
+  }
+
+  function applyAiSuggestion() {
+    if (aiResult?.days) {
+      setEditDays(aiResult.days);
+      setErrors([]);
+      setAiResult(null);
+      setAiPrompt("");
+      setAiOpen(false);
+    }
+  }
+
   // ── Styles ──
   const cardS = { ...S.card, marginBottom: 12 };
   const toggleOn = { width: 44, height: 24, borderRadius: 12, border: "none", cursor: "pointer", position: "relative", background: "var(--ac)", transition: "background .2s" };
@@ -1760,6 +1876,57 @@ function WorkScheduleManagerTab({ restaurantId, employees, roles, workSchedules,
           </div>
         </details>
       )}
+
+      {/* ═══ AI ASSISTANT ═══ */}
+      <div style={{...S.card,marginBottom:12,border:aiOpen?"2px solid #8b5cf644":"1px solid var(--border)",background:aiOpen?"#8b5cf608":"var(--card-bg)"}}>
+        <div onClick={()=>setAiOpen(!aiOpen)} style={{display:"flex",justifyContent:"space-between",alignItems:"center",cursor:"pointer"}}>
+          <div style={{display:"flex",alignItems:"center",gap:8}}>
+            <span style={{fontSize:16}}>🤖</span>
+            <span style={{color:"#8b5cf6",fontWeight:700,fontSize:13}}>Assistente de Horários</span>
+          </div>
+          <span style={{color:"var(--text3)",fontSize:12}}>{aiOpen?"▲":"▼"}</span>
+        </div>
+        {aiOpen && (
+          <div style={{marginTop:12}}>
+            <p style={{color:"var(--text3)",fontSize:11,margin:"0 0 10px",lineHeight:1.5}}>
+              Descreva o que deseja e o assistente preenche automaticamente. Exemplos: "folga domingo e segunda", "entra 08:00 sai 17:00 intervalo 60min", "escala 6x1"
+            </p>
+            <div style={{display:"flex",gap:8}}>
+              <input
+                type="text" value={aiPrompt}
+                onChange={e=>setAiPrompt(e.target.value)}
+                onKeyDown={e=>{ if(e.key==="Enter") handleAiSubmit(); }}
+                placeholder="Ex: folga dom e seg, entra 08:00 sai 16:20..."
+                style={{...S.input,flex:1,fontSize:13}}
+              />
+              <button onClick={handleAiSubmit} disabled={aiLoading||!aiPrompt.trim()}
+                style={{...S.btnPrimary,padding:"8px 16px",fontSize:12,whiteSpace:"nowrap",opacity:aiLoading?0.5:1,background:"#8b5cf6"}}>
+                {aiLoading ? "..." : "Sugerir"}
+              </button>
+            </div>
+            {aiResult && (
+              <div style={{marginTop:12,padding:"12px 14px",borderRadius:10,background:aiResult.days?"#f0fdf4":"#fff7ed",border:`1px solid ${aiResult.days?"#10b98133":"#f59e0b33"}`}}>
+                <p style={{color:aiResult.days?"var(--green)":"#f59e0b",fontSize:12,fontWeight:700,margin:"0 0 8px"}}>
+                  {aiResult.days ? "✅ Sugestão do assistente:" : "⚠️ Não entendido"}
+                </p>
+                <pre style={{color:"var(--text2)",fontSize:11,margin:0,whiteSpace:"pre-wrap",fontFamily:"'DM Mono',monospace"}}>{aiResult.message}</pre>
+                {aiResult.warnings?.length > 0 && (
+                  <div style={{marginTop:8,padding:"8px 10px",borderRadius:8,background:"#fff7ed",border:"1px solid #f59e0b33"}}>
+                    <p style={{color:"#f59e0b",fontSize:11,fontWeight:700,margin:"0 0 4px"}}>⚠️ Avisos:</p>
+                    {aiResult.warnings.map((w,i) => <p key={i} style={{color:"#92400e",fontSize:11,margin:"2px 0"}}>{w}</p>)}
+                  </div>
+                )}
+                {aiResult.days && (
+                  <div style={{display:"flex",gap:8,marginTop:10}}>
+                    <button onClick={applyAiSuggestion} style={{...S.btnPrimary,padding:"8px 16px",fontSize:12,background:"#8b5cf6"}}>Aplicar sugestão</button>
+                    <button onClick={()=>setAiResult(null)} style={{...S.btnSecondary,padding:"8px 16px",fontSize:12}}>Descartar</button>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
 
       {/* ═══ DAY CARDS (mobile-first) ═══ */}
       <div style={{background:"var(--bg1)",borderRadius:10,padding:"10px 14px",marginBottom:12}}>
@@ -2889,7 +3056,7 @@ function EmpRowLine({ emp, isNew, row, restRoles, isSaved, isOwner, onChange, on
         ? <div style={{...empInS2,display:"flex",alignItems:"center",color:"var(--text3)"}}>•••.•••.•••-••</div>
         : <input value={row.cpf||""} onChange={ev=>onChange("cpf",maskCpf(ev.target.value))} placeholder="000.000.000-00" style={empInS2} inputMode="numeric"/>
       }
-      <input type="date" value={row.admission||""} onChange={ev=>onChange("admission",ev.target.value)} style={empInS2}/>
+      <input type="date" value={row.admission||""} onChange={ev=>onChange("admission",ev.target.value)} placeholder="01/01/2026" title={row.admission ? "" : "Sem data → assume 01/01/2026"} style={{...empInS2, ...(row.admission ? {} : {borderColor:"#f59e0b44",background:"#fffbeb"})}}/>
 
       {/* PIN — botão resetar */}
       <div style={{display:"flex",gap:4,alignItems:"center",justifyContent:"center"}}>
@@ -2957,7 +3124,7 @@ function EmployeeSpreadsheet({ restEmps, restRoles, rid, employees, onUpdate, re
   ];
   const plano = PLANOS.find(p=>p.id===(restaurant?.planoId??"p10")) ?? PLANOS[0];
   const activeCount = restEmps.filter(e=>!e.inactive).length;
-  const blank = () => ({ name:"", cpf:"", admission:today(), pin:"", roleId:"", restaurantId:rid });
+  const blank = () => ({ name:"", cpf:"", admission:"", pin:"", roleId:"", restaurantId:rid });
   const [newRow, setNewRow] = useState(blank());
   const [editRows, setEditRows] = useState({});
   const [saved, setSaved] = useState({});
@@ -3026,7 +3193,7 @@ Inclua apenas as ações solicitadas. Arrays vazios se não houver ação daquel
             empCode, pin,
             name: e.nome,
             cpf: e.cpf || "",
-            admission: e.admissao || today(),
+            admission: e.admissao || "2026-01-01",
             roleId: role?.id || "",
             roleName: role?.name || e.cargo || "(não encontrado)",
             roleMatched: !!role,
@@ -3133,7 +3300,7 @@ Inclua apenas as ações solicitadas. Arrays vazios se não houver ação daquel
     const seq = nextEmpSeq(employees, restCode);
     const empCode = makeEmpCode(restCode, seq);
     const pin = newRow.pin || String(seq).padStart(4,"0");
-    onUpdate("employees", [...employees, { ...newRow, id:Date.now().toString(), empCode, pin, restaurantId:rid }]);
+    onUpdate("employees", [...employees, { ...newRow, admission: newRow.admission || "2026-01-01", id:Date.now().toString(), empCode, pin, restaurantId:rid }]);
     setNewRow(blank());
   }
 
@@ -3350,7 +3517,7 @@ Inclua apenas as ações solicitadas. Arrays vazios se não houver ação daquel
   );
 }
 
-function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, splits, schedules, onUpdate, perms, isOwner, data, currentUser, privacyMask }) {
+function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, splits, schedules, onUpdate, perms, isOwner, data, currentUser, privacyMask, mobileOnly }) {
   const now = new Date();
   const [year, setYear] = useState(now.getFullYear());
   const [month, setMonth] = useState(now.getMonth());
@@ -3462,7 +3629,8 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
       const r = restRoles.find(r => r.id === emp.roleId);
       if (!r) { _dbgNoRole++; return false; }
       if (emp.isFreela) { _dbgFreela++; return false; }
-      if (emp.admission && emp.admission > date) { _dbgAdm++; return false; }
+      const admDate = emp.admission || "2026-01-01";
+      if (admDate > date) { _dbgAdm++; return false; }
       if (emp.inactive && emp.inactiveFrom && emp.inactiveFrom <= date) { _dbgInact++; return false; }
       const status = empDayStatus(emp.id);
       if (status === DAY_VACATION || status === DAY_FREELA) { _dbgSched++; return false; }
@@ -3680,7 +3848,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
     isDP                                       && ["notificacoes",`📬 Caixa${inboxUnread>0?` (${inboxUnread})`:""}`],
     isDP                                       && ["dp_gestores", "👔 Gestores"],
     (canTips || isOwner)                       && ["config",       "⚙️ Configurações"],
-  ].filter(Boolean);
+  ].filter(Boolean).filter(([id]) => !mobileOnly || ["dashboard","tips"].includes(id));
 
   const [tab, setTab] = useState("dashboard");
 
@@ -4377,8 +4545,8 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
             <div style={{marginBottom:12}}>
               <PillBar options={["Todos", ...AREAS]} value={schedArea} onChange={setSchedArea}/>
             </div>
-            <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
-              <div style={{display:"flex",gap:8}}>
+            <div style={{display:"flex",gap:8,flexWrap:"wrap",alignItems:"center",justifyContent:"space-between",marginBottom:12}}>
+              <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
 
                 {/* Pre-fill contract days off */}
                 <button onClick={()=>{
@@ -4393,7 +4561,6 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                     const empScheds = data?.workSchedules?.[rid]?.[emp.id] ?? [];
                     const currentSched = empScheds[empScheds.length - 1];
                     if (!currentSched) return;
-                    // Dias SEM presença no contrato = folga fixa (suporta days-only e formato completo)
                     const folgaDays = new Set([0,1,2,3,4,5,6].filter(d => !currentSched.days[d]));
                     const empDayMap = { ...(newSchedules?.[rid]?.[mk]?.[emp.id] ?? {}) };
                     for (let d = 1; d <= daysInMonth; d++) {
@@ -4401,12 +4568,9 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                       const weekday = new Date(date+"T12:00:00").getDay();
                       const current = empDayMap[date];
                       if (folgaDays.has(weekday)) {
-                        // Dia de folga no contrato → marca como DAY_OFF (sobrescreve se já era DAY_OFF, senão só se estiver vazio)
                         if (!current) { empDayMap[date] = DAY_OFF; added++; }
-                        else if (current === DAY_OFF) { /* já correto, não conta */ }
-                        // se tiver outro status (férias, falta, etc.) respeita
+                        else if (current === DAY_OFF) { /* já correto */ }
                       } else {
-                        // Dia de trabalho no contrato → se estiver marcado como DAY_OFF, remove
                         if (current === DAY_OFF) { delete empDayMap[date]; removed++; }
                       }
                     }
@@ -4423,14 +4587,37 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                 }} style={{padding:"8px 12px",borderRadius:10,border:"1px solid #e74c3c44",background:"transparent",color:"var(--red)",cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:12,whiteSpace:"nowrap"}}>
                   📅 Folgas do contrato
                 </button>
-                <button onClick={async () => {
+                {/* Reiniciar escala */}
+                <button onClick={()=>{
+                  const mesNome = monthLabel(year, month);
+                  const n = areaEmps.length;
+                  if (!n) return;
+                  if (!window.confirm(`Reiniciar escala de ${mesNome}?\n\nTodos os ${n} empregado(s) ${schedArea==="Todos"?"":"da área "+schedArea+" "}voltarão ao status "Trabalho" em todos os dias.\n\nIsso remove folgas, freelas, férias, faltas e compensações do mês.`)) return;
+                  let newSched = JSON.parse(JSON.stringify(schedules ?? {}));
+                  if (!newSched[rid]) newSched[rid] = {};
+                  if (!newSched[rid][mk]) newSched[rid][mk] = {};
+                  areaEmps.forEach(emp => { newSched[rid][mk][emp.id] = {}; });
+                  onUpdate("schedules", newSched);
+                  onUpdate("_toast", `🔄 Escala de ${mesNome} reiniciada — ${n} empregado(s)`);
+                }} style={{padding:"8px 12px",borderRadius:10,border:"1px solid #e74c3c44",background:"transparent",color:"var(--red)",cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:12,whiteSpace:"nowrap"}}>
+                  🔄 Reiniciar escala
+                </button>
+
+                {/* Marcar férias */}
+                <button onClick={()=>{setShowVacForm(!showVacForm);setVacEmpId("");setVacFrom("");setVacTo("");}}
+                  style={{padding:"8px 12px",borderRadius:10,border:`1px solid ${showVacForm?"#8b5cf6":"#8b5cf644"}`,background:showVacForm?"#8b5cf622":"transparent",color:"#8b5cf6",cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:12,whiteSpace:"nowrap"}}>
+                  🏖️ Marcar férias
+                </button>
+              </div>
+
+              {/* PDF export — à direita */}
+              <button onClick={async () => {
                   await loadScript("https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js");
                   await loadScript("https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js");
                   const { jsPDF } = window.jspdf;
                   const doc = new jsPDF({ orientation:"landscape", unit:"mm", format:"a4" });
                   const daysInMonth = new Date(year, month+1, 0).getDate();
                   const STATUS_SHORT = {off:"F",freela:"FL",comp:"C",vac:"FÉR",faultj:"FJ",faultu:"FI"};
-                  // Colors: work=green, off=red, freela=cyan, comp=blue, vac=purple, faultj=orange, faultu=dark red
                   const STATUS_COLORS = {
                     work: [39,174,96],
                     off:  [231,76,60],
@@ -4445,7 +4632,6 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                   doc.setTextColor(30,30,30);
                   doc.text(`Escala — ${schedArea} — ${monthLabel(year,month)} — ${restaurant.name}`, 14, 12);
 
-                  // Legend
                   const legend = [
                     ["T  Trabalho", STATUS_COLORS.work],
                     ["F  Folga", STATUS_COLORS.off],
@@ -4465,10 +4651,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                     lx += 38;
                   });
 
-                  // Build head row: name + days + T
                   const head = [["Empregado", ...Array.from({length:daysInMonth},(_,i)=>String(i+1)), "T"]];
-
-                  // Group employees by area for section headers
                   const areasToExport = schedArea === "Todos" ? AREAS.filter(a => areaEmps.some(e => { const r = restRoles.find(x=>x.id===e.roleId); return r?.area === a; })) : [schedArea];
 
                   function buildAreaBody(empsForArea) {
@@ -4531,8 +4714,6 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                       ? areaEmps.filter(e => { const r = restRoles.find(x=>x.id===e.roleId); return r?.area === area; })
                       : areaEmps;
                     if (empsForArea.length === 0) return;
-
-                    // Area header (when showing multiple areas)
                     if (schedArea === "Todos") {
                       if (aIdx > 0 && curY > 170) { doc.addPage(); curY = 12; }
                       doc.setFontSize(9);
@@ -4540,16 +4721,14 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                       doc.text(`▸ ${area.toUpperCase()} (${empsForArea.length})`, 14, curY + 2);
                       curY += 5;
                     }
-
                     const body = buildAreaBody(empsForArea);
                     curY = drawTable(body, curY, empsForArea) + 4;
                   });
 
                   doc.save(`escala_${schedArea}_${year}_${String(month+1).padStart(2,"0")}.pdf`);
                 }} style={{padding:"8px 12px",borderRadius:10,border:"1px solid var(--border)",background:"transparent",color:"var(--text2)",cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:12,whiteSpace:"nowrap"}}>
-                  📄 PDF
-                </button>
-              </div>
+                📄 Exportar PDF
+              </button>
             </div>
 
             {/* Legend */}
@@ -4562,31 +4741,6 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                   <span style={{color:"var(--text3)",fontSize:10,fontFamily:"'DM Mono',monospace"}}>{l}</span>
                 </div>
               ))}
-            </div>
-
-            {/* ═══ AÇÕES DA ESCALA ═══ */}
-            <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:14}}>
-              {/* Reiniciar escala */}
-              <button onClick={()=>{
-                const mesNome = monthLabel(year, month);
-                const n = areaEmps.length;
-                if (!n) return;
-                if (!window.confirm(`Reiniciar escala de ${mesNome}?\n\nTodos os ${n} empregado(s) ${schedArea==="Todos"?"":"da área "+schedArea+" "}voltarão ao status "Trabalho" em todos os dias.\n\nIsso remove folgas, freelas, férias, faltas e compensações do mês.`)) return;
-                let newSched = JSON.parse(JSON.stringify(schedules ?? {}));
-                if (!newSched[rid]) newSched[rid] = {};
-                if (!newSched[rid][mk]) newSched[rid][mk] = {};
-                areaEmps.forEach(emp => { newSched[rid][mk][emp.id] = {}; });
-                onUpdate("schedules", newSched);
-                onUpdate("_toast", `🔄 Escala de ${mesNome} reiniciada — ${n} empregado(s)`);
-              }} style={{padding:"8px 12px",borderRadius:10,border:"1px solid #e74c3c44",background:"transparent",color:"var(--red)",cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:12,whiteSpace:"nowrap"}}>
-                🔄 Reiniciar escala
-              </button>
-
-              {/* Marcar férias */}
-              <button onClick={()=>{setShowVacForm(!showVacForm);setVacEmpId("");setVacFrom("");setVacTo("");}}
-                style={{padding:"8px 12px",borderRadius:10,border:`1px solid ${showVacForm?"#8b5cf6":"#8b5cf644"}`,background:showVacForm?"#8b5cf622":"transparent",color:"#8b5cf6",cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:12,whiteSpace:"nowrap"}}>
-                🏖️ Marcar férias
-              </button>
             </div>
 
             {/* Formulário de férias */}
@@ -6963,12 +7117,19 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }
 
         {tab === "changelog" && (() => {
           const CHANGELOG = [
+            { version:"5.6.0", date:"2026-04-12", items:[
+              "Novo: Admissão default — empregados sem data de admissão assumem 01/01/2026",
+              "Novo: Privacidade de dados na landing page e no guia do gestor",
+              "Novo: Botões da escala reorganizados — Folgas, Reiniciar, Férias lado a lado + Exportar PDF à direita",
+              "Novo: Mobile gestor — apenas Dashboard e Gorjetas, com aviso para usar demais funções no PC",
+              "Novo: Assistente de Horários com IA — descreva o que deseja e o sistema sugere preenchimento automático",
+              "Correção: input de gorjeta aceita vírgula como separador decimal (padrão brasileiro)",
+            ]},
             { version:"5.5.0", date:"2026-04-12", items:[
-              "Novo: Tabela de gorjetas simplificada — digita valores e salva tudo de uma vez (padrão deferred save)",
+              "Tabela de gorjetas simplificada — digita valores e salva tudo de uma vez (padrão deferred save)",
               "Removido: modo simples vs tabela, botões salvar por dia, 'Lançar Todos Preenchidos'",
-              "Novo: Botão sticky 'Salvar Gorjetas' + 'Descartar' aparece quando há alterações pendentes",
-              "Novo: Aviso ao sair da aba Gorjetas sem salvar — pergunta se deseja salvar antes",
-              "Limpeza de variáveis de estado não utilizadas (tipDate, tipTotal, tipNote, showTipTable)",
+              "Botão sticky 'Salvar Gorjetas' + 'Descartar' aparece quando há alterações pendentes",
+              "Aviso ao sair da aba Gorjetas sem salvar — pergunta se deseja salvar antes",
             ]},
             { version:"5.4.2", date:"2026-04-12", items:[
               "Correção: gorjeta lançada não sumia mais — refatoração de calcTipForDate e recalcTipDay para evitar stale closure",
@@ -7239,6 +7400,14 @@ function ManagerPortal({ manager, data, onUpdate, onBack, toggleTheme, theme, on
   });
   const ac = "var(--ac)";
 
+  // Mobile detection
+  const [isMobile, setIsMobile] = useState(() => window.innerWidth < 768);
+  useEffect(() => {
+    const handler = () => setIsMobile(window.innerWidth < 768);
+    window.addEventListener("resize", handler);
+    return () => window.removeEventListener("resize", handler);
+  }, []);
+
   useEffect(() => {
     if (selId) localStorage.setItem("apptip_selrest", selId);
     else localStorage.removeItem("apptip_selrest");
@@ -7368,6 +7537,23 @@ function ManagerPortal({ manager, data, onUpdate, onBack, toggleTheme, theme, on
                     ← Ver outros restaurantes
                   </button>
                 )}
+              </div>
+            </div>
+          ) : isMobile ? (
+            <div>
+              <RestaurantPanel
+                restaurant={selRest} restaurants={restaurants} employees={employees}
+                roles={roles} tips={tips} splits={splits} schedules={schedules}
+                onUpdate={onUpdate}
+                perms={{...(manager.perms ?? {tips:true,schedule:true}), isDP: manager.isDP ?? false, managerAreas: manager.profile==="lider"?(manager.areas??[]):[] }}
+                isOwner={false} data={data} currentUser={manager} mobileOnly
+              />
+              <div style={{margin:"20px 16px",padding:"20px 18px",borderRadius:14,background:"#fffbeb",border:"1px solid #f59e0b44",textAlign:"center"}}>
+                <div style={{fontSize:32,marginBottom:10}}>🖥️</div>
+                <p style={{color:"#92400e",fontSize:14,fontWeight:700,margin:"0 0 8px"}}>Demais funcionalidades disponíveis no computador</p>
+                <p style={{color:"#92400e99",fontSize:12,margin:0,lineHeight:1.5}}>
+                  Para acessar Escala, Equipe, Cargos, Horários, Comunicados, FAQ, DP e Configurações, utilize o AppTip em um computador ou tablet.
+                </p>
               </div>
             </div>
           ) : (
@@ -7783,6 +7969,7 @@ function Home({ onLogin }) {
     { icon:"💬", title:"Canal com o DP", desc:"Canal direto, inclusive anônimo, para comunicação entre equipe e departamento pessoal. Sugestões, denúncias, atestados e dúvidas trabalhistas." },
 
     { icon:"👔", title:"Perfis de gestor", desc:"DP com acesso completo ou Líder de Área com visão restrita. Permissões granulares, criação de gestores por DP e CPF obrigatório para segurança." },
+    { icon:"🛡️", title:"Privacidade de dados", desc:"Gestores controlam a visibilidade dos dados. Com o modo privacidade, a equipe de administradores não acessa valores de gorjetas, CPFs, mensagens do DP ou comunicados — garantindo sigilo total da operação." },
     { icon:"🔒", title:"Segurança e controle", desc:"Acesso por PIN e CPF, permissões por perfil, modo somente leitura, lixeira com restauração e auditoria completa. Cada pessoa vê apenas o que deve." },
     { icon:"📱", title:"100% no celular", desc:"Sem app para instalar. Acessa pelo navegador em qualquer smartphone. Gestor e empregado com portais distintos e seguros." },
   ];
@@ -8328,6 +8515,7 @@ hr{border:none;border-top:1px solid var(--border);margin:24px 0}
   <a href="#config-divisao"><span class="ic">⚖️</span> Divisão de Gorjeta</a>
   <div class="sg">Referência</div>
   <a href="#permissoes"><span class="ic">🔑</span> Permissões</a>
+  <a href="#privacidade-admin"><span class="ic">🛡️</span> Privacidade</a>
   <a href="#bloqueio"><span class="ic">🔒</span> Acesso Suspenso</a>
 </nav>
 <div class="main">
@@ -8657,6 +8845,31 @@ hr{border:none;border-top:1px solid var(--border);margin:24px 0}
           <tr><td>📬 Gestor do DP</td><td>Aba Caixa, recebe mensagens do Fale com DP</td></tr>
         </table>
         <div class="ib tip"><span class="ico">💡</span><span>Se alguma aba não aparece, seu perfil pode não ter permissão ou o admin não autorizou. CPF é obrigatório para todos os gestores.</span></div>
+      </div>
+    </div>
+
+    <div class="sec" id="privacidade-admin">
+      <div class="sh"><div class="iw">🛡️</div><div><h2>Privacidade de Dados <span class="new">NOVO</span></h2><p>Controle o que a equipe de administradores pode ver</p></div></div>
+      <div class="card"><h3>O que é o Modo Privacidade?</h3><p>Quando ativado, o modo privacidade oculta dados sensíveis do seu restaurante para a equipe de administradores do AppTip. Os admins continuam tendo acesso à gestão do sistema, mas não visualizam informações confidenciais da sua operação.</p></div>
+      <div class="card"><h3>O que fica oculto para o admin</h3>
+        <table>
+          <tr><th>Dado</th><th>Visão do admin</th></tr>
+          <tr><td>💸 Valores de gorjeta</td><td>Aparece como <strong>••••,••</strong></td></tr>
+          <tr><td>📋 CPFs de empregados e gestores</td><td>Aparece como <strong>•••.•••.•••-••</strong></td></tr>
+          <tr><td>📢 Comunicados</td><td>Conteúdo completamente oculto</td></tr>
+          <tr><td>💬 Mensagens do DP</td><td>Conteúdo completamente oculto</td></tr>
+          <tr><td>🔔 Notificações</td><td>Conteúdo completamente oculto</td></tr>
+        </table>
+        <div class="ib tip"><span class="ico">💡</span><span>O admin vê um banner indicando que o modo privacidade está ativo, garantindo transparência de que existem dados mas que estão protegidos.</span></div>
+      </div>
+      <div class="card"><h3>Como ativar</h3>
+        <div class="steps">
+          <div class="st"><span class="sn">1</span><span>Acesse <strong>⚙️ Configurações</strong></span></div>
+          <div class="st"><span class="sn">2</span><span>Encontre a seção <strong>🔒 Privacidade</strong></span></div>
+          <div class="st"><span class="sn">3</span><span>Ative o toggle de privacidade</span></div>
+          <div class="st"><span class="sn">4</span><span>Clique em <strong>Salvar Configurações</strong></span></div>
+        </div>
+        <div class="ib blue"><span class="ico">ℹ️</span><span>O modo privacidade afeta apenas a visão do admin. Gestores e empregados continuam vendo todos os dados normalmente em seus respectivos portais.</span></div>
       </div>
     </div>
 
