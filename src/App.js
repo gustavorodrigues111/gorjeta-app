@@ -3,7 +3,7 @@ import { useState, useEffect, Component } from "react";
 import { db } from "./firebase";
 import { doc, getDoc, setDoc } from "firebase/firestore";
 
-const APP_VERSION = "5.4.2";
+const APP_VERSION = "5.5.0";
 
 /* eslint-disable no-unused-vars */
 
@@ -3378,10 +3378,6 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
     : allRestEmps;
 
   // forms
-  const [tipDate, setTipDate]   = useState(today());
-  const [tipTotal, setTipTotal] = useState("");
-  const [tipNote, setTipNote]   = useState("");
-  const [showTipTable, setShowTipTable] = useState(true);
   const [tipRows, setTipRows]   = useState([{date:today(),total:"",note:""}]);
   const [showRecalc, setShowRecalc] = useState(false);
   const [splitForm, setSplitForm]         = useState(null);
@@ -3704,6 +3700,40 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
     return true; // indica que pode prosseguir com o reset
   }
 
+  // --- Gorjetas dirty check & save helper ---
+  const tipsDirty = tipRows.some(r => {
+    const v = parseFloat(r.total);
+    const dayTips = (tips ?? []).filter(t => t.restaurantId === rid && t.date === r.date);
+    const isLaunched = dayTips.length > 0;
+    const launchedPool = isLaunched ? dayTips[0].poolTotal : null;
+    return (v > 0 && !isNaN(v) && !isLaunched) || (isLaunched && launchedPool != null && v > 0 && !isNaN(v) && v !== launchedPool);
+  });
+
+  function saveTipRows() {
+    const dirtyRows = tipRows.filter(r => {
+      const v = parseFloat(r.total);
+      if (!v || isNaN(v) || v <= 0) return false;
+      const dayTips = (tips ?? []).filter(t => t.restaurantId === rid && t.date === r.date);
+      const isLaunched = dayTips.length > 0;
+      const launchedPool = isLaunched ? dayTips[0].poolTotal : null;
+      return !isLaunched || (launchedPool != null && v !== launchedPool);
+    });
+    if (!dirtyRows.length) return;
+    let count = 0, currentTips = tips;
+    dirtyRows.forEach(row => {
+      const result = calcTipForDate(row.date, parseFloat(row.total), row.note ?? "", currentTips);
+      count += result.count;
+      currentTips = result.updatedTips;
+    });
+    if (count > 0) {
+      onUpdate("tips", currentTips);
+      setTipRows([]);
+      onUpdate("_toast", `✅ ${dirtyRows.length} dia${dirtyRows.length>1?"s":""} salvo${dirtyRows.length>1?"s":""}!`);
+    }
+  }
+
+  function discardTipRows() { setTipRows([]); }
+
   return (
     <div style={{ fontFamily:"'DM Sans',sans-serif" }}>
       {/* Tabs com scroll suave */}
@@ -3714,6 +3744,11 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
               const action = window.confirm("Você tem alterações não salvas nas configurações.\n\nDeseja salvar antes de sair?");
               if (action) { saveConfig(); }
               else { discardConfig(); }
+            }
+            if (tab === "tips" && id !== "tips" && tipsDirty) {
+              const action = window.confirm("Você tem gorjetas não salvas.\n\nDeseja salvar antes de sair?");
+              if (action) { saveTipRows(); }
+              else { discardTipRows(); }
             }
             setTab(id);
           }}
@@ -4082,38 +4117,28 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                 <button onClick={() => setShowExport(true)} style={{ ...S.btnSecondary, fontSize: 12, color: ac, borderColor: ac }}>📤 Exportar Gorjeta</button>
               </div>
             )}
-            <div style={{ ...S.card, marginBottom: 24 }}>
-              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
-                <p style={{ color: ac, fontSize: 14, margin: 0, fontWeight: 700 }}>💸 Lançar Gorjeta</p>
-                <button onClick={()=>setShowTipTable(!showTipTable)} style={{...S.btnSecondary,fontSize:11,padding:"4px 10px"}}>
-                  {showTipTable ? "Modo simples" : "Modo tabela"}
-                </button>
+            {/* Botão salvar gorjetas — sticky no topo quando há alterações */}
+            {tipsDirty && (
+              <div style={{position:"sticky",top:0,zIndex:50,marginBottom:16}}>
+                <div style={{background:"var(--card-bg)",border:"2px solid var(--ac)",borderRadius:14,padding:"14px 18px",boxShadow:"0 4px 20px rgba(0,0,0,0.15)"}}>
+                  <p style={{color:ac,fontSize:13,fontWeight:700,margin:"0 0 10px"}}>⚠️ Gorjetas não salvas</p>
+                  <div style={{display:"flex",gap:10}}>
+                    <button onClick={saveTipRows} style={{...S.btnPrimary,flex:1,padding:"12px",fontSize:14,fontWeight:700}}>Salvar Gorjetas</button>
+                    <button onClick={discardTipRows} style={{...S.btnSecondary,padding:"12px 16px",fontSize:13}}>Descartar</button>
+                  </div>
+                </div>
               </div>
+            )}
 
-              {!showTipTable ? (
-              <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-                <div><label style={S.label}>Data</label><input type="date" value={tipDate} onChange={e => setTipDate(e.target.value)} style={S.input} /></div>
-                <div><label style={S.label}>Valor Total (R$)</label><input type="number" min="0" step="0.01" value={tipTotal} onChange={e => setTipTotal(e.target.value)} placeholder="Ex: 1500.00" style={S.input} /></div>
-                <div><label style={S.label}>Observação</label><input value={tipNote} onChange={e => setTipNote(e.target.value)} placeholder="Ex: Sábado à noite" style={S.input} /></div>
-                <button onClick={() => { const { count, updatedTips } = calcTipForDate(tipDate, tipTotal, tipNote); if (count > 0) { onUpdate("tips", updatedTips); setTipTotal(""); setTipNote(""); onUpdate("_toast", `✅ Distribuído para ${count} empregados!`); } }} style={S.btnPrimary}>Calcular e Distribuir</button>
-              </div>
-              ) : (
-              /* MODO TABELA */
-              (() => {
+            <div style={{ ...S.card, marginBottom: 24 }}>
+              <p style={{ color: ac, fontSize: 14, margin: "0 0 14px", fontWeight: 700 }}>💸 Gorjetas — {monthLabel(year,month)}</p>
+              {(() => {
                 const daysInMonth = new Date(year, month+1, 0).getDate();
-                const taxRate = restaurant.taxRate ?? TAX;
-                const tSplit = splits?.[rid]?.[mk] ?? DEFAULT_SPLIT;
-                const mode = restaurant.divisionMode ?? MODE_AREA_POINTS;
                 const noTipDays = data?.noTipDays?.[rid] ?? [];
 
                 const allDays = Array.from({length: daysInMonth}, (_, i) => {
                   const d = i+1;
                   return `${year}-${String(month+1).padStart(2,"0")}-${String(d).padStart(2,"0")}`;
-                });
-
-                const pendingRows = tipRows.filter(r => {
-                  const v = parseFloat(r.total);
-                  return v > 0 && !isNaN(v) && !monthTips.some(t=>t.date===r.date) && !noTipDays.includes(r.date);
                 });
 
                 const setNoTip = (date, checked) => {
@@ -4124,14 +4149,10 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
 
                 return (
                   <div>
-                    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
-                      <span style={{color:"var(--text3)",fontSize:12}}>{monthLabel(year,month)} — {daysInMonth} dias</span>
-                    </div>
-
                     {/* Cabeçalho */}
-                    <div style={{display:"grid",gridTemplateColumns:"40px 1fr 56px 70px",gap:4,padding:"0 6px 4px",marginBottom:2}}>
-                      {["","Valor (R$)","S/ gorj.",""].map((h,i)=>(
-                        <div key={i} style={{color:"var(--text3)",fontSize:10,fontWeight:700,textAlign:i===2?"center":"left"}}>{h}</div>
+                    <div style={{display:"grid",gridTemplateColumns:"40px 1fr 48px 36px",gap:4,padding:"0 6px 4px",marginBottom:2}}>
+                      {["","Valor (R$)","S/gorj",""].map((h,i)=>(
+                        <div key={i} style={{color:"var(--text3)",fontSize:10,fontWeight:700,textAlign:i>=2?"center":"left"}}>{h}</div>
                       ))}
                     </div>
 
@@ -4141,28 +4162,24 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                       const isLaunched = dayTips.length > 0;
                       const launchedPool = isLaunched ? dayTips[0].poolTotal : null;
 
-                      const row = tipRows.find(r => r.date === date) ?? {
-                        date,
-                        total: launchedPool != null ? String(launchedPool) : "",
-                        note:  isLaunched ? (dayTips[0].note ?? "") : ""
-                      };
-                      const val    = parseFloat(row.total);
+                      const localRow = tipRows.find(r => r.date === date);
+                      const displayVal = localRow ? localRow.total : (launchedPool != null ? String(launchedPool) : "");
+                      const val = parseFloat(displayVal);
                       const hasVal = val > 0 && !isNaN(val);
-                      const isDirty = isLaunched && launchedPool != null && hasVal && val !== launchedPool;
+                      const isDirty = localRow && ((isLaunched && launchedPool != null && hasVal && val !== launchedPool) || (!isLaunched && hasVal));
 
                       const weekday  = new Date(date+"T12:00:00").toLocaleDateString("pt-BR",{weekday:"short"});
                       const isWeekend = [0,6].includes(new Date(date+"T12:00:00").getDay());
                       const isBeforeVigencia = restaurant.serviceStartDate && date < restaurant.serviceStartDate;
 
-                      let bg = "#fff", border = "var(--border)";
-                      if      (isBeforeVigencia)       { bg = "var(--bg3)"; border = "var(--border)"; }
-                      else if (isNoTip)               { bg = "#f5f0ff"; border = "#6366f133"; }
-                      else if (isLaunched && !isDirty) { bg = "#f0fdf4"; border = "#10b98133"; }
-                      else if (isDirty)                { bg = "#fffbeb"; border = "#f59e0b44"; }
-                      else if (hasVal)                 { bg = "#faf8f4"; border = "var(--ac)33"; }
+                      let bg = "var(--card-bg)", border = "var(--border)";
+                      if      (isBeforeVigencia)            { bg = "var(--bg3)"; border = "var(--border)"; }
+                      else if (isNoTip)                     { bg = "#f5f0ff"; border = "#6366f133"; }
+                      else if (isDirty)                     { bg = "#fffbeb"; border = "#f59e0b44"; }
+                      else if (isLaunched)                  { bg = "#f0fdf4"; border = "#10b98133"; }
 
                       if (isBeforeVigencia) return (
-                        <div key={date} style={{display:"grid",gridTemplateColumns:"40px 1fr",gap:4,padding:"5px 6px",marginBottom:4,borderRadius:10,background:bg,border:`1px solid ${border}`,alignItems:"center",opacity:0.4}}>
+                        <div key={date} style={{display:"grid",gridTemplateColumns:"40px 1fr",gap:4,padding:"5px 6px",marginBottom:3,borderRadius:10,background:bg,border:`1px solid ${border}`,alignItems:"center",opacity:0.4}}>
                           <div style={{textAlign:"center"}}>
                             <div style={{color:"var(--text3)",fontSize:13,fontWeight:700}}>{parseInt(date.slice(-2))}</div>
                             <div style={{color:"var(--text3)",fontSize:9}}>{weekday}</div>
@@ -4172,30 +4189,30 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                       );
 
                       return (
-                        <div key={date} style={{display:"grid",gridTemplateColumns:"40px 1fr 56px 70px",gap:4,padding:"5px 6px",marginBottom:4,borderRadius:10,background:bg,border:`1px solid ${border}`,alignItems:"center"}}>
+                        <div key={date} style={{display:"grid",gridTemplateColumns:"40px 1fr 48px 36px",gap:4,padding:"5px 6px",marginBottom:3,borderRadius:10,background:bg,border:`1px solid ${border}`,alignItems:"center"}}>
 
                           {/* Data */}
                           <div style={{textAlign:"center"}}>
-                            <div style={{color:isWeekend?"#f59e0b":isNoTip?"#818cf8":isLaunched?"var(--green)":"var(--text3)",fontSize:13,fontWeight:700}}>{parseInt(date.slice(-2))}</div>
+                            <div style={{color:isWeekend?"#f59e0b":isNoTip?"#818cf8":isLaunched&&!isDirty?"var(--green)":isDirty?"#f59e0b":"var(--text3)",fontSize:13,fontWeight:700}}>{parseInt(date.slice(-2))}</div>
                             <div style={{color:"var(--text3)",fontSize:9}}>{weekday}</div>
                           </div>
 
                           {/* Valor */}
-                          {privacyMask && isLaunched ? (
+                          {privacyMask && isLaunched && !isDirty ? (
                             <div style={{...S.input, fontSize:14, padding:"8px 10px", background:"#e8faf0", color:"var(--green)", borderColor:"#10b98133", display:"flex", alignItems:"center"}}>
                               ••••,••
                             </div>
                           ) : (
                             <input
                               type="number" min="0" step="0.01"
-                              value={isNoTip ? "" : row.total}
+                              value={isNoTip ? "" : displayVal}
                               disabled={isNoTip}
-                              onChange={e=>{ const nr=tipRows.filter(r=>r.date!==date); setTipRows([...nr,{...row,total:e.target.value}]); }}
+                              onChange={e=>{ setTipRows(prev => { const without = prev.filter(r => r.date !== date); return [...without, { date, total: e.target.value, note: "" }]; }); }}
                               placeholder="0,00"
                               style={{...S.input, fontSize:14, padding:"8px 10px",
-                                background:  isNoTip?"#f5f0ff"  : isDirty?"#fef9e7" : isLaunched?"#e8faf0" : "var(--bg2)",
-                                color:       isNoTip?"#6366f1"  : isDirty?"#f59e0b" : isLaunched?"var(--green)" : "var(--text)",
-                                borderColor: isNoTip?"transparent": isDirty?"#f59e0b44": isLaunched?"#10b98133": "var(--border)",
+                                background:  isNoTip?"#f5f0ff" : isDirty?"#fef9e7" : isLaunched?"#e8faf0" : "var(--bg2)",
+                                color:       isNoTip?"#6366f1" : isDirty?"#f59e0b" : isLaunched?"var(--green)" : "var(--text)",
+                                borderColor: isNoTip?"transparent" : isDirty?"#f59e0b44" : isLaunched?"#10b98133" : "var(--border)",
                                 cursor:      isNoTip?"not-allowed" : "text",
                               }}
                             />
@@ -4203,41 +4220,22 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
 
                           {/* Checkbox sem gorjeta */}
                           <label style={{display:"flex",justifyContent:"center",alignItems:"center",cursor:isLaunched?"default":"pointer",userSelect:"none",opacity:isLaunched?0.3:1}}>
-                            <input
-                              type="checkbox"
-                              checked={isNoTip}
-                              disabled={isLaunched}
+                            <input type="checkbox" checked={isNoTip} disabled={isLaunched}
                               onChange={e=>setNoTip(date, e.target.checked)}
-                              style={{width:20,height:20,cursor:isLaunched?"default":"pointer",accentColor:"#6366f1"}}
-                            />
+                              style={{width:18,height:18,cursor:isLaunched?"default":"pointer",accentColor:"#6366f1"}} />
                           </label>
 
-                          {/* Ação */}
-                          <div style={{display:"flex",justifyContent:"center",gap:2,alignItems:"center"}}>
-                            {!isLaunched && !isNoTip && hasVal && (
-                              <button onClick={()=>{
-                                const { count, updatedTips }=calcTipForDate(date,val,row.note);
-                                if(count>0){onUpdate("tips", updatedTips);setTipRows(prev=>prev.filter(r=>r.date!==date));onUpdate("_toast",`✅ ${fmtDate(date)}: ${count} emp.`);}
-                              }} style={{padding:"4px 8px",borderRadius:8,border:"none",background:ac,color:"#1c1710",fontWeight:700,cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:11,whiteSpace:"nowrap"}}>
-                                ✓
-                              </button>
-                            )}
-                            {isLaunched && isDirty && hasVal && (
-                              <button onClick={()=>{
-                                const { count, updatedTips }=calcTipForDate(date,val,row.note);
-                                if(count>0){onUpdate("tips", updatedTips);setTipRows(prev=>prev.filter(r=>r.date!==date));onUpdate("_toast",`✏️ atualizado`);}
-                              }} style={{padding:"4px 8px",borderRadius:8,border:"none",background:"#f59e0b",color:"var(--text)",fontWeight:700,cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:11,whiteSpace:"nowrap"}}>
-                                ✓
-                              </button>
-                            )}
+                          {/* Status */}
+                          <div style={{display:"flex",justifyContent:"center",alignItems:"center"}}>
                             {isLaunched && !isDirty && <span style={{color:"var(--green)",fontSize:14}}>✓</span>}
+                            {isDirty && <span style={{color:"#f59e0b",fontSize:12}}>●</span>}
                             {isLaunched && (
                               <button onClick={()=>{
                                 if(!window.confirm(`Zerar gorjeta de ${fmtDate(date)}?`)) return;
                                 onUpdate("tips",tips.filter(t=>!(t.restaurantId===rid&&t.date===date)));
                                 setTipRows(prev=>prev.filter(r=>r.date!==date));
                                 onUpdate("_toast",`🗑️ ${fmtDate(date)}: removido`);
-                              }} style={{padding:"3px 6px",borderRadius:7,border:"1px solid #ef444433",background:"transparent",color:"var(--red)",cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:11}}>
+                              }} style={{padding:"2px 5px",borderRadius:6,border:"none",background:"transparent",color:"var(--red)",cursor:"pointer",fontSize:10,marginLeft:2}}>
                                 ✕
                               </button>
                             )}
@@ -4245,24 +4243,9 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                         </div>
                       );
                     })}
-
-                    {pendingRows.length > 0 && (
-                      <button onClick={()=>{
-                        let count=0, currentTips=tips;
-                        pendingRows.forEach(row=>{
-                          const result=calcTipForDate(row.date,parseFloat(row.total),row.note,currentTips);
-                          count+=result.count;
-                          currentTips=result.updatedTips;
-                        });
-                        if(count>0){onUpdate("tips",currentTips);setTipRows(prev=>prev.filter(r=>!pendingRows.some(p=>p.date===r.date)));onUpdate("_toast",`✅ ${pendingRows.length} dias lançados!`);}
-                      }} style={{...S.btnPrimary,marginTop:8}}>
-                        Lançar Todos Preenchidos ({pendingRows.length})
-                      </button>
-                    )}
                   </div>
                 );
-              })()
-              )}
+              })()}
             </div>
 
             {/* Recalcular periodo */}
@@ -6964,6 +6947,13 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }
 
         {tab === "changelog" && (() => {
           const CHANGELOG = [
+            { version:"5.5.0", date:"2026-04-12", items:[
+              "Novo: Tabela de gorjetas simplificada — digita valores e salva tudo de uma vez (padrão deferred save)",
+              "Removido: modo simples vs tabela, botões salvar por dia, 'Lançar Todos Preenchidos'",
+              "Novo: Botão sticky 'Salvar Gorjetas' + 'Descartar' aparece quando há alterações pendentes",
+              "Novo: Aviso ao sair da aba Gorjetas sem salvar — pergunta se deseja salvar antes",
+              "Limpeza de variáveis de estado não utilizadas (tipDate, tipTotal, tipNote, showTipTable)",
+            ]},
             { version:"5.4.2", date:"2026-04-12", items:[
               "Correção: gorjeta lançada não sumia mais — refatoração de calcTipForDate e recalcTipDay para evitar stale closure",
               "Correção: 'Lançar Todos Preenchidos' agora acumula tips corretamente em batch",
