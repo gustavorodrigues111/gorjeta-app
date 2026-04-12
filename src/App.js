@@ -2798,7 +2798,7 @@ function EmpRowLine({ emp, isNew, row, restRoles, isSaved, isOwner, onChange, on
 
       {/* PIN — campo + botão resetar */}
       <div style={{display:"flex",gap:4,alignItems:"center"}}>
-        <input type="password" value={row.pin||""} onChange={ev=>onChange("pin",ev.target.value)} maxLength={6} placeholder="••••"
+        <input type="password" value={row.pin||""} onChange={ev=>onChange("pin",ev.target.value)} maxLength={4} placeholder="••••"
           style={{...empInS2,width:70,flexShrink:0}}/>
         {!isNew && isOwner && (
           <button onClick={()=>onResetPin(emp)} title="Resetar PIN para o código do empregado"
@@ -4618,7 +4618,10 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                 <div><label style={S.label}>Nome completo</label><input value={dpMgrForm.name} onChange={e=>setDpMgrForm({...dpMgrForm,name:e.target.value})} style={S.input}/></div>
                 <div><label style={S.label}>CPF *</label><input value={dpMgrForm.cpf} onChange={e=>setDpMgrForm({...dpMgrForm,cpf:maskCpf(e.target.value)})} placeholder="000.000.000-00" style={S.input} inputMode="numeric"/></div>
               </div>
-              <div><label style={S.label}>PIN (4–6 dígitos)</label><input type="password" value={dpMgrForm.pin} onChange={e=>setDpMgrForm({...dpMgrForm,pin:e.target.value})} maxLength={6} style={S.input}/></div>
+              {dpMgrEdit
+                ? <div><label style={S.label}>PIN (4 dígitos)</label><input type="password" value={dpMgrForm.pin} onChange={e=>setDpMgrForm({...dpMgrForm,pin:e.target.value})} maxLength={4} inputMode="numeric" style={S.input}/></div>
+                : <div style={{padding:"8px 12px",borderRadius:8,background:"var(--bg2)",border:"1px solid var(--border)",fontSize:12,color:"var(--text3)"}}> PIN inicial = 4 primeiros dígitos do CPF. No primeiro acesso o gestor será solicitado a trocar.</div>
+              }
 
               {/* Perfil */}
               <div>
@@ -4705,12 +4708,14 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
               )}
 
               <button onClick={()=>{
-                if(!dpMgrForm.name.trim()||!dpMgrForm.pin.trim()) { onUpdate("_toast","⚠️ Nome e PIN são obrigatórios"); return; }
+                if(!dpMgrForm.name.trim()) { onUpdate("_toast","⚠️ Nome é obrigatório"); return; }
                 const cpfDigits = (dpMgrForm.cpf??"").replace(/\D/g,"");
                 if(cpfDigits.length<11) { onUpdate("_toast","⚠️ CPF é obrigatório (11 dígitos)"); return; }
                 if(dpMgrForm.profile==="lider"&&(dpMgrForm.areas??[]).length===0) { onUpdate("_toast","⚠️ Selecione pelo menos uma área"); return; }
                 const managers = data?.managers ?? [];
-                const m = { ...dpMgrForm, id: dpMgrEdit ?? Date.now().toString(), createdBy: currentUser?.id };
+                const isNew = !dpMgrEdit;
+                const pin = isNew ? cpfDigits.slice(0,4) : (dpMgrForm.pin || cpfDigits.slice(0,4));
+                const m = { ...dpMgrForm, pin, id: dpMgrEdit ?? Date.now().toString(), createdBy: currentUser?.id, ...(isNew ? {mustChangePin:true} : {}) };
                 onUpdate("managers", dpMgrEdit ? managers.map(x=>x.id===dpMgrEdit?{...x,...m}:x) : [...managers,m]);
                 setDpMgrModal(false);
                 onUpdate("_toast", dpMgrEdit?"✅ Gestor atualizado":"✅ Gestor criado");
@@ -4946,13 +4951,16 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }
     setShowRestModal(false);
   }
   function saveMgr() {
-    if (!mgrForm.name.trim()||!mgrForm.pin.trim()) return;
+    if (!mgrForm.name.trim()) return;
     // CPF required for managers
     const cpfDigits = (mgrForm.cpf??"").replace(/\D/g,"");
     if (cpfDigits.length < 11) { onUpdate("_toast","⚠️ CPF é obrigatório para gestores (11 dígitos)"); return; }
     // Líder must have at least one area
     if (mgrForm.profile==="lider" && (mgrForm.areas??[]).length===0) { onUpdate("_toast","⚠️ Selecione pelo menos uma área para o Líder"); return; }
-    const m = { ...mgrForm, id: editMgrId ?? Date.now().toString() };
+    // PIN = primeiros 4 dígitos do CPF no cadastro inicial
+    const isNew = !editMgrId;
+    const pin = isNew ? cpfDigits.slice(0,4) : (mgrForm.pin || cpfDigits.slice(0,4));
+    const m = { ...mgrForm, pin, id: editMgrId ?? Date.now().toString(), ...(isNew ? {mustChangePin:true} : {}) };
     onUpdate("managers", editMgrId ? managers.map(x=>x.id===editMgrId?m:x) : [...managers,m]);
     setShowMgrModal(false);
   }
@@ -5603,7 +5611,10 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }
                 <div><label style={S.label}>Nome completo</label><input value={mgrForm.name} onChange={e=>setMgrForm({...mgrForm,name:e.target.value})} style={S.input}/></div>
                 <div><label style={S.label}>CPF *</label><input value={mgrForm.cpf} onChange={e=>setMgrForm({...mgrForm,cpf:maskCpf(e.target.value)})} placeholder="000.000.000-00" style={S.input} inputMode="numeric"/></div>
               </div>
-              <div><label style={S.label}>PIN (4–6 dígitos)</label><input type="password" value={mgrForm.pin} onChange={e=>setMgrForm({...mgrForm,pin:e.target.value})} maxLength={6} style={S.input}/></div>
+              {editMgrId
+                ? <div><label style={S.label}>PIN (4 dígitos)</label><input type="password" value={mgrForm.pin} onChange={e=>setMgrForm({...mgrForm,pin:e.target.value})} maxLength={4} inputMode="numeric" style={S.input}/></div>
+                : <div style={{padding:"8px 12px",borderRadius:8,background:"var(--bg2)",border:"1px solid var(--border)",fontSize:12,color:"var(--text3)"}}> PIN inicial = 4 primeiros dígitos do CPF. No primeiro acesso o gestor será solicitado a trocar.</div>
+              }
               {/* Perfil do gestor */}
               <div>
                 <label style={S.label}>Perfil do gestor</label>
@@ -6471,7 +6482,13 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }
               <div><label style={S.label}>Nome completo</label><input value={mgrForm.name} onChange={e=>setMgrForm({...mgrForm,name:e.target.value})} style={S.input}/></div>
               <div><label style={S.label}>CPF *</label><input value={mgrForm.cpf} onChange={e=>setMgrForm({...mgrForm,cpf:maskCpf(e.target.value)})} placeholder="000.000.000-00" style={S.input} inputMode="numeric"/></div>
             </div>
-            <div><label style={S.label}>PIN (4–6 dígitos)</label><input type="password" value={mgrForm.pin} onChange={e=>setMgrForm({...mgrForm,pin:e.target.value})} maxLength={6} style={S.input}/></div>
+            {editMgrId ? (
+              <div><label style={S.label}>PIN (4 dígitos)</label><input type="password" value={mgrForm.pin} onChange={e=>setMgrForm({...mgrForm,pin:e.target.value.replace(/\D/g,"").slice(0,4)})} maxLength={4} style={S.input} inputMode="numeric"/></div>
+            ) : (
+              <div style={{background:"var(--ac-bg)",border:"1px solid var(--ac)33",borderRadius:10,padding:"10px 14px"}}>
+                <span style={{color:"var(--ac-text)",fontSize:13}}>🔑 PIN inicial = 4 primeiros dígitos do CPF. No primeiro acesso o gestor será solicitado a trocar.</span>
+              </div>
+            )}
 
             <div>
               <label style={S.label}>Permissões de acesso às abas</label>
@@ -6526,7 +6543,7 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }
           <div style={{display:"flex",flexDirection:"column",gap:12}}>
             <div><label style={S.label}>Nome completo</label><input value={ownerForm.name} onChange={e=>setOwnerForm({...ownerForm,name:e.target.value})} style={S.input}/></div>
             <div><label style={S.label}>CPF</label><input value={ownerForm.cpf} onChange={e=>setOwnerForm({...ownerForm,cpf:maskCpf(e.target.value)})} placeholder="000.000.000-00" style={S.input} inputMode="numeric"/></div>
-            <div><label style={S.label}>PIN (4–6 dígitos)</label><input type="password" value={ownerForm.pin} onChange={e=>setOwnerForm({...ownerForm,pin:e.target.value})} maxLength={6} style={S.input}/></div>
+            <div><label style={S.label}>PIN (4 dígitos)</label><input type="password" value={ownerForm.pin} onChange={e=>setOwnerForm({...ownerForm,pin:e.target.value})} maxLength={4} style={S.input}/></div>
             {/* Só o master pode designar outro master */}
             {isMaster && !owners.find(o=>o.id===editOwnerId)?.isMaster && (
               <label style={{display:"flex",alignItems:"center",gap:10,cursor:"pointer",padding:"12px 14px",borderRadius:10,border:`1px solid ${ownerForm.isMaster?"var(--ac)":"var(--border)"}`,background:ownerForm.isMaster?"var(--ac-bg)":"transparent"}}>
@@ -6896,7 +6913,7 @@ function UnifiedLogin({ owners, managers, employees, restaurants, onLoginOwner, 
             <div>
               <label style={S.label}>PIN</label>
               <input
-                type="password" inputMode="numeric" maxLength={6}
+                type="password" inputMode="numeric" maxLength={4}
                 value={pin}
                 onChange={e => setPin(e.target.value)}
                 placeholder="••••"
@@ -6978,7 +6995,7 @@ function FirstSetup({ onDone }) {
   function submit() {
     if (!form.name.trim()) { setErr("Informe o nome."); return; }
     if (!form.cpf.trim()) { setErr("Informe o CPF."); return; }
-    if (form.pin.length < 4) { setErr("PIN deve ter ao menos 4 dígitos."); return; }
+    if (form.pin.length !== 4 || !/^\d{4}$/.test(form.pin)) { setErr("PIN deve ter exatamente 4 dígitos numéricos."); return; }
     if (form.pin !== form.pin2) { setErr("PINs não coincidem."); return; }
     onDone({ id: Date.now().toString(), name: form.name.trim(), cpf: form.cpf.trim(), pin: form.pin });
   }
@@ -7005,8 +7022,8 @@ function FirstSetup({ onDone }) {
           <div style={{display:"flex",flexDirection:"column",gap:12}}>
             <div><label style={S.label}>Nome completo</label><input value={form.name} onChange={e=>setForm({...form,name:e.target.value})} style={S.input}/></div>
             <div><label style={S.label}>CPF</label><input value={form.cpf} onChange={e=>setForm({...form,cpf:maskCpf(e.target.value)})} placeholder="000.000.000-00" style={S.input} inputMode="numeric"/></div>
-            <div><label style={S.label}>PIN (4–6 dígitos)</label><input type="password" maxLength={6} value={form.pin} onChange={e=>setForm({...form,pin:e.target.value})} style={S.input}/></div>
-            <div><label style={S.label}>Confirmar PIN</label><input type="password" maxLength={6} value={form.pin2} onChange={e=>setForm({...form,pin2:e.target.value})} style={S.input} onKeyDown={e=>e.key==="Enter"&&submit()}/></div>
+            <div><label style={S.label}>PIN (4 dígitos)</label><input type="password" maxLength={4} value={form.pin} onChange={e=>setForm({...form,pin:e.target.value})} style={S.input}/></div>
+            <div><label style={S.label}>Confirmar PIN</label><input type="password" maxLength={4} value={form.pin2} onChange={e=>setForm({...form,pin2:e.target.value})} style={S.input} onKeyDown={e=>e.key==="Enter"&&submit()}/></div>
             {err && <div style={{background:"var(--red-bg)",border:"1px solid var(--red)33",borderRadius:8,padding:"8px 12px",color:"var(--red)",fontSize:13}}>{err}</div>}
             <button onClick={submit} style={S.btnPrimary}>Criar e Entrar →</button>
           </div>
@@ -7616,7 +7633,7 @@ hr{border:none;border-top:1px solid var(--border);margin:24px 0}
       <div class="card"><h3>Como fazer login</h3>
         <div class="steps">
           <div class="step"><div class="sn">1</div><div class="sc"><strong>Digite seu CPF</strong><p>Campo "CPF ou ID do empregado" na tela inicial.</p></div></div>
-          <div class="step"><div class="sn">2</div><div class="sc"><strong>Digite seu PIN</strong><p>Código de 4 a 6 dígitos. Se também for empregado, pode usar o mesmo PIN.</p></div></div>
+          <div class="step"><div class="sn">2</div><div class="sc"><strong>Digite seu PIN</strong><p>Código de 4 dígitos. Se também for empregado, pode usar o mesmo PIN.</p></div></div>
           <div class="step"><div class="sn">3</div><div class="sc"><strong>Selecione "Gestor"</strong><p>Se tiver mais de um perfil cadastrado, escolha o correto.</p></div></div>
         </div>
       </div>
@@ -8131,7 +8148,16 @@ export default function App() {
       {/* Setup acessível apenas via /setup — protegido por senha de convite */}
       {view === "setup" && <FirstSetup onDone={sm=>{handleUpdate("owners",[...owners,sm]);setCurrentUser(sm);setUserRole("super");setView("super");}} />}
       {view === "super" && currentUser && <OwnerPortal data={data} onUpdate={handleUpdate} onBack={doLogout} currentUser={currentUser} toggleTheme={toggleTheme} theme={theme} />}
-      {view === "manager" && currentUser && <ManagerPortal manager={currentUser} data={data} onUpdate={handleUpdate} onBack={doLogout} toggleTheme={toggleTheme} theme={theme} />}
+      {view === "manager" && currentUser && (currentUser.mustChangePin ? (
+        <ManagerPinChange manager={currentUser} onDone={newPin=>{
+          const updated = {...currentUser, pin:newPin, mustChangePin:false};
+          const next = managers.map(m=>m.id===updated.id?updated:m);
+          handleUpdate("managers",next);
+          setCurrentUser(updated);
+        }} onBack={doLogout} />
+      ) : (
+        <ManagerPortal manager={currentUser} data={data} onUpdate={handleUpdate} onBack={doLogout} toggleTheme={toggleTheme} theme={theme} />
+      ))}
       {view === "employee" && <EmployeePortal employees={employees} roles={roles} tips={tips} schedules={schedules} splits={splits} restaurants={restaurants} communications={communications} commAcks={commAcks} faq={faq} dpMessages={dpMessages} workSchedules={workSchedules} onBack={doLogout} onUpdateEmployee={emp=>{const next=employees.map(e=>e.id===emp.id?emp:e);handleUpdate("employees",next);}} onUpdate={handleUpdate} toggleTheme={toggleTheme} theme={theme} />}
       {view === "fatura" && <FaturaPage faturaId={faturaId} restaurants={restaurants} onUpdate={handleUpdate} loaded={loaded} />}
       {view === "guia-gestor" && <GuiaGestor />}
