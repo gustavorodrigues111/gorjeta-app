@@ -7366,7 +7366,7 @@ hr{border:none;border-top:1px solid var(--border);margin:24px 0}
 <div class="main">
   <div class="topbar">
     <div><h1>Guia do Gestor</h1><div class="sub">Manual completo de uso do AppTip para gestores de restaurante</div></div>
-    <span class="ver">v4.6 · 2026</span>
+    <span class="ver">v4.7 · 2026</span>
   </div>
   <div class="content">
 
@@ -7644,7 +7644,7 @@ hr{border:none;border-top:1px solid var(--border);margin:24px 0}
     <hr>
     <div style="text-align:center;padding:20px 0 40px;color:var(--t3);font-size:13px">
       <div style="font-size:28px;margin-bottom:8px">🍽️</div>
-      <div>AppTip · Guia do Gestor · v4.6 · Abril 2026</div>
+      <div>AppTip · Guia do Gestor · v4.7 · Abril 2026</div>
       <div style="margin-top:4px">Dúvidas? <a href="/cdn-cgi/l/email-protection#9bf8f4f5effaeff4dbfaebebeff2ebb5faebeb" style="color:var(--ac)"><span class="__cf_email__" data-cfemail="3a5955544e5b4e557a5b4a4a4e534a145b4a4a">[email&#160;protected]</span></a> · Clientes: <strong style="color:var(--t2)">(11) 98549-9821</strong></div>
     </div>
 
@@ -7875,7 +7875,7 @@ export default function App() {
       {view === "home" && <Home onLogin={()=>setView("login")} />}
       <Toast msg={toast} onClose={()=>setToast("")} />
       {/* Rodapé de versão */}
-      <div style={{position:"fixed",bottom:8,right:12,fontSize:10,color:"var(--text3)",fontFamily:"'DM Mono',monospace",opacity:0.45,pointerEvents:"none",zIndex:100}}>v4.6i</div>
+      <div style={{position:"fixed",bottom:8,right:12,fontSize:10,color:"var(--text3)",fontFamily:"'DM Mono',monospace",opacity:0.45,pointerEvents:"none",zIndex:100}}>v4.7j</div>
 
       {/* Modal Política de Privacidade */}
       <div id="apptip-privacy" style={{display:"none",position:"fixed",inset:0,background:"rgba(0,0,0,0.5)",zIndex:9999,alignItems:"center",justifyContent:"center",padding:20}} onClick={e=>{if(e.target===e.currentTarget)e.currentTarget.style.display="none";}}>
