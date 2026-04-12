@@ -4822,11 +4822,11 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }
   }
 
   const PLANOS = [
-    { id:"p10",  label:"Starter",     empMax:10,  mensal:97,    anual:87.30  },
-    { id:"p20",  label:"Básico",      empMax:20,  mensal:187,   anual:168.30 },
-    { id:"p50",  label:"Profissional",empMax:50,  mensal:397,   anual:357.30 },
-    { id:"p999", label:"Enterprise",  empMax:100, mensal:null,  anual:null   },
-    { id:"pOrc", label:"On Demand",    empMax:999, mensal:null,  anual:null   },
+    { id:"p10",  label:"Starter",     empMax:10,  mensal:97,    anual:87.30,  multi:false },
+    { id:"p20",  label:"Básico",      empMax:20,  mensal:187,   anual:168.30, multi:true  },
+    { id:"p50",  label:"Profissional",empMax:50,  mensal:397,   anual:357.30, multi:true  },
+    { id:"p999", label:"Enterprise",  empMax:100, mensal:null,  anual:null,   multi:true  },
+    { id:"pOrc", label:"On Demand",    empMax:999, mensal:null,  anual:null,   multi:true  },
   ];
   function getPlano(r) { return PLANOS.find(p=>p.id===(r.planoId??"p10")) ?? PLANOS[0]; }
 
@@ -5209,9 +5209,14 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }
                     };
                     return (
                       <button key={p.id} onClick={()=>onUpdate("restaurants",restaurants.map(r=>r.id===selRestaurant?{...r,planoId:p.id}:r))}
-                        style={{padding:"10px 14px",borderRadius:10,border:`1px solid ${sel?ac:"var(--border)"}`,background:sel?"var(--ac-bg)":"transparent",cursor:"pointer",fontFamily:"'DM Sans',sans-serif",textAlign:"left",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-                        <span style={{color:sel?"var(--ac-text)":"var(--text2)",fontWeight:sel?700:400}}>{sel?"✓":"○"} {p.label} {p.id==="p10"?"(até 10)":p.id==="p20"?"(até 20)":p.id==="p50"?"(até 50)":p.id==="p999"?"(51–100)":"(+100)"}</span>
-                        <span style={{color:"var(--text3)",fontSize:11}}>{precos[p.id]}</span>
+                        style={{padding:"10px 14px",borderRadius:10,border:`1px solid ${sel?ac:"var(--border)"}`,background:sel?"var(--ac-bg)":"transparent",cursor:"pointer",fontFamily:"'DM Sans',sans-serif",textAlign:"left",display:"flex",flexDirection:"column",gap:4}}>
+                        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",width:"100%"}}>
+                          <span style={{color:sel?"var(--ac-text)":"var(--text2)",fontWeight:sel?700:400}}>{sel?"✓":"○"} {p.label} {p.id==="p10"?"(até 10)":p.id==="p20"?"(até 20)":p.id==="p50"?"(até 50)":p.id==="p999"?"(51–100)":"(+100)"}</span>
+                          <span style={{color:"var(--text3)",fontSize:11}}>{precos[p.id]}</span>
+                        </div>
+                        <span style={{fontSize:10,color:p.multi?"var(--green)":"var(--text3)",fontWeight:500}}>
+                          {p.multi?"🏢 Múltiplas unidades":"🏢 Máx. 1 unidade"}
+                        </span>
                       </button>
                     );
                   })}
@@ -5562,6 +5567,8 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }
           const totalMgrs = managers.length;
           const receitaMensal = restaurants.reduce((sum, r) => {
             const p = getPlano(r);
+            if (r.planoId === "p999") return sum + ((r.empMaxCustom ?? 51) * 7.99);
+            if (r.planoId === "pOrc") return sum;
             return sum + (p.mensal ?? 0);
           }, 0);
 
@@ -5817,9 +5824,15 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }
             const isEnt = r.planoId === "p999";
             const isOrc = r.planoId === "pOrc";
             const empMax = isEnt ? (r.empMaxCustom ?? 51) : (isOrc ? (r.empMaxCustom ?? 101) : plano.empMax);
-            const valorBase = isEnt ? 0 : (tipoCobranca === "anual" ? plano.anual : plano.mensal);
-            const valorAdicionais = isEnt ? empMax * 7.99 : 0;
-            const valorTotal = isOrc ? null : (valorBase ?? 0) + valorAdicionais;
+            const valorMensalCalc = (() => {
+              if (isOrc) return null;
+              if (isEnt) {
+                const porEmp = empMax * 7.99;
+                return tipoCobranca === "anual" ? porEmp * 0.9 : porEmp;
+              }
+              return tipoCobranca === "anual" ? (plano.anual ?? 0) : (plano.mensal ?? 0);
+            })();
+            const valorTotal = valorMensalCalc;
             const status = fin.status ?? "ativo";
             const venc = fin.proximoVencimento;
             const diasParaVencer = venc ? Math.ceil((new Date(venc+"T12:00:00") - new Date()) / (1000*60*60*24)) : null;
@@ -6855,11 +6868,11 @@ function Home({ onLogin }) {
   ];
 
   const PLANOS = [
-    { nome:"Starter",      emp:"até 10",    precoAnual:"R$87,30",  precoMensal:"R$97",   anualSub:"por mês no plano anual", mensalSub:"ou R$97/mês no mensal",  destaque:false, cta:"Começar agora" },
-    { nome:"Básico",       emp:"até 20",    precoAnual:"R$168,30", precoMensal:"R$187",  anualSub:"por mês no plano anual", mensalSub:"ou R$187/mês no mensal", destaque:true,  cta:"Começar agora" },
-    { nome:"Profissional", emp:"até 50",    precoAnual:"R$357,30", precoMensal:"R$397",  anualSub:"por mês no plano anual", mensalSub:"ou R$397/mês no mensal", destaque:false, cta:"Começar agora" },
-    { nome:"Enterprise",   emp:"51 a 100",  precoAnual:"R$7,99",   precoMensal:null,     anualSub:"por empregado/mês",      mensalSub:"pagamento mensal",       destaque:false, cta:"Falar com a gente" },
-    { nome:"On Demand",    emp:"+100",      precoAnual:null,       precoMensal:null,     anualSub:"",                       mensalSub:"Solução personalizada",  destaque:false, cta:"Falar com a gente" },
+    { nome:"Starter",      emp:"até 10",    precoAnual:"R$87,30",  precoMensal:"R$97",   anualSub:"por mês no plano anual", mensalSub:"ou R$97/mês no mensal",  destaque:false, cta:"Começar agora", multi:false },
+    { nome:"Básico",       emp:"até 20",    precoAnual:"R$168,30", precoMensal:"R$187",  anualSub:"por mês no plano anual", mensalSub:"ou R$187/mês no mensal", destaque:true,  cta:"Começar agora", multi:true },
+    { nome:"Profissional", emp:"até 50",    precoAnual:"R$357,30", precoMensal:"R$397",  anualSub:"por mês no plano anual", mensalSub:"ou R$397/mês no mensal", destaque:false, cta:"Começar agora", multi:true },
+    { nome:"Enterprise",   emp:"51 a 100",  precoAnual:"R$7,99",   precoMensal:null,     anualSub:"por funcionário/mês",    mensalSub:"pagamento mensal",       destaque:false, cta:"Falar com a gente", multi:true },
+    { nome:"On Demand",    emp:"+100",      precoAnual:null,       precoMensal:null,     anualSub:"",                       mensalSub:"Sob orçamento",          destaque:false, cta:"Falar com a gente", multi:true },
   ];
 
   const ac = "#d4a017";
@@ -6958,19 +6971,41 @@ function Home({ onLogin }) {
         </div>
       </section>
 
+      {/* EARLY ADOPTER — destaque */}
+      <section style={{padding:"48px 24px 0",background:"#faf8f4"}}>
+        <div style={{maxWidth:720,margin:"0 auto",borderRadius:20,background:"linear-gradient(135deg, #1c1208 0%, #3a2a10 100%)",padding:"clamp(28px,5vw,48px)",position:"relative",overflow:"hidden",boxShadow:"0 12px 48px rgba(212,160,23,0.15)"}}>
+          <div style={{position:"absolute",top:-40,right:-40,width:160,height:160,borderRadius:"50%",background:"radial-gradient(circle,#d4a01744 0%,transparent 70%)",pointerEvents:"none"}}/>
+          <div style={{position:"absolute",bottom:-30,left:-30,width:120,height:120,borderRadius:"50%",background:"radial-gradient(circle,#d4a01722 0%,transparent 70%)",pointerEvents:"none"}}/>
+          <div style={{position:"relative",zIndex:1,textAlign:"center"}}>
+            <div style={{display:"inline-block",background:"#d4a017",color:"#1c1208",fontSize:12,fontWeight:800,padding:"5px 16px",borderRadius:20,marginBottom:16,letterSpacing:0.5}}>EARLY ADOPTER</div>
+            <h2 style={{fontSize:"clamp(22px,4vw,34px)",fontWeight:800,color:"#fff",margin:"0 0 12px",letterSpacing:-0.5,lineHeight:1.2}}>Primeiros 30 clientes ganham<br/><span style={{color:"#d4a017",fontSize:"clamp(28px,5vw,42px)"}}>30% de desconto permanente</span></h2>
+            <p style={{color:"#c4b08a",fontSize:"clamp(14px,2vw,17px)",lineHeight:1.6,margin:"0 0 24px",maxWidth:520,marginLeft:"auto",marginRight:"auto"}}>Desconto aplicado no plano escolhido enquanto sua conta existir. Sem prazo de validade, sem truques.</p>
+            <a href="#contato" style={{display:"inline-block",padding:"14px 36px",borderRadius:12,background:"#d4a017",color:"#1c1208",fontWeight:800,fontSize:16,textDecoration:"none",boxShadow:"0 4px 20px #d4a01744"}}>
+              Garantir meu desconto
+            </a>
+            <div style={{marginTop:16,display:"flex",justifyContent:"center",gap:24,flexWrap:"wrap"}}>
+              <div style={{color:"#8c7a5e",fontSize:12}}>Starter por <strong style={{color:"#d4a017"}}>R$67,90/mês</strong></div>
+              <div style={{color:"#8c7a5e",fontSize:12}}>Básico por <strong style={{color:"#d4a017"}}>R$130,90/mês</strong></div>
+              <div style={{color:"#8c7a5e",fontSize:12}}>Profissional por <strong style={{color:"#d4a017"}}>R$277,90/mês</strong></div>
+            </div>
+          </div>
+        </div>
+      </section>
+
       {/* PREÇOS */}
-      <section id="precos" style={{padding:"80px 24px",background:"#faf8f4"}}>
+      <section id="precos" style={{padding:"48px 24px 80px",background:"#faf8f4"}}>
         <div style={{maxWidth:1000,margin:"0 auto"}}>
           <div style={{textAlign:"center",marginBottom:48}}>
             <h2 style={{fontSize:"clamp(24px,4vw,38px)",fontWeight:800,margin:"0 0 12px",letterSpacing:-0.8,color:"#1c1208"}}>Planos e preços</h2>
-            <p style={{color:"#8c7a5e",fontSize:16}}>Plano anual com <strong style={{color:ac}}>10% de desconto</strong></p>
+            <p style={{color:"#8c7a5e",fontSize:16}}>Plano anual com <strong style={{color:ac}}>10% de desconto</strong> · Máx. 1 unidade no Starter</p>
           </div>
-          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(160px,1fr))",gap:16}}>
+          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(170px,1fr))",gap:16}}>
             {PLANOS.map(p=>(
               <div key={p.nome} style={{borderRadius:16,border:p.destaque?`2px solid ${ac}`:"1px solid #ede8df",padding:"24px 18px",background:p.destaque?"#1c1208":"#fff",position:"relative",boxShadow:p.destaque?"0 8px 32px #d4a01733":"0 2px 12px rgba(0,0,0,0.04)",display:"flex",flexDirection:"column"}}>
                 {p.destaque && <div style={{position:"absolute",top:-12,left:"50%",transform:"translateX(-50%)",background:ac,color:"#fff",fontSize:11,fontWeight:700,padding:"4px 14px",borderRadius:20,whiteSpace:"nowrap"}}>Mais popular</div>}
                 <div style={{color:p.destaque?"#fff":"#1c1208",fontWeight:800,fontSize:16,marginBottom:4}}>{p.nome}</div>
-                <div style={{color:p.destaque?"#d4c4a0":"#8c7a5e",fontSize:12,marginBottom:16}}>{p.emp} empregados</div>
+                <div style={{color:p.destaque?"#d4c4a0":"#8c7a5e",fontSize:12,marginBottom:4}}>{p.emp} funcionários</div>
+                <div style={{color:p.destaque?"#887a5e":"#b0996e",fontSize:10,marginBottom:14}}>{p.multi ? "🏢 Múltiplas unidades" : "🏢 Máx. 1 unidade"}</div>
 
                 {/* Preço principal — anual */}
                 {p.precoAnual ? (
@@ -6980,7 +7015,7 @@ function Home({ onLogin }) {
                       <span style={{color:p.destaque?"#d4c4a0":"#8c7a5e",fontSize:11,whiteSpace:"nowrap"}}>/mês</span>
                     </div>
                     <div style={{color:"#d4a017",fontSize:11,fontWeight:700,marginBottom:p.precoMensal?6:16}}>
-                      {p.nome==="Enterprise" ? "por empregado/mês" : "✦ no plano anual"}
+                      {p.nome==="Enterprise" ? "por funcionário/mês" : "✦ no plano anual"}
                     </div>
                     {p.precoMensal && (
                       <div style={{color:p.destaque?"#6b5a3e":"#a08060",fontSize:11,marginBottom:16}}>
@@ -6992,6 +7027,12 @@ function Home({ onLogin }) {
                   <div style={{marginBottom:16,flex:1}}>
                     <div style={{color:p.destaque?ac:"#1c1208",fontSize:18,fontWeight:800,marginBottom:4}}>Sob orçamento</div>
                     <div style={{color:p.destaque?"#d4c4a0":"#8c7a5e",fontSize:12}}>{p.mensalSub}</div>
+                  </div>
+                )}
+
+                {p.multi && (
+                  <div style={{color:p.destaque?"#6b5a3e":"#a08060",fontSize:10,marginBottom:12,lineHeight:1.5}}>
+                    Distribua os funcionários entre suas unidades como quiser.
                   </div>
                 )}
 
