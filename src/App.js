@@ -1705,6 +1705,11 @@ function WorkScheduleManagerTab({ restaurantId, employees, workSchedules, notifi
       )}
 
       {/* ═══ DAY CARDS (mobile-first) ═══ */}
+      <div style={{background:"var(--bg1)",borderRadius:10,padding:"10px 14px",marginBottom:12,display:"flex",alignItems:"center",gap:12,flexWrap:"wrap"}}>
+        <span style={{color:"var(--text3)",fontSize:12}}>Use o switch de cada dia para definir:</span>
+        <span style={{color:"var(--green)",fontSize:12,fontWeight:600}}>ON = Trabalha</span>
+        <span style={{color:"var(--text3)",fontSize:12,fontWeight:600}}>OFF = Folga</span>
+      </div>
       <div style={{marginBottom:16}}>
         {[0,1,2,3,4,5,6].map(dayIdx => {
           const d = editDays[dayIdx] ?? { active: true };
@@ -1725,7 +1730,9 @@ function WorkScheduleManagerTab({ restaurantId, employees, workSchedules, notifi
               <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom: isActive ? 12 : 0}}>
                 <div style={{display:"flex",alignItems:"center",gap:10}}>
                   <span style={{color:isWeekend?"#f59e0b":"var(--text)",fontWeight:700,fontSize:15,minWidth:36}}>{WEEK_DAYS_LABEL[dayIdx]}</span>
-                  <span style={{color:"var(--text3)",fontSize:12}}>{isActive ? (hasHours ? "Trabalha" : "Trabalha (sem horario)") : "Folga"}</span>
+                  <span style={{color: isActive ? (hasHours ? "var(--green)" : "#f59e0b") : "var(--text3)", fontSize:12, fontWeight: isActive ? 600 : 400}}>
+                    {isActive ? (hasHours ? "Trabalha" : "Preencha os horarios abaixo") : "FOLGA"}
+                  </span>
                 </div>
                 <button onClick={()=>toggleDay(dayIdx)} style={isActive ? toggleOn : toggleOff}>
                   <div style={toggleDot(isActive)} />
@@ -7992,8 +7999,8 @@ export default function App() {
     console.log("handleUpdate field:", field, "has setter:", !!setters[field], "has key:", !!keys[field]);
     setters[field]?.(value);
     if (keys[field]) await save(keys[field], value);
-    const labels = { owners:"Admins atualizados", managers:"Gestores atualizados", restaurants:"Restaurantes atualizados", employees:"Empregados atualizados", roles:"Cargos atualizados", tips:"Gorjetas atualizadas", splits:"Percentuais salvos", schedules:"Escala atualizada", communications:"Comunicados atualizados", commAcks:"Ciências atualizadas", faq:"FAQ atualizado", dpMessages:"Mensagem enviada", workSchedules:"Horários salvos", notifications:"Notificações atualizadas", schedTemplates:"Template salvo", schedDrafts:"Rascunho salvo" };
-    setToast(labels[field] ?? value ?? "Salvo!");
+    const labels = { owners:"Admins atualizados", managers:"Gestores atualizados", restaurants:"Restaurantes atualizados", employees:"Empregados atualizados", roles:"Cargos atualizados", tips:"Gorjetas atualizadas", splits:"Percentuais salvos", schedules:"Escala atualizada", communications:"Comunicados atualizados", commAcks:"Ciências atualizadas", faq:"FAQ atualizado", dpMessages:"Mensagem enviada", workSchedules:"Horários salvos", notifications:"Notificações atualizadas", schedTemplates:"Template salvo", schedDrafts:"Rascunho salvo", trash:"Lixeira atualizada", noTipDays:"Dias sem gorjeta atualizados" };
+    setToast(labels[field] ?? (typeof value === "string" ? value : "Salvo!"));
   }
 
   function doLogout() {
