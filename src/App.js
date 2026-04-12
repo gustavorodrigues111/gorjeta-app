@@ -3363,42 +3363,49 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
   const [dpMgrEdit, setDpMgrEdit]   = useState(null);
   const [dpMgrForm, setDpMgrForm]   = useState({name:"",cpf:"",pin:"",restaurantIds:[rid],perms:{tips:true,schedule:true},isDP:false,profile:"custom",areas:[]});
 
-  // Config local state — save button approach
-  const [localTabsConfig, setLocalTabsConfig] = useState(null); // admin: null means unchanged
-  const [localTabsGestor, setLocalTabsGestor] = useState(null); // manager: null means unchanged
-  const configDirty = localTabsConfig !== null || localTabsGestor !== null;
-  function getTabsConfig(key) { return (localTabsConfig ?? restaurant.tabsConfig ?? {})[key] !== false; }
-  function getTabsGestor(key) { return (localTabsGestor ?? restaurant.tabsGestor ?? {})[key] !== false; }
+  // Config local state — unified deferred save for ALL config settings
+  const [localConfig, setLocalConfig] = useState(null); // null = clean, object = pending changes
+  const configDirty = localConfig !== null;
+
+  function getLocalRest() {
+    if (!localConfig) return { ...restaurant };
+    return { ...restaurant, ...localConfig };
+  }
+  function patchConfig(patch) {
+    setLocalConfig(prev => ({ ...(prev ?? {}), ...patch }));
+  }
+
+  const localRest = getLocalRest();
+  function getTabsConfig(key) { return (localRest.tabsConfig ?? {})[key] !== false; }
+  function getTabsGestor(key) { return (localRest.tabsGestor ?? {})[key] !== false; }
+
   function toggleAdminTab(key) {
-    const cur = localTabsConfig ?? { ...(restaurant.tabsConfig ?? {}) };
+    const cur = { ...(localRest.tabsConfig ?? {}) };
     const novoValor = !(cur[key] !== false);
+    cur[key] = novoValor;
     const tabFaqMap = { dp:"__dp__", comunicados:"__comunicados__" };
     const faqId = tabFaqMap[key];
-    const curGestor = localTabsGestor ?? { ...(restaurant.tabsGestor ?? {}) };
-    const curFaqAuto = curGestor.faqAuto ?? {};
-    const novoFaqAuto = faqId ? { ...curFaqAuto, [faqId]: novoValor } : curFaqAuto;
-    setLocalTabsConfig({ ...cur, [key]: novoValor });
-    setLocalTabsGestor({ ...curGestor, faqAuto: novoFaqAuto });
+    const curGestor = { ...(localRest.tabsGestor ?? {}) };
+    if (faqId) curGestor.faqAuto = { ...(curGestor.faqAuto ?? {}), [faqId]: novoValor };
+    patchConfig({ tabsConfig: cur, tabsGestor: curGestor });
   }
   function toggleGestorTab(key) {
-    const cur = localTabsGestor ?? { ...(restaurant.tabsGestor ?? {}) };
+    const cur = { ...(localRest.tabsGestor ?? {}) };
     const novoValor = !(cur[key] !== false);
+    cur[key] = novoValor;
     const tabFaqMap = { dp:"__dp__", comunicados:"__comunicados__" };
     const faqId = tabFaqMap[key];
-    const curFaqAuto = cur.faqAuto ?? {};
-    const novoFaqAuto = faqId ? { ...curFaqAuto, [faqId]: novoValor } : curFaqAuto;
-    setLocalTabsGestor({ ...cur, [key]: novoValor, faqAuto: novoFaqAuto });
+    if (faqId) cur.faqAuto = { ...(cur.faqAuto ?? {}), [faqId]: novoValor };
+    patchConfig({ tabsGestor: cur });
   }
   function saveConfig() {
-    const patch = {};
-    if (localTabsConfig) patch.tabsConfig = localTabsConfig;
-    if (localTabsGestor) patch.tabsGestor = localTabsGestor;
-    const updated = restaurants.map(r => r.id === rid ? { ...r, ...patch } : r);
+    if (!localConfig) return;
+    const updated = restaurants.map(r => r.id === rid ? { ...r, ...localConfig } : r);
     onUpdate("restaurants", updated);
-    setLocalTabsConfig(null);
-    setLocalTabsGestor(null);
+    setLocalConfig(null);
+    onUpdate("_toast", "✅ Configurações salvas!");
   }
-  function discardConfig() { setLocalTabsConfig(null); setLocalTabsGestor(null); }
+  function discardConfig() { setLocalConfig(null); }
 
   const empSummary = restEmps.map(e => {
     const eT = monthTips.filter(t => t.employeeId === e.id);
@@ -5148,11 +5155,10 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
 
               <div style={{display:"flex",gap:10,marginBottom:14}}>
                 {[[0.33,"33%"],[0.20,"20%"]].map(([rate,lbl])=>{
-                  const sel = (restaurant.taxRate ?? TAX) === rate;
+                  const sel = (localRest.taxRate ?? TAX) === rate;
                   return (
                     <button key={rate} onClick={()=>{
-                      onUpdate("restaurants", restaurants.map(r=>r.id===rid?{...r,taxRate:rate}:r));
-                      onUpdate("_toast","Retenção salva!");
+                      patchConfig({ taxRate: rate });
                     }} style={{flex:1,padding:"12px",borderRadius:12,border:`2px solid ${sel?ac:"var(--border)"}`,background:sel?ac+"11":"transparent",cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:16,fontWeight:700,color:sel?ac:"#555"}}>
                       {lbl}
                     </button>
@@ -5162,13 +5168,13 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
 
               {/* Explicação das alíquotas */}
               <div style={{display:"flex",flexDirection:"column",gap:8}}>
-                <div style={{padding:"12px 14px",borderRadius:10,background:(restaurant.taxRate??TAX)===0.33?"var(--ac-bg)":"var(--bg2)",border:`1px solid ${(restaurant.taxRate??TAX)===0.33?"var(--ac)33":"var(--border)"}`}}>
+                <div style={{padding:"12px 14px",borderRadius:10,background:(localRest.taxRate??TAX)===0.33?"var(--ac-bg)":"var(--bg2)",border:`1px solid ${(localRest.taxRate??TAX)===0.33?"var(--ac)33":"var(--border)"}`}}>
                   <div style={{fontWeight:700,fontSize:13,color:"var(--text)",marginBottom:4}}>33% — Lucro Real ou Lucro Presumido</div>
                   <div style={{fontSize:12,color:"var(--text3)",lineHeight:1.6}}>
                     Aplica-se a empresas tributadas pelo Lucro Real ou Presumido. Incide INSS patronal (20%) + FGTS (8%) + RAT/terceiros (~5%). Base: art. 457 CLT e Lei 13.419/2017.
                   </div>
                 </div>
-                <div style={{padding:"12px 14px",borderRadius:10,background:(restaurant.taxRate??TAX)===0.20?"var(--ac-bg)":"var(--bg2)",border:`1px solid ${(restaurant.taxRate??TAX)===0.20?"var(--ac)33":"var(--border)"}`}}>
+                <div style={{padding:"12px 14px",borderRadius:10,background:(localRest.taxRate??TAX)===0.20?"var(--ac-bg)":"var(--bg2)",border:`1px solid ${(localRest.taxRate??TAX)===0.20?"var(--ac)33":"var(--border)"}`}}>
                   <div style={{fontWeight:700,fontSize:13,color:"var(--text)",marginBottom:4}}>20% — Simples Nacional</div>
                   <div style={{fontSize:12,color:"var(--text3)",lineHeight:1.6}}>
                     Aplica-se a MEI, ME e EPP optantes pelo Simples Nacional. A gorjeta integra a folha de pagamento com encargos simplificados. Base: LC 123/2006 e Resolução CGSN 140/2018.
@@ -5184,15 +5190,14 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
               <div style={{display:"flex",flexDirection:"column",gap:10}}>
                 <p style={{color:"var(--text3)",fontSize:11,margin:0,fontWeight:600}}>Por área (empregados regulares):</p>
                 {AREAS.map(area => {
-                  const current = restaurant.faultPenalty?.[area] ?? 0;
+                  const current = localRest.faultPenalty?.[area] ?? 0;
                   return (
                     <div key={area} style={{display:"flex",alignItems:"center",gap:10}}>
                       <div style={{minWidth:80}}><AreaBadge area={area}/></div>
                       <input type="number" min="0" max="20" step="0.01" value={current}
                         onChange={e => {
                           const val = parseFloat(e.target.value) || 0;
-                          const updated = restaurants.map(r => r.id===rid ? {...r, faultPenalty:{...(r.faultPenalty??{}), [area]: Math.round(val*100)/100}} : r);
-                          onUpdate("restaurants", updated);
+                          patchConfig({ faultPenalty: { ...(localRest.faultPenalty??{}), [area]: Math.round(val*100)/100 } });
                         }}
                         style={{...S.input, width:70, textAlign:"center"}}
                       />
@@ -5206,11 +5211,10 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                     <div style={{minWidth:130}}>
                       <span style={{background:"#dc262611",color:"var(--red)",padding:"3px 10px",borderRadius:8,fontSize:11,fontWeight:700,fontFamily:"'DM Mono',monospace"}}>Falta injustificada</span>
                     </div>
-                    <input type="number" min="0" max="20" step="0.01" value={restaurant.producaoPenaltyU ?? 6.66}
+                    <input type="number" min="0" max="20" step="0.01" value={localRest.producaoPenaltyU ?? 6.66}
                       onChange={e => {
                         const val = parseFloat(e.target.value) || 0;
-                        const updated = restaurants.map(r => r.id===rid ? {...r, producaoPenaltyU: Math.round(val*100)/100} : r);
-                        onUpdate("restaurants", updated);
+                        patchConfig({ producaoPenaltyU: Math.round(val*100)/100 });
                       }}
                       style={{...S.input, width:70, textAlign:"center"}}
                     />
@@ -5220,11 +5224,10 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                     <div style={{minWidth:130}}>
                       <span style={{background:"#f59e0b11",color:"#f59e0b",padding:"3px 10px",borderRadius:8,fontSize:11,fontWeight:700,fontFamily:"'DM Mono',monospace"}}>Falta justificada</span>
                     </div>
-                    <input type="number" min="0" max="20" step="0.01" value={restaurant.producaoPenaltyJ ?? 3.33}
+                    <input type="number" min="0" max="20" step="0.01" value={localRest.producaoPenaltyJ ?? 3.33}
                       onChange={e => {
                         const val = parseFloat(e.target.value) || 0;
-                        const updated = restaurants.map(r => r.id===rid ? {...r, producaoPenaltyJ: Math.round(val*100)/100} : r);
-                        onUpdate("restaurants", updated);
+                        patchConfig({ producaoPenaltyJ: Math.round(val*100)/100 });
                       }}
                       style={{...S.input, width:70, textAlign:"center"}}
                     />
@@ -5243,12 +5246,10 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
               <p style={{color:"var(--text3)",fontSize:12,marginBottom:14}}>Define como a gorjeta é dividida entre os empregados.</p>
               <div style={{display:"flex",flexDirection:"column",gap:10}}>
                 {[[MODE_AREA_POINTS,"🏷️ Áreas + Pontos","Divide por área (%) e depois por pontos dentro de cada área"],[MODE_GLOBAL_POINTS,"⚡ Pontos Global","Divide diretamente pelos pontos de todos os empregados, sem separação por área"]].map(([mode,label,desc])=>{
-                  const selected = (restaurant.divisionMode ?? MODE_AREA_POINTS) === mode;
+                  const selected = (localRest.divisionMode ?? MODE_AREA_POINTS) === mode;
                   return (
                     <button key={mode} onClick={()=>{
-                      const updated = restaurants.map(r=>r.id===rid?{...r,divisionMode:mode}:r);
-                      onUpdate("restaurants",updated);
-                      onUpdate("_toast","Modalidade salva!");
+                      patchConfig({ divisionMode: mode });
                     }} style={{padding:"14px 16px",borderRadius:12,border:`2px solid ${selected?ac:"var(--border)"}`,background:selected?ac+"11":"transparent",cursor:"pointer",textAlign:"left",fontFamily:"'DM Mono',monospace"}}>
                       <div style={{color:selected?ac:"#fff",fontWeight:700,fontSize:14}}>{label}</div>
                       <div style={{color:"var(--text3)",fontSize:12,marginTop:4}}>{desc}</div>
@@ -5257,7 +5258,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                 })}
               </div>
             </div>
-            {(restaurant.divisionMode ?? MODE_AREA_POINTS) === MODE_AREA_POINTS && (
+            {(localRest.divisionMode ?? MODE_AREA_POINTS) === MODE_AREA_POINTS && (
               <div style={{...S.card,marginBottom:20}}>
                 <p style={{color:ac,fontSize:14,fontWeight:700,margin:"0 0 4px"}}>Distribuição por Área</p>
                 <p style={{color:"var(--text3)",fontSize:11,margin:"0 0 14px"}}>Percentuais de cada área no pool total.</p>
