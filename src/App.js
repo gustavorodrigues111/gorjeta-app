@@ -3762,8 +3762,8 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                     </div>
 
                     {/* Cabeçalho */}
-                    <div style={{display:"grid",gridTemplateColumns:"46px 1fr 100px 90px",gap:6,padding:"0 8px 4px",marginBottom:2}}>
-                      {["","Valor (R$)","Sem gorjeta",""].map((h,i)=>(
+                    <div style={{display:"grid",gridTemplateColumns:"40px 1fr 56px 70px",gap:4,padding:"0 6px 4px",marginBottom:2}}>
+                      {["","Valor (R$)","S/ gorj.",""].map((h,i)=>(
                         <div key={i} style={{color:"var(--text3)",fontSize:10,fontWeight:700,textAlign:i===2?"center":"left"}}>{h}</div>
                       ))}
                     </div>
@@ -3793,7 +3793,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                       else if (hasVal)                 { bg = "#faf8f4"; border = "var(--ac)33"; }
 
                       return (
-                        <div key={date} style={{display:"grid",gridTemplateColumns:"46px 1fr 100px 90px",gap:6,padding:"5px 8px",marginBottom:4,borderRadius:10,background:bg,border:`1px solid ${border}`,alignItems:"center"}}>
+                        <div key={date} style={{display:"grid",gridTemplateColumns:"40px 1fr 56px 70px",gap:4,padding:"5px 6px",marginBottom:4,borderRadius:10,background:bg,border:`1px solid ${border}`,alignItems:"center"}}>
 
                           {/* Data */}
                           <div style={{textAlign:"center"}}>
@@ -3817,43 +3817,42 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                           />
 
                           {/* Checkbox sem gorjeta */}
-                          <label style={{display:"flex",flexDirection:"column",alignItems:"center",gap:3,cursor:isLaunched?"default":"pointer",userSelect:"none",opacity:isLaunched?0.3:1}}>
+                          <label style={{display:"flex",justifyContent:"center",alignItems:"center",cursor:isLaunched?"default":"pointer",userSelect:"none",opacity:isLaunched?0.3:1}}>
                             <input
                               type="checkbox"
                               checked={isNoTip}
                               disabled={isLaunched}
                               onChange={e=>setNoTip(date, e.target.checked)}
-                              style={{width:18,height:18,cursor:isLaunched?"default":"pointer",accentColor:"#6366f1"}}
+                              style={{width:20,height:20,cursor:isLaunched?"default":"pointer",accentColor:"#6366f1"}}
                             />
-                            <span style={{fontSize:9,color:isNoTip?"#818cf8":"#555",fontFamily:"'DM Mono',monospace"}}>Sem gorjeta</span>
                           </label>
 
                           {/* Ação */}
-                          <div style={{display:"flex",justifyContent:"center",gap:4,alignItems:"center"}}>
+                          <div style={{display:"flex",justifyContent:"center",gap:2,alignItems:"center"}}>
                             {!isLaunched && !isNoTip && hasVal && (
                               <button onClick={()=>{
                                 const n=calcTipForDate(date,val,row.note);
                                 if(n>0){setTipRows(prev=>prev.filter(r=>r.date!==date));onUpdate("_toast",`✅ ${fmtDate(date)}: ${n} emp.`);}
-                              }} style={{padding:"5px 12px",borderRadius:8,border:"none",background:ac,color:"#1c1710",fontWeight:700,cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:11,whiteSpace:"nowrap"}}>
-                                Lançar
+                              }} style={{padding:"4px 8px",borderRadius:8,border:"none",background:ac,color:"#1c1710",fontWeight:700,cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:11,whiteSpace:"nowrap"}}>
+                                ✓
                               </button>
                             )}
                             {isLaunched && isDirty && hasVal && (
                               <button onClick={()=>{
                                 const n=calcTipForDate(date,val,row.note);
                                 if(n>0){setTipRows(prev=>prev.filter(r=>r.date!==date));onUpdate("_toast",`✏️ atualizado`);}
-                              }} style={{padding:"5px 10px",borderRadius:8,border:"none",background:"#f59e0b",color:"var(--text)",fontWeight:700,cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:11,whiteSpace:"nowrap"}}>
-                                Salvar
+                              }} style={{padding:"4px 8px",borderRadius:8,border:"none",background:"#f59e0b",color:"var(--text)",fontWeight:700,cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:11,whiteSpace:"nowrap"}}>
+                                ✓
                               </button>
                             )}
-                            {isLaunched && !isDirty && <span style={{color:"var(--green)",fontSize:16}}>✓</span>}
+                            {isLaunched && !isDirty && <span style={{color:"var(--green)",fontSize:14}}>✓</span>}
                             {isLaunched && (
                               <button onClick={()=>{
                                 if(!window.confirm(`Zerar gorjeta de ${fmtDate(date)}?`)) return;
                                 onUpdate("tips",tips.filter(t=>!(t.restaurantId===rid&&t.date===date)));
                                 setTipRows(prev=>prev.filter(r=>r.date!==date));
                                 onUpdate("_toast",`🗑️ ${fmtDate(date)}: removido`);
-                              }} style={{padding:"4px 7px",borderRadius:7,border:"1px solid #ef444433",background:"transparent",color:"var(--red)",cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:12}}>
+                              }} style={{padding:"3px 6px",borderRadius:7,border:"1px solid #ef444433",background:"transparent",color:"var(--red)",cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:11}}>
                                 ✕
                               </button>
                             )}
