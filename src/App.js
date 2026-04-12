@@ -4862,6 +4862,7 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }
             <button onClick={()=>setSelRestaurant(null)} style={{ ...S.btnSecondary, fontSize:12, padding:"6px 12px" }}>← Voltar</button>
             <span style={{ color:"var(--text)", fontWeight:700, fontSize:15 }}>{rest?.name}</span>
             <span style={{ background:"var(--ac-bg)", color:"var(--ac-text)", borderRadius:6, padding:"2px 8px", fontSize:11, fontWeight:700 }}>{getPlano(rest).label}</span>
+            {rest?.earlyAdopter && <span style={{background:"#d4a01715",color:"#d4a017",borderRadius:6,padding:"2px 8px",fontSize:11,fontWeight:700}}>🚀 Early Adopter</span>}
           </div>
           <button onClick={onBack} style={{ ...S.btnSecondary, fontSize:12 }}>Sair</button>
         </div>
@@ -4997,8 +4998,12 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }
           const empMax       = isEnt ? (rest?.empMaxCustom ?? 51) : isOrc ? (rest?.empMaxCustom ?? 101) : plano.empMax;
           const empAtivos    = employees.filter(e=>e.restaurantId===selRestaurant&&!e.inactive).length;
 
+          // Early Adopter — 30% desconto permanente
+          const isEarlyAdopter = rest?.earlyAdopter === true;
+          const EA_DESC = 0.7; // fator multiplicador (1 - 0.30)
+
           // Valor da cobrança — mensal = valor do mês, anual = total do ano
-          const valorMensal = (() => {
+          const valorBruto = (() => {
             if (isOrc) return null;
             if (isEnt) {
               const porEmp = empMax * 7.99;
@@ -5007,6 +5012,7 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }
             if (tipo === "anual") return (plano.anual ?? 0) * 12;
             return plano.mensal;
           })();
+          const valorMensal = valorBruto != null && isEarlyAdopter ? Math.round(valorBruto * EA_DESC * 100) / 100 : valorBruto;
 
           // ─── Ciclo ─────────────────────────────────────────────────
           // fonte única de verdade: fin.cicloInicio e fin.cicloFim
@@ -5193,6 +5199,17 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }
                   })}
                 </div>
 
+                {/* Early Adopter toggle */}
+                <label style={{display:"flex",alignItems:"center",gap:10,padding:"10px 14px",borderRadius:10,border:`1px solid ${isEarlyAdopter?"#d4a01766":"var(--border)"}`,background:isEarlyAdopter?"linear-gradient(135deg,#1c120811,#d4a01711)":"transparent",cursor:"pointer",marginBottom:12,userSelect:"none"}}>
+                  <input type="checkbox" checked={isEarlyAdopter}
+                    onChange={e=>onUpdate("restaurants",restaurants.map(r=>r.id===selRestaurant?{...r,earlyAdopter:e.target.checked}:r))}
+                    style={{width:18,height:18,accentColor:"#d4a017",cursor:"pointer",flexShrink:0}}/>
+                  <div>
+                    <div style={{color:isEarlyAdopter?"#d4a017":"var(--text2)",fontWeight:700,fontSize:13}}>🚀 Early Adopter — 30% off permanente</div>
+                    <div style={{color:"var(--text3)",fontSize:11,marginTop:2}}>Primeiros 30 clientes. Desconto válido enquanto a assinatura estiver ativa.</div>
+                  </div>
+                </label>
+
                 {isEnt && <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:8}}>
                   <label style={{...S.label,marginBottom:0}}>Empregados contratados (51–100):</label>
                   <input type="number" min="51" max="100" defaultValue={rest?.empMaxCustom??51}
@@ -5207,22 +5224,29 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }
                 </div>}
 
                 {/* Valor calculado */}
-                <div style={{padding:"14px",borderRadius:12,background:"var(--ac-bg)",border:"1px solid var(--ac)33",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                <div style={{padding:"14px",borderRadius:12,background:isEarlyAdopter?"linear-gradient(135deg,#1c120811,#d4a01718)":"var(--ac-bg)",border:`1px solid ${isEarlyAdopter?"#d4a01744":"var(--ac)33"}`,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
                   <div>
-                    <div style={{color:"var(--text3)",fontSize:11,fontWeight:600,marginBottom:4}}>VALOR A COBRAR</div>
+                    <div style={{color:"var(--text3)",fontSize:11,fontWeight:600,marginBottom:4}}>
+                      VALOR A COBRAR {isEarlyAdopter && <span style={{color:"#d4a017",fontWeight:700}}>· 🚀 −30% EARLY ADOPTER</span>}
+                    </div>
                     {isOrc
                       ? <div style={{color:"var(--ac-text)",fontWeight:800,fontSize:18}}>Sob orçamento</div>
-                      : <div style={{color:"var(--ac-text)",fontWeight:800,fontSize:22,fontFamily:"'DM Mono',monospace"}}>
-                          R$ {valorMensal?.toLocaleString("pt-BR",{minimumFractionDigits:2})}
-                          <span style={{color:"var(--text3)",fontSize:13,fontWeight:400}}>
-                            {tipo==="anual"?"/ano (12x)":"/mês"}
-                          </span>
+                      : <div>
+                          {isEarlyAdopter && valorBruto != null && <div style={{color:"var(--text3)",fontSize:13,textDecoration:"line-through",marginBottom:2,fontFamily:"'DM Mono',monospace"}}>
+                            R$ {valorBruto.toLocaleString("pt-BR",{minimumFractionDigits:2})}
+                          </div>}
+                          <div style={{color:isEarlyAdopter?"#d4a017":"var(--ac-text)",fontWeight:800,fontSize:22,fontFamily:"'DM Mono',monospace"}}>
+                            R$ {valorMensal?.toLocaleString("pt-BR",{minimumFractionDigits:2})}
+                            <span style={{color:"var(--text3)",fontSize:13,fontWeight:400}}>
+                              {tipo==="anual"?"/ano (12x)":"/mês"}
+                            </span>
+                          </div>
                         </div>
                     }
                     {isEnt && <div style={{color:"var(--text3)",fontSize:11,marginTop:2}}>
                       {tipo==="anual"
-                        ? `${empMax} emp. × R$7,99 × 12 meses × 0,9 (−10%)`
-                        : `${empMax} emp. × R$7,99/mês`}
+                        ? `${empMax} emp. × R$7,99 × 12 meses × 0,9 (−10%)${isEarlyAdopter?" × 0,7 (−30%)":""}`
+                        : `${empMax} emp. × R$7,99/mês${isEarlyAdopter?" × 0,7 (−30%)":""}`}
                     </div>}
                   </div>
                   <div style={{color:"var(--text3)",fontSize:13}}>{empAtivos}/{isOrc?"∞":empMax} ativos</div>
@@ -5528,9 +5552,10 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }
           const totalMgrs = managers.length;
           const receitaMensal = restaurants.reduce((sum, r) => {
             const p = getPlano(r);
-            if (r.planoId === "p999") return sum + ((r.empMaxCustom ?? 51) * 7.99);
+            const ea = r.earlyAdopter ? 0.7 : 1;
+            if (r.planoId === "p999") return sum + ((r.empMaxCustom ?? 51) * 7.99 * ea);
             if (r.planoId === "pOrc") return sum;
-            return sum + (p.mensal ?? 0);
+            return sum + ((p.mensal ?? 0) * ea);
           }, 0);
 
           const today_ = today();
@@ -5785,13 +5810,14 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }
             const isEnt = r.planoId === "p999";
             const isOrc = r.planoId === "pOrc";
             const empMax = isEnt ? (r.empMaxCustom ?? 51) : (isOrc ? (r.empMaxCustom ?? 101) : plano.empMax);
+            const ea = r.earlyAdopter ? 0.7 : 1;
             const valorMensalCalc = (() => {
               if (isOrc) return null;
               if (isEnt) {
                 const porEmp = empMax * 7.99;
-                return tipoCobranca === "anual" ? porEmp * 0.9 : porEmp;
+                return (tipoCobranca === "anual" ? porEmp * 0.9 : porEmp) * ea;
               }
-              return tipoCobranca === "anual" ? (plano.anual ?? 0) : (plano.mensal ?? 0);
+              return (tipoCobranca === "anual" ? (plano.anual ?? 0) : (plano.mensal ?? 0)) * ea;
             })();
             const valorTotal = valorMensalCalc;
             const status = fin.status ?? "ativo";
@@ -5893,7 +5919,10 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }
                     <div key={r.id} style={{display:"grid",gridTemplateColumns:"2fr 1fr 1fr 1fr 1fr 1fr",gap:0,padding:"12px 16px",borderBottom:"1px solid var(--border)",background:rowBg,alignItems:"center",cursor:"pointer"}}
                       onClick={()=>{ setSelRestaurant(r.id); setRestTab("financeiro"); }}>
                       <div>
-                        <div style={{color:"var(--text)",fontWeight:700,fontSize:14}}>{r.name}</div>
+                        <div style={{color:"var(--text)",fontWeight:700,fontSize:14}}>
+                          {r.name}
+                          {r.earlyAdopter && <span style={{marginLeft:6,fontSize:10,color:"#d4a017",fontWeight:700,background:"#d4a01715",padding:"1px 6px",borderRadius:8}}>🚀 EA</span>}
+                        </div>
                         <div style={{color:"var(--text3)",fontSize:11}}>{r.tipoCobranca==="anual"?"Anual":"Mensal"}</div>
                       </div>
                       <div style={{color:"var(--text2)",fontSize:13}}>{plano.label}</div>
