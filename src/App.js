@@ -4183,10 +4183,10 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                 </div>
                 <div style={{display:"grid",gridTemplateColumns:mobileOnly?"1fr 1fr":"1fr 1fr 1fr 1fr",gap:mobileOnly?6:8}}>
                   {[
-                    ["Pool total",    pFmt(tipPoolTotal), "#fff"],
-                    ["Retenção",      pFmt(totalTax),     "var(--red)"],
-                    ["Distribuído",   pFmt(totalNet),     ac],
-                    ["Dias resolvidos", `${diasResolvidos}/${dim}`, diasResolvidos===dim?"var(--green)":diasResolvidos>=diasUteisPassados?"var(--green)":"#f59e0b"],
+                    ["Pool total",    pFmt(tipPoolTotal || 0), "#fff"],
+                    ["Retenção",      pFmt(totalTax || 0),     "var(--red)"],
+                    ["Distribuído",   pFmt(totalNet || 0),     ac],
+                    ["Dias preenchidos", `${diasLancados}/${dim}`, diasLancados===dim?"var(--green)":diasLancados>=diasUteisPassados?"var(--green)":"#f59e0b"],
                   ].map(([lbl,val,col])=>(
                     <div key={lbl} style={{background:"var(--bg1)",borderRadius:10,padding:mobileOnly?"8px 6px":"10px 8px",textAlign:"center"}}>
                       <div style={{color:"var(--text3)",fontSize:mobileOnly?8:9,marginBottom:3,lineHeight:1.2}}>{lbl}</div>
