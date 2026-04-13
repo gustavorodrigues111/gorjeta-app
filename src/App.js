@@ -3,7 +3,7 @@ import { useState, useEffect, Component } from "react";
 import { db } from "./firebase";
 import { doc, getDoc, setDoc } from "firebase/firestore";
 
-const APP_VERSION = "5.9.0";
+const APP_VERSION = "5.10.0";
 
 const DEFAULT_ADMISSION = () => `${new Date().getFullYear()}-01-01`;
 const round2 = (v) => Math.round(v * 100) / 100;
@@ -3958,7 +3958,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
     isDP                                       && ["notificacoes",`📬 Caixa${inboxUnread>0?` (${inboxUnread})`:""}`],
     isDP                                       && ["dp_gestores", "👔 Gestores"],
     (canTips || isOwner)                       && ["config",       "⚙️ Configurações"],
-  ].filter(Boolean).filter(([id]) => !mobileOnly || ["dashboard","schedule","notificacoes"].includes(id));
+  ].filter(Boolean).filter(([id]) => !mobileOnly || ["dashboard","schedule","horarios","notificacoes"].includes(id));
 
   const [tab, setTab] = useState("dashboard");
 
@@ -7320,6 +7320,10 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }
 
         {tab === "changelog" && (() => {
           const CHANGELOG = [
+            { version:"5.10.0", date:"2026-04-12", items:[
+              "Novo: aba Horários disponível no mobile do gestor — edição completa + assistente IA",
+              "Atualizado: aviso de funcionalidades desktop removeu Horários da lista (agora disponível no celular)",
+            ]},
             { version:"5.9.0", date:"2026-04-12", items:[
               "Melhoria: IA de horários — parser reescrito para entender linguagem natural flexível em português",
               "Melhoria: IA aceita conjugações verbais (folgue, trabalhe, dividindo, entrando), typos (semanis, entrandoa s) e frases compostas",
@@ -7778,7 +7782,7 @@ function ManagerPortal({ manager, data, onUpdate, onBack, toggleTheme, theme, on
                 <span style={{fontSize:22,flexShrink:0}}>🖥️</span>
                 <div>
                   <p style={{color:"#92400e",fontSize:12,fontWeight:700,margin:0}}>Demais funcionalidades no computador</p>
-                  <p style={{color:"#92400e99",fontSize:11,margin:"2px 0 0",lineHeight:1.4}}>Gorjetas, Equipe, Cargos, Horários, Comunicados, FAQ, DP e Config.</p>
+                  <p style={{color:"#92400e99",fontSize:11,margin:"2px 0 0",lineHeight:1.4}}>Gorjetas, Equipe, Cargos, Comunicados, FAQ, DP e Config.</p>
                 </div>
               </div>
               <RestaurantPanel
