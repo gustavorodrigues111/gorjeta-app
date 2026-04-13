@@ -1447,7 +1447,7 @@ function validateWeekSchedule(days) {
 }
 
 // ── Work Schedule Manager Tab ─────────────────────────────────────────────────
-function WorkScheduleManagerTab({ restaurantId, employees, roles, workSchedules, notifications, managers, currentManagerName, onUpdate, communications, isOwner }) {
+function WorkScheduleManagerTab({ restaurantId, employees, roles, workSchedules, notifications, managers, currentManagerName, onUpdate, communications, isOwner, mobileOnly }) {
   const ac = "var(--ac)";
   const restEmps = employees.filter(e => e.restaurantId === restaurantId && !e.inactive);
 
@@ -5306,7 +5306,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                 if(ok){ const w={...data?.workSchedules}; delete w[rid]; onUpdate("workSchedules",w); onUpdate("_toast","🗑️ Horários enviados para a lixeira"); }
               }} style={{...S.btnSecondary,fontSize:12,color:"var(--red)",borderColor:"var(--red)44"}}>🗑️ Resetar horários</button>
             </div>}
-            <WorkScheduleManagerTab restaurantId={rid} employees={employees} roles={roles} workSchedules={data?.workSchedules??{}} notifications={data?.notifications??[]} managers={data?.managers??[]} currentManagerName={currentUser?.name ?? (isOwner?"Admin AppTip":"Gestor")} onUpdate={onUpdate} communications={data?.communications??[]} isOwner={isOwner} />
+            <WorkScheduleManagerTab restaurantId={rid} employees={employees} roles={roles} workSchedules={data?.workSchedules??{}} notifications={data?.notifications??[]} managers={data?.managers??[]} currentManagerName={currentUser?.name ?? (isOwner?"Admin AppTip":"Gestor")} onUpdate={onUpdate} communications={data?.communications??[]} isOwner={isOwner} mobileOnly={mobileOnly} />
           </div>
         )}
 
