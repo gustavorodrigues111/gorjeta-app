@@ -3563,7 +3563,23 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
   const [vacEmpId, setVacEmpId]             = useState("");
   const [vacFrom, setVacFrom]               = useState("");
   const [vacTo, setVacTo]                   = useState("");
-  const [weekIdx, setWeekIdx]               = useState(0);
+  function calcWeekForToday(y, m) {
+    const now = new Date();
+    const isCurrentMonth = now.getFullYear() === y && now.getMonth() === m;
+    if (!isCurrentMonth) return 0;
+    const todayDay = now.getDate();
+    const daysInM = new Date(y, m + 1, 0).getDate();
+    let wk = 0, d = 1;
+    while (d <= daysInM) {
+      const wd0 = new Date(y, m, d).getDay();
+      let weekEnd = d + (6 - wd0);
+      weekEnd = Math.min(weekEnd, daysInM);
+      if (todayDay >= d && todayDay <= weekEnd) return wk;
+      d = weekEnd + 1; wk++;
+    }
+    return 0;
+  }
+  const [weekIdx, setWeekIdx] = useState(() => calcWeekForToday(now.getFullYear(), now.getMonth()));
 
   const [showExport, setShowExport]       = useState(false);
 
@@ -3958,7 +3974,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
 
       <div style={{ padding:"20px 24px", maxWidth:1100, margin:"0 auto" }}>
         {["dashboard","tips","schedule"].includes(tab) && (
-          <div style={{ marginBottom: 20 }}><MonthNav year={year} month={month} onChange={(y,m)=>{setYear(y);setMonth(m);}} /></div>
+          <div style={{ marginBottom: 20 }}><MonthNav year={year} month={month} onChange={(y,m)=>{setYear(y);setMonth(m);setWeekIdx(calcWeekForToday(y,m));}} /></div>
         )}
 
         {/* Banner de privacidade */}
@@ -4745,13 +4761,13 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
             </div>
 
             {/* Legend */}
-            <div style={{display:"flex",gap:mobileOnly?4:8,flexWrap:"wrap",marginBottom:12}}>
+            <div style={{display:"flex",gap:mobileOnly?0:8,flexWrap:mobileOnly?"nowrap":"wrap",justifyContent:mobileOnly?"space-between":"flex-start",marginBottom:12}}>
               {[["var(--green)","T","Trabalho"],["var(--red)","F","Folga"],["#06b6d4","FL","Freela"],["#3b82f6","C","Comp."],["#8b5cf6","Fér","Férias"],["#f59e0b","FJ","F.Just."],["var(--red)","FI","F.Inj."]].map(([c,s,l])=>(
-                <div key={s} style={{display:"flex",alignItems:"center",gap:2}}>
-                  <div style={{width:mobileOnly?16:20,height:mobileOnly?14:16,borderRadius:3,background:c+"33",border:`1px solid ${c}`,display:"flex",alignItems:"center",justifyContent:"center"}}>
+                <div key={s} style={{display:"flex",alignItems:"center",gap:mobileOnly?1:3,flexShrink:0}}>
+                  <div style={{width:mobileOnly?14:20,height:mobileOnly?14:16,borderRadius:3,background:c+"33",border:`1px solid ${c}`,display:"flex",alignItems:"center",justifyContent:"center"}}>
                     <span style={{color:c,fontSize:mobileOnly?7:9,fontWeight:700}}>{s}</span>
                   </div>
-                  <span style={{color:"var(--text3)",fontSize:mobileOnly?8:10,fontFamily:"'DM Mono',monospace"}}>{l}</span>
+                  {!mobileOnly && <span style={{color:"var(--text3)",fontSize:10,fontFamily:"'DM Mono',monospace"}}>{l}</span>}
                 </div>
               ))}
             </div>
