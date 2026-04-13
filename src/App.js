@@ -1657,77 +1657,145 @@ function WorkScheduleManagerTab({ restaurantId, employees, roles, workSchedules,
   const [aiLoading, setAiLoading] = useState(false);
 
   function parseAiCommand(text) {
-    const DIAS_MAP = {"dom":0,"domingo":0,"seg":1,"segunda":1,"ter":2,"terca":2,"terça":2,"qua":3,"quarta":3,"qui":4,"quinta":4,"sex":5,"sexta":5,"sab":6,"sabado":6,"sábado":6};
+    const DIAS_FULL = [
+      {names:["dom","domingo"], idx:0}, {names:["seg","segunda"], idx:1},
+      {names:["ter","terca","terça"], idx:2}, {names:["qua","quarta"], idx:3},
+      {names:["qui","quinta"], idx:4}, {names:["sex","sexta"], idx:5},
+      {names:["sab","sabado","sábado"], idx:6},
+    ];
     const lower = text.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g,"");
     const newDays = JSON.parse(JSON.stringify(editDays));
     const changes = [];
 
-    // Parse "folga" days
-    const folgaMatch = lower.match(/folga(?:s)?(?:\s+(?:nos?\s+dias?\s+|em\s+|no\s+|na\s+|nas?\s+)?)([\w\s,e]+)/);
-    if (folgaMatch) {
-      const daysText = folgaMatch[1];
-      Object.entries(DIAS_MAP).forEach(([name, idx]) => {
-        if (daysText.includes(name)) {
-          newDays[idx] = { active: false };
-          changes.push(`${WEEK_DAYS_LABEL[idx]}: Folga`);
+    // Helper: extrai indices de dias mencionados num trecho de texto (sem duplicar)
+    function extractDays(txt) {
+      const found = new Set();
+      // "seg a sex" / "segunda a sexta" range pattern
+      const rangeMatch = txt.match(/(\w+)\s+a\s+(\w+)/);
+      if (rangeMatch) {
+        const fromD = DIAS_FULL.find(d => d.names.some(n => rangeMatch[1].includes(n)));
+        const toD = DIAS_FULL.find(d => d.names.some(n => rangeMatch[2].includes(n)));
+        if (fromD && toD) {
+          for (let i = fromD.idx; i !== (toD.idx + 1) % 7; i = (i + 1) % 7) found.add(i);
+          return [...found];
         }
+      }
+      DIAS_FULL.forEach(d => {
+        // Match pela palavra mais longa primeiro para evitar "seg" dentro de "segunda"
+        const sorted = [...d.names].sort((a,b)=>b.length-a.length);
+        for (const n of sorted) {
+          // word boundary match
+          if (new RegExp("\\b" + n + "\\b").test(txt) || txt.includes(n)) { found.add(d.idx); break; }
+        }
+      });
+      return [...found];
+    }
+
+    // ═══ 1. Parse "divida X horas em Y dias" — calcula jornada automaticamente ═══
+    const cargaMatch = lower.match(/divid[ae]\s+(?:as?\s+)?(\d+)\s*(?:h|horas?)\s*(?:semana(?:is|l)?)?(?:\s+em\s+(\d)\s*dias)?/);
+    let cargaSemanalMin = 0;
+    let numDiasTrab = 0;
+    if (cargaMatch) {
+      cargaSemanalMin = parseInt(cargaMatch[1]) * 60;
+      numDiasTrab = cargaMatch[2] ? parseInt(cargaMatch[2]) : 0;
+    }
+
+    // ═══ 2. Parse folga days ═══
+    const folgaMatch = lower.match(/folga(?:s)?(?:\s+(?:para\s+ele\s+|nos?\s+dias?\s+|em\s+|no\s+|na\s+|nas?\s+)?)([\w\s,e]+?)(?:\s*[,.]|\s+(?:horario|entrada|saida|entra|sai|intervalo|escala|divid)|\s*$)/);
+    const folgaDays = new Set();
+    if (folgaMatch) {
+      extractDays(folgaMatch[1]).forEach(idx => {
+        folgaDays.add(idx);
+        newDays[idx] = { active: false };
+        changes.push(`${WEEK_DAYS_LABEL[idx]}: Folga`);
       });
     }
 
-    // Parse "trabalha" days
-    const trabMatch = lower.match(/trabalh[ao](?:r)?(?:\s+(?:nos?\s+dias?\s+|em\s+|no\s+|na\s+)?)([\w\s,e]+)/);
+    // ═══ 3. Parse "trabalha" days ═══
+    const trabMatch = lower.match(/trabalh[ao](?:r)?(?:\s+(?:nos?\s+dias?\s+|em\s+|no\s+|na\s+)?)([\w\s,e]+?)(?:\s*[,.]|\s+(?:horario|entrada|saida|entra|sai|intervalo|escala|divid|folga)|\s*$)/);
     if (trabMatch) {
-      const daysText = trabMatch[1];
-      Object.entries(DIAS_MAP).forEach(([name, idx]) => {
-        if (daysText.includes(name)) {
+      extractDays(trabMatch[1]).forEach(idx => {
+        if (!folgaDays.has(idx)) {
           newDays[idx] = { active: true, in: newDays[idx]?.in || "", out: newDays[idx]?.out || "", break: newDays[idx]?.break || 0 };
           changes.push(`${WEEK_DAYS_LABEL[idx]}: Trabalha`);
         }
       });
     }
 
-    // Parse time patterns like "entra 08:00" / "sai 17:00" / "entrada as 08:00" / "saida 17:00"
-    const entradaMatch = lower.match(/entra(?:da)?(?:\s+(?:as?\s*)?)?(\d{1,2})[:.]?(\d{2})?/);
-    const saidaMatch = lower.match(/sa(?:i(?:da)?|ída)(?:\s+(?:as?\s*)?)?(\d{1,2})[:.]?(\d{2})?/);
-    const intervaloMatch = lower.match(/intervalo(?:\s+(?:de\s+)?)(\d+)\s*(?:min|minutos|h|hora)/);
-
-    if (entradaMatch || saidaMatch) {
-      const entH = entradaMatch ? `${String(parseInt(entradaMatch[1])).padStart(2,"0")}:${entradaMatch[2]||"00"}` : null;
-      const saiH = saidaMatch ? `${String(parseInt(saidaMatch[1])).padStart(2,"0")}:${saidaMatch[2]||"00"}` : null;
-      const breakMin = intervaloMatch ? parseInt(intervaloMatch[1]) * (intervaloMatch[0].includes("h")?60:1) : null;
-
-      // Apply to specific days mentioned or all active days
-      let targetDays = [];
-      Object.entries(DIAS_MAP).forEach(([name, idx]) => {
-        if (lower.includes(name)) targetDays.push(idx);
-      });
-      if (targetDays.length === 0) targetDays = [0,1,2,3,4,5,6].filter(i => newDays[i]?.active);
-
-      targetDays.forEach(idx => {
-        if (!newDays[idx]?.active) return;
-        if (entH) { newDays[idx] = { ...newDays[idx], in: entH }; }
-        if (saiH) { newDays[idx] = { ...newDays[idx], out: saiH }; }
-        if (breakMin !== null) { newDays[idx] = { ...newDays[idx], break: breakMin }; }
-      });
-      if (entH) changes.push(`Entrada: ${entH}${targetDays.length<7?" (dias específicos)":""}`);
-      if (saiH) changes.push(`Saída: ${saiH}`);
-      if (breakMin!==null) changes.push(`Intervalo: ${breakMin}min`);
-    }
-
-    // Parse "escala 6x1" patterns
+    // ═══ 4. Parse "escala 6x1" ═══
     const escalaMatch = lower.match(/escala\s+(\d)x(\d)/);
     if (escalaMatch) {
       const trab = parseInt(escalaMatch[1]), folg = parseInt(escalaMatch[2]);
       let count = 0;
-      for (let i = 1; i <= 6; i++) { // seg-sab
+      for (let i = 1; i <= 6; i++) {
         if (count < trab) { newDays[i] = { active: true, in: newDays[i]?.in||"", out: newDays[i]?.out||"", break: newDays[i]?.break||0 }; count++; }
-        else { newDays[i] = { active: false }; }
+        else { newDays[i] = { active: false }; folgaDays.add(i); }
       }
-      newDays[0] = { active: false }; // dom folga
-      changes.push(`Escala ${trab}x${folg}: ${trab} dias de trabalho, ${folg} de folga (dom folga)`);
+      newDays[0] = { active: false }; folgaDays.add(0);
+      changes.push(`Escala ${trab}x${folg}: ${trab} dias trabalho, ${folg} folga (dom folga)`);
     }
 
-    // Validate the suggestion
+    // ═══ 5. Se "divida X horas" + folgas definidas, inferir dias de trabalho ═══
+    if (cargaSemanalMin > 0 && folgaDays.size > 0 && numDiasTrab === 0) {
+      numDiasTrab = 7 - folgaDays.size;
+    }
+    if (cargaSemanalMin > 0 && numDiasTrab > 0) {
+      // Marcar dias de trabalho que não são folga
+      const trabIds = [];
+      for (let i = 0; i < 7; i++) {
+        if (!folgaDays.has(i) && trabIds.length < numDiasTrab) {
+          trabIds.push(i);
+          newDays[i] = { active: true, in: newDays[i]?.in || "", out: newDays[i]?.out || "", break: newDays[i]?.break || 0 };
+        } else if (!folgaDays.has(i)) {
+          newDays[i] = { active: false }; folgaDays.add(i);
+          changes.push(`${WEEK_DAYS_LABEL[i]}: Folga (excedente)`);
+        }
+      }
+      changes.push(`Carga: ${Math.round(cargaSemanalMin/60)}h semanais em ${numDiasTrab} dias`);
+    }
+
+    // ═══ 6. Parse horários — entrada, saída, intervalo ═══
+    const entradaMatch = lower.match(/(?:entra(?:da)?|horario\s+de\s+entrada)(?:\s+(?:as?\s*)?)?(\d{1,2})[:.]?(\d{2})?/);
+    const saidaMatch = lower.match(/sa(?:i(?:da)?|ida)(?:\s+(?:as?\s*)?)?(\d{1,2})[:.]?(\d{2})?/);
+    const intervaloMatch = lower.match(/intervalo(?:\s+(?:de\s+)?)(\d+)\s*(?:min|minutos|h|hora)/);
+
+    const entH = entradaMatch ? `${String(parseInt(entradaMatch[1])).padStart(2,"0")}:${entradaMatch[2]||"00"}` : null;
+    const saiH = saidaMatch ? `${String(parseInt(saidaMatch[1])).padStart(2,"0")}:${saidaMatch[2]||"00"}` : null;
+    const breakMin = intervaloMatch ? parseInt(intervaloMatch[1]) * (intervaloMatch[0].includes("h")?60:1) : null;
+
+    // ═══ 7. Se tem carga horária + entrada (sem saída), calcular saída automaticamente ═══
+    let calcSaiH = saiH;
+    if (cargaSemanalMin > 0 && entH && !saiH && numDiasTrab > 0) {
+      const dailyMin = Math.round(cargaSemanalMin / numDiasTrab);
+      const bk = breakMin ?? 60; // default 1h intervalo
+      const totalMin = dailyMin + bk;
+      const entMin = parseInt(entH.split(":")[0]) * 60 + parseInt(entH.split(":")[1]);
+      const saiMin = entMin + totalMin;
+      calcSaiH = `${String(Math.floor(saiMin / 60) % 24).padStart(2,"0")}:${String(saiMin % 60).padStart(2,"0")}`;
+      const jornH = Math.floor(dailyMin / 60);
+      const jornM = dailyMin % 60;
+      changes.push(`Jornada: ${jornH}h${jornM > 0 ? String(jornM).padStart(2,"0") + "min" : ""}/dia`);
+      changes.push(`Entrada: ${entH} → Saída: ${calcSaiH} (intervalo ${bk}min)`);
+    } else {
+      if (entH) changes.push(`Entrada: ${entH}`);
+      if (saiH) changes.push(`Saída: ${saiH}`);
+    }
+    if (breakMin !== null && !(cargaSemanalMin > 0 && entH && !saiH)) changes.push(`Intervalo: ${breakMin}min`);
+
+    // Apply horários aos dias ativos
+    const finalEnt = entH;
+    const finalSai = calcSaiH || saiH;
+    const finalBreak = breakMin ?? (cargaSemanalMin > 0 && entH && !saiH ? 60 : null);
+    if (finalEnt || finalSai || finalBreak !== null) {
+      const targetDays = [0,1,2,3,4,5,6].filter(i => newDays[i]?.active);
+      targetDays.forEach(idx => {
+        if (finalEnt) newDays[idx] = { ...newDays[idx], in: finalEnt };
+        if (finalSai) newDays[idx] = { ...newDays[idx], out: finalSai };
+        if (finalBreak !== null) newDays[idx] = { ...newDays[idx], break: finalBreak };
+      });
+    }
+
+    // ═══ 8. Validação ═══
     const warnings = [];
     const activeDays = Object.values(newDays).filter(d => d.active);
     if (activeDays.length === 0) warnings.push("Nenhum dia de trabalho definido.");
@@ -1742,7 +1810,7 @@ function WorkScheduleManagerTab({ restaurantId, employees, roles, workSchedules,
       errs.forEach(e => warnings.push(e));
     }
 
-    if (changes.length === 0) return { days: null, message: "Não consegui entender. Tente algo como:\n• \"folga domingo e segunda\"\n• \"entra 08:00 sai 17:00 intervalo 60min\"\n• \"escala 6x1\"\n• \"trabalha seg a sex, folga sab dom\"", warnings: [] };
+    if (changes.length === 0) return { days: null, message: "Não consegui entender. Tente algo como:\n• \"folga domingo e segunda\"\n• \"entra 08:00 sai 17:00 intervalo 60min\"\n• \"escala 6x1\"\n• \"divida 44 horas em 5 dias, folga seg e ter, entrada 10:00\"", warnings: [] };
     return { days: newDays, message: changes.join("\n"), warnings };
   }
 
