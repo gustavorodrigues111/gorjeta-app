@@ -3878,7 +3878,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
     isDP                                       && ["notificacoes",`📬 Caixa${inboxUnread>0?` (${inboxUnread})`:""}`],
     isDP                                       && ["dp_gestores", "👔 Gestores"],
     (canTips || isOwner)                       && ["config",       "⚙️ Configurações"],
-  ].filter(Boolean).filter(([id]) => !mobileOnly || ["dashboard","schedule"].includes(id));
+  ].filter(Boolean).filter(([id]) => !mobileOnly || ["dashboard","schedule","notificacoes"].includes(id));
 
   const [tab, setTab] = useState("dashboard");
 
