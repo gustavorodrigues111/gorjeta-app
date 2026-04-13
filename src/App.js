@@ -2066,21 +2066,21 @@ function WorkScheduleManagerTab({ restaurantId, employees, roles, workSchedules,
               {/* Time inputs (only if active) */}
               {isActive && (
                 <div>
-                  <div style={{display:"flex",flexWrap:"wrap",gap:8,marginBottom:8}}>
-                    <div style={{flex:"1 1 80px",minWidth:80}}>
+                  <div style={{display:"grid",gridTemplateColumns:"1fr 1fr auto",gap:8,alignItems:"end",marginBottom:8}}>
+                    <div>
                       <label style={{color:"var(--text3)",fontSize:10,display:"block",marginBottom:3}}>Entrada</label>
                       <input type="time" value={d.in||""} onChange={e=>handleDayChange(dayIdx,"in",e.target.value)}
                         style={{...S.input,fontSize:14,padding:"10px 8px",textAlign:"center",width:"100%",boxSizing:"border-box"}}/>
                     </div>
-                    <div style={{flex:"1 1 80px",minWidth:80}}>
+                    <div>
                       <label style={{color:"var(--text3)",fontSize:10,display:"block",marginBottom:3}}>Saída</label>
                       <input type="time" value={d.out||""} onChange={e=>handleDayChange(dayIdx,"out",e.target.value)}
                         style={{...S.input,fontSize:14,padding:"10px 8px",textAlign:"center",width:"100%",boxSizing:"border-box"}}/>
                     </div>
-                    <div style={{flex:"1 1 80px",minWidth:80}}>
-                      <label style={{color:"var(--text3)",fontSize:10,display:"block",marginBottom:3}}>Intervalo (min)</label>
+                    <div style={{width:64}}>
+                      <label style={{color:"var(--text3)",fontSize:10,display:"block",marginBottom:3,textAlign:"center"}}>Int.(min)</label>
                       <input type="number" min="0" max="120" value={d.break||""} onChange={e=>handleDayChange(dayIdx,"break",parseInt(e.target.value)||0)}
-                        placeholder="30" style={{...S.input,fontSize:14,padding:"10px 8px",textAlign:"center",width:"100%",boxSizing:"border-box"}}/>
+                        placeholder="30" style={{...S.input,fontSize:14,padding:"10px 4px",textAlign:"center",width:"100%",boxSizing:"border-box"}}/>
                     </div>
                   </div>
 
