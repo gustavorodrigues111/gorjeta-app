@@ -4298,8 +4298,8 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                 </div>
               )}
 
-              {/* Ações rápidas */}
-              <div style={{...S.card}}>
+              {/* Ações rápidas — só no desktop */}
+              {!mobileOnly && <div style={{...S.card}}>
                 <span style={{color:ac,fontWeight:700,fontSize:13,display:"block",marginBottom:10}}>⚡ Ações rápidas</span>
                 <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
                   {[
@@ -4313,7 +4313,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                     </button>
                   ))}
                 </div>
-              </div>
+              </div>}
             </div>
           );
         })()}
