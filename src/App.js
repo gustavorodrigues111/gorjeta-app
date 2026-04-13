@@ -3878,7 +3878,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
     isDP                                       && ["notificacoes",`📬 Caixa${inboxUnread>0?` (${inboxUnread})`:""}`],
     isDP                                       && ["dp_gestores", "👔 Gestores"],
     (canTips || isOwner)                       && ["config",       "⚙️ Configurações"],
-  ].filter(Boolean).filter(([id]) => !mobileOnly || ["dashboard","tips","schedule"].includes(id));
+  ].filter(Boolean).filter(([id]) => !mobileOnly || ["dashboard","schedule"].includes(id));
 
   const [tab, setTab] = useState("dashboard");
 
@@ -4101,7 +4101,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                       <div style={{color:"var(--text3)",fontSize:9,marginTop:2}}>pendência</div>
                     </div>
                   </div>
-                  {gorjetaHoje === null && isCurrentMonth && (
+                  {gorjetaHoje === null && isCurrentMonth && !mobileOnly && (
                     <button onClick={()=>setTab("tips")}
                       style={{...S.btnPrimary, width:"100%", marginTop:10, padding:"10px", fontSize:13}}>
                       💸 Lançar gorjeta de hoje
@@ -4209,7 +4209,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
               <div style={{...S.card, marginBottom:14}}>
                 <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
                   <span style={{color:ac,fontWeight:700,fontSize:13}}>💸 Gorjetas — {monthLabel(year,month)}</span>
-                  <button onClick={()=>setTab("tips")} style={{...S.btnSecondary,fontSize:11,padding:"4px 10px"}}>Ver tudo →</button>
+                  {!mobileOnly && <button onClick={()=>setTab("tips")} style={{...S.btnSecondary,fontSize:11,padding:"4px 10px"}}>Ver tudo →</button>}
                 </div>
                 <div style={{display:"grid",gridTemplateColumns:mobileOnly?"1fr 1fr":"1fr 1fr 1fr 1fr",gap:mobileOnly?6:8}}>
                   {[
@@ -7688,7 +7688,7 @@ function ManagerPortal({ manager, data, onUpdate, onBack, toggleTheme, theme, on
                 <span style={{fontSize:22,flexShrink:0}}>🖥️</span>
                 <div>
                   <p style={{color:"#92400e",fontSize:12,fontWeight:700,margin:0}}>Demais funcionalidades no computador</p>
-                  <p style={{color:"#92400e99",fontSize:11,margin:"2px 0 0",lineHeight:1.4}}>Equipe, Cargos, Horários, Comunicados, FAQ, DP e Config.</p>
+                  <p style={{color:"#92400e99",fontSize:11,margin:"2px 0 0",lineHeight:1.4}}>Gorjetas, Equipe, Cargos, Horários, Comunicados, FAQ, DP e Config.</p>
                 </div>
               </div>
               <RestaurantPanel
