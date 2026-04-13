@@ -1909,16 +1909,16 @@ function WorkScheduleManagerTab({ restaurantId, employees, roles, workSchedules,
             <p style={{color:"var(--text3)",fontSize:11,margin:"0 0 10px",lineHeight:1.5}}>
               Descreva o que deseja e o assistente preenche automaticamente. Exemplos: "folga domingo e segunda", "entra 08:00 sai 17:00 intervalo 60min", "escala 6x1"
             </p>
-            <div style={{display:"flex",gap:8}}>
+            <div style={{display:"flex",flexDirection:"column",gap:8}}>
               <input
                 type="text" value={aiPrompt}
                 onChange={e=>setAiPrompt(e.target.value)}
                 onKeyDown={e=>{ if(e.key==="Enter") handleAiSubmit(); }}
                 placeholder="Ex: folga dom e seg, entra 08:00 sai 16:20..."
-                style={{...S.input,flex:1,fontSize:13}}
+                style={{...S.input,width:"100%",fontSize:13,boxSizing:"border-box"}}
               />
               <button onClick={handleAiSubmit} disabled={aiLoading||!aiPrompt.trim()}
-                style={{...S.btnPrimary,padding:"8px 16px",fontSize:12,whiteSpace:"nowrap",opacity:aiLoading?0.5:1,background:"#8b5cf6"}}>
+                style={{...S.btnPrimary,padding:"10px 16px",fontSize:13,whiteSpace:"nowrap",opacity:aiLoading||!aiPrompt.trim()?0.5:1,background:"#8b5cf6",width:"100%"}}>
                 {aiLoading ? "..." : "Sugerir"}
               </button>
             </div>
