@@ -3,7 +3,7 @@ import { useState, useEffect, Component } from "react";
 import { db } from "./firebase";
 import { doc, getDoc, setDoc } from "firebase/firestore";
 
-const APP_VERSION = "5.8.0";
+const APP_VERSION = "5.9.0";
 
 const DEFAULT_ADMISSION = () => `${new Date().getFullYear()}-01-01`;
 const round2 = (v) => Math.round(v * 100) / 100;
@@ -1663,14 +1663,14 @@ function WorkScheduleManagerTab({ restaurantId, employees, roles, workSchedules,
       {names:["qui","quinta"], idx:4}, {names:["sex","sexta"], idx:5},
       {names:["sab","sabado","sábado"], idx:6},
     ];
-    const lower = text.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g,"");
+    // Normaliza: lowercase, remove acentos, normaliza espaços
+    const lower = text.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g,"").replace(/\s+/g," ").trim();
     const newDays = JSON.parse(JSON.stringify(editDays));
     const changes = [];
 
-    // Helper: extrai indices de dias mencionados num trecho de texto (sem duplicar)
+    // Helper: extrai indices de dias de um trecho (sem duplicar)
     function extractDays(txt) {
       const found = new Set();
-      // "seg a sex" / "segunda a sexta" range pattern
       const rangeMatch = txt.match(/(\w+)\s+a\s+(\w+)/);
       if (rangeMatch) {
         const fromD = DIAS_FULL.find(d => d.names.some(n => rangeMatch[1].includes(n)));
@@ -1681,28 +1681,28 @@ function WorkScheduleManagerTab({ restaurantId, employees, roles, workSchedules,
         }
       }
       DIAS_FULL.forEach(d => {
-        // Match pela palavra mais longa primeiro para evitar "seg" dentro de "segunda"
         const sorted = [...d.names].sort((a,b)=>b.length-a.length);
-        for (const n of sorted) {
-          // word boundary match
-          if (new RegExp("\\b" + n + "\\b").test(txt) || txt.includes(n)) { found.add(d.idx); break; }
-        }
+        for (const n of sorted) { if (txt.includes(n)) { found.add(d.idx); break; } }
       });
       return [...found];
     }
 
-    // ═══ 1. Parse "divida X horas em Y dias" — calcula jornada automaticamente ═══
-    const cargaMatch = lower.match(/divid[ae]\s+(?:as?\s+)?(\d+)\s*(?:h|horas?)\s*(?:semana(?:is|l)?)?(?:\s+em\s+(\d)\s*dias)?/);
+    // ═══ 1. Parse carga horária semanal ═══
+    // Aceita: "divida/dividindo/divide 44h", "44 horas semanais", "44 semanis", "44h semanais"
+    const cargaMatch = lower.match(/(?:divid\w*\s+(?:as?\s+)?)?(\d{2,3})\s*(?:h(?:oras?)?|hrs?)?\s*semana\w*/);
     let cargaSemanalMin = 0;
     let numDiasTrab = 0;
     if (cargaMatch) {
       cargaSemanalMin = parseInt(cargaMatch[1]) * 60;
-      numDiasTrab = cargaMatch[2] ? parseInt(cargaMatch[2]) : 0;
     }
+    // "em X dias"
+    const emDiasMatch = lower.match(/em\s+(\d)\s*dias/);
+    if (emDiasMatch) numDiasTrab = parseInt(emDiasMatch[1]);
 
-    // ═══ 2. Parse folga days ═══
-    const folgaMatch = lower.match(/folga(?:s)?(?:\s+(?:para\s+ele\s+|nos?\s+dias?\s+|em\s+|no\s+|na\s+|nas?\s+)?)([\w\s,e]+?)(?:\s*[,.]|\s+(?:horario|entrada|saida|entra|sai|intervalo|escala|divid)|\s*$)/);
+    // ═══ 2. Parse folga ═══
+    // Aceita: folga/folgue/folgando/folgar/folgou + dias
     const folgaDays = new Set();
+    const folgaMatch = lower.match(/folg\w*\s+(?:esse\s+empregado\s+|para\s+(?:ele\s+)?|(?:nos?\s+)?(?:dias?\s+)?(?:de?\s+)?)?(.+?)(?:\s+e\s+trabalh|\s+(?:divid|entrand|entrad|horari|interval|escala)\w*|\s*[,.]|$)/);
     if (folgaMatch) {
       extractDays(folgaMatch[1]).forEach(idx => {
         folgaDays.add(idx);
@@ -1711,15 +1711,26 @@ function WorkScheduleManagerTab({ restaurantId, employees, roles, workSchedules,
       });
     }
 
-    // ═══ 3. Parse "trabalha" days ═══
-    const trabMatch = lower.match(/trabalh[ao](?:r)?(?:\s+(?:nos?\s+dias?\s+|em\s+|no\s+|na\s+)?)([\w\s,e]+?)(?:\s*[,.]|\s+(?:horario|entrada|saida|entra|sai|intervalo|escala|divid|folga)|\s*$)/);
-    if (trabMatch) {
-      extractDays(trabMatch[1]).forEach(idx => {
-        if (!folgaDays.has(idx)) {
-          newDays[idx] = { active: true, in: newDays[idx]?.in || "", out: newDays[idx]?.out || "", break: newDays[idx]?.break || 0 };
-          changes.push(`${WEEK_DAYS_LABEL[idx]}: Trabalha`);
+    // ═══ 3. Parse "trabalha/trabalhe nos outros dias" ═══
+    const trabOutros = /trabalh\w*\s+(?:n[oa]s?\s+)?outr\w*\s+dias?/.test(lower);
+    if (trabOutros) {
+      for (let i = 0; i < 7; i++) {
+        if (!folgaDays.has(i)) {
+          newDays[i] = { active: true, in: newDays[i]?.in||"", out: newDays[i]?.out||"", break: newDays[i]?.break||0 };
         }
-      });
+      }
+      changes.push(`Trabalha: ${7 - folgaDays.size} dias`);
+    } else {
+      // Parse dias específicos de trabalho
+      const trabMatch = lower.match(/trabalh\w*\s+(?:n[oa]s?\s+)?(?:dias?\s+)?(.+?)(?:\s+(?:folg|divid|entrand|entrad|horari|interval|escala)\w*|\s*[,.]|$)/);
+      if (trabMatch && !trabOutros) {
+        extractDays(trabMatch[1]).forEach(idx => {
+          if (!folgaDays.has(idx)) {
+            newDays[idx] = { active: true, in: newDays[idx]?.in||"", out: newDays[idx]?.out||"", break: newDays[idx]?.break||0 };
+            changes.push(`${WEEK_DAYS_LABEL[idx]}: Trabalha`);
+          }
+        });
+      }
     }
 
     // ═══ 4. Parse "escala 6x1" ═══
@@ -1735,17 +1746,16 @@ function WorkScheduleManagerTab({ restaurantId, employees, roles, workSchedules,
       changes.push(`Escala ${trab}x${folg}: ${trab} dias trabalho, ${folg} folga (dom folga)`);
     }
 
-    // ═══ 5. Se "divida X horas" + folgas definidas, inferir dias de trabalho ═══
+    // ═══ 5. Se carga horária + folgas, inferir dias de trabalho ═══
     if (cargaSemanalMin > 0 && folgaDays.size > 0 && numDiasTrab === 0) {
       numDiasTrab = 7 - folgaDays.size;
     }
     if (cargaSemanalMin > 0 && numDiasTrab > 0) {
-      // Marcar dias de trabalho que não são folga
       const trabIds = [];
       for (let i = 0; i < 7; i++) {
         if (!folgaDays.has(i) && trabIds.length < numDiasTrab) {
           trabIds.push(i);
-          newDays[i] = { active: true, in: newDays[i]?.in || "", out: newDays[i]?.out || "", break: newDays[i]?.break || 0 };
+          newDays[i] = { active: true, in: newDays[i]?.in||"", out: newDays[i]?.out||"", break: newDays[i]?.break||0 };
         } else if (!folgaDays.has(i)) {
           newDays[i] = { active: false }; folgaDays.add(i);
           changes.push(`${WEEK_DAYS_LABEL[i]}: Folga (excedente)`);
@@ -1754,20 +1764,22 @@ function WorkScheduleManagerTab({ restaurantId, employees, roles, workSchedules,
       changes.push(`Carga: ${Math.round(cargaSemanalMin/60)}h semanais em ${numDiasTrab} dias`);
     }
 
-    // ═══ 6. Parse horários — entrada, saída, intervalo ═══
-    const entradaMatch = lower.match(/(?:entra(?:da)?|horario\s+de\s+entrada)(?:\s+(?:as?\s*)?)?(\d{1,2})[:.]?(\d{2})?/);
-    const saidaMatch = lower.match(/sa(?:i(?:da)?|ida)(?:\s+(?:as?\s*)?)?(\d{1,2})[:.]?(\d{2})?/);
-    const intervaloMatch = lower.match(/intervalo(?:\s+(?:de\s+)?)(\d+)\s*(?:min|minutos|h|hora)/);
+    // ═══ 6. Parse horários ═══
+    // Aceita: entra/entrada/entrando + as/a/s + hora
+    // Também "horario de entrada as 10", "entrandoa s 10"
+    const entradaMatch = lower.match(/(?:entrand\w*\s*a?\s*s?\s*|entra(?:da)?\s*(?:as?\s*)?|horario\s+de\s+entrada\s*(?:as?\s*)?)(\d{1,2})\s*[:.h]?\s*(\d{2})?/);
+    const saidaMatch = lower.match(/(?:saind\w*\s*a?\s*s?\s*|sa[ii](?:da)?\s*(?:as?\s*)?|horario\s+de\s+saida\s*(?:as?\s*)?)(\d{1,2})\s*[:.h]?\s*(\d{2})?/);
+    const intervaloMatch = lower.match(/intervalo\s*(?:de\s+)?(\d+)\s*(?:min|minutos?|h|hora)/);
 
     const entH = entradaMatch ? `${String(parseInt(entradaMatch[1])).padStart(2,"0")}:${entradaMatch[2]||"00"}` : null;
     const saiH = saidaMatch ? `${String(parseInt(saidaMatch[1])).padStart(2,"0")}:${saidaMatch[2]||"00"}` : null;
     const breakMin = intervaloMatch ? parseInt(intervaloMatch[1]) * (intervaloMatch[0].includes("h")?60:1) : null;
 
-    // ═══ 7. Se tem carga horária + entrada (sem saída), calcular saída automaticamente ═══
+    // ═══ 7. Se tem carga + entrada (sem saída), calcular saída ═══
     let calcSaiH = saiH;
     if (cargaSemanalMin > 0 && entH && !saiH && numDiasTrab > 0) {
       const dailyMin = Math.round(cargaSemanalMin / numDiasTrab);
-      const bk = breakMin ?? 60; // default 1h intervalo
+      const bk = breakMin ?? 60;
       const totalMin = dailyMin + bk;
       const entMin = parseInt(entH.split(":")[0]) * 60 + parseInt(entH.split(":")[1]);
       const saiMin = entMin + totalMin;
@@ -1795,7 +1807,7 @@ function WorkScheduleManagerTab({ restaurantId, employees, roles, workSchedules,
       });
     }
 
-    // ═══ 8. Validação ═══
+    // ═══ 8. Validação CLT ═══
     const warnings = [];
     const activeDays = Object.values(newDays).filter(d => d.active);
     if (activeDays.length === 0) warnings.push("Nenhum dia de trabalho definido.");
@@ -1810,7 +1822,7 @@ function WorkScheduleManagerTab({ restaurantId, employees, roles, workSchedules,
       errs.forEach(e => warnings.push(e));
     }
 
-    if (changes.length === 0) return { days: null, message: "Não consegui entender. Tente algo como:\n• \"folga domingo e segunda\"\n• \"entra 08:00 sai 17:00 intervalo 60min\"\n• \"escala 6x1\"\n• \"divida 44 horas em 5 dias, folga seg e ter, entrada 10:00\"", warnings: [] };
+    if (changes.length === 0) return { days: null, message: "Não consegui entender. Tente algo como:\n• \"folga segunda e terça, entrada 10:00\"\n• \"entra 08:00 sai 17:00 intervalo 60min\"\n• \"escala 6x1\"\n• \"folgue seg e ter, trabalhe nos outros dias, 44h semanais entrando as 10\"", warnings: [] };
     return { days: newDays, message: changes.join("\n"), warnings };
   }
 
@@ -7308,6 +7320,16 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }
 
         {tab === "changelog" && (() => {
           const CHANGELOG = [
+            { version:"5.9.0", date:"2026-04-12", items:[
+              "Melhoria: IA de horários — parser reescrito para entender linguagem natural flexível em português",
+              "Melhoria: IA aceita conjugações verbais (folgue, trabalhe, dividindo, entrando), typos (semanis, entrandoa s) e frases compostas",
+              "Melhoria: IA reconhece 'trabalhe nos outros dias' como padrão para preencher dias não mencionados",
+              "Melhoria: campo de texto da IA de horários em layout empilhado (input + botão 100% largura)",
+              "Removido: aba Gorjetas do mobile (lançamentos apenas pelo PC)",
+              "Removido: 'Ações rápidas' do dashboard mobile",
+              "Novo: aba Caixa de entrada na visão mobile do gestor",
+              "Correção: mobile tabs agora Dashboard + Escala + Caixa de entrada",
+            ]},
             { version:"5.8.0", date:"2026-04-12", items:[
               "Novo: Escala mobile — visão semanal com navegação ◀/▶, grid 7 colunas, toque para alterar status",
               "Melhoria: botões de ação da escala compactos no mobile (Folgas, Reiniciar, Férias)",
