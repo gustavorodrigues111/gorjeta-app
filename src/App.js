@@ -3,7 +3,7 @@ import { useState, useEffect, Component } from "react";
 import { db } from "./firebase";
 import { doc, getDoc, setDoc } from "firebase/firestore";
 
-const APP_VERSION = "5.7.0";
+const APP_VERSION = "5.8.0";
 
 const DEFAULT_ADMISSION = () => `${new Date().getFullYear()}-01-01`;
 const round2 = (v) => Math.round(v * 100) / 100;
@@ -3563,6 +3563,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
   const [vacEmpId, setVacEmpId]             = useState("");
   const [vacFrom, setVacFrom]               = useState("");
   const [vacTo, setVacTo]                   = useState("");
+  const [weekIdx, setWeekIdx]               = useState(0);
 
   const [showExport, setShowExport]       = useState(false);
 
@@ -4548,7 +4549,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
         {/* ESCALA */}
         {tab === "schedule" && (
           <div>
-            {isOwner && <div style={{display:"flex",justifyContent:"flex-end",marginBottom:10}}>
+            {isOwner && !mobileOnly && <div style={{display:"flex",justifyContent:"flex-end",marginBottom:10}}>
               <button onClick={()=>{
                 const ok = resetTab("schedule","Escala",()=>({schedules:schedules?.[rid]}));
                 if(ok){ const s={...schedules}; delete s[rid]; onUpdate("schedules",s); onUpdate("_toast","🗑️ Escala enviada para a lixeira"); }
@@ -4558,8 +4559,8 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
             <div style={{marginBottom:12}}>
               <PillBar options={["Todos", ...AREAS]} value={schedArea} onChange={setSchedArea}/>
             </div>
-            <div style={{display:"flex",gap:8,flexWrap:"wrap",alignItems:"center",justifyContent:"space-between",marginBottom:12}}>
-              <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+            <div style={{display:"flex",gap:mobileOnly?4:8,flexWrap:"wrap",alignItems:"center",justifyContent:"space-between",marginBottom:12}}>
+              <div style={{display:"flex",gap:mobileOnly?4:8,flexWrap:"wrap"}}>
 
                 {/* Pre-fill contract days off */}
                 <button onClick={()=>{
@@ -4597,8 +4598,8 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                   if (added) parts.push(`${added} folga(s) adicionada(s)`);
                   if (removed) parts.push(`${removed} folga(s) removida(s) fora do contrato`);
                   onUpdate("_toast", parts.length ? `✅ ${parts.join(" · ")}` : "Escala já está de acordo com o contrato");
-                }} style={{padding:"8px 12px",borderRadius:10,border:"1px solid #e74c3c44",background:"transparent",color:"var(--red)",cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:12,whiteSpace:"nowrap"}}>
-                  📅 Folgas do contrato
+                }} style={{padding:mobileOnly?"6px 8px":"8px 12px",borderRadius:10,border:"1px solid #e74c3c44",background:"transparent",color:"var(--red)",cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:mobileOnly?10:12,whiteSpace:"nowrap"}}>
+                  {mobileOnly?"📅 Folgas":"📅 Folgas do contrato"}
                 </button>
                 {/* Reiniciar escala */}
                 <button onClick={()=>{
@@ -4612,19 +4613,19 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                   areaEmps.forEach(emp => { newSched[rid][mk][emp.id] = {}; });
                   onUpdate("schedules", newSched);
                   onUpdate("_toast", `🔄 Escala de ${mesNome} reiniciada — ${n} empregado(s)`);
-                }} style={{padding:"8px 12px",borderRadius:10,border:"1px solid #e74c3c44",background:"transparent",color:"var(--red)",cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:12,whiteSpace:"nowrap"}}>
-                  🔄 Reiniciar escala
+                }} style={{padding:mobileOnly?"6px 8px":"8px 12px",borderRadius:10,border:"1px solid #e74c3c44",background:"transparent",color:"var(--red)",cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:mobileOnly?10:12,whiteSpace:"nowrap"}}>
+                  {mobileOnly?"🔄 Reiniciar":"🔄 Reiniciar escala"}
                 </button>
 
                 {/* Marcar férias */}
                 <button onClick={()=>{setShowVacForm(!showVacForm);setVacEmpId("");setVacFrom("");setVacTo("");}}
-                  style={{padding:"8px 12px",borderRadius:10,border:`1px solid ${showVacForm?"#8b5cf6":"#8b5cf644"}`,background:showVacForm?"#8b5cf622":"transparent",color:"#8b5cf6",cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:12,whiteSpace:"nowrap"}}>
-                  🏖️ Marcar férias
+                  style={{padding:mobileOnly?"6px 8px":"8px 12px",borderRadius:10,border:`1px solid ${showVacForm?"#8b5cf6":"#8b5cf644"}`,background:showVacForm?"#8b5cf622":"transparent",color:"#8b5cf6",cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:mobileOnly?10:12,whiteSpace:"nowrap"}}>
+                  {mobileOnly?"🏖️ Férias":"🏖️ Marcar férias"}
                 </button>
               </div>
 
-              {/* PDF export — à direita */}
-              <button onClick={async () => {
+              {/* PDF export — à direita (desktop only) */}
+              {!mobileOnly && <button onClick={async () => {
                   await loadScript("https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js");
                   await loadScript("https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js");
                   const { jsPDF } = window.jspdf;
@@ -4740,17 +4741,17 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                   doc.save(`escala_${schedArea}_${year}_${String(month+1).padStart(2,"0")}.pdf`);
                 }} style={{padding:"8px 12px",borderRadius:10,border:"1px solid var(--border)",background:"transparent",color:"var(--text2)",cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:12,whiteSpace:"nowrap"}}>
                 📄 Exportar PDF
-              </button>
+              </button>}
             </div>
 
             {/* Legend */}
-            <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:12}}>
-              {[["var(--green)","T","Trabalho"],["var(--red)","F","Folga"],["#06b6d4","FL","Freela"],["#3b82f6","C","Comp."],["#8b5cf6","Fér","Férias"],["#f59e0b","FJ","Falta Just."],["var(--red)","FI","Falta Injust."]].map(([c,s,l])=>(
-                <div key={s} style={{display:"flex",alignItems:"center",gap:3}}>
-                  <div style={{width:20,height:16,borderRadius:3,background:c+"33",border:`1px solid ${c}`,display:"flex",alignItems:"center",justifyContent:"center"}}>
-                    <span style={{color:c,fontSize:9,fontWeight:700}}>{s}</span>
+            <div style={{display:"flex",gap:mobileOnly?4:8,flexWrap:"wrap",marginBottom:12}}>
+              {[["var(--green)","T","Trabalho"],["var(--red)","F","Folga"],["#06b6d4","FL","Freela"],["#3b82f6","C","Comp."],["#8b5cf6","Fér","Férias"],["#f59e0b","FJ","F.Just."],["var(--red)","FI","F.Inj."]].map(([c,s,l])=>(
+                <div key={s} style={{display:"flex",alignItems:"center",gap:2}}>
+                  <div style={{width:mobileOnly?16:20,height:mobileOnly?14:16,borderRadius:3,background:c+"33",border:`1px solid ${c}`,display:"flex",alignItems:"center",justifyContent:"center"}}>
+                    <span style={{color:c,fontSize:mobileOnly?7:9,fontWeight:700}}>{s}</span>
                   </div>
-                  <span style={{color:"var(--text3)",fontSize:10,fontFamily:"'DM Mono',monospace"}}>{l}</span>
+                  <span style={{color:"var(--text3)",fontSize:mobileOnly?8:10,fontFamily:"'DM Mono',monospace"}}>{l}</span>
                 </div>
               ))}
             </div>
@@ -4828,7 +4829,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
               const daysInMonth = dim;
 
               function cycleStatus(empId, dateStr) {
-                if (restaurant.serviceStartDate && dateStr < restaurant.serviceStartDate) return; // bloqueia antes da vigência
+                if (restaurant.serviceStartDate && dateStr < restaurant.serviceStartDate) return;
                 const empDayMap = schedules?.[rid]?.[mk]?.[empId] ?? {};
                 const cur = empDayMap[dateStr];
                 const idx = DAY_CYCLE.indexOf(cur);
@@ -4841,6 +4842,110 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                 });
               }
 
+              /* ——— MOBILE: Visão Semanal ——— */
+              if (mobileOnly) {
+                // Gera semanas do mês
+                const weeks = [];
+                let d = 1;
+                while (d <= daysInMonth) {
+                  const weekDays = [];
+                  for (let i = 0; i < 7 && d <= daysInMonth; i++) {
+                    const date = `${year}-${String(month+1).padStart(2,"0")}-${String(d).padStart(2,"0")}`;
+                    const wd = new Date(date+"T12:00:00").getDay();
+                    // Primeira semana: preenche dias anteriores com null
+                    if (weeks.length === 0 && weekDays.length === 0 && wd > 0) {
+                      for (let p = 0; p < wd; p++) weekDays.push(null);
+                    }
+                    weekDays.push({ day: d, date, wd });
+                    d++;
+                    // Se caiu no sábado, quebra semana
+                    if (wd === 6) break;
+                  }
+                  // Preenche final da semana com null
+                  while (weekDays.length < 7) weekDays.push(null);
+                  weeks.push(weekDays);
+                }
+                const safeWeek = Math.min(weekIdx, weeks.length - 1);
+                const curWeek = weeks[safeWeek] || [];
+                const validDays = curWeek.filter(Boolean);
+                const rangeLabel = validDays.length ? `${validDays[0].day} — ${validDays[validDays.length-1].day}` : "";
+
+                return (
+                  <div>
+                    {/* Navegação de semana */}
+                    <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:12,padding:"0 4px"}}>
+                      <button onClick={()=>setWeekIdx(Math.max(0, safeWeek-1))} disabled={safeWeek===0}
+                        aria-label="Semana anterior"
+                        style={{background:"none",border:"1px solid var(--border)",borderRadius:8,padding:"6px 12px",color:safeWeek===0?"var(--text3)":"var(--text)",cursor:safeWeek===0?"default":"pointer",fontSize:14}}>
+                        ◀
+                      </button>
+                      <div style={{textAlign:"center"}}>
+                        <div style={{color:"var(--text)",fontWeight:700,fontSize:13,fontFamily:"'DM Sans',sans-serif"}}>Semana {safeWeek+1} de {weeks.length}</div>
+                        <div style={{color:"var(--text3)",fontSize:11}}>Dias {rangeLabel}</div>
+                      </div>
+                      <button onClick={()=>setWeekIdx(Math.min(weeks.length-1, safeWeek+1))} disabled={safeWeek>=weeks.length-1}
+                        aria-label="Próxima semana"
+                        style={{background:"none",border:"1px solid var(--border)",borderRadius:8,padding:"6px 12px",color:safeWeek>=weeks.length-1?"var(--text3)":"var(--text)",cursor:safeWeek>=weeks.length-1?"default":"pointer",fontSize:14}}>
+                        ▶
+                      </button>
+                    </div>
+
+                    {/* Header dos dias da semana */}
+                    <div style={{display:"grid",gridTemplateColumns:"80px repeat(7,1fr)",gap:2,marginBottom:4,padding:"0 2px"}}>
+                      <div></div>
+                      {["Dom","Seg","Ter","Qua","Qui","Sex","Sáb"].map((dl,i)=>(
+                        <div key={dl} style={{textAlign:"center",color:i===0||i===6?"#f59e0b":"var(--text3)",fontSize:9,fontWeight:700,fontFamily:"'DM Mono',monospace",padding:"2px 0"}}>
+                          <div>{dl}</div>
+                          <div style={{fontSize:10,color:"var(--text2)"}}>{curWeek[i]?.day ?? ""}</div>
+                        </div>
+                      ))}
+                    </div>
+
+                    {/* Grid de empregados */}
+                    {areaEmps.map((emp, ei) => {
+                      const role = restRoles.find(r=>r.id===emp.roleId);
+                      const dayMap = schedules?.[rid]?.[mk]?.[emp.id] ?? {};
+                      const curArea = role?.area;
+                      const prevEmp = areaEmps[ei-1];
+                      const prevArea = prevEmp ? restRoles.find(r=>r.id===prevEmp.roleId)?.area : null;
+                      const showAreaHeader = schedArea === "Todos" && curArea !== prevArea;
+
+                      return (
+                        <div key={emp.id}>
+                          {showAreaHeader && (
+                            <div style={{padding:"8px 4px 4px",marginTop:ei>0?8:0}}>
+                              <span style={{color:AREA_COLORS[curArea]??"#888",fontSize:10,fontWeight:700,letterSpacing:1}}>{(curArea??"").toUpperCase()}</span>
+                            </div>
+                          )}
+                          <div style={{display:"grid",gridTemplateColumns:"80px repeat(7,1fr)",gap:2,padding:"4px 2px",background:ei%2===0?"var(--bg1)":"var(--bg2)",borderRadius:6,marginBottom:2}}>
+                            {/* Nome do empregado */}
+                            <div style={{display:"flex",flexDirection:"column",justifyContent:"center",padding:"2px 4px",minWidth:0}}>
+                              <div style={{color:"var(--text)",fontSize:10,fontWeight:600,lineHeight:1.2,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{emp.name.split(" ")[0]}</div>
+                              <div style={{color:"var(--text3)",fontSize:8,lineHeight:1.1}}>{role?.name}</div>
+                            </div>
+                            {/* 7 dias da semana */}
+                            {curWeek.map((slot, di) => {
+                              if (!slot) return <div key={di} style={{minHeight:36}}></div>;
+                              const status = dayMap[slot.date];
+                              const color = STATUS_COLORS[status] ?? "var(--green)";
+                              const label = STATUS_SHORT[status] ?? "T";
+                              const locked = restaurant.serviceStartDate && slot.date < restaurant.serviceStartDate;
+                              return (
+                                <div key={di} onClick={()=>!locked && cycleStatus(emp.id, slot.date)}
+                                  style={{display:"flex",alignItems:"center",justifyContent:"center",minHeight:36,borderRadius:6,cursor:locked?"not-allowed":"pointer",background:status?color+"22":"transparent",border:`1px solid ${status?color+"44":"var(--border)"}`,opacity:locked?0.35:1}}>
+                                  <span style={{color:locked?"var(--text3)":color,fontSize:11,fontWeight:700}}>{locked?"🔒":label}</span>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                );
+              }
+
+              /* ——— DESKTOP: Tabela completa ——— */
               return (
                 <div style={{overflowX:"auto",WebkitOverflowScrolling:"touch"}}>
                   <table style={{borderCollapse:"collapse",fontFamily:"'DM Mono',monospace",fontSize:11,minWidth:"100%"}}>
@@ -7119,6 +7224,12 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }
 
         {tab === "changelog" && (() => {
           const CHANGELOG = [
+            { version:"5.8.0", date:"2026-04-12", items:[
+              "Novo: Escala mobile — visão semanal com navegação ◀/▶, grid 7 colunas, toque para alterar status",
+              "Melhoria: botões de ação da escala compactos no mobile (Folgas, Reiniciar, Férias)",
+              "Melhoria: legenda da escala ajustada para telas menores",
+              "Removido: botão PDF export e Reset ocultos no mobile",
+            ]},
             { version:"5.7.0", date:"2026-04-12", items:[
               "Melhoria: dashboard gorjetas — label 'Dias preenchidos' + valores zerados exibem R$ 0,00",
               "Melhoria: aba Escala agora disponível no mobile do gestor (Dashboard + Gorjetas + Escala)",
