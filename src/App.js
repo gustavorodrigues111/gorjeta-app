@@ -8200,7 +8200,7 @@ function Home({ onLogin }) {
     { icon:"💸", title:"Gorjetas transparentes", desc:"Cálculo e distribuição automática por área e cargo. Cada empregado vê exatamente o que recebeu, bruto e líquido, sem dúvidas." },
     { icon:"📅", title:"Escala inteligente", desc:"Controle de folgas, faltas, férias e compensações integrado ao cálculo de gorjetas. Escala base gerada automaticamente pelo horário contratual." },
     { icon:"👥", title:"Gestão de equipe", desc:"Cadastro completo, cargos, pontos e acesso individual para cada empregado. Histórico preservado mesmo após inativação." },
-    { icon:"🕐", title:"Horários contratuais", desc:"Cadastre dias de trabalho e folga primeiro, preencha horários quando tiver. Validação automática de carga semanal, interjornada e hora noturna." },
+    { icon:"🕐", title:"Horários com IA", desc:"Cadastre dias de trabalho e folga, preencha horários ou use o assistente de IA — descreva em linguagem natural e o sistema gera os horários automaticamente. Validação de carga semanal, interjornada e hora noturna." },
     { icon:"❓", title:"FAQ com assistente de IA", desc:"Base de perguntas e respostas para sua equipe. Perguntas automáticas sobre gorjetas e regras, mais IA para ajudar o gestor a redigir." },
     { icon:"📢", title:"Comunicados com IA", desc:"Envie avisos para toda a equipe ou áreas específicas. Assistente de IA ajuda a redigir. Acompanhe quem leu e confirmou." },
     { icon:"💬", title:"Canal com o DP", desc:"Canal direto, inclusive anônimo, para comunicação entre equipe e departamento pessoal. Sugestões, denúncias, atestados e dúvidas trabalhistas." },
@@ -8208,7 +8208,7 @@ function Home({ onLogin }) {
     { icon:"👔", title:"Perfis de gestor", desc:"DP com acesso completo ou Líder de Área com visão restrita. Permissões granulares, criação de gestores por DP e CPF obrigatório para segurança." },
     { icon:"🛡️", title:"Privacidade de dados", desc:"Gestores controlam a visibilidade dos dados. Com o modo privacidade, a equipe de administradores não acessa valores de gorjetas, CPFs, mensagens do DP ou comunicados — garantindo sigilo total da operação." },
     { icon:"🔒", title:"Segurança e controle", desc:"Acesso por PIN e CPF, permissões por perfil, modo somente leitura, lixeira com restauração e auditoria completa. Cada pessoa vê apenas o que deve." },
-    { icon:"📱", title:"100% no celular", desc:"Sem app para instalar. Acessa pelo navegador em qualquer smartphone. Gestor e empregado com portais distintos e seguros." },
+    { icon:"📱", title:"100% no celular", desc:"Sem app para instalar. Acessa pelo navegador em qualquer smartphone. Gestor gerencia escala, horários e caixa de entrada direto pelo celular. Empregado com portal próprio e seguro." },
   ];
 
   const PLANOS = [
@@ -8248,7 +8248,7 @@ function Home({ onLogin }) {
             Gorjetas distribuídas<br/><span style={{color:ac}}>com transparência total</span>
           </h1>
           <p style={{color:"#8c7a5e",fontSize:"clamp(15px,2vw,18px)",lineHeight:1.7,marginBottom:40,maxWidth:520,margin:"0 auto 40px"}}>
-            O AppTip automatiza o cálculo e distribuição de gorjetas, controla escala, comunicados e FAQ com IA — tudo pelo celular, sem app para instalar.
+            O AppTip automatiza o cálculo e distribuição de gorjetas, controla escala, horários e comunicados com IA — tudo pelo celular, sem app para instalar.
           </p>
           <div style={{display:"flex",gap:12,justifyContent:"center",flexWrap:"wrap"}}>
             <a href="#contato" style={{padding:"15px 32px",borderRadius:12,background:ac,color:"#fff",fontWeight:700,fontSize:16,textDecoration:"none",display:"inline-block",boxShadow:"0 4px 20px #d4a01744"}}>
@@ -8265,7 +8265,7 @@ function Home({ onLogin }) {
       {/* STATS */}
       <section style={{background:"#fff",padding:"48px 24px",borderTop:"1px solid #ede8df",borderBottom:"1px solid #ede8df"}}>
         <div style={{maxWidth:700,margin:"0 auto",display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:24,textAlign:"center"}}>
-          {[["100%","Mobile first — sem app instalar"],["IA","FAQ e comunicados assistidos"],["LGPD","Conformidade e dados protegidos"]].map(([n,l])=>(
+          {[["100%","Mobile first — sem app instalar"],["IA","Horários, FAQ e comunicados assistidos"],["LGPD","Conformidade e dados protegidos"]].map(([n,l])=>(
             <div key={l}>
               <div style={{fontSize:32,fontWeight:800,color:ac,marginBottom:6,letterSpacing:-1,fontFamily:"'DM Mono',monospace"}}>{n}</div>
               <div style={{color:"#8c7a5e",fontSize:13,fontWeight:500}}>{l}</div>
@@ -8279,7 +8279,7 @@ function Home({ onLogin }) {
         <div style={{maxWidth:960,margin:"0 auto"}}>
           <div style={{textAlign:"center",marginBottom:56}}>
             <h2 style={{fontSize:"clamp(24px,4vw,38px)",fontWeight:800,margin:"0 0 12px",letterSpacing:-0.8,color:"#1c1208"}}>Tudo que sua equipe precisa</h2>
-            <p style={{color:"#8c7a5e",fontSize:16}}>Gorjetas, escala, horários, comunicados com IA e muito mais</p>
+            <p style={{color:"#8c7a5e",fontSize:16}}>Gorjetas, escala, horários com IA, comunicados com IA e muito mais</p>
           </div>
           <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(280px,1fr))",gap:20}}>
             {FEATURES.map(f=>(
@@ -8753,6 +8753,7 @@ hr{border:none;border-top:1px solid var(--border);margin:24px 0}
   <div class="sg">Referência</div>
   <a href="#permissoes"><span class="ic">🔑</span> Permissões</a>
   <a href="#privacidade-admin"><span class="ic">🛡️</span> Privacidade</a>
+  <a href="#mobile-gestor"><span class="ic">📱</span> Acesso Mobile</a>
   <a href="#bloqueio"><span class="ic">🔒</span> Acesso Suspenso</a>
 </nav>
 <div class="main">
@@ -8764,9 +8765,9 @@ hr{border:none;border-top:1px solid var(--border);margin:24px 0}
 
     <div class="hero">
       <h2>Bem-vindo ao AppTip 🍽️</h2>
-      <p>O AppTip centraliza a gestão de gorjetas. Como gestor, você lança gorjetas, gerencia equipe, escala, horários, comunicados, FAQ com IA e configura as regras do restaurante.</p>
+      <p>O AppTip centraliza a gestão de gorjetas. Como gestor, você lança gorjetas, gerencia equipe, escala, horários com IA, comunicados, FAQ com IA e configura as regras do restaurante — inclusive pelo celular.</p>
       <div class="chips">
-        <span class="chip">💸 Gorjetas automáticas</span><span class="chip">📅 Escala</span><span class="chip">👥 Equipe</span><span class="chip">🕐 Horários</span><span class="chip">❓ FAQ com IA</span><span class="chip">📢 Comunicados com IA</span><span class="chip">⚙️ Configurações</span>
+        <span class="chip">💸 Gorjetas automáticas</span><span class="chip">📅 Escala</span><span class="chip">👥 Equipe</span><span class="chip">🕐 Horários com IA</span><span class="chip">❓ FAQ com IA</span><span class="chip">📢 Comunicados com IA</span><span class="chip">📱 Mobile gestor</span><span class="chip">⚙️ Configurações</span>
       </div>
     </div>
 
@@ -8803,7 +8804,7 @@ hr{border:none;border-top:1px solid var(--border);margin:24px 0}
       <div class="card"><h3>📅 Resumo do dia <span class="new">NOVO</span></h3>
         <p>No topo do Dashboard (apenas no mês corrente), um card âmbar mostra o estado atual:</p>
         <ul><li><strong>👥 Trabalhando hoje</strong> — empregados sem marcação de folga ou falta</li><li><strong>💸 Gorjeta lançada</strong> — valor do pool de hoje, ou "—" se ainda não lançado</li><li><strong>Pendência gorjeta</strong> — dias úteis passados sem lançamento</li></ul>
-        <p style="margin-top:10px">Se a gorjeta de hoje ainda não foi lançada, aparece um botão direto <strong>"💸 Lançar gorjeta de hoje"</strong> que leva direto à aba Gorjetas.</p>
+        <p style="margin-top:10px">Se a gorjeta de hoje ainda não foi lançada, aparece um botão direto <strong>"💸 Lançar gorjeta de hoje"</strong> que leva à aba Gorjetas (visível apenas no computador).</p>
       </div>
       <div class="card"><h3>🔔 Alertas automáticos</h3>
         <table>
@@ -8920,15 +8921,26 @@ hr{border:none;border-top:1px solid var(--border);margin:24px 0}
     </div>
 
     <div class="sec" id="horarios">
-      <div class="sh"><div class="iw">🕐</div><div><h2>Horários <span class="new">ATUALIZADO</span></h2><p>Horários contratuais dos empregados</p></div></div>
-      <div class="card"><h3>Para que serve?</h3><p>Registra os dias de trabalho/folga e horários contratuais (entrada, saída, intervalo) de cada empregado. Usado para controle interno e geração automática da escala base.</p></div>
+      <div class="sh"><div class="iw">🕐</div><div><h2>Horários <span class="new">COM IA</span></h2><p>Horários contratuais dos empregados — com assistente de IA</p></div></div>
+      <div class="card"><h3>Para que serve?</h3><p>Registra os dias de trabalho/folga e horários contratuais (entrada, saída, intervalo) de cada empregado. Usado para controle interno e geração automática da escala base. Disponível também no celular do gestor.</p></div>
       <div class="card"><h3>Fluxo simplificado</h3>
-        <p>Você pode cadastrar em duas etapas:</p>
+        <p>Você pode cadastrar de três formas:</p>
         <div class="steps">
-          <div class="step"><div class="sn">1</div><div class="sc"><strong>Defina dias de trabalho e folga</strong><p>Use o toggle de cada dia: ON = trabalha, OFF = folga. Clique em <strong>"Salvar Dias"</strong> para registrar sem precisar preencher horários.</p></div></div>
-          <div class="step"><div class="sn">2</div><div class="sc"><strong>Preencha os horários quando tiver</strong><p>Volte ao empregado, preencha entrada/saída/intervalo e clique em <strong>"Validar e Salvar Horário"</strong>. O sistema valida carga semanal (43:55–44:00), interjornada (11h), máximo 10h/dia e intervalo mínimo.</p></div></div>
+          <div class="step"><div class="sn">1</div><div class="sc"><strong>Manual: dias de trabalho e folga</strong><p>Use o toggle de cada dia: ON = trabalha, OFF = folga. Clique em <strong>"Salvar Dias"</strong> para registrar sem precisar preencher horários.</p></div></div>
+          <div class="step"><div class="sn">2</div><div class="sc"><strong>Manual: horários completos</strong><p>Preencha entrada/saída/intervalo e clique em <strong>"Validar e Salvar Horário"</strong>. O sistema valida carga semanal (43:55–44:00), interjornada (11h), máximo 10h/dia e intervalo mínimo.</p></div></div>
+          <div class="step"><div class="sn">3</div><div class="sc"><strong>Com IA: descreva em linguagem natural</strong><p>Abra o <strong>Assistente de Horários</strong> e descreva o que deseja. Ex: <em>"folgue segunda e terça, trabalhe nos outros dias dividindo 44h semanais entrando às 10"</em>. A IA preenche tudo automaticamente — revise e salve.</p></div></div>
         </div>
         <div class="ib tip"><span class="ico">💡</span><span>A escala usa os dias de trabalho/folga mesmo sem horários preenchidos. Cadastre os dias primeiro para já gerar a escala base.</span></div>
+      </div>
+      <div class="card"><h3>🤖 Assistente de IA <span class="new">NOVO</span></h3>
+        <p>Descreva os horários em linguagem natural — com typos, conjugações verbais ou abreviações. O assistente entende e preenche os campos automaticamente.</p>
+        <ul>
+          <li><strong>Folgas:</strong> "folgue segunda e terça", "folga dom e seg"</li>
+          <li><strong>Carga horária:</strong> "divida 44 horas semanais", "44h em 5 dias"</li>
+          <li><strong>Entrada fixa:</strong> "entrando às 10 todo dia", "entrada 09:00"</li>
+          <li><strong>Frases compostas:</strong> "folgue seg e ter, trabalhe nos outros dias dividindo 44h entrando às 10"</li>
+        </ul>
+        <div class="ib warn"><span class="ico">⚠️</span><span>A IA aplica as mesmas regras de validação CLT (carga semanal, interjornada, intervalo mínimo). Se a sugestão violar alguma regra, os erros são mostrados antes de salvar.</span></div>
       </div>
       <div class="card"><h3>Status na lista de empregados</h3>
         <table>
@@ -9077,6 +9089,7 @@ hr{border:none;border-top:1px solid var(--border);margin:24px 0}
           <tr><th>Permissão</th><th>Dá acesso a</th></tr>
           <tr><td>💸 Gorjetas</td><td>Dashboard, aba Gorjetas, exportação</td></tr>
           <tr><td>📅 Escala</td><td>Aba Escala</td></tr>
+          <tr><td>🕐 Horários</td><td>Aba Horários (se admin autorizou)</td></tr>
           <tr><td>🏷️ Cargos</td><td>Aba Cargos (se admin autorizou)</td></tr>
           <tr><td>👥 Equipe</td><td>Aba Equipe (se admin autorizou)</td></tr>
           <tr><td>📬 Gestor do DP</td><td>Aba Caixa, recebe mensagens do Fale com DP</td></tr>
@@ -9107,6 +9120,21 @@ hr{border:none;border-top:1px solid var(--border);margin:24px 0}
           <div class="st"><span class="sn">4</span><span>Clique em <strong>Salvar Configurações</strong></span></div>
         </div>
         <div class="ib blue"><span class="ico">ℹ️</span><span>O modo privacidade afeta apenas a visão do admin. Gestores e empregados continuam vendo todos os dados normalmente em seus respectivos portais.</span></div>
+      </div>
+    </div>
+
+    <div class="sec" id="mobile-gestor">
+      <div class="sh"><div class="iw">📱</div><div><h2>Acesso Mobile <span class="new">NOVO</span></h2><p>O que o gestor consegue fazer pelo celular</p></div></div>
+      <div class="card"><h3>Abas no celular</h3>
+        <p>No celular, o gestor tem acesso a um conjunto otimizado de abas:</p>
+        <table>
+          <tr><th>Aba</th><th>Funcionalidade</th></tr>
+          <tr><td>📊 Dashboard</td><td>Resumo do dia, alertas, widget de gorjetas (somente leitura)</td></tr>
+          <tr><td>📅 Escala</td><td>Visão semanal com navegação ◀/▶, toque para alterar status</td></tr>
+          <tr><td>🕐 Horários</td><td>Edição completa + assistente de IA para gerar horários</td></tr>
+          <tr><td>📬 Caixa</td><td>Notificações e mensagens do Fale com DP</td></tr>
+        </table>
+        <div class="ib tip"><span class="ico">💡</span><span>As demais funcionalidades (Gorjetas, Equipe, Cargos, Comunicados, FAQ, DP e Configurações) estão disponíveis apenas pelo computador.</span></div>
       </div>
     </div>
 
