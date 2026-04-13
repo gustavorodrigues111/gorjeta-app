@@ -2036,72 +2036,115 @@ function WorkScheduleManagerTab({ restaurantId, employees, roles, workSchedules,
         </div>
         {!mobileOnly && <p style={{color:"var(--text3)",fontSize:11,margin:"6px 0 0"}}>Defina os dias de trabalho e folga. Horarios podem ser preenchidos agora ou depois.</p>}
       </div>
-      <div style={{marginBottom:16}}>
-        {[0,1,2,3,4,5,6].map(dayIdx => {
-          const d = editDays[dayIdx] ?? { active: true };
-          const isActive = d.active;
-          const hasHours = isActive && d.in && d.out;
-          const calc = hasHours ? calcDayHours(d.in, d.out, parseInt(d.break)||0) : null;
-          const isWeekend = dayIdx === 0 || dayIdx === 6;
-          const contractOver = calc && calc.totalContract > 10*60;
-
-          return (
-            <div key={dayIdx} style={{
-              ...cardS,
-              borderColor: isActive ? (hasHours ? (contractOver ? "var(--red)" : "var(--ac)33") : "var(--border)") : "var(--border)",
-              opacity: isActive ? 1 : 0.6,
-              background: isActive ? "var(--card-bg)" : "var(--bg1)",
-            }}>
-              {/* Day header with toggle */}
-              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom: isActive ? (mobileOnly ? 8 : 12) : 0}}>
-                <div style={{display:"flex",alignItems:"center",gap:mobileOnly?6:10}}>
-                  <span style={{color:isWeekend?"#f59e0b":"var(--text)",fontWeight:700,fontSize:mobileOnly?14:15,minWidth:mobileOnly?30:36}}>{WEEK_DAYS_LABEL[dayIdx]}</span>
-                  <span style={{color: isActive ? (hasHours ? "var(--green)" : "var(--text3)") : "var(--text3)", fontSize:mobileOnly?11:12, fontWeight: isActive ? 600 : 400}}>
-                    {isActive ? (hasHours ? "Trabalha" : mobileOnly ? "Sem horário" : "Trabalha (sem horario)") : "FOLGA"}
-                  </span>
-                </div>
-                <button onClick={()=>toggleDay(dayIdx)} style={isActive ? toggleOn : toggleOff}>
-                  <div style={toggleDot(isActive)} />
-                </button>
-              </div>
-
-              {/* Time inputs (only if active) */}
-              {isActive && (
-                <div>
-                  <div style={{display:"grid",gridTemplateColumns:"1fr 1fr auto",gap:mobileOnly?6:8,alignItems:"end",marginBottom:mobileOnly?6:8}}>
-                    <div>
-                      <label style={{color:"var(--text3)",fontSize:mobileOnly?9:10,display:"block",marginBottom:2}}>Entrada</label>
-                      <input type="time" value={d.in||""} onChange={e=>handleDayChange(dayIdx,"in",e.target.value)}
-                        style={{...S.input,fontSize:mobileOnly?13:14,padding:mobileOnly?"8px 4px":"10px 8px",textAlign:"center",width:"100%",boxSizing:"border-box"}}/>
-                    </div>
-                    <div>
-                      <label style={{color:"var(--text3)",fontSize:mobileOnly?9:10,display:"block",marginBottom:2}}>Saída</label>
-                      <input type="time" value={d.out||""} onChange={e=>handleDayChange(dayIdx,"out",e.target.value)}
-                        style={{...S.input,fontSize:mobileOnly?13:14,padding:mobileOnly?"8px 4px":"10px 8px",textAlign:"center",width:"100%",boxSizing:"border-box"}}/>
-                    </div>
-                    <div style={{width:mobileOnly?56:64}}>
-                      <label style={{color:"var(--text3)",fontSize:mobileOnly?9:10,display:"block",marginBottom:2,textAlign:"center"}}>Int.</label>
-                      <input type="number" min="0" max="120" value={d.break||""} onChange={e=>handleDayChange(dayIdx,"break",parseInt(e.target.value)||0)}
-                        placeholder="30" style={{...S.input,fontSize:mobileOnly?13:14,padding:mobileOnly?"8px 2px":"10px 4px",textAlign:"center",width:"100%",boxSizing:"border-box"}}/>
-                    </div>
+      {/* ═══ DAY ROWS ═══ */}
+      {mobileOnly ? (
+        /* ── MOBILE: single card with all days as compact rows ── */
+        <div style={{...S.card,padding:0,marginBottom:8,overflow:"hidden"}}>
+          {[0,1,2,3,4,5,6].map(dayIdx => {
+            const d = editDays[dayIdx] ?? { active: true };
+            const isActive = d.active;
+            const hasHours = isActive && d.in && d.out;
+            const calc = hasHours ? calcDayHours(d.in, d.out, parseInt(d.break)||0) : null;
+            const isWeekend = dayIdx === 0 || dayIdx === 6;
+            const contractOver = calc && calc.totalContract > 10*60;
+            return (
+              <div key={dayIdx} style={{
+                padding:"10px 12px",
+                borderBottom: dayIdx < 6 ? "1px solid var(--border)" : "none",
+                opacity: isActive ? 1 : 0.5,
+                background: isActive ? "var(--card-bg)" : "var(--bg1)",
+              }}>
+                {/* Row: day + toggle */}
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:isActive?8:0}}>
+                  <div style={{display:"flex",alignItems:"center",gap:8}}>
+                    <span style={{color:isWeekend?"#f59e0b":"var(--text)",fontWeight:700,fontSize:14,minWidth:30}}>{WEEK_DAYS_LABEL[dayIdx]}</span>
+                    {!isActive && <span style={{color:"var(--text3)",fontSize:11}}>Folga</span>}
+                    {isActive && hasHours && calc && (
+                      <span style={{color:contractOver?"var(--red)":ac,fontSize:10,fontWeight:700,fontFamily:"'DM Mono',monospace"}}>{fmtHHMM(calc.totalContract)}</span>
+                    )}
                   </div>
-
-                  {/* Calculated hours (compact row) */}
-                  {calc && (
-                    <div style={{display:"flex",gap:mobileOnly?4:6,flexWrap:"wrap",fontSize:mobileOnly?10:11,fontFamily:"'DM Mono',monospace"}}>
-                      {!mobileOnly && <span style={{color:"var(--text3)"}}>Real: <strong style={{color:"var(--text2)"}}>{fmtHHMM(calc.worked)}</strong></span>}
-                      {!mobileOnly && <span style={{color:"var(--text3)"}}>Diurna: <strong style={{color:"var(--text2)"}}>{fmtHHMM(calc.diurnal)}</strong></span>}
-                      {mobileOnly && <span style={{color:"var(--text3)"}}>Trab: <strong style={{color:"var(--text2)"}}>{fmtHHMM(calc.worked)}</strong></span>}
-                      {calc.nocturnal > 0 && <span style={{color:"#8b5cf6"}}>Not: <strong>{fmtHHMM(calc.nocturnalFicta)}</strong></span>}
-                      <span style={{color:contractOver?"var(--red)":ac,fontWeight:700}}>{mobileOnly?"Contr:":"Contratual:"} {fmtHHMM(calc.totalContract)}</span>
-                    </div>
-                  )}
+                  <button onClick={()=>toggleDay(dayIdx)} style={isActive ? toggleOn : toggleOff}>
+                    <div style={toggleDot(isActive)} />
+                  </button>
                 </div>
-              )}
-            </div>
-          );
-        })}
-      </div>
+                {/* Inputs inline */}
+                {isActive && (
+                  <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 52px",gap:6,alignItems:"center"}}>
+                    <input type="time" value={d.in||""} onChange={e=>handleDayChange(dayIdx,"in",e.target.value)}
+                      placeholder="Entrada" style={{...S.input,fontSize:13,padding:"7px 4px",textAlign:"center",width:"100%",boxSizing:"border-box"}}/>
+                    <input type="time" value={d.out||""} onChange={e=>handleDayChange(dayIdx,"out",e.target.value)}
+                      placeholder="Saída" style={{...S.input,fontSize:13,padding:"7px 4px",textAlign:"center",width:"100%",boxSizing:"border-box"}}/>
+                    <input type="number" min="0" max="120" value={d.break||""} onChange={e=>handleDayChange(dayIdx,"break",parseInt(e.target.value)||0)}
+                      placeholder="Int" style={{...S.input,fontSize:13,padding:"7px 2px",textAlign:"center",width:"100%",boxSizing:"border-box"}}/>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      ) : (
+        /* ── DESKTOP: individual cards per day ── */
+        <div style={{marginBottom:16}}>
+          {[0,1,2,3,4,5,6].map(dayIdx => {
+            const d = editDays[dayIdx] ?? { active: true };
+            const isActive = d.active;
+            const hasHours = isActive && d.in && d.out;
+            const calc = hasHours ? calcDayHours(d.in, d.out, parseInt(d.break)||0) : null;
+            const isWeekend = dayIdx === 0 || dayIdx === 6;
+            const contractOver = calc && calc.totalContract > 10*60;
+            return (
+              <div key={dayIdx} style={{
+                ...cardS,
+                borderColor: isActive ? (hasHours ? (contractOver ? "var(--red)" : "var(--ac)33") : "var(--border)") : "var(--border)",
+                opacity: isActive ? 1 : 0.6,
+                background: isActive ? "var(--card-bg)" : "var(--bg1)",
+              }}>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom: isActive ? 12 : 0}}>
+                  <div style={{display:"flex",alignItems:"center",gap:10}}>
+                    <span style={{color:isWeekend?"#f59e0b":"var(--text)",fontWeight:700,fontSize:15,minWidth:36}}>{WEEK_DAYS_LABEL[dayIdx]}</span>
+                    <span style={{color: isActive ? (hasHours ? "var(--green)" : "var(--text3)") : "var(--text3)", fontSize:12, fontWeight: isActive ? 600 : 400}}>
+                      {isActive ? (hasHours ? "Trabalha" : "Trabalha (sem horario)") : "FOLGA"}
+                    </span>
+                  </div>
+                  <button onClick={()=>toggleDay(dayIdx)} style={isActive ? toggleOn : toggleOff}>
+                    <div style={toggleDot(isActive)} />
+                  </button>
+                </div>
+                {isActive && (
+                  <div>
+                    <div style={{display:"grid",gridTemplateColumns:"1fr 1fr auto",gap:8,alignItems:"end",marginBottom:8}}>
+                      <div>
+                        <label style={{color:"var(--text3)",fontSize:10,display:"block",marginBottom:2}}>Entrada</label>
+                        <input type="time" value={d.in||""} onChange={e=>handleDayChange(dayIdx,"in",e.target.value)}
+                          style={{...S.input,fontSize:14,padding:"10px 8px",textAlign:"center",width:"100%",boxSizing:"border-box"}}/>
+                      </div>
+                      <div>
+                        <label style={{color:"var(--text3)",fontSize:10,display:"block",marginBottom:2}}>Saída</label>
+                        <input type="time" value={d.out||""} onChange={e=>handleDayChange(dayIdx,"out",e.target.value)}
+                          style={{...S.input,fontSize:14,padding:"10px 8px",textAlign:"center",width:"100%",boxSizing:"border-box"}}/>
+                      </div>
+                      <div style={{width:64}}>
+                        <label style={{color:"var(--text3)",fontSize:10,display:"block",marginBottom:2,textAlign:"center"}}>Int.(min)</label>
+                        <input type="number" min="0" max="120" value={d.break||""} onChange={e=>handleDayChange(dayIdx,"break",parseInt(e.target.value)||0)}
+                          placeholder="30" style={{...S.input,fontSize:14,padding:"10px 4px",textAlign:"center",width:"100%",boxSizing:"border-box"}}/>
+                      </div>
+                    </div>
+                    {calc && (
+                      <div style={{display:"flex",gap:6,flexWrap:"wrap",fontSize:11,fontFamily:"'DM Mono',monospace"}}>
+                        <span style={{color:"var(--text3)"}}>Real: <strong style={{color:"var(--text2)"}}>{fmtHHMM(calc.worked)}</strong></span>
+                        <span style={{color:"var(--text3)"}}>Diurna: <strong style={{color:"var(--text2)"}}>{fmtHHMM(calc.diurnal)}</strong></span>
+                        {calc.nocturnal > 0 && <span style={{color:"#8b5cf6"}}>Not.real: <strong>{fmtHHMM(calc.nocturnal)}</strong></span>}
+                        {calc.nocturnalFicta > 0 && <span style={{color:"#ec4899"}}>Not.ficta: <strong>{fmtHHMM(calc.nocturnalFicta)}</strong></span>}
+                        <span style={{color:contractOver?"var(--red)":ac,fontWeight:700}}>Contratual: {fmtHHMM(calc.totalContract)}</span>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
 
       {/* Weekly total (only if all hours filled) */}
       {allHoursFilled && activeDayCount > 0 && (
