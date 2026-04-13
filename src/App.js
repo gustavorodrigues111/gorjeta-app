@@ -1847,7 +1847,7 @@ function WorkScheduleManagerTab({ restaurantId, employees, roles, workSchedules,
   }
 
   // ── Styles ──
-  const cardS = { ...S.card, marginBottom: 12 };
+  const cardS = { ...S.card, marginBottom: mobileOnly ? 8 : 12, padding: mobileOnly ? "10px 12px" : undefined };
   const toggleOn = { width: 44, height: 24, borderRadius: 12, border: "none", cursor: "pointer", position: "relative", background: "var(--ac)", transition: "background .2s" };
   const toggleOff = { ...toggleOn, background: "var(--border)" };
   const toggleDot = (on) => ({ position: "absolute", top: 2, left: on ? 22 : 2, width: 20, height: 20, borderRadius: 10, background: "#fff", transition: "left .2s", boxShadow: "0 1px 3px rgba(0,0,0,.2)" });
@@ -4052,7 +4052,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
         ))}
       </div>
 
-      <div style={{ padding:"20px 24px", maxWidth:1100, margin:"0 auto" }}>
+      <div style={{ padding:mobileOnly?"12px 10px":"20px 24px", maxWidth:1100, margin:"0 auto" }}>
         {["dashboard","tips","schedule"].includes(tab) && (
           <div style={{ marginBottom: 20 }}><MonthNav year={year} month={month} onChange={(y,m)=>{setYear(y);setMonth(m);setWeekIdx(calcWeekForToday(y,m));}} /></div>
         )}
