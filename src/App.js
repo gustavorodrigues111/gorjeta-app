@@ -3,7 +3,7 @@ import { useState, useEffect, Component } from "react";
 import { db } from "./firebase";
 import { doc, getDoc, setDoc } from "firebase/firestore";
 
-const APP_VERSION = "5.10.0";
+const APP_VERSION = "5.10.1";
 
 const DEFAULT_ADMISSION = () => `${new Date().getFullYear()}-01-01`;
 const round2 = (v) => Math.round(v * 100) / 100;
@@ -1871,28 +1871,28 @@ function WorkScheduleManagerTab({ restaurantId, employees, roles, workSchedules,
       const workDays = cur ? Object.keys(cur.days).length : 0;
       const folgaDays = cur ? 7 - workDays : 0;
       return (
-        <div key={emp.id} onClick={()=>loadEmp(emp.id)} style={{...S.card,marginBottom:8,cursor:"pointer",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+        <div key={emp.id} onClick={()=>loadEmp(emp.id)} style={{...S.card,marginBottom:mobileOnly?6:8,padding:mobileOnly?"8px 10px":undefined,cursor:"pointer",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
           <div style={{flex:1,minWidth:0}}>
-            <div style={{color:"var(--text)",fontWeight:600,fontSize:14,display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
+            <div style={{color:"var(--text)",fontWeight:600,fontSize:mobileOnly?13:14,display:"flex",alignItems:"center",gap:6,flexWrap:"wrap"}}>
               {emp.name}
-              {cur && !hasHoursComplete && <span style={{background:"#f59e0b22",color:"#f59e0b",fontSize:10,padding:"2px 8px",borderRadius:6,fontWeight:700}}>HORARIOS PENDENTES</span>}
+              {cur && !hasHoursComplete && <span style={{background:"#f59e0b22",color:"#f59e0b",fontSize:mobileOnly?9:10,padding:"2px 6px",borderRadius:6,fontWeight:700}}>{mobileOnly?"PENDENTE":"HORARIOS PENDENTES"}</span>}
             </div>
-            <div style={{color:"var(--text3)",fontSize:12}}>
+            <div style={{color:"var(--text3)",fontSize:mobileOnly?10:12}}>
               {cur
                 ? (hasHoursComplete
-                  ? `Vigente desde ${fmtDate(cur.validFrom)} · ${fmtHHMM(cur.totalContract)}/sem`
-                  : `${workDays} dias trabalho, ${folgaDays} folga(s) · horarios pendentes`)
-                : "Sem horario cadastrado"}
+                  ? (mobileOnly ? `${fmtHHMM(cur.totalContract)}/sem` : `Vigente desde ${fmtDate(cur.validFrom)} · ${fmtHHMM(cur.totalContract)}/sem`)
+                  : `${workDays} dias, ${folgaDays} folga(s)${mobileOnly?"":" · horarios pendentes"}`)
+                : "Sem horario"}
             </div>
           </div>
-          <span style={{color:ac,fontSize:16,fontWeight:700,flexShrink:0,paddingLeft:8}}>&rsaquo;</span>
+          <span style={{color:ac,fontSize:16,fontWeight:700,flexShrink:0,paddingLeft:6}}>&rsaquo;</span>
         </div>
       );
     };
 
     return (
       <div>
-        <p style={{color:"var(--text3)",fontSize:13,marginBottom:16}}>Selecione um empregado para cadastrar ou editar o horario:</p>
+        <p style={{color:"var(--text3)",fontSize:mobileOnly?11:13,marginBottom:mobileOnly?10:16}}>Selecione um empregado para cadastrar ou editar o horario:</p>
         {AREAS.map(area => {
           const emps = byArea[area];
           if (emps.length === 0) return null;
@@ -1924,11 +1924,11 @@ function WorkScheduleManagerTab({ restaurantId, employees, roles, workSchedules,
   return (
     <div>
       {/* Header */}
-      <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:16,flexWrap:"wrap"}}>
-        <button onClick={()=>{setSelEmpId(null);setErrors([]);setShowValidFrom(false);setSaveMode(null);}} style={{...S.btnSecondary,fontSize:12,padding:"6px 14px"}}>← Voltar</button>
+      <div style={{display:"flex",alignItems:"center",gap:mobileOnly?6:10,marginBottom:mobileOnly?10:16,flexWrap:"wrap"}}>
+        <button onClick={()=>{setSelEmpId(null);setErrors([]);setShowValidFrom(false);setSaveMode(null);}} style={{...S.btnSecondary,fontSize:mobileOnly?11:12,padding:mobileOnly?"5px 10px":"6px 14px"}}>← Voltar</button>
         <div style={{flex:1,minWidth:0}}>
-          <div style={{color:"var(--text)",fontWeight:700,fontSize:15}}>{selEmp?.name}</div>
-          <div style={{color:"var(--text3)",fontSize:11}}>Horario semanal · {activeDayCount} dias · {folgaDayCount} folga(s)</div>
+          <div style={{color:"var(--text)",fontWeight:700,fontSize:mobileOnly?14:15}}>{selEmp?.name}</div>
+          <div style={{color:"var(--text3)",fontSize:mobileOnly?10:11}}>{mobileOnly?`${activeDayCount} dias · ${folgaDayCount} folga(s)`:`Horario semanal · ${activeDayCount} dias · ${folgaDayCount} folga(s)`}</div>
         </div>
       </div>
 
@@ -1976,18 +1976,20 @@ function WorkScheduleManagerTab({ restaurantId, employees, roles, workSchedules,
       )}
 
       {/* ═══ AI ASSISTANT ═══ */}
-      <div style={{...S.card,marginBottom:12,border:aiOpen?"2px solid #8b5cf644":"1px solid var(--border)",background:aiOpen?"#8b5cf608":"var(--card-bg)"}}>
+      <div style={{...S.card,marginBottom:mobileOnly?8:12,padding:mobileOnly?"10px 12px":undefined,border:aiOpen?"2px solid #8b5cf644":"1px solid var(--border)",background:aiOpen?"#8b5cf608":"var(--card-bg)"}}>
         <div onClick={()=>setAiOpen(!aiOpen)} style={{display:"flex",justifyContent:"space-between",alignItems:"center",cursor:"pointer"}}>
           <div style={{display:"flex",alignItems:"center",gap:8}}>
-            <span style={{fontSize:16}}>🤖</span>
-            <span style={{color:"#8b5cf6",fontWeight:700,fontSize:13}}>Assistente de Horários</span>
+            <span style={{fontSize:mobileOnly?14:16}}>🤖</span>
+            <span style={{color:"#8b5cf6",fontWeight:700,fontSize:mobileOnly?12:13}}>Assistente de Horários</span>
           </div>
           <span style={{color:"var(--text3)",fontSize:12}}>{aiOpen?"▲":"▼"}</span>
         </div>
         {aiOpen && (
-          <div style={{marginTop:12}}>
-            <p style={{color:"var(--text3)",fontSize:11,margin:"0 0 10px",lineHeight:1.5}}>
-              Descreva o que deseja e o assistente preenche automaticamente. Exemplos: "folga domingo e segunda", "entra 08:00 sai 17:00 intervalo 60min", "escala 6x1"
+          <div style={{marginTop:mobileOnly?8:12}}>
+            <p style={{color:"var(--text3)",fontSize:mobileOnly?10:11,margin:"0 0 8px",lineHeight:1.5}}>
+              {mobileOnly
+                ? "Descreva em linguagem natural. Ex: \"folga dom e seg, 44h semanais entrando às 10\""
+                : "Descreva o que deseja e o assistente preenche automaticamente. Exemplos: \"folga domingo e segunda\", \"entra 08:00 sai 17:00 intervalo 60min\", \"escala 6x1\""}
             </p>
             <div style={{display:"flex",flexDirection:"column",gap:8}}>
               <input
@@ -2027,12 +2029,12 @@ function WorkScheduleManagerTab({ restaurantId, employees, roles, workSchedules,
       </div>
 
       {/* ═══ DAY CARDS (mobile-first) ═══ */}
-      <div style={{background:"var(--bg1)",borderRadius:10,padding:"10px 14px",marginBottom:12}}>
-        <div style={{display:"flex",alignItems:"center",gap:12,flexWrap:"wrap"}}>
-          <span style={{color:"var(--green)",fontSize:12,fontWeight:600}}>ON = Trabalha</span>
-          <span style={{color:"var(--text3)",fontSize:12,fontWeight:600}}>OFF = Folga</span>
+      <div style={{background:"var(--bg1)",borderRadius:10,padding:mobileOnly?"8px 10px":"10px 14px",marginBottom:mobileOnly?8:12}}>
+        <div style={{display:"flex",alignItems:"center",gap:10}}>
+          <span style={{color:"var(--green)",fontSize:11,fontWeight:600}}>ON = Trabalha</span>
+          <span style={{color:"var(--text3)",fontSize:11,fontWeight:600}}>OFF = Folga</span>
         </div>
-        <p style={{color:"var(--text3)",fontSize:11,margin:"6px 0 0"}}>Defina os dias de trabalho e folga. Horarios podem ser preenchidos agora ou depois.</p>
+        {!mobileOnly && <p style={{color:"var(--text3)",fontSize:11,margin:"6px 0 0"}}>Defina os dias de trabalho e folga. Horarios podem ser preenchidos agora ou depois.</p>}
       </div>
       <div style={{marginBottom:16}}>
         {[0,1,2,3,4,5,6].map(dayIdx => {
@@ -2051,11 +2053,11 @@ function WorkScheduleManagerTab({ restaurantId, employees, roles, workSchedules,
               background: isActive ? "var(--card-bg)" : "var(--bg1)",
             }}>
               {/* Day header with toggle */}
-              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom: isActive ? 12 : 0}}>
-                <div style={{display:"flex",alignItems:"center",gap:10}}>
-                  <span style={{color:isWeekend?"#f59e0b":"var(--text)",fontWeight:700,fontSize:15,minWidth:36}}>{WEEK_DAYS_LABEL[dayIdx]}</span>
-                  <span style={{color: isActive ? (hasHours ? "var(--green)" : "var(--text3)") : "var(--text3)", fontSize:12, fontWeight: isActive ? 600 : 400}}>
-                    {isActive ? (hasHours ? "Trabalha" : "Trabalha (sem horario)") : "FOLGA"}
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom: isActive ? (mobileOnly ? 8 : 12) : 0}}>
+                <div style={{display:"flex",alignItems:"center",gap:mobileOnly?6:10}}>
+                  <span style={{color:isWeekend?"#f59e0b":"var(--text)",fontWeight:700,fontSize:mobileOnly?14:15,minWidth:mobileOnly?30:36}}>{WEEK_DAYS_LABEL[dayIdx]}</span>
+                  <span style={{color: isActive ? (hasHours ? "var(--green)" : "var(--text3)") : "var(--text3)", fontSize:mobileOnly?11:12, fontWeight: isActive ? 600 : 400}}>
+                    {isActive ? (hasHours ? "Trabalha" : mobileOnly ? "Sem horário" : "Trabalha (sem horario)") : "FOLGA"}
                   </span>
                 </div>
                 <button onClick={()=>toggleDay(dayIdx)} style={isActive ? toggleOn : toggleOff}>
@@ -2066,32 +2068,32 @@ function WorkScheduleManagerTab({ restaurantId, employees, roles, workSchedules,
               {/* Time inputs (only if active) */}
               {isActive && (
                 <div>
-                  <div style={{display:"grid",gridTemplateColumns:"1fr 1fr auto",gap:8,alignItems:"end",marginBottom:8}}>
+                  <div style={{display:"grid",gridTemplateColumns:"1fr 1fr auto",gap:mobileOnly?6:8,alignItems:"end",marginBottom:mobileOnly?6:8}}>
                     <div>
-                      <label style={{color:"var(--text3)",fontSize:10,display:"block",marginBottom:3}}>Entrada</label>
+                      <label style={{color:"var(--text3)",fontSize:mobileOnly?9:10,display:"block",marginBottom:2}}>Entrada</label>
                       <input type="time" value={d.in||""} onChange={e=>handleDayChange(dayIdx,"in",e.target.value)}
-                        style={{...S.input,fontSize:14,padding:"10px 8px",textAlign:"center",width:"100%",boxSizing:"border-box"}}/>
+                        style={{...S.input,fontSize:mobileOnly?13:14,padding:mobileOnly?"8px 4px":"10px 8px",textAlign:"center",width:"100%",boxSizing:"border-box"}}/>
                     </div>
                     <div>
-                      <label style={{color:"var(--text3)",fontSize:10,display:"block",marginBottom:3}}>Saída</label>
+                      <label style={{color:"var(--text3)",fontSize:mobileOnly?9:10,display:"block",marginBottom:2}}>Saída</label>
                       <input type="time" value={d.out||""} onChange={e=>handleDayChange(dayIdx,"out",e.target.value)}
-                        style={{...S.input,fontSize:14,padding:"10px 8px",textAlign:"center",width:"100%",boxSizing:"border-box"}}/>
+                        style={{...S.input,fontSize:mobileOnly?13:14,padding:mobileOnly?"8px 4px":"10px 8px",textAlign:"center",width:"100%",boxSizing:"border-box"}}/>
                     </div>
-                    <div style={{width:64}}>
-                      <label style={{color:"var(--text3)",fontSize:10,display:"block",marginBottom:3,textAlign:"center"}}>Int.(min)</label>
+                    <div style={{width:mobileOnly?56:64}}>
+                      <label style={{color:"var(--text3)",fontSize:mobileOnly?9:10,display:"block",marginBottom:2,textAlign:"center"}}>Int.</label>
                       <input type="number" min="0" max="120" value={d.break||""} onChange={e=>handleDayChange(dayIdx,"break",parseInt(e.target.value)||0)}
-                        placeholder="30" style={{...S.input,fontSize:14,padding:"10px 4px",textAlign:"center",width:"100%",boxSizing:"border-box"}}/>
+                        placeholder="30" style={{...S.input,fontSize:mobileOnly?13:14,padding:mobileOnly?"8px 2px":"10px 4px",textAlign:"center",width:"100%",boxSizing:"border-box"}}/>
                     </div>
                   </div>
 
                   {/* Calculated hours (compact row) */}
                   {calc && (
-                    <div style={{display:"flex",gap:6,flexWrap:"wrap",fontSize:11,fontFamily:"'DM Mono',monospace"}}>
-                      <span style={{color:"var(--text3)"}}>Real: <strong style={{color:"var(--text2)"}}>{fmtHHMM(calc.worked)}</strong></span>
-                      <span style={{color:"var(--text3)"}}>Diurna: <strong style={{color:"var(--text2)"}}>{fmtHHMM(calc.diurnal)}</strong></span>
-                      {calc.nocturnal > 0 && <span style={{color:"#8b5cf6"}}>Not.real: <strong>{fmtHHMM(calc.nocturnal)}</strong></span>}
-                      {calc.nocturnalFicta > 0 && <span style={{color:"#ec4899"}}>Not.ficta: <strong>{fmtHHMM(calc.nocturnalFicta)}</strong></span>}
-                      <span style={{color:contractOver?"var(--red)":ac,fontWeight:700}}>Contratual: {fmtHHMM(calc.totalContract)}</span>
+                    <div style={{display:"flex",gap:mobileOnly?4:6,flexWrap:"wrap",fontSize:mobileOnly?10:11,fontFamily:"'DM Mono',monospace"}}>
+                      {!mobileOnly && <span style={{color:"var(--text3)"}}>Real: <strong style={{color:"var(--text2)"}}>{fmtHHMM(calc.worked)}</strong></span>}
+                      {!mobileOnly && <span style={{color:"var(--text3)"}}>Diurna: <strong style={{color:"var(--text2)"}}>{fmtHHMM(calc.diurnal)}</strong></span>}
+                      {mobileOnly && <span style={{color:"var(--text3)"}}>Trab: <strong style={{color:"var(--text2)"}}>{fmtHHMM(calc.worked)}</strong></span>}
+                      {calc.nocturnal > 0 && <span style={{color:"#8b5cf6"}}>Not: <strong>{fmtHHMM(calc.nocturnalFicta)}</strong></span>}
+                      <span style={{color:contractOver?"var(--red)":ac,fontWeight:700}}>{mobileOnly?"Contr:":"Contratual:"} {fmtHHMM(calc.totalContract)}</span>
                     </div>
                   )}
                 </div>
@@ -2103,11 +2105,11 @@ function WorkScheduleManagerTab({ restaurantId, employees, roles, workSchedules,
 
       {/* Weekly total (only if all hours filled) */}
       {allHoursFilled && activeDayCount > 0 && (
-        <div style={{...cardS,display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:8,borderColor:weekOk?"var(--green)33":"var(--red)33"}}>
-          <span style={{color:"var(--text3)",fontSize:13}}>Total semanal contratual</span>
-          <div style={{display:"flex",alignItems:"center",gap:10}}>
-            <span style={{color:weekOk?"var(--green)":"var(--red)",fontWeight:700,fontSize:16,fontFamily:"'DM Mono',monospace"}}>{fmtHHMM(totalContract)}</span>
-            <span style={{color:weekOk?"var(--green)":"var(--red)",fontSize:12}}>{weekOk?"OK":"Fora do limite (43:55-44:00)"}</span>
+        <div style={{...cardS,display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:6,borderColor:weekOk?"var(--green)33":"var(--red)33"}}>
+          <span style={{color:"var(--text3)",fontSize:mobileOnly?11:13}}>{mobileOnly?"Total semanal":"Total semanal contratual"}</span>
+          <div style={{display:"flex",alignItems:"center",gap:mobileOnly?6:10}}>
+            <span style={{color:weekOk?"var(--green)":"var(--red)",fontWeight:700,fontSize:mobileOnly?14:16,fontFamily:"'DM Mono',monospace"}}>{fmtHHMM(totalContract)}</span>
+            <span style={{color:weekOk?"var(--green)":"var(--red)",fontSize:mobileOnly?10:12}}>{weekOk?"OK":mobileOnly?"Fora (43:55-44:00)":"Fora do limite (43:55-44:00)"}</span>
           </div>
         </div>
       )}
@@ -2123,11 +2125,11 @@ function WorkScheduleManagerTab({ restaurantId, employees, roles, workSchedules,
       {/* Valid from confirmation */}
       {showValidFrom && (
         <div style={{...cardS,border:"1px solid var(--ac)44"}}>
-          <p style={{color:ac,fontWeight:700,fontSize:14,margin:"0 0 10px"}}>
+          <p style={{color:ac,fontWeight:700,fontSize:mobileOnly?13:14,margin:"0 0 8px"}}>
             {saveMode === "days" ? "Salvar dias de trabalho e folga" : "Salvar horario completo"}
           </p>
-          <p style={{color:"var(--text3)",fontSize:12,marginBottom:10}}>A partir de quando entra em vigor?</p>
-          <input type="date" value={validFrom} onChange={e=>setValidFrom(e.target.value)} style={{...S.input,marginBottom:12,fontSize:15,padding:"12px 14px"}}/>
+          <p style={{color:"var(--text3)",fontSize:mobileOnly?11:12,marginBottom:8}}>A partir de quando entra em vigor?</p>
+          <input type="date" value={validFrom} onChange={e=>setValidFrom(e.target.value)} style={{...S.input,marginBottom:10,fontSize:mobileOnly?14:15,padding:mobileOnly?"10px 10px":"12px 14px",width:"100%",boxSizing:"border-box"}}/>
           {saveMode === "days" && (
             <p style={{color:"#f59e0b",fontSize:12,marginBottom:12}}>Os horarios de cada dia poderao ser preenchidos depois. A escala usara os dias de trabalho/folga.</p>
           )}
@@ -2145,12 +2147,12 @@ function WorkScheduleManagerTab({ restaurantId, employees, roles, workSchedules,
       {!showValidFrom && (
         <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
           <button onClick={trySaveDays} disabled={activeDayCount === 0}
-            style={{...S.btnSecondary,flex:1,minWidth:120,opacity:activeDayCount>0?1:0.4}}>
-            Salvar Dias
+            style={{...S.btnSecondary,flex:1,minWidth:mobileOnly?80:120,fontSize:mobileOnly?12:undefined,padding:mobileOnly?"10px 8px":undefined,opacity:activeDayCount>0?1:0.4}}>
+            {mobileOnly?"Salvar Dias":"Salvar Dias"}
           </button>
           <button onClick={tryValidateFull} disabled={!allHoursFilled || activeDayCount === 0}
-            style={{...S.btnPrimary,flex:2,minWidth:160,opacity:allHoursFilled&&activeDayCount>0?1:0.4}}>
-            Validar e Salvar Horario
+            style={{...S.btnPrimary,flex:2,minWidth:mobileOnly?120:160,fontSize:mobileOnly?12:undefined,padding:mobileOnly?"10px 8px":undefined,opacity:allHoursFilled&&activeDayCount>0?1:0.4}}>
+            {mobileOnly?"Validar e Salvar":"Validar e Salvar Horario"}
           </button>
         </div>
       )}
@@ -7320,6 +7322,13 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }
 
         {tab === "changelog" && (() => {
           const CHANGELOG = [
+            { version:"5.10.1", date:"2026-04-12", items:[
+              "Melhoria: layout de Horários otimizado para mobile — cards, inputs, labels e botões compactos",
+              "Melhoria: container geral com padding reduzido no celular",
+              "Melhoria: assistente IA com texto de ajuda compacto no mobile",
+              "Melhoria: lista de empregados mais densa no celular (tags e subtítulos abreviados)",
+              "Melhoria: cálculos de horas simplificados no mobile (Trab + Contr em vez de Real + Diurna + Contratual)",
+            ]},
             { version:"5.10.0", date:"2026-04-12", items:[
               "Novo: aba Horários disponível no mobile do gestor — edição completa + assistente IA",
               "Atualizado: aviso de funcionalidades desktop removeu Horários da lista (agora disponível no celular)",
