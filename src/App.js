@@ -3,7 +3,7 @@ import { useState, useEffect, Component } from "react";
 import { db } from "./firebase";
 import { doc, getDoc, setDoc } from "firebase/firestore";
 
-const APP_VERSION = "5.13.0";
+const APP_VERSION = "5.14.0";
 
 const DEFAULT_ADMISSION = () => `${new Date().getFullYear()}-01-01`;
 const round2 = (v) => Math.round(v * 100) / 100;
@@ -135,7 +135,97 @@ const K = {
   trash:         "v4:trash",           // {restaurants:[], managers:[], employees:[]}
   schedTemplates:"v4:schedTemplates",  // {[restaurantId]: [{id,name,days}]}
   schedDrafts:   "v4:schedDrafts",     // {[restaurantId]: {[empId]: {days,savedAt}}}
+  scheduleVersions: "v4:scheduleVersions", // {[restaurantId]: {[monthKey]: [{id,ts,author,reason,snapshot}]}}
+  tipVersions:      "v4:tipVersions",      // {[restaurantId]: {[monthKey]: [{id,ts,author,reason,snapshot}]}}
 };
+
+// ── Version retention ──
+const MAX_VERSIONS = 30;
+const VERSION_DEBOUNCE_MS = 30000; // 30s
+// Pending debounced snapshots: key = `${kind}:${rid}:${mk}`, value = { timer, firstSnapshot, author, reason }
+const _pendingSnapshots = {};
+
+// Format relative time in pt-BR ("há 5 min", "há 2h", "ontem às 14:30")
+// eslint-disable-next-line no-unused-vars
+function fmtRelTime(iso) {
+  const d = new Date(iso);
+  const now = new Date();
+  const diffMs = now - d;
+  const diffMin = Math.floor(diffMs / 60000);
+  if (diffMin < 1) return "agora há pouco";
+  if (diffMin < 60) return `há ${diffMin} min`;
+  const diffH = Math.floor(diffMin / 60);
+  if (diffH < 24) return `há ${diffH}h`;
+  const diffD = Math.floor(diffH / 24);
+  if (diffD === 1) return `ontem às ${d.toLocaleTimeString("pt-BR",{hour:"2-digit",minute:"2-digit"})}`;
+  if (diffD < 7) return `há ${diffD} dias`;
+  return d.toLocaleDateString("pt-BR") + " " + d.toLocaleTimeString("pt-BR",{hour:"2-digit",minute:"2-digit"});
+}
+
+// Create a snapshot of schedules for a specific month (deep copy)
+// eslint-disable-next-line no-unused-vars
+function snapshotSchedulesMonth(schedules, rid, mk) {
+  return JSON.parse(JSON.stringify(schedules?.[rid]?.[mk] ?? {}));
+}
+// Create a snapshot of tips for a specific month (deep copy)
+// eslint-disable-next-line no-unused-vars
+function snapshotTipsMonth(tips, rid, mk) {
+  return JSON.parse(JSON.stringify((tips ?? []).filter(t => t.restaurantId === rid && t.monthKey === mk)));
+}
+
+// Enqueue or save a version entry. `kind` = "schedules" | "tips".
+// Bulk = true salva imediatamente (sem debounce). Bulk = false aguarda VERSION_DEBOUNCE_MS.
+// eslint-disable-next-line no-unused-vars
+function saveVersion(kind, rid, mk, currentVersions, snapshot, author, reason, onUpdate, bulk = false) {
+  const versionKey = kind === "schedules" ? "scheduleVersions" : "tipVersions";
+  const pendKey = `${kind}:${rid}:${mk}`;
+
+  function commit(snap, reas) {
+    const entry = {
+      id: `${Date.now()}-${Math.random().toString(36).slice(2,6)}`,
+      ts: new Date().toISOString(),
+      author: author || "Gestor",
+      reason: reas,
+      snapshot: snap,
+    };
+    const byRest = { ...(currentVersions ?? {}) };
+    const byMonth = { ...(byRest[rid] ?? {}) };
+    const list = [entry, ...(byMonth[mk] ?? [])].slice(0, MAX_VERSIONS);
+    byMonth[mk] = list;
+    byRest[rid] = byMonth;
+    onUpdate(versionKey, byRest);
+  }
+
+  if (bulk) {
+    // clear pending (bulk supersedes debounced edits)
+    if (_pendingSnapshots[pendKey]) { clearTimeout(_pendingSnapshots[pendKey].timer); delete _pendingSnapshots[pendKey]; }
+    commit(snapshot, reason);
+    return;
+  }
+
+  // Debounced: if already pending, reset timer (keep original pre-edit snapshot)
+  if (_pendingSnapshots[pendKey]) {
+    clearTimeout(_pendingSnapshots[pendKey].timer);
+    _pendingSnapshots[pendKey].editCount = (_pendingSnapshots[pendKey].editCount ?? 1) + 1;
+    _pendingSnapshots[pendKey].timer = setTimeout(() => {
+      const p = _pendingSnapshots[pendKey];
+      if (!p) return;
+      commit(p.preSnapshot, `Edição manual (${p.editCount} alteração${p.editCount>1?"ões":""})`);
+      delete _pendingSnapshots[pendKey];
+    }, VERSION_DEBOUNCE_MS);
+    return;
+  }
+
+  // New pending: capture the PRE-edit state (snapshot passed in should be pre-edit)
+  _pendingSnapshots[pendKey] = {
+    preSnapshot: snapshot,
+    editCount: 1,
+    timer: setTimeout(() => {
+      commit(snapshot, "Edição manual (1 alteração)");
+      delete _pendingSnapshots[pendKey];
+    }, VERSION_DEBOUNCE_MS),
+  };
+}
 
 //
 const ac = "#d4a017";
@@ -166,6 +256,49 @@ function Modal({ title, onClose, children, wide }) {
         {children}
       </div>
     </div>
+  );
+}
+
+// ── Version History Modal (shared by Escala + Gorjetas) ──
+function VersionHistoryModal({ title, versions, currentSnapshot, onRestore, onClose, restoreLabel = "Restaurar esta versão", emptyMsg = "Nenhuma versão salva ainda. Qualquer alteração gera automaticamente um ponto de histórico." }) {
+  const list = versions ?? [];
+  return (
+    <Modal title={title} onClose={onClose} wide>
+      <div style={{display:"flex",flexDirection:"column",gap:12}}>
+        <p style={{color:"var(--text3)",fontSize:13,margin:0,lineHeight:1.6}}>
+          As últimas {MAX_VERSIONS} versões deste mês são mantidas automaticamente. Ao restaurar, a versão atual também vira um ponto no histórico — você pode desfazer se quiser.
+        </p>
+        {list.length === 0 && (
+          <div style={{...S.card,textAlign:"center",padding:"32px 20px"}}>
+            <div style={{fontSize:32,marginBottom:10}}>📂</div>
+            <p style={{color:"var(--text3)",fontSize:13,margin:0}}>{emptyMsg}</p>
+          </div>
+        )}
+        {list.map((v, idx) => (
+          <div key={v.id} style={{...S.card,padding:"14px 18px"}}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:12,flexWrap:"wrap"}}>
+              <div style={{flex:1,minWidth:200}}>
+                <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:4,flexWrap:"wrap"}}>
+                  <span style={{color:"var(--text)",fontWeight:700,fontSize:14}}>{v.reason || "Alteração"}</span>
+                  {idx === 0 && <span style={{background:"#10b98122",color:"var(--green)",fontSize:10,fontWeight:700,padding:"2px 8px",borderRadius:6}}>MAIS RECENTE</span>}
+                </div>
+                <div style={{color:"var(--text3)",fontSize:12,display:"flex",gap:8,flexWrap:"wrap"}}>
+                  <span>👤 {v.author || "Gestor"}</span>
+                  <span>·</span>
+                  <span title={new Date(v.ts).toLocaleString("pt-BR")}>🕐 {fmtRelTime(v.ts)}</span>
+                </div>
+              </div>
+              <button onClick={()=>{
+                if (!window.confirm(`Restaurar esta versão?\n\n"${v.reason}" · ${fmtRelTime(v.ts)}\n\nA versão atual será salva como uma nova entrada no histórico — você pode desfazer depois.`)) return;
+                onRestore(v);
+              }} style={{...S.btnSecondary,fontSize:12,padding:"8px 16px",color:"var(--ac-text)",borderColor:"var(--ac)44"}}>
+                ♻️ {restoreLabel}
+              </button>
+            </div>
+          </div>
+        ))}
+      </div>
+    </Modal>
   );
 }
 
@@ -1491,6 +1624,7 @@ function WorkScheduleManagerTab({ restaurantId, employees, roles, workSchedules,
   const [validFrom, setValidFrom]           = useState(today());
   const [selectedSchedIds, setSelectedSchedIds] = useState(new Set());
   const [saveMode, setSaveMode]             = useState(null); // "days" or "full"
+  const [validated, setValidated]           = useState(false); // true após validar horários com sucesso
 
   const selEmp = restEmps.find(e => e.id === selEmpId);
   const empSchedules = workSchedules?.[restaurantId]?.[selEmpId] ?? [];
@@ -1549,6 +1683,7 @@ function WorkScheduleManagerTab({ restaurantId, employees, roles, workSchedules,
     setErrors([]);
     setShowValidFrom(false);
     setSaveMode(null);
+    setValidated(false);
     setCopyPickerOpen(false);
     const sched = (workSchedules?.[restaurantId]?.[empId] ?? []);
     const cur = sched[sched.length - 1];
@@ -1569,6 +1704,7 @@ function WorkScheduleManagerTab({ restaurantId, employees, roles, workSchedules,
       return { ...prev, [dayIdx]: cur.active ? { active: false } : { active: true, in: "", out: "", break: 0 } };
     });
     setErrors([]);
+    setValidated(false);
   }
 
   // ── Update time/break field ──
@@ -1578,6 +1714,7 @@ function WorkScheduleManagerTab({ restaurantId, employees, roles, workSchedules,
       [dayIdx]: { ...(prev[dayIdx] ?? { active: true }), [field]: val }
     }));
     setErrors([]);
+    setValidated(false);
   }
 
   // ── "Salvar Dias" (days-only, no hours required) ──
@@ -1589,18 +1726,30 @@ function WorkScheduleManagerTab({ restaurantId, employees, roles, workSchedules,
     setShowValidFrom(true);
   }
 
-  // ── "Validar e Salvar" (full hours + validation) ──
+  // ── "Validar Horários" (só valida, não salva) ──
   function tryValidateFull() {
     const activeDays = Object.values(editDays).filter(d => d.active);
-    if (activeDays.length === 0) { setErrors(["Selecione pelo menos um dia de trabalho."]); return; }
+    if (activeDays.length === 0) { setErrors(["Selecione pelo menos um dia de trabalho."]); setValidated(false); return; }
     if (!hasAllHours(editDays)) {
       setErrors(["Preencha os horarios de todos os dias marcados como trabalho para validar a carga semanal."]);
+      setValidated(false);
       return;
     }
     const storageDays = toStorage(editDays, false);
     const { errors: errs } = validateWeekSchedule(storageDays);
     setErrors(errs);
-    if (errs.length === 0) { setSaveMode("full"); setShowValidFrom(true); }
+    if (errs.length === 0) {
+      setValidated(true);
+      onUpdate("_toast", "✅ Horário validado — clique em Salvar para confirmar");
+    } else {
+      setValidated(false);
+    }
+  }
+
+  // ── "Prosseguir para salvar" (abre modal de vigência — só após validar) ──
+  function proceedToSave() {
+    setSaveMode("full");
+    setShowValidFrom(true);
   }
 
   // ── Save schedule ──
@@ -1667,6 +1816,7 @@ function WorkScheduleManagerTab({ restaurantId, employees, roles, workSchedules,
 
     setShowValidFrom(false);
     setSaveMode(null);
+    setValidated(false);
     setErrors([]);
     onUpdate("_toast", daysOnly
       ? `Dias de ${selEmp?.name} salvos (horarios pendentes)`
@@ -2102,7 +2252,7 @@ function WorkScheduleManagerTab({ restaurantId, employees, roles, workSchedules,
     <div>
       {/* Header */}
       <div style={{display:"flex",alignItems:"center",gap:mobileOnly?6:10,marginBottom:mobileOnly?10:16,flexWrap:"wrap"}}>
-        <button onClick={()=>{setSelEmpId(null);setErrors([]);setShowValidFrom(false);setSaveMode(null);}} style={{...S.btnSecondary,fontSize:mobileOnly?11:12,padding:mobileOnly?"5px 10px":"6px 14px"}}>← Voltar</button>
+        <button onClick={()=>{setSelEmpId(null);setErrors([]);setShowValidFrom(false);setSaveMode(null);setValidated(false);}} style={{...S.btnSecondary,fontSize:mobileOnly?11:12,padding:mobileOnly?"5px 10px":"6px 14px"}}>← Voltar</button>
         <div style={{flex:1,minWidth:0}}>
           <div style={{color:"var(--text)",fontWeight:700,fontSize:mobileOnly?14:15}}>{selEmp?.name}</div>
           <div style={{color:"var(--text3)",fontSize:mobileOnly?10:11}}>{mobileOnly?`${activeDayCount} dias · ${folgaDayCount} folga(s)`:`Horario semanal · ${activeDayCount} dias · ${folgaDayCount} folga(s)`}</div>
@@ -2158,16 +2308,36 @@ function WorkScheduleManagerTab({ restaurantId, employees, roles, workSchedules,
               </div>
             )}
             {[...empSchedules].reverse().slice(1).map(s => (
-              <div key={s.id} style={{padding:"6px 12px",borderBottom:"1px solid var(--border)",fontSize:12,display:"flex",alignItems:"center",gap:10,flexWrap:"wrap"}}>
+              <div key={s.id} style={{padding:"8px 12px",borderBottom:"1px solid var(--border)",fontSize:12,display:"flex",alignItems:"center",gap:10,flexWrap:"wrap"}}>
                 {isOwner && (
                   <input type="checkbox" checked={selectedSchedIds.has(s.id)}
                     onChange={e=>{ const next = new Set(selectedSchedIds); e.target.checked ? next.add(s.id) : next.delete(s.id); setSelectedSchedIds(next); }}
                     style={{accentColor:"var(--red)",cursor:"pointer",width:14,height:14}}
                   />
                 )}
-                <span style={{color:"var(--text2)"}}>Vigente de {fmtDate(s.validFrom)}</span>
+                <span style={{color:"var(--text2)",flex:1,minWidth:140}}>Vigente de {fmtDate(s.validFrom)}</span>
                 <span style={{color:"var(--text3)"}}>por {s.createdBy}</span>
                 <span style={{color:"var(--text3)"}}>{s.hoursComplete !== false ? `${fmtHHMM(s.totalContract)}/sem` : "dias apenas"}</span>
+                <button onClick={()=>{
+                  if(!window.confirm(`Reativar esta versão do horário?\n\nOs dias e horários dessa versão serão copiados como nova vigência (a mais recente fica preservada no histórico).`)) return;
+                  // Cria uma nova entrada baseada nessa versão antiga, como a mais recente
+                  const reactivated = {
+                    ...s,
+                    id: `${Date.now()}-${Math.random().toString(36).slice(2,5)}`,
+                    validFrom: today(),
+                    createdBy: currentManagerName,
+                    createdAt: new Date().toISOString(),
+                    reactivatedFrom: s.id,
+                  };
+                  const newList = [...empSchedules, reactivated];
+                  onUpdate("workSchedules", {
+                    ...workSchedules,
+                    [restaurantId]: { ...(workSchedules?.[restaurantId]??{}), [selEmpId]: newList }
+                  });
+                  // Carrega a versão reativada no editor
+                  setEditDays(toInternal(reactivated));
+                  onUpdate("_toast", `♻️ Horário de ${fmtDate(s.validFrom)} reativado como vigência a partir de hoje`);
+                }} title="Copiar esta versão como nova vigência" style={{padding:"4px 10px",borderRadius:6,border:"1px solid var(--ac)44",background:"transparent",color:"var(--ac-text)",cursor:"pointer",fontSize:11,fontWeight:600}}>♻️ Reativar</button>
               </div>
             ))}
           </div>
@@ -2466,22 +2636,41 @@ function WorkScheduleManagerTab({ restaurantId, employees, roles, workSchedules,
           )}
           <div style={{display:"flex",gap:mobileOnly?10:12,flexWrap:"wrap"}}>
             <button onClick={saveSchedule} style={{...S.btnPrimary,flex:1,minWidth:mobileOnly?140:200,padding:mobileOnly?undefined:"14px 24px",fontSize:mobileOnly?undefined:14,fontWeight:700}}>✓ Confirmar e Salvar</button>
-            <button onClick={()=>{setShowValidFrom(false);setSaveMode(null);}} style={{...S.btnSecondary,flex:1,minWidth:mobileOnly?100:140,padding:mobileOnly?undefined:"14px 24px",fontSize:mobileOnly?undefined:14}}>Cancelar</button>
+            <button onClick={()=>{setShowValidFrom(false);setSaveMode(null);}} style={{...S.btnSecondary,flex:1,minWidth:mobileOnly?100:140,padding:mobileOnly?undefined:"14px 24px",fontSize:mobileOnly?undefined:14}}>Voltar</button>
           </div>
         </div>
       )}
 
       {/* Action buttons */}
       {!showValidFrom && (
-        <div style={{display:"flex",gap:mobileOnly?8:12,flexWrap:"wrap",marginTop:mobileOnly?4:8}}>
-          <button onClick={trySaveDays} disabled={activeDayCount === 0}
-            style={{...S.btnSecondary,flex:1,minWidth:mobileOnly?80:160,fontSize:mobileOnly?12:14,padding:mobileOnly?"10px 8px":"14px 24px",fontWeight:600,opacity:activeDayCount>0?1:0.4}}>
-            📅 Salvar Dias
-          </button>
-          <button onClick={tryValidateFull} disabled={!allHoursFilled || activeDayCount === 0}
-            style={{...S.btnPrimary,flex:2,minWidth:mobileOnly?120:220,fontSize:mobileOnly?12:14,padding:mobileOnly?"10px 8px":"14px 24px",fontWeight:700,opacity:allHoursFilled&&activeDayCount>0?1:0.4}}>
-            ✓ {mobileOnly?"Validar e Salvar":"Validar e Salvar Horário"}
-          </button>
+        <div style={{display:"flex",flexDirection:"column",gap:10,marginTop:mobileOnly?4:8}}>
+          {/* Validado com sucesso — mostra aviso e libera Salvar */}
+          {validated && (
+            <div style={{...S.card,padding:mobileOnly?"10px 14px":"14px 18px",background:"#10b98108",borderColor:"#10b98144",display:"flex",alignItems:"center",gap:10}}>
+              <span style={{fontSize:mobileOnly?18:22}}>✅</span>
+              <div style={{flex:1,minWidth:0}}>
+                <div style={{color:"var(--green)",fontWeight:700,fontSize:mobileOnly?13:14}}>Horário validado</div>
+                <div style={{color:"var(--text3)",fontSize:mobileOnly?11:12,marginTop:2}}>Todas as regras da CLT estão atendidas. Pode salvar com segurança.</div>
+              </div>
+            </div>
+          )}
+          <div style={{display:"flex",gap:mobileOnly?8:12,flexWrap:"wrap"}}>
+            <button onClick={trySaveDays} disabled={activeDayCount === 0}
+              style={{...S.btnSecondary,flex:1,minWidth:mobileOnly?80:160,fontSize:mobileOnly?12:14,padding:mobileOnly?"10px 8px":"14px 24px",fontWeight:600,opacity:activeDayCount>0?1:0.4}}>
+              📅 Salvar Dias
+            </button>
+            {validated ? (
+              <button onClick={proceedToSave}
+                style={{...S.btnPrimary,flex:2,minWidth:mobileOnly?120:220,fontSize:mobileOnly?12:14,padding:mobileOnly?"10px 8px":"14px 24px",fontWeight:700,background:"var(--green)"}}>
+                💾 Salvar Horário
+              </button>
+            ) : (
+              <button onClick={tryValidateFull} disabled={!allHoursFilled || activeDayCount === 0}
+                style={{...S.btnPrimary,flex:2,minWidth:mobileOnly?120:220,fontSize:mobileOnly?12:14,padding:mobileOnly?"10px 8px":"14px 24px",fontWeight:700,opacity:allHoursFilled&&activeDayCount>0?1:0.4}}>
+                ✓ Validar Horários
+              </button>
+            )}
+          </div>
         </div>
       )}
     </div>
@@ -3970,6 +4159,8 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
   const [splitForm, setSplitForm]         = useState(null);
   const [schedArea, setSchedArea]           = useState("Todos");
   const [showVacForm, setShowVacForm]       = useState(false);
+  const [showSchedHistory, setShowSchedHistory] = useState(false);
+  const [showTipHistory, setShowTipHistory]     = useState(false);
   const [vacEmpId, setVacEmpId]             = useState("");
   const [vacFrom, setVacFrom]               = useState("");
   const [vacTo, setVacTo]                   = useState("");
@@ -4339,6 +4530,9 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
       currentTips = result.updatedTips;
     });
     if (count > 0) {
+      // Snapshot pré-save das gorjetas do mês
+      const preSnapT = snapshotTipsMonth(tips, rid, mk);
+      saveVersion("tips", rid, mk, data?.tipVersions, preSnapT, currentUser?.name || (isOwner?"Admin AppTip":"Gestor"), `Salvar gorjetas (${dirtyRows.length} dia${dirtyRows.length>1?"s":""})`, onUpdate, true);
       onUpdate("tips", currentTips);
       setTipRows([]);
       onUpdate("_toast", `✅ ${dirtyRows.length} dia${dirtyRows.length>1?"s":""} salvo${dirtyRows.length>1?"s":""}! (${count} empregados)`);
@@ -4733,13 +4927,43 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
           <div>
             {/* Export button inside tips tab */}
             {canTips && (
-              <div style={{display:"flex",justifyContent:"flex-end",gap:8,marginBottom:12}}>
+              <div style={{display:"flex",justifyContent:"flex-end",gap:8,marginBottom:12,flexWrap:"wrap"}}>
+                {(isOwner || isDP) && (() => {
+                  const vCount = (data?.tipVersions?.[rid]?.[mk] ?? []).length;
+                  return (
+                    <button onClick={()=>setShowTipHistory(true)}
+                      title="Ver e restaurar versões anteriores das gorjetas deste mês"
+                      style={{...S.btnSecondary,fontSize:12,color:"var(--ac-text)",borderColor:"var(--ac)44"}}>
+                      🕐 Histórico{vCount>0?` (${vCount})`:""}
+                    </button>
+                  );
+                })()}
                 {isOwner && <button onClick={()=>{
                   const ok = resetTab("tips","Gorjetas",()=>({tips:tips.filter(t=>t.restaurantId===rid), splits:splits?.[rid]}));
                   if(ok){ onUpdate("tips",tips.filter(t=>t.restaurantId!==rid)); onUpdate("_toast","🗑️ Gorjetas enviadas para a lixeira"); }
                 }} style={{...S.btnSecondary,fontSize:12,color:"var(--red)",borderColor:"var(--red)44"}}>🗑️ Resetar gorjetas</button>}
                 <button onClick={() => setShowExport(true)} style={{ ...S.btnSecondary, fontSize: 12, color: ac, borderColor: ac }}>📤 Exportar Gorjeta</button>
               </div>
+            )}
+
+            {/* Modal de histórico das gorjetas */}
+            {showTipHistory && (
+              <VersionHistoryModal
+                title={`🕐 Histórico de Gorjetas — ${monthLabel(year, month)}`}
+                versions={data?.tipVersions?.[rid]?.[mk]}
+                onClose={()=>setShowTipHistory(false)}
+                onRestore={(v)=>{
+                  // Salva estado atual como nova versão
+                  const curSnap = snapshotTipsMonth(tips, rid, mk);
+                  saveVersion("tips", rid, mk, data?.tipVersions, curSnap, currentUser?.name || (isOwner?"Admin AppTip":"Gestor"), `Antes de restaurar "${v.reason}"`, onUpdate, true);
+                  // Aplica versão restaurada: remove tips atuais desse mês e adiciona os do snapshot
+                  const otherTips = (tips ?? []).filter(t => !(t.restaurantId === rid && t.monthKey === mk));
+                  const restoredTips = [...otherTips, ...((v.snapshot ?? []).map(t => ({...t})))];
+                  onUpdate("tips", restoredTips);
+                  setShowTipHistory(false);
+                  onUpdate("_toast", `♻️ Gorjetas restauradas para "${v.reason}" (${fmtRelTime(v.ts)})`);
+                }}
+              />
             )}
             {/* Botão salvar gorjetas — sticky no topo quando há alterações */}
             {tipsDirty && (
@@ -4855,7 +5079,9 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                             {isDirty && <span style={{color:"#f59e0b",fontSize:12}}>●</span>}
                             {isLaunched && (
                               <button onClick={()=>{
-                                if(!window.confirm(`Zerar gorjeta de ${fmtDate(date)}?`)) return;
+                                if(!window.confirm(`Zerar gorjeta de ${fmtDate(date)}?\n\n⚠️ Um backup será salvo no Histórico — você pode restaurar depois.`)) return;
+                                const preSnap = snapshotTipsMonth(tips, rid, mk);
+                                saveVersion("tips", rid, mk, data?.tipVersions, preSnap, currentUser?.name || (isOwner?"Admin AppTip":"Gestor"), `Remover gorjeta de ${fmtDate(date)}`, onUpdate, true);
                                 onUpdate("tips",tips.filter(t=>!(t.restaurantId===rid&&t.date===date)));
                                 setTipRows(prev=>prev.filter(r=>r.date!==date));
                                 onUpdate("_toast",`🗑️ ${fmtDate(date)}: removido`);
@@ -4887,11 +5113,28 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                   {tipDates.map(d => (
                     <div key={d} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"8px 0",borderBottom:"1px solid var(--border)"}}>
                       <span style={{color:"var(--text2)",fontSize:13}}>{fmtDate(d)}</span>
-                      <button onClick={()=>{const { count, updatedTips }=recalcTipDay(d);if(count>0)onUpdate("tips",updatedTips);onUpdate("_toast",`🔄 Dia ${fmtDate(d)} recalculado para ${count} empregados`);}} style={{padding:"6px 14px",borderRadius:8,border:"1px solid #f59e0b44",background:"transparent",color:"#f59e0b",cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:12}}>Recalcular</button>
+                      <button onClick={()=>{
+                        const { count, updatedTips }=recalcTipDay(d);
+                        if(count>0){
+                          const preSnap = snapshotTipsMonth(tips, rid, mk);
+                          saveVersion("tips", rid, mk, data?.tipVersions, preSnap, currentUser?.name || (isOwner?"Admin AppTip":"Gestor"), `Recalcular dia ${fmtDate(d)}`, onUpdate, true);
+                          onUpdate("tips",updatedTips);
+                        }
+                        onUpdate("_toast",`🔄 Dia ${fmtDate(d)} recalculado para ${count} empregados`);
+                      }} style={{padding:"6px 14px",borderRadius:8,border:"1px solid #f59e0b44",background:"transparent",color:"#f59e0b",cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:12}}>Recalcular</button>
                     </div>
                   ))}
                   {tipDates.length > 1 && (
-                    <button onClick={()=>{let total=0,currentTips=tips;tipDates.forEach(d=>{const r=recalcTipDay(d,currentTips);total+=r.count;currentTips=r.updatedTips;});if(total>0)onUpdate("tips",currentTips);onUpdate("_toast",`🔄 ${tipDates.length} dias recalculados!`);}} style={{...S.btnPrimary,marginTop:12,background:"#f59e0b"}}>Recalcular Todos os Dias do Mês</button>
+                    <button onClick={()=>{
+                      let total=0,currentTips=tips;
+                      const preSnap = snapshotTipsMonth(tips, rid, mk);
+                      tipDates.forEach(d=>{const r=recalcTipDay(d,currentTips);total+=r.count;currentTips=r.updatedTips;});
+                      if(total>0){
+                        saveVersion("tips", rid, mk, data?.tipVersions, preSnap, currentUser?.name || (isOwner?"Admin AppTip":"Gestor"), `Recalcular todos os dias (${tipDates.length})`, onUpdate, true);
+                        onUpdate("tips",currentTips);
+                      }
+                      onUpdate("_toast",`🔄 ${tipDates.length} dias recalculados!`);
+                    }} style={{...S.btnPrimary,marginTop:12,background:"#f59e0b"}}>Recalcular Todos os Dias do Mês</button>
                   )}
                 </div>
               )}
@@ -4928,7 +5171,13 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                       </div>
                     );
                   })}
-                  <button onClick={()=>{const ids=new Set(dT.map(t=>t.id));onUpdate("tips",tips.filter(t=>!ids.has(t.id)));onUpdate("_toast","Lançamento removido.");}} style={{marginTop:10,background:"none",border:"1px solid #e74c3c33",borderRadius:8,color:"var(--red)",cursor:"pointer",fontSize:12,padding:"4px 12px",fontFamily:"'DM Mono',monospace"}}>Remover lançamento</button>
+                  <button onClick={()=>{
+                    const ids=new Set(dT.map(t=>t.id));
+                    const preSnap = snapshotTipsMonth(tips, rid, mk);
+                    saveVersion("tips", rid, mk, data?.tipVersions, preSnap, currentUser?.name || (isOwner?"Admin AppTip":"Gestor"), `Remover lançamento (${fmtDate(dT[0]?.date)})`, onUpdate, true);
+                    onUpdate("tips",tips.filter(t=>!ids.has(t.id)));
+                    onUpdate("_toast","Lançamento removido.");
+                  }} style={{marginTop:10,background:"none",border:"1px solid #e74c3c33",borderRadius:8,color:"var(--red)",cursor:"pointer",fontSize:12,padding:"4px 12px",fontFamily:"'DM Mono',monospace"}}>Remover lançamento</button>
                 </div>
               );
             })}
@@ -5019,6 +5268,9 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                       [rid]: { ...(newSchedules?.[rid]??{}), [mk]: { ...(newSchedules?.[rid]?.[mk]??{}), [emp.id]: empDayMap } }
                     };
                   });
+                  // Snapshot bulk antes de aplicar "Folgas do contrato"
+                  const preSnap1 = snapshotSchedulesMonth(schedules, rid, mk);
+                  saveVersion("schedules", rid, mk, data?.scheduleVersions, preSnap1, currentUser?.name || (isOwner?"Admin AppTip":"Gestor"), "Folgas do contrato aplicadas", onUpdate, true);
                   onUpdate("schedules", newSchedules);
                   const parts = [];
                   if (added) parts.push(`${added} folga(s) adicionada(s)`);
@@ -5032,7 +5284,10 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                   const mesNome = monthLabel(year, month);
                   const n = areaEmps.length;
                   if (!n) return;
-                  if (!window.confirm(`Reiniciar escala de ${mesNome}?\n\nTodos os ${n} empregado(s) ${schedArea==="Todos"?"":"da área "+schedArea+" "}voltarão ao status "Trabalho" em todos os dias.\n\nIsso remove folgas, freelas, férias, faltas e compensações do mês.`)) return;
+                  if (!window.confirm(`Reiniciar escala de ${mesNome}?\n\nTodos os ${n} empregado(s) ${schedArea==="Todos"?"":"da área "+schedArea+" "}voltarão ao status "Trabalho" em todos os dias.\n\nIsso remove folgas, freelas, férias, faltas e compensações do mês.\n\n⚠️ Um backup será salvo no Histórico — você pode restaurar a versão anterior a qualquer momento.`)) return;
+                  // Snapshot bulk antes do reset
+                  const preSnap2 = snapshotSchedulesMonth(schedules, rid, mk);
+                  saveVersion("schedules", rid, mk, data?.scheduleVersions, preSnap2, currentUser?.name || (isOwner?"Admin AppTip":"Gestor"), `Reiniciar escala (${schedArea==="Todos"?"todas as áreas":schedArea})`, onUpdate, true);
                   let newSched = JSON.parse(JSON.stringify(schedules ?? {}));
                   if (!newSched[rid]) newSched[rid] = {};
                   if (!newSched[rid][mk]) newSched[rid][mk] = {};
@@ -5048,7 +5303,40 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                   style={{padding:mobileOnly?"6px 8px":"8px 12px",borderRadius:10,border:`1px solid ${showVacForm?"#8b5cf6":"#8b5cf644"}`,background:showVacForm?"#8b5cf622":"transparent",color:"#8b5cf6",cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:mobileOnly?10:12,whiteSpace:"nowrap"}}>
                   {mobileOnly?"🏖️ Férias":"🏖️ Marcar férias"}
                 </button>
+
+                {/* Histórico — só Admin e DP */}
+                {(isOwner || isDP) && (() => {
+                  const vCount = (data?.scheduleVersions?.[rid]?.[mk] ?? []).length;
+                  return (
+                    <button onClick={()=>setShowSchedHistory(true)}
+                      title="Ver e restaurar versões anteriores desta escala"
+                      style={{padding:mobileOnly?"6px 8px":"8px 12px",borderRadius:10,border:"1px solid var(--ac)44",background:"transparent",color:"var(--ac-text)",cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:mobileOnly?10:12,whiteSpace:"nowrap"}}>
+                      🕐 {mobileOnly?"Histórico":"Histórico"}{vCount>0?` (${vCount})`:""}
+                    </button>
+                  );
+                })()}
               </div>
+
+              {/* Modal de histórico da escala */}
+              {showSchedHistory && (
+                <VersionHistoryModal
+                  title={`🕐 Histórico da Escala — ${monthLabel(year, month)}`}
+                  versions={data?.scheduleVersions?.[rid]?.[mk]}
+                  onClose={()=>setShowSchedHistory(false)}
+                  onRestore={(v)=>{
+                    // Salva o estado atual como nova versão (pra poder desfazer o restore)
+                    const curSnap = snapshotSchedulesMonth(schedules, rid, mk);
+                    saveVersion("schedules", rid, mk, data?.scheduleVersions, curSnap, currentUser?.name || (isOwner?"Admin AppTip":"Gestor"), `Antes de restaurar "${v.reason}"`, onUpdate, true);
+                    // Aplica a versão restaurada
+                    const newSched = JSON.parse(JSON.stringify(schedules ?? {}));
+                    if (!newSched[rid]) newSched[rid] = {};
+                    newSched[rid][mk] = JSON.parse(JSON.stringify(v.snapshot ?? {}));
+                    onUpdate("schedules", newSched);
+                    setShowSchedHistory(false);
+                    onUpdate("_toast", `♻️ Escala restaurada para "${v.reason}" (${fmtRelTime(v.ts)})`);
+                  }}
+                />
+              )}
 
               {/* PDF export — à direita (desktop only) */}
               {!mobileOnly && <button onClick={async () => {
@@ -5236,6 +5524,9 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                         cur.setDate(cur.getDate() + 1);
                       }
                       newSched[rid][mk][vacEmpId] = empMap;
+                      // Snapshot bulk antes de marcar férias
+                      const preSnapV = snapshotSchedulesMonth(schedules, rid, mk);
+                      saveVersion("schedules", rid, mk, data?.scheduleVersions, preSnapV, currentUser?.name || (isOwner?"Admin AppTip":"Gestor"), `Férias marcadas (${emp.name}, ${count} dia${count>1?"s":""})`, onUpdate, true);
                       onUpdate("schedules", newSched);
                       setShowVacForm(false);
                       onUpdate("_toast", `🏖️ ${count} dia(s) de férias marcados para ${emp.name}`);
@@ -5262,6 +5553,9 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                 const next = idx === DAY_CYCLE.length - 1 ? null : DAY_CYCLE[idx + 1];
                 const newMap = { ...empDayMap };
                 if (next === null) delete newMap[dateStr]; else newMap[dateStr] = next;
+                // Snapshot PRE-edit (debounced — agrupa cliques em 30s)
+                const preSnap = snapshotSchedulesMonth(schedules, rid, mk);
+                saveVersion("schedules", rid, mk, data?.scheduleVersions, preSnap, currentUser?.name || (isOwner?"Admin AppTip":"Gestor"), "Edição manual", onUpdate, false);
                 onUpdate("schedules", {
                   ...schedules,
                   [rid]: { ...(schedules?.[rid]??{}), [mk]: { ...(schedules?.[rid]?.[mk]??{}), [empId]: newMap } }
@@ -7666,6 +7960,16 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }
 
         {tab === "changelog" && (() => {
           const CHANGELOG = [
+            { version:"5.14.0", date:"2026-04-12", items:[
+              "Novo: Histórico de versões da Escala — botão '🕐 Histórico' no topo da aba (Admin/DP). Últimas 30 versões, restore do mês inteiro, cada alteração vira ponto no histórico",
+              "Novo: Histórico de versões das Gorjetas — mesmo formato da escala, botão '🕐 Histórico' na aba Gorjetas",
+              "Novo: ações bulk (Reiniciar escala, Folgas do contrato, Marcar férias, Recalcular, Remover gorjeta) geram snapshot automático antes de aplicar",
+              "Novo: edições individuais na escala geram snapshot debounced de 30s (agrupa cliques em sequência)",
+              "Novo: restaurar versão também cria um ponto — permite desfazer o desfazer",
+              "Novo: Horários — botão '♻️ Reativar' em cada versão do histórico copia a versão antiga como nova vigência a partir de hoje",
+              "Melhoria: fluxo de Horários separado em 2 passos — '✓ Validar Horários' confirma as regras CLT e só depois libera '💾 Salvar Horário' (previne salvamento acidental sem validar)",
+              "Melhoria: card verde 'Horário validado' aparece entre validação e salvamento como confirmação visual",
+            ]},
             { version:"5.13.0", date:"2026-04-12", items:[
               "Novo: botão '🔑 Resetar PIN' nos cards de gestores (Admin AppTip e DP Gestores) — PIN volta para 4 primeiros dígitos do CPF e força troca no próximo acesso",
               "Melhoria: fluxo de reset de PIN dos gestores agora consistente com o dos empregados",
@@ -9636,13 +9940,15 @@ export default function App() {
   const [trash,         setTrash]         = useState({ restaurants:[], managers:[], employees:[] });
   const [schedTemplates,setSchedTemplates]= useState({});
   const [schedDrafts,   setSchedDrafts]   = useState({});
+  const [scheduleVersions, setScheduleVersions] = useState({});
+  const [tipVersions,      setTipVersions]      = useState({});
 
   useEffect(() => {
     const savedId = currentUserId;
     (async () => {
       const vals = await Promise.all(Object.values(K).map(load));
       const keys = Object.keys(K);
-      const map = { owners:setOwners, managers:setManagers, restaurants:setRestaurants, employees:setEmployees, roles:setRoles, tips:setTips, splits:setSplits, schedules:setSchedules, communications:setCommunications, commAcks:setCommAcks, faq:setFaq, dpMessages:setDpMessages, workSchedules:setWorkSchedules, notifications:setNotifications, noTipDays:setNoTipDays, trash:setTrash, schedTemplates:setSchedTemplates, schedDrafts:setSchedDrafts };
+      const map = { owners:setOwners, managers:setManagers, restaurants:setRestaurants, employees:setEmployees, roles:setRoles, tips:setTips, splits:setSplits, schedules:setSchedules, communications:setCommunications, commAcks:setCommAcks, faq:setFaq, dpMessages:setDpMessages, workSchedules:setWorkSchedules, notifications:setNotifications, noTipDays:setNoTipDays, trash:setTrash, schedTemplates:setSchedTemplates, schedDrafts:setSchedDrafts, scheduleVersions:setScheduleVersions, tipVersions:setTipVersions };
       const loaded_data = {};
       keys.forEach((k, i) => { if (k !== "receipts" && vals[i]) { map[k]?.(vals[i]); loaded_data[k] = vals[i]; } });
 
@@ -9744,12 +10050,12 @@ export default function App() {
     })();
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const data = { owners, managers, restaurants, employees, roles, tips, splits, schedules, communications, commAcks, faq, dpMessages, workSchedules, notifications, noTipDays, trash, schedTemplates, schedDrafts };
+  const data = { owners, managers, restaurants, employees, roles, tips, splits, schedules, communications, commAcks, faq, dpMessages, workSchedules, notifications, noTipDays, trash, schedTemplates, schedDrafts, scheduleVersions, tipVersions };
 
   async function handleUpdate(field, value) {
     if (field === "_toast") { setToast(value); return; }
-    const setters = { owners:setOwners, managers:setManagers, restaurants:setRestaurants, employees:setEmployees, roles:setRoles, tips:setTips, splits:setSplits, schedules:setSchedules, communications:setCommunications, commAcks:setCommAcks, faq:setFaq, dpMessages:setDpMessages, workSchedules:setWorkSchedules, notifications:setNotifications, noTipDays:setNoTipDays, trash:setTrash, schedTemplates:setSchedTemplates, schedDrafts:setSchedDrafts };
-    const keys    = { owners:K.owners, managers:K.managers, restaurants:K.restaurants, employees:K.employees, roles:K.roles, tips:K.tips, splits:K.splits, schedules:K.schedules, communications:K.communications, commAcks:K.commAcks, faq:K.faq, dpMessages:K.dpMessages, workSchedules:K.workSchedules, notifications:K.notifications, noTipDays:K.noTipDays, trash:K.trash, schedTemplates:K.schedTemplates, schedDrafts:K.schedDrafts };
+    const setters = { owners:setOwners, managers:setManagers, restaurants:setRestaurants, employees:setEmployees, roles:setRoles, tips:setTips, splits:setSplits, schedules:setSchedules, communications:setCommunications, commAcks:setCommAcks, faq:setFaq, dpMessages:setDpMessages, workSchedules:setWorkSchedules, notifications:setNotifications, noTipDays:setNoTipDays, trash:setTrash, schedTemplates:setSchedTemplates, schedDrafts:setSchedDrafts, scheduleVersions:setScheduleVersions, tipVersions:setTipVersions };
+    const keys    = { owners:K.owners, managers:K.managers, restaurants:K.restaurants, employees:K.employees, roles:K.roles, tips:K.tips, splits:K.splits, schedules:K.schedules, communications:K.communications, commAcks:K.commAcks, faq:K.faq, dpMessages:K.dpMessages, workSchedules:K.workSchedules, notifications:K.notifications, noTipDays:K.noTipDays, trash:K.trash, schedTemplates:K.schedTemplates, schedDrafts:K.schedDrafts, scheduleVersions:K.scheduleVersions, tipVersions:K.tipVersions };
     setters[field]?.(value);
     if (keys[field]) {
       const ok = await save(keys[field], value);
@@ -9758,7 +10064,8 @@ export default function App() {
         return;
       }
     }
-    const labels = { owners:"Admins atualizados", managers:"Gestores atualizados", restaurants:"Restaurantes atualizados", employees:"Empregados atualizados", roles:"Cargos atualizados", tips:"Gorjetas atualizadas", splits:"Percentuais salvos", schedules:"Escala atualizada", communications:"Comunicados atualizados", commAcks:"Ciências atualizadas", faq:"FAQ atualizado", dpMessages:"Mensagem enviada", workSchedules:"Horários salvos", notifications:"Notificações atualizadas", schedTemplates:"Template salvo", schedDrafts:"Rascunho salvo", trash:"Lixeira atualizada", noTipDays:"Dias sem gorjeta atualizados" };
+    const labels = { owners:"Admins atualizados", managers:"Gestores atualizados", restaurants:"Restaurantes atualizados", employees:"Empregados atualizados", roles:"Cargos atualizados", tips:"Gorjetas atualizadas", splits:"Percentuais salvos", schedules:"Escala atualizada", communications:"Comunicados atualizados", commAcks:"Ciências atualizadas", faq:"FAQ atualizado", dpMessages:"Mensagem enviada", workSchedules:"Horários salvos", notifications:"Notificações atualizadas", schedTemplates:"Template salvo", schedDrafts:"Rascunho salvo", trash:"Lixeira atualizada", noTipDays:"Dias sem gorjeta atualizados", scheduleVersions:null, tipVersions:null };
+    if (labels[field] === null) return; // silent save (e.g. version snapshots)
     setToast(labels[field] ?? (typeof value === "string" ? value : "Salvo!"));
   }
 
