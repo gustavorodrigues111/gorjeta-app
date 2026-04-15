@@ -3,7 +3,7 @@ import { useState, useEffect, Component } from "react";
 import { db } from "./firebase";
 import { doc, getDoc, setDoc } from "firebase/firestore";
 
-const APP_VERSION = "5.14.0";
+const APP_VERSION = "5.14.1";
 
 const DEFAULT_ADMISSION = () => `${new Date().getFullYear()}-01-01`;
 const round2 = (v) => Math.round(v * 100) / 100;
@@ -1717,7 +1717,8 @@ function WorkScheduleManagerTab({ restaurantId, employees, roles, workSchedules,
     setValidated(false);
   }
 
-  // ── "Salvar Dias" (days-only, no hours required) ──
+  // ── "Salvar Dias" (days-only, no hours required) — botão removido na v5.14.1, função preservada ──
+  // eslint-disable-next-line no-unused-vars
   function trySaveDays() {
     const activeDays = Object.values(editDays).filter(d => d.active);
     if (activeDays.length === 0) { setErrors(["Selecione pelo menos um dia de trabalho."]); return; }
@@ -2655,18 +2656,14 @@ function WorkScheduleManagerTab({ restaurantId, employees, roles, workSchedules,
             </div>
           )}
           <div style={{display:"flex",gap:mobileOnly?8:12,flexWrap:"wrap"}}>
-            <button onClick={trySaveDays} disabled={activeDayCount === 0}
-              style={{...S.btnSecondary,flex:1,minWidth:mobileOnly?80:160,fontSize:mobileOnly?12:14,padding:mobileOnly?"10px 8px":"14px 24px",fontWeight:600,opacity:activeDayCount>0?1:0.4}}>
-              📅 Salvar Dias
-            </button>
             {validated ? (
               <button onClick={proceedToSave}
-                style={{...S.btnPrimary,flex:2,minWidth:mobileOnly?120:220,fontSize:mobileOnly?12:14,padding:mobileOnly?"10px 8px":"14px 24px",fontWeight:700,background:"var(--green)"}}>
+                style={{...S.btnPrimary,flex:1,minWidth:mobileOnly?120:220,fontSize:mobileOnly?13:15,padding:mobileOnly?"12px 10px":"14px 24px",fontWeight:700,background:"var(--green)"}}>
                 💾 Salvar Horário
               </button>
             ) : (
               <button onClick={tryValidateFull} disabled={!allHoursFilled || activeDayCount === 0}
-                style={{...S.btnPrimary,flex:2,minWidth:mobileOnly?120:220,fontSize:mobileOnly?12:14,padding:mobileOnly?"10px 8px":"14px 24px",fontWeight:700,opacity:allHoursFilled&&activeDayCount>0?1:0.4}}>
+                style={{...S.btnPrimary,flex:1,minWidth:mobileOnly?120:220,fontSize:mobileOnly?13:15,padding:mobileOnly?"12px 10px":"14px 24px",fontWeight:700,opacity:allHoursFilled&&activeDayCount>0?1:0.4}}>
                 ✓ Validar Horários
               </button>
             )}
@@ -5923,13 +5920,6 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
         {/* HORARIOS */}
         {tab === "horarios" && (
           <div>
-            {isOwner && <div style={{display:"flex",justifyContent:"flex-end",padding:"12px 16px 0"}}>
-              <button onClick={()=>{
-                const ws = data?.workSchedules?.[rid];
-                const ok = resetTab("horarios","Horários",()=>({workSchedules:ws}));
-                if(ok){ const w={...data?.workSchedules}; delete w[rid]; onUpdate("workSchedules",w); onUpdate("_toast","🗑️ Horários enviados para a lixeira"); }
-              }} style={{...S.btnSecondary,fontSize:12,color:"var(--red)",borderColor:"var(--red)44"}}>🗑️ Resetar horários</button>
-            </div>}
             <WorkScheduleManagerTab restaurantId={rid} employees={employees} roles={roles} workSchedules={data?.workSchedules??{}} notifications={data?.notifications??[]} managers={data?.managers??[]} currentManagerName={currentUser?.name ?? (isOwner?"Admin AppTip":"Gestor")} onUpdate={onUpdate} communications={data?.communications??[]} isOwner={isOwner} mobileOnly={mobileOnly} />
           </div>
         )}
@@ -7960,6 +7950,11 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }
 
         {tab === "changelog" && (() => {
           const CHANGELOG = [
+            { version:"5.14.1", date:"2026-04-12", items:[
+              "Removido: botão 'Salvar Dias' da aba Horários — fluxo unificado em Validar → Salvar Horário",
+              "Removido: botão 'Resetar horários' da página geral de Horários — ação preservada apenas na tela de edição do empregado (evita duplicação)",
+              "Melhoria: botão de Validar/Salvar Horário ocupa toda a largura disponível (mais visível)",
+            ]},
             { version:"5.14.0", date:"2026-04-12", items:[
               "Novo: Histórico de versões da Escala — botão '🕐 Histórico' no topo da aba (Admin/DP). Últimas 30 versões, restore do mês inteiro, cada alteração vira ponto no histórico",
               "Novo: Histórico de versões das Gorjetas — mesmo formato da escala, botão '🕐 Histórico' na aba Gorjetas",
