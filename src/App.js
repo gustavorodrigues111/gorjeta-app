@@ -3,7 +3,7 @@ import { useState, useEffect, Component } from "react";
 import { db } from "./firebase";
 import { doc, getDoc, setDoc } from "firebase/firestore";
 
-const APP_VERSION = "5.12.3";
+const APP_VERSION = "5.13.0";
 
 const DEFAULT_ADMISSION = () => `${new Date().getFullYear()}-01-01`;
 const round2 = (v) => Math.round(v * 100) / 100;
@@ -849,7 +849,7 @@ function ComunicadosManagerTab({ restaurantId, communications, commAcks, employe
       );
       setTitle(result.titulo); setBody(result.corpo); setAiInput("");
     } catch(e) {
-      setAiError("Não foi possível gerar sugestão. Tente novamente.");
+      setAiError(e.message || "Não foi possível gerar sugestão. Tente novamente.");
     }
     setAiLoading(false);
   }
@@ -1065,24 +1065,56 @@ const r = employees.find(x=>x.id===e.id); return true; }) // area filter below
 const GROQ_KEY = process.env.REACT_APP_GROQ_KEY ?? "";
 
 async function groqGenerate(systemPrompt, userInput) {
-  const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-    method: "POST",
-    headers: { "Content-Type": "application/json", "Authorization": `Bearer ${GROQ_KEY}` },
-    body: JSON.stringify({
-      model: "llama-3.3-70b-versatile",
-      messages: [
-        { role: "system", content: systemPrompt },
-        { role: "user", content: userInput },
-      ],
-      temperature: 0.15,
-      response_format: { type: "json_object" },
-      max_tokens: 2048,
-    }),
-  });
-  const data = await res.json();
-  if (data.error) throw new Error(data.error.message || "Groq error");
+  if (!GROQ_KEY || GROQ_KEY.length < 20) {
+    throw new Error("Chave da IA não configurada (REACT_APP_GROQ_KEY ausente no build). Contate o admin.");
+  }
+  let res;
+  try {
+    res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Authorization": `Bearer ${GROQ_KEY}` },
+      body: JSON.stringify({
+        model: "llama-3.3-70b-versatile",
+        messages: [
+          { role: "system", content: systemPrompt },
+          { role: "user", content: userInput },
+        ],
+        temperature: 0.15,
+        response_format: { type: "json_object" },
+        max_tokens: 2048,
+      }),
+    });
+  } catch (netErr) {
+    console.error("[Groq] Erro de rede:", netErr);
+    throw new Error("Erro de conexão com a IA. Verifique sua internet e tente novamente.");
+  }
+
+  let data;
+  try {
+    data = await res.json();
+  } catch (parseErr) {
+    console.error("[Groq] Resposta inválida (não-JSON):", res.status, await res.text().catch(()=>"(sem corpo)"));
+    throw new Error(`Resposta inválida da IA (HTTP ${res.status}).`);
+  }
+
+  if (!res.ok || data.error) {
+    const msg = data.error?.message || `HTTP ${res.status}`;
+    const code = data.error?.code || data.error?.type;
+    console.error("[Groq] Erro da API:", { status: res.status, code, msg, data });
+    if (res.status === 401) throw new Error("Chave da IA inválida ou expirada. Contate o admin.");
+    if (res.status === 429) throw new Error("Limite de requisições da IA excedido. Aguarde alguns instantes.");
+    if (res.status === 404 || /model.*not.*found|decommission/i.test(msg)) throw new Error("Modelo da IA indisponível. Atualização necessária.");
+    throw new Error(`IA retornou erro: ${msg}`);
+  }
+
   const raw = data.choices?.[0]?.message?.content ?? "";
-  return JSON.parse(raw.replace(/```json|```/g, "").trim());
+  if (!raw.trim()) throw new Error("IA retornou resposta vazia. Tente reformular o pedido.");
+  try {
+    return JSON.parse(raw.replace(/```json|```/g, "").trim());
+  } catch (parseErr) {
+    console.error("[Groq] Não foi possível parsear JSON:", raw);
+    throw new Error("IA retornou texto fora do formato esperado. Tente novamente.");
+  }
 }
 
 // FAQ MANAGER TAB
@@ -1132,7 +1164,7 @@ function FaqManagerTab({ restaurantId, faq, onUpdate }) {
       setForm({ q: result.q, a: result.a });
       setAiInput("");
     } catch (e) {
-      setAiError("Não foi possível gerar sugestão. Tente novamente.");
+      setAiError(e.message || "Não foi possível gerar sugestão. Tente novamente.");
     }
     setAiLoading(false);
   }
@@ -3147,7 +3179,7 @@ Inclua apenas as ações solicitadas. Arrays vazios se não houver ação daquel
         setAiPreview(preview);
       }
     } catch(e) {
-      setAiError("Não foi possível processar. Tente reformular.");
+      setAiError(e.message || "Não foi possível processar. Tente reformular.");
     }
     setAiLoading(false);
   }
@@ -3615,7 +3647,7 @@ Inclua apenas as ações solicitadas. Arrays vazios se não houver ação daquel
         setAiEmpPreview(preview);
       }
     } catch(e) {
-      setAiEmpError("Não foi possível processar. Tente reformular.");
+      setAiEmpError(e.message || "Não foi possível processar. Tente reformular.");
     }
     setAiEmpLoading(false);
   }
@@ -5666,7 +5698,15 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                       {!mine && <div style={{color:"var(--text3)",fontSize:10,marginTop:2,fontStyle:"italic"}}>Criado pelo admin</div>}
                     </div>
                     {mine && (
-                      <div style={{display:"flex",gap:6,flexShrink:0}}>
+                      <div style={{display:"flex",gap:6,flexShrink:0,flexWrap:"wrap"}}>
+                        <button onClick={()=>{
+                          const cpfDigits = (m.cpf??"").replace(/\D/g,"");
+                          if (cpfDigits.length < 4) { onUpdate("_toast","⚠️ CPF inválido — não foi possível gerar PIN automático"); return; }
+                          const newPin = cpfDigits.slice(0,4);
+                          if(!window.confirm(`Resetar PIN de "${m.name}"?\n\nO PIN voltará para ${newPin} (4 primeiros dígitos do CPF) e ele será obrigado a trocar no próximo acesso.`)) return;
+                          onUpdate("managers", managers.map(x=>x.id===m.id?{...x,pin:newPin,mustChangePin:true}:x));
+                          onUpdate("_toast",`🔑 PIN de ${m.name} resetado para ${newPin}`);
+                        }} title="Resetar PIN para os 4 primeiros dígitos do CPF" style={{...S.btnSecondary,fontSize:11,padding:"5px 10px"}}>🔑 Resetar PIN</button>
                         <button onClick={()=>{
                           setDpMgrEdit(m.id);
                           setDpMgrForm({name:m.name,cpf:m.cpf??"",pin:m.pin??"",restaurantIds:m.restaurantIds??[],perms:m.perms??{tips:true,schedule:true},isDP:m.isDP??false,profile:m.profile??"custom",areas:m.areas??[]});
@@ -6290,7 +6330,15 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }
                         </div>
                       )}
                     </div>
-                    <div style={{display:"flex",gap:8,flexShrink:0}}>
+                    <div style={{display:"flex",gap:8,flexShrink:0,flexWrap:"wrap"}}>
+                      <button onClick={()=>{
+                        const cpfDigits = (m.cpf??"").replace(/\D/g,"");
+                        if (cpfDigits.length < 4) { onUpdate("_toast","⚠️ CPF inválido — não foi possível gerar PIN automático"); return; }
+                        const newPin = cpfDigits.slice(0,4);
+                        if(!window.confirm(`Resetar PIN de "${m.name}"?\n\nO PIN voltará para ${newPin} (4 primeiros dígitos do CPF) e ele será obrigado a trocar no próximo acesso.`)) return;
+                        onUpdate("managers", managers.map(x=>x.id===m.id?{...x,pin:newPin,mustChangePin:true}:x));
+                        onUpdate("_toast", `🔑 PIN de ${m.name} resetado para ${newPin}`);
+                      }} title="Resetar PIN para os 4 primeiros dígitos do CPF" style={{...S.btnSecondary,fontSize:12}}>🔑 Resetar PIN</button>
                       <button onClick={()=>{setEditMgrId(m.id);setMgrForm({name:m.name,cpf:m.cpf??"",pin:m.pin??"",restaurantIds:m.restaurantIds??[],perms:m.perms??{tips:true,schedule:true},isDP:m.isDP??false,profile:m.profile??"custom",areas:m.areas??[]});setShowMgrModal(true);}} style={{...S.btnSecondary,fontSize:12}}>Editar</button>
                       <button onClick={()=>{
                         if(!window.confirm(`Remover ${m.name} deste restaurante?`)) return;
@@ -7618,6 +7666,13 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }
 
         {tab === "changelog" && (() => {
           const CHANGELOG = [
+            { version:"5.13.0", date:"2026-04-12", items:[
+              "Novo: botão '🔑 Resetar PIN' nos cards de gestores (Admin AppTip e DP Gestores) — PIN volta para 4 primeiros dígitos do CPF e força troca no próximo acesso",
+              "Melhoria: fluxo de reset de PIN dos gestores agora consistente com o dos empregados",
+              "Correção: IA (Comunicados, FAQ, Cargos, Empregados, Horários) agora exibe mensagem real do erro em vez de 'Não foi possível gerar'",
+              "Correção: groqGenerate detecta chave ausente, modelo descontinuado, rate limit (429) e auth inválido (401) com mensagens específicas",
+              "Correção: erros da IA agora aparecem no console.error com detalhes completos (status, código, payload)",
+            ]},
             { version:"5.12.3", date:"2026-04-12", items:[
               "Melhoria: cards 'Copiar horário' e 'Assistente IA' em Horários com padding 18px 22px, ícones maiores, subtítulo descritivo e divisor ao expandir",
               "Melhoria: no desktop, input + botão da IA ficam lado a lado (antes empilhados)",
