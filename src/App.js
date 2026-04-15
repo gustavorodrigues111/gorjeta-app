@@ -3,7 +3,7 @@ import { useState, useEffect, Component } from "react";
 import { db } from "./firebase";
 import { doc, getDoc, setDoc } from "firebase/firestore";
 
-const APP_VERSION = "5.12.2";
+const APP_VERSION = "5.12.3";
 
 const DEFAULT_ADMISSION = () => `${new Date().getFullYear()}-01-01`;
 const round2 = (v) => Math.round(v * 100) / 100;
@@ -2144,21 +2144,24 @@ function WorkScheduleManagerTab({ restaurantId, employees, roles, workSchedules,
 
       {/* ═══ COPY FROM ANOTHER EMPLOYEE ═══ */}
       {empsWithSched.length > 0 && (
-        <div style={{...S.card,marginBottom:mobileOnly?8:12,padding:mobileOnly?"10px 12px":undefined,border:copyPickerOpen?"2px solid #06b6d444":"1px solid var(--border)",background:copyPickerOpen?"#06b6d408":"var(--card-bg)"}}>
-          <div onClick={()=>setCopyPickerOpen(!copyPickerOpen)} style={{display:"flex",justifyContent:"space-between",alignItems:"center",cursor:"pointer"}}>
-            <div style={{display:"flex",alignItems:"center",gap:8}}>
-              <span style={{fontSize:mobileOnly?14:16}}>📋</span>
-              <span style={{color:"#06b6d4",fontWeight:700,fontSize:mobileOnly?12:13}}>Copiar horário de outro empregado</span>
+        <div style={{...S.card,marginBottom:mobileOnly?8:14,padding:mobileOnly?"12px 14px":"18px 22px",border:copyPickerOpen?"2px solid #06b6d444":"1px solid var(--border)",background:copyPickerOpen?"#06b6d408":"var(--card-bg)"}}>
+          <div onClick={()=>setCopyPickerOpen(!copyPickerOpen)} style={{display:"flex",justifyContent:"space-between",alignItems:"center",cursor:"pointer",gap:12}}>
+            <div style={{display:"flex",alignItems:"center",gap:mobileOnly?10:14}}>
+              <span style={{fontSize:mobileOnly?18:22,lineHeight:1}}>📋</span>
+              <div>
+                <div style={{color:"#06b6d4",fontWeight:700,fontSize:mobileOnly?13:15,letterSpacing:-0.2}}>Copiar horário de outro empregado</div>
+                {!mobileOnly && <div style={{color:"var(--text3)",fontSize:12,marginTop:2}}>Traga os dias e horários de um colega como ponto de partida</div>}
+              </div>
             </div>
-            <span style={{color:"var(--text3)",fontSize:12}}>{copyPickerOpen?"▲":"▼"}</span>
+            <span style={{color:"var(--text3)",fontSize:14,flexShrink:0}}>{copyPickerOpen?"▲":"▼"}</span>
           </div>
           {copyPickerOpen && (
-            <div style={{marginTop:mobileOnly?8:12}}>
-              <p style={{color:"var(--text3)",fontSize:mobileOnly?10:11,margin:"0 0 8px",lineHeight:1.5}}>
+            <div style={{marginTop:mobileOnly?12:16,paddingTop:mobileOnly?12:16,borderTop:"1px solid var(--border)"}}>
+              <p style={{color:"var(--text3)",fontSize:mobileOnly?11:12,margin:"0 0 12px",lineHeight:1.6}}>
                 Seleciona um empregado — os dias e horários serão copiados para edição (nada é salvo automaticamente).
               </p>
               <select defaultValue="" onChange={e=>{ if(e.target.value) copyFromEmployee(e.target.value); e.target.value=""; }}
-                style={{...S.input,width:"100%",fontSize:mobileOnly?13:14,cursor:"pointer"}}>
+                style={{...S.input,width:"100%",fontSize:mobileOnly?13:14,padding:mobileOnly?undefined:"12px 14px",cursor:"pointer"}}>
                 <option value="" disabled>Selecionar empregado...</option>
                 {(() => {
                   const restRoles = roles?.filter(r => r.restaurantId === restaurantId) ?? [];
@@ -2199,50 +2202,53 @@ function WorkScheduleManagerTab({ restaurantId, employees, roles, workSchedules,
       )}
 
       {/* ═══ AI ASSISTANT ═══ */}
-      <div style={{...S.card,marginBottom:mobileOnly?8:12,padding:mobileOnly?"10px 12px":undefined,border:aiOpen?"2px solid #8b5cf644":"1px solid var(--border)",background:aiOpen?"#8b5cf608":"var(--card-bg)"}}>
-        <div onClick={()=>setAiOpen(!aiOpen)} style={{display:"flex",justifyContent:"space-between",alignItems:"center",cursor:"pointer"}}>
-          <div style={{display:"flex",alignItems:"center",gap:8}}>
-            <span style={{fontSize:mobileOnly?14:16}}>🤖</span>
-            <span style={{color:"#8b5cf6",fontWeight:700,fontSize:mobileOnly?12:13}}>Assistente de Horários</span>
+      <div style={{...S.card,marginBottom:mobileOnly?8:14,padding:mobileOnly?"12px 14px":"18px 22px",border:aiOpen?"2px solid #8b5cf644":"1px solid var(--border)",background:aiOpen?"#8b5cf608":"var(--card-bg)"}}>
+        <div onClick={()=>setAiOpen(!aiOpen)} style={{display:"flex",justifyContent:"space-between",alignItems:"center",cursor:"pointer",gap:12}}>
+          <div style={{display:"flex",alignItems:"center",gap:mobileOnly?10:14}}>
+            <span style={{fontSize:mobileOnly?18:22,lineHeight:1}}>🤖</span>
+            <div>
+              <div style={{color:"#8b5cf6",fontWeight:700,fontSize:mobileOnly?13:15,letterSpacing:-0.2}}>Assistente de Horários</div>
+              {!mobileOnly && <div style={{color:"var(--text3)",fontSize:12,marginTop:2}}>Descreva o horário em linguagem natural — a IA preenche os campos</div>}
+            </div>
           </div>
-          <span style={{color:"var(--text3)",fontSize:12}}>{aiOpen?"▲":"▼"}</span>
+          <span style={{color:"var(--text3)",fontSize:14,flexShrink:0}}>{aiOpen?"▲":"▼"}</span>
         </div>
         {aiOpen && (
-          <div style={{marginTop:mobileOnly?8:12}}>
-            <p style={{color:"var(--text3)",fontSize:mobileOnly?10:11,margin:"0 0 8px",lineHeight:1.5}}>
+          <div style={{marginTop:mobileOnly?12:16,paddingTop:mobileOnly?12:16,borderTop:"1px solid var(--border)"}}>
+            <p style={{color:"var(--text3)",fontSize:mobileOnly?11:12,margin:"0 0 12px",lineHeight:1.6}}>
               {mobileOnly
-                ? "Descreva em linguagem natural. Ex: \"folga dom e seg, 44h semanais entrando às 10\""
-                : "Descreva o que deseja e o assistente preenche automaticamente. Exemplos: \"folga domingo e segunda\", \"entra 08:00 sai 17:00 intervalo 60min\", \"escala 6x1\""}
+                ? "Ex: \"folga dom e seg, 44h semanais entrando às 10\""
+                : "Exemplos: \"folga domingo e segunda, entra 08:00 sai 17:00 intervalo 60min\" · \"escala 6x1\" · \"Qua e Qui: 15h às 24h com 1h de intervalo\""}
             </p>
-            <div style={{display:"flex",flexDirection:"column",gap:8}}>
+            <div style={{display:"flex",flexDirection:mobileOnly?"column":"row",gap:mobileOnly?8:10}}>
               <input
                 type="text" value={aiPrompt}
                 onChange={e=>setAiPrompt(e.target.value)}
                 onKeyDown={e=>{ if(e.key==="Enter") handleAiSubmit(); }}
-                placeholder="Ex: folga dom e seg, entra 08:00 sai 16:20..."
-                style={{...S.input,width:"100%",fontSize:13,boxSizing:"border-box"}}
+                placeholder="Descreva o horário..."
+                style={{...S.input,flex:1,fontSize:mobileOnly?13:14,padding:mobileOnly?undefined:"12px 14px",boxSizing:"border-box"}}
               />
               <button onClick={handleAiSubmit} disabled={aiLoading||!aiPrompt.trim()}
-                style={{...S.btnPrimary,padding:"10px 16px",fontSize:13,whiteSpace:"nowrap",opacity:aiLoading||!aiPrompt.trim()?0.5:1,background:"#8b5cf6",width:"100%"}}>
-                {aiLoading ? "..." : "Sugerir"}
+                style={{...S.btnPrimary,padding:mobileOnly?"10px 16px":"12px 28px",fontSize:mobileOnly?13:14,fontWeight:700,whiteSpace:"nowrap",opacity:aiLoading||!aiPrompt.trim()?0.5:1,background:"#8b5cf6",width:mobileOnly?"100%":"auto",minWidth:mobileOnly?undefined:140}}>
+                {aiLoading ? "..." : "✨ Sugerir"}
               </button>
             </div>
             {aiResult && (
-              <div style={{marginTop:12,padding:"12px 14px",borderRadius:10,background:aiResult.days?"#f0fdf4":"#fff7ed",border:`1px solid ${aiResult.days?"#10b98133":"#f59e0b33"}`}}>
-                <p style={{color:aiResult.days?"var(--green)":"#f59e0b",fontSize:12,fontWeight:700,margin:"0 0 8px"}}>
+              <div style={{marginTop:mobileOnly?12:16,padding:mobileOnly?"12px 14px":"16px 18px",borderRadius:12,background:aiResult.days?"#f0fdf4":"#fff7ed",border:`1px solid ${aiResult.days?"#10b98133":"#f59e0b33"}`}}>
+                <p style={{color:aiResult.days?"var(--green)":"#f59e0b",fontSize:mobileOnly?12:13,fontWeight:700,margin:"0 0 10px"}}>
                   {aiResult.days ? "✅ Sugestão do assistente:" : "⚠️ Não entendido"}
                 </p>
-                <pre style={{color:"var(--text2)",fontSize:11,margin:0,whiteSpace:"pre-wrap",fontFamily:"'DM Mono',monospace"}}>{aiResult.message}</pre>
+                <pre style={{color:"var(--text2)",fontSize:mobileOnly?11:12,margin:0,whiteSpace:"pre-wrap",fontFamily:"'DM Mono',monospace",lineHeight:1.6}}>{aiResult.message}</pre>
                 {aiResult.warnings?.length > 0 && (
-                  <div style={{marginTop:8,padding:"8px 10px",borderRadius:8,background:"#fff7ed",border:"1px solid #f59e0b33"}}>
-                    <p style={{color:"#f59e0b",fontSize:11,fontWeight:700,margin:"0 0 4px"}}>⚠️ Avisos:</p>
-                    {aiResult.warnings.map((w,i) => <p key={i} style={{color:"#92400e",fontSize:11,margin:"2px 0"}}>{w}</p>)}
+                  <div style={{marginTop:10,padding:"10px 12px",borderRadius:8,background:"#fff7ed",border:"1px solid #f59e0b33"}}>
+                    <p style={{color:"#f59e0b",fontSize:mobileOnly?11:12,fontWeight:700,margin:"0 0 4px"}}>⚠️ Avisos:</p>
+                    {aiResult.warnings.map((w,i) => <p key={i} style={{color:"#92400e",fontSize:mobileOnly?11:12,margin:"2px 0"}}>{w}</p>)}
                   </div>
                 )}
                 {aiResult.days && (
-                  <div style={{display:"flex",gap:8,marginTop:10}}>
-                    <button onClick={applyAiSuggestion} style={{...S.btnPrimary,padding:"8px 16px",fontSize:12,background:"#8b5cf6"}}>Aplicar sugestão</button>
-                    <button onClick={()=>setAiResult(null)} style={{...S.btnSecondary,padding:"8px 16px",fontSize:12}}>Descartar</button>
+                  <div style={{display:"flex",gap:10,marginTop:14,flexWrap:"wrap"}}>
+                    <button onClick={applyAiSuggestion} style={{...S.btnPrimary,padding:mobileOnly?"8px 16px":"10px 20px",fontSize:mobileOnly?12:13,fontWeight:700,background:"#8b5cf6"}}>✓ Aplicar sugestão</button>
+                    <button onClick={()=>setAiResult(null)} style={{...S.btnSecondary,padding:mobileOnly?"8px 16px":"10px 20px",fontSize:mobileOnly?12:13}}>Descartar</button>
                   </div>
                 )}
               </div>
@@ -7612,6 +7618,11 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }
 
         {tab === "changelog" && (() => {
           const CHANGELOG = [
+            { version:"5.12.3", date:"2026-04-12", items:[
+              "Melhoria: cards 'Copiar horário' e 'Assistente IA' em Horários com padding 18px 22px, ícones maiores, subtítulo descritivo e divisor ao expandir",
+              "Melhoria: no desktop, input + botão da IA ficam lado a lado (antes empilhados)",
+              "Melhoria: resultado da IA com padding 16px 18px e fontes maiores",
+            ]},
             { version:"5.12.2", date:"2026-04-12", items:[
               "Melhoria: barra de Total Semanal em Horários redesenhada — padding generoso, ícone ✅/⚠️, total em 28px mono, descrição do status CLT",
             ]},
