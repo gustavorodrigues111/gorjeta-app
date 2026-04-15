@@ -3,7 +3,7 @@ import { useState, useEffect, Component } from "react";
 import { db } from "./firebase";
 import { doc, getDoc, setDoc } from "firebase/firestore";
 
-const APP_VERSION = "5.10.1";
+const APP_VERSION = "5.11.0";
 
 const DEFAULT_ADMISSION = () => `${new Date().getFullYear()}-01-01`;
 const round2 = (v) => Math.round(v * 100) / 100;
@@ -1517,6 +1517,7 @@ function WorkScheduleManagerTab({ restaurantId, employees, roles, workSchedules,
     setErrors([]);
     setShowValidFrom(false);
     setSaveMode(null);
+    setCopyPickerOpen(false);
     const sched = (workSchedules?.[restaurantId]?.[empId] ?? []);
     const cur = sched[sched.length - 1];
     if (cur) {
@@ -1655,6 +1656,22 @@ function WorkScheduleManagerTab({ restaurantId, employees, roles, workSchedules,
   const [aiPrompt, setAiPrompt] = useState("");
   const [aiResult, setAiResult] = useState(null); // { days: {}, message: "" }
   const [aiLoading, setAiLoading] = useState(false);
+
+  // ── Copy from another employee ──
+  const [copyPickerOpen, setCopyPickerOpen] = useState(false);
+  // Empregados que têm horário cadastrado (exceto o atual)
+  const empsWithSched = restEmps.filter(e => e.id !== selEmpId && (workSchedules?.[restaurantId]?.[e.id]?.length ?? 0) > 0);
+
+  function copyFromEmployee(srcEmpId) {
+    const srcScheds = workSchedules?.[restaurantId]?.[srcEmpId] ?? [];
+    const src = srcScheds[srcScheds.length - 1];
+    if (!src) { onUpdate("_toast","⚠️ Empregado de origem sem horário cadastrado"); return; }
+    setEditDays(toInternal(src));
+    setErrors([]);
+    setCopyPickerOpen(false);
+    const srcEmp = restEmps.find(e => e.id === srcEmpId);
+    onUpdate("_toast", `📋 Horário copiado de ${srcEmp?.name ?? "outro empregado"}`);
+  }
 
   function parseAiCommand(text) {
     const DIAS_FULL = [
@@ -1973,6 +1990,62 @@ function WorkScheduleManagerTab({ restaurantId, employees, roles, workSchedules,
             ))}
           </div>
         </details>
+      )}
+
+      {/* ═══ COPY FROM ANOTHER EMPLOYEE ═══ */}
+      {empsWithSched.length > 0 && (
+        <div style={{...S.card,marginBottom:mobileOnly?8:12,padding:mobileOnly?"10px 12px":undefined,border:copyPickerOpen?"2px solid #06b6d444":"1px solid var(--border)",background:copyPickerOpen?"#06b6d408":"var(--card-bg)"}}>
+          <div onClick={()=>setCopyPickerOpen(!copyPickerOpen)} style={{display:"flex",justifyContent:"space-between",alignItems:"center",cursor:"pointer"}}>
+            <div style={{display:"flex",alignItems:"center",gap:8}}>
+              <span style={{fontSize:mobileOnly?14:16}}>📋</span>
+              <span style={{color:"#06b6d4",fontWeight:700,fontSize:mobileOnly?12:13}}>Copiar horário de outro empregado</span>
+            </div>
+            <span style={{color:"var(--text3)",fontSize:12}}>{copyPickerOpen?"▲":"▼"}</span>
+          </div>
+          {copyPickerOpen && (
+            <div style={{marginTop:mobileOnly?8:12}}>
+              <p style={{color:"var(--text3)",fontSize:mobileOnly?10:11,margin:"0 0 8px",lineHeight:1.5}}>
+                Seleciona um empregado — os dias e horários serão copiados para edição (nada é salvo automaticamente).
+              </p>
+              <select defaultValue="" onChange={e=>{ if(e.target.value) copyFromEmployee(e.target.value); e.target.value=""; }}
+                style={{...S.input,width:"100%",fontSize:mobileOnly?13:14,cursor:"pointer"}}>
+                <option value="" disabled>Selecionar empregado...</option>
+                {(() => {
+                  const restRoles = roles?.filter(r => r.restaurantId === restaurantId) ?? [];
+                  const byArea = {};
+                  AREAS.forEach(a => { byArea[a] = []; });
+                  const noArea = [];
+                  empsWithSched.forEach(emp => {
+                    const role = restRoles.find(r => r.id === emp.roleId);
+                    const a = role?.area;
+                    if (a && byArea[a]) byArea[a].push({ emp, role });
+                    else noArea.push({ emp, role });
+                  });
+                  const fmtOpt = ({emp, role}) => {
+                    const scheds = workSchedules?.[restaurantId]?.[emp.id] ?? [];
+                    const cur = scheds[scheds.length - 1];
+                    const hasHoursComplete = cur?.hoursComplete !== false;
+                    const workDays = cur ? Object.keys(cur.days).length : 0;
+                    const suf = hasHoursComplete && cur?.totalContract
+                      ? ` — ${fmtHHMM(cur.totalContract)}/sem`
+                      : ` — ${workDays} dias (pendente)`;
+                    return <option key={emp.id} value={emp.id}>{emp.name}{role ? ` (${role.name})` : ""}{suf}</option>;
+                  };
+                  const groups = [];
+                  AREAS.forEach(area => {
+                    const list = byArea[area];
+                    if (list.length === 0) return;
+                    groups.push(<optgroup key={area} label={area}>{list.sort((a,b)=>a.emp.name.localeCompare(b.emp.name)).map(fmtOpt)}</optgroup>);
+                  });
+                  if (noArea.length > 0) {
+                    groups.push(<optgroup key="sem" label="Sem área">{noArea.sort((a,b)=>a.emp.name.localeCompare(b.emp.name)).map(fmtOpt)}</optgroup>);
+                  }
+                  return groups;
+                })()}
+              </select>
+            </div>
+          )}
+        </div>
       )}
 
       {/* ═══ AI ASSISTANT ═══ */}
@@ -7365,6 +7438,11 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }
 
         {tab === "changelog" && (() => {
           const CHANGELOG = [
+            { version:"5.11.0", date:"2026-04-12", items:[
+              "Novo: Horários — copiar horário de outro empregado ao cadastrar/editar (seletor por área com carga semanal)",
+              "Melhoria: Horários mobile redesenhado — 7 dias em um único card compacto com divisores (em vez de 7 cards separados)",
+              "Melhoria: Horários mobile — inputs inline sem labels por linha, placeholder como label",
+            ]},
             { version:"5.10.1", date:"2026-04-12", items:[
               "Melhoria: layout de Horários otimizado para mobile — cards, inputs, labels e botões compactos",
               "Melhoria: container geral com padding reduzido no celular",
@@ -8983,6 +9061,10 @@ hr{border:none;border-top:1px solid var(--border);margin:24px 0}
           <div class="step"><div class="sn">3</div><div class="sc"><strong>Com IA: descreva em linguagem natural</strong><p>Abra o <strong>Assistente de Horários</strong> e descreva o que deseja. Ex: <em>"folgue segunda e terça, trabalhe nos outros dias dividindo 44h semanais entrando às 10"</em>. A IA preenche tudo automaticamente — revise e salve.</p></div></div>
         </div>
         <div class="ib tip"><span class="ico">💡</span><span>A escala usa os dias de trabalho/folga mesmo sem horários preenchidos. Cadastre os dias primeiro para já gerar a escala base.</span></div>
+      </div>
+      <div class="card"><h3>📋 Copiar de outro empregado <span class="new">NOVO</span></h3>
+        <p>Na tela de edição de horário, o card <strong>"📋 Copiar horário de outro empregado"</strong> permite selecionar qualquer colega com horário cadastrado e trazer os dias e horários para o empregado atual. Os dados ficam em edição até você confirmar com "Salvar Dias" ou "Validar e Salvar Horário" — nada é salvo automaticamente.</p>
+        <div class="ib tip"><span class="ico">💡</span><span>Útil para novos empregados que seguem a mesma escala de um colega: copie o horário, ajuste o que for diferente e salve.</span></div>
       </div>
       <div class="card"><h3>🤖 Assistente de IA <span class="new">NOVO</span></h3>
         <p>Descreva os horários em linguagem natural — com typos, conjugações verbais ou abreviações. O assistente entende e preenche os campos automaticamente.</p>
