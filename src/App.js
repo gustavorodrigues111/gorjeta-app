@@ -3,7 +3,7 @@ import { useState, useEffect, Component } from "react";
 import { db } from "./firebase";
 import { doc, getDoc, setDoc } from "firebase/firestore";
 
-const APP_VERSION = "5.12.0";
+const APP_VERSION = "5.12.1";
 
 const DEFAULT_ADMISSION = () => `${new Date().getFullYear()}-01-01`;
 const round2 = (v) => Math.round(v * 100) / 100;
@@ -1974,48 +1974,89 @@ function WorkScheduleManagerTab({ restaurantId, employees, roles, workSchedules,
       const hasHoursComplete = cur?.hoursComplete !== false;
       const workDays = cur ? Object.keys(cur.days).length : 0;
       const folgaDays = cur ? 7 - workDays : 0;
-      return (
-        <div key={emp.id} onClick={()=>loadEmp(emp.id)} style={{...S.card,marginBottom:mobileOnly?6:8,padding:mobileOnly?"8px 10px":undefined,cursor:"pointer",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-          <div style={{flex:1,minWidth:0}}>
-            <div style={{color:"var(--text)",fontWeight:600,fontSize:mobileOnly?13:14,display:"flex",alignItems:"center",gap:6,flexWrap:"wrap"}}>
-              {emp.name}
-              {cur && !hasHoursComplete && <span style={{background:"#f59e0b22",color:"#f59e0b",fontSize:mobileOnly?9:10,padding:"2px 6px",borderRadius:6,fontWeight:700}}>{mobileOnly?"PENDENTE":"HORARIOS PENDENTES"}</span>}
+      const role = restRoles.find(r => r.id === emp.roleId);
+      const areaColor = role?.area ? AREA_COLORS[role.area] : "var(--text3)";
+      const initial = emp.name?.trim()?.[0]?.toUpperCase() ?? "?";
+
+      // Status compacto (lado direito)
+      let statusBadge = null;
+      if (!cur) {
+        statusBadge = <span style={{background:"var(--bg1)",color:"var(--text3)",fontSize:mobileOnly?10:11,padding:mobileOnly?"3px 8px":"5px 12px",borderRadius:8,fontWeight:600,border:"1px solid var(--border)"}}>Sem horário</span>;
+      } else if (!hasHoursComplete) {
+        statusBadge = <span style={{background:"#f59e0b18",color:"#b45309",fontSize:mobileOnly?10:11,padding:mobileOnly?"3px 8px":"5px 12px",borderRadius:8,fontWeight:700,border:"1px solid #f59e0b33"}}>⏳ {mobileOnly?"Pendente":"Horários pendentes"}</span>;
+      } else {
+        statusBadge = <span style={{background:"#10b98118",color:"#047857",fontSize:mobileOnly?10:11,padding:mobileOnly?"3px 8px":"5px 12px",borderRadius:8,fontWeight:700,border:"1px solid #10b98133",fontFamily:"'DM Mono',monospace"}}>{fmtHHMM(cur.totalContract)}/sem</span>;
+      }
+
+      if (mobileOnly) {
+        // Mobile: layout compacto existente
+        return (
+          <div key={emp.id} onClick={()=>loadEmp(emp.id)} style={{...S.card,marginBottom:6,padding:"8px 10px",cursor:"pointer",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+            <div style={{flex:1,minWidth:0}}>
+              <div style={{color:"var(--text)",fontWeight:600,fontSize:13,display:"flex",alignItems:"center",gap:6,flexWrap:"wrap"}}>
+                {emp.name}
+                {cur && !hasHoursComplete && <span style={{background:"#f59e0b22",color:"#f59e0b",fontSize:9,padding:"2px 6px",borderRadius:6,fontWeight:700}}>PENDENTE</span>}
+              </div>
+              <div style={{color:"var(--text3)",fontSize:10}}>
+                {cur
+                  ? (hasHoursComplete ? `${fmtHHMM(cur.totalContract)}/sem` : `${workDays} dias, ${folgaDays} folga(s)`)
+                  : "Sem horario"}
+              </div>
             </div>
-            <div style={{color:"var(--text3)",fontSize:mobileOnly?10:12}}>
-              {cur
-                ? (hasHoursComplete
-                  ? (mobileOnly ? `${fmtHHMM(cur.totalContract)}/sem` : `Vigente desde ${fmtDate(cur.validFrom)} · ${fmtHHMM(cur.totalContract)}/sem`)
-                  : `${workDays} dias, ${folgaDays} folga(s)${mobileOnly?"":" · horarios pendentes"}`)
-                : "Sem horario"}
+            <span style={{color:ac,fontSize:16,fontWeight:700,flexShrink:0,paddingLeft:6}}>&rsaquo;</span>
+          </div>
+        );
+      }
+
+      // Desktop: layout espaçoso com avatar, grid, status e seta
+      return (
+        <div key={emp.id} onClick={()=>loadEmp(emp.id)} onMouseEnter={e=>e.currentTarget.style.borderColor="var(--ac)66"} onMouseLeave={e=>e.currentTarget.style.borderColor="var(--border)"}
+          style={{...S.card,marginBottom:10,padding:"16px 20px",cursor:"pointer",display:"grid",gridTemplateColumns:"48px 1fr auto 20px",gap:16,alignItems:"center",transition:"border-color .15s"}}>
+          {/* Avatar com inicial */}
+          <div style={{width:48,height:48,borderRadius:12,background:`${areaColor}15`,border:`2px solid ${areaColor}33`,display:"flex",alignItems:"center",justifyContent:"center",color:areaColor,fontWeight:800,fontSize:18,letterSpacing:-0.5}}>
+            {initial}
+          </div>
+          {/* Nome + cargo + vigência */}
+          <div style={{minWidth:0}}>
+            <div style={{color:"var(--text)",fontWeight:700,fontSize:15,marginBottom:3,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{emp.name}</div>
+            <div style={{color:"var(--text3)",fontSize:12,display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
+              {role && <span>{role.name}</span>}
+              {cur && hasHoursComplete && <span>· Vigente desde {fmtDate(cur.validFrom)}</span>}
+              {cur && !hasHoursComplete && <span>· {workDays} dias de trabalho</span>}
             </div>
           </div>
-          <span style={{color:ac,fontSize:16,fontWeight:700,flexShrink:0,paddingLeft:6}}>&rsaquo;</span>
+          {/* Status badge */}
+          <div style={{flexShrink:0}}>{statusBadge}</div>
+          {/* Seta */}
+          <span style={{color:"var(--text3)",fontSize:18,fontWeight:600,textAlign:"right"}}>›</span>
         </div>
       );
     };
 
     return (
       <div>
-        <p style={{color:"var(--text3)",fontSize:mobileOnly?11:13,marginBottom:mobileOnly?10:16}}>Selecione um empregado para cadastrar ou editar o horario:</p>
+        <p style={{color:"var(--text3)",fontSize:mobileOnly?11:14,marginBottom:mobileOnly?10:20}}>
+          Selecione um empregado para cadastrar ou editar o horário de trabalho:
+        </p>
         {AREAS.map(area => {
           const emps = byArea[area];
           if (emps.length === 0) return null;
           return (
-            <div key={area} style={{marginBottom:16}}>
-              <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:8,paddingBottom:4,borderBottom:`2px solid ${AREA_COLORS[area]}33`}}>
-                <span style={{width:8,height:8,borderRadius:"50%",background:AREA_COLORS[area],display:"inline-block"}}></span>
-                <span style={{color:AREA_COLORS[area],fontSize:12,fontWeight:700,letterSpacing:1}}>{area.toUpperCase()}</span>
-                <span style={{color:"var(--text3)",fontSize:11,marginLeft:4}}>({emps.length})</span>
+            <div key={area} style={{marginBottom:mobileOnly?16:24}}>
+              <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:mobileOnly?8:12,paddingBottom:mobileOnly?4:6,borderBottom:`2px solid ${AREA_COLORS[area]}33`}}>
+                <span style={{width:mobileOnly?8:10,height:mobileOnly?8:10,borderRadius:"50%",background:AREA_COLORS[area],display:"inline-block"}}></span>
+                <span style={{color:AREA_COLORS[area],fontSize:mobileOnly?12:13,fontWeight:700,letterSpacing:1}}>{area.toUpperCase()}</span>
+                <span style={{color:"var(--text3)",fontSize:mobileOnly?11:12,marginLeft:4}}>({emps.length})</span>
               </div>
               {emps.map(renderEmpCard)}
             </div>
           );
         })}
         {noArea.length > 0 && (
-          <div style={{marginBottom:16}}>
-            <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:8,paddingBottom:4,borderBottom:"2px solid var(--border)"}}>
-              <span style={{color:"var(--text3)",fontSize:12,fontWeight:700,letterSpacing:1}}>SEM AREA</span>
-              <span style={{color:"var(--text3)",fontSize:11,marginLeft:4}}>({noArea.length})</span>
+          <div style={{marginBottom:mobileOnly?16:24}}>
+            <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:mobileOnly?8:12,paddingBottom:mobileOnly?4:6,borderBottom:"2px solid var(--border)"}}>
+              <span style={{color:"var(--text3)",fontSize:mobileOnly?12:13,fontWeight:700,letterSpacing:1}}>SEM ÁREA</span>
+              <span style={{color:"var(--text3)",fontSize:mobileOnly?11:12,marginLeft:4}}>({noArea.length})</span>
             </div>
             {noArea.map(renderEmpCard)}
           </div>
@@ -2370,23 +2411,23 @@ function WorkScheduleManagerTab({ restaurantId, employees, roles, workSchedules,
           {saveMode === "full" && (
             <p style={{color:"var(--text3)",fontSize:12,marginBottom:12}}>Todos os gestores DP receberao uma notificacao com esta alteracao.</p>
           )}
-          <div style={{display:"flex",gap:10,flexWrap:"wrap"}}>
-            <button onClick={saveSchedule} style={{...S.btnPrimary,flex:1,minWidth:140}}>Confirmar e Salvar</button>
-            <button onClick={()=>{setShowValidFrom(false);setSaveMode(null);}} style={{...S.btnSecondary,flex:1,minWidth:100}}>Cancelar</button>
+          <div style={{display:"flex",gap:mobileOnly?10:12,flexWrap:"wrap"}}>
+            <button onClick={saveSchedule} style={{...S.btnPrimary,flex:1,minWidth:mobileOnly?140:200,padding:mobileOnly?undefined:"14px 24px",fontSize:mobileOnly?undefined:14,fontWeight:700}}>✓ Confirmar e Salvar</button>
+            <button onClick={()=>{setShowValidFrom(false);setSaveMode(null);}} style={{...S.btnSecondary,flex:1,minWidth:mobileOnly?100:140,padding:mobileOnly?undefined:"14px 24px",fontSize:mobileOnly?undefined:14}}>Cancelar</button>
           </div>
         </div>
       )}
 
       {/* Action buttons */}
       {!showValidFrom && (
-        <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+        <div style={{display:"flex",gap:mobileOnly?8:12,flexWrap:"wrap",marginTop:mobileOnly?4:8}}>
           <button onClick={trySaveDays} disabled={activeDayCount === 0}
-            style={{...S.btnSecondary,flex:1,minWidth:mobileOnly?80:120,fontSize:mobileOnly?12:undefined,padding:mobileOnly?"10px 8px":undefined,opacity:activeDayCount>0?1:0.4}}>
-            {mobileOnly?"Salvar Dias":"Salvar Dias"}
+            style={{...S.btnSecondary,flex:1,minWidth:mobileOnly?80:160,fontSize:mobileOnly?12:14,padding:mobileOnly?"10px 8px":"14px 24px",fontWeight:600,opacity:activeDayCount>0?1:0.4}}>
+            📅 Salvar Dias
           </button>
           <button onClick={tryValidateFull} disabled={!allHoursFilled || activeDayCount === 0}
-            style={{...S.btnPrimary,flex:2,minWidth:mobileOnly?120:160,fontSize:mobileOnly?12:undefined,padding:mobileOnly?"10px 8px":undefined,opacity:allHoursFilled&&activeDayCount>0?1:0.4}}>
-            {mobileOnly?"Validar e Salvar":"Validar e Salvar Horario"}
+            style={{...S.btnPrimary,flex:2,minWidth:mobileOnly?120:220,fontSize:mobileOnly?12:14,padding:mobileOnly?"10px 8px":"14px 24px",fontWeight:700,opacity:allHoursFilled&&activeDayCount>0?1:0.4}}>
+            ✓ {mobileOnly?"Validar e Salvar":"Validar e Salvar Horário"}
           </button>
         </div>
       )}
@@ -7556,6 +7597,12 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }
 
         {tab === "changelog" && (() => {
           const CHANGELOG = [
+            { version:"5.12.1", date:"2026-04-12", items:[
+              "Melhoria: botões de ação em Horários (Salvar Dias / Validar e Salvar) com padding 14px 24px no desktop",
+              "Melhoria: botão 'Confirmar e Salvar' com padding generoso e peso 700",
+              "Melhoria: lista de empregados em Horários (desktop) redesenhada — avatar colorido por área, grid 48px + 1fr + status + seta, padding 16px 20px, hover border",
+              "Melhoria: status do empregado agora exibido como badge colorido (verde=completo, âmbar=pendente, cinza=sem horário)",
+            ]},
             { version:"5.12.0", date:"2026-04-12", items:[
               "Novo: IA de horários entende listas estruturadas por dia (ex: 'Qua e Qui: das 15h às 24h com 1h de intervalo')",
               "Novo: IA reconhece separadores como linha nova, •, ·, ; e dias não mencionados viram folga automaticamente",
