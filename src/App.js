@@ -3,7 +3,7 @@ import { useState, useEffect, Component } from "react";
 import { db } from "./firebase";
 import { doc, getDoc, setDoc } from "firebase/firestore";
 
-const APP_VERSION = "5.12.1";
+const APP_VERSION = "5.12.2";
 
 const DEFAULT_ADMISSION = () => `${new Date().getFullYear()}-01-01`;
 const round2 = (v) => Math.round(v * 100) / 100;
@@ -2380,11 +2380,26 @@ function WorkScheduleManagerTab({ restaurantId, employees, roles, workSchedules,
 
       {/* Weekly total (only if all hours filled) */}
       {allHoursFilled && activeDayCount > 0 && (
-        <div style={{...cardS,display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:6,borderColor:weekOk?"var(--green)33":"var(--red)33"}}>
-          <span style={{color:"var(--text3)",fontSize:mobileOnly?11:13}}>{mobileOnly?"Total semanal":"Total semanal contratual"}</span>
-          <div style={{display:"flex",alignItems:"center",gap:mobileOnly?6:10}}>
-            <span style={{color:weekOk?"var(--green)":"var(--red)",fontWeight:700,fontSize:mobileOnly?14:16,fontFamily:"'DM Mono',monospace"}}>{fmtHHMM(totalContract)}</span>
-            <span style={{color:weekOk?"var(--green)":"var(--red)",fontSize:mobileOnly?10:12}}>{weekOk?"OK":mobileOnly?"Fora (43:55-44:00)":"Fora do limite (43:55-44:00)"}</span>
+        <div style={{
+          ...cardS,
+          padding: mobileOnly ? "14px 16px" : "20px 24px",
+          display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",
+          gap: mobileOnly ? 10 : 16,
+          borderColor:weekOk?"var(--green)33":"var(--red)33",
+          background: weekOk ? "#10b98108" : "#ef444408",
+        }}>
+          <div style={{display:"flex",alignItems:"center",gap:mobileOnly?8:12}}>
+            <span style={{fontSize:mobileOnly?18:22}}>{weekOk?"✅":"⚠️"}</span>
+            <div>
+              <div style={{color:"var(--text3)",fontSize:mobileOnly?11:12,fontWeight:500,letterSpacing:0.3,textTransform:"uppercase"}}>{mobileOnly?"Total semanal":"Total semanal contratual"}</div>
+              <div style={{color:weekOk?"var(--green)":"var(--red)",fontSize:mobileOnly?11:12,fontWeight:600,marginTop:2}}>
+                {weekOk ? "Dentro do limite CLT" : "Fora do limite — deve estar entre 43:55 e 44:00"}
+              </div>
+            </div>
+          </div>
+          <div style={{display:"flex",alignItems:"baseline",gap:6}}>
+            <span style={{color:weekOk?"var(--green)":"var(--red)",fontWeight:800,fontSize:mobileOnly?22:28,fontFamily:"'DM Mono',monospace",letterSpacing:-0.5}}>{fmtHHMM(totalContract)}</span>
+            <span style={{color:"var(--text3)",fontSize:mobileOnly?11:13,fontWeight:500}}>/ sem</span>
           </div>
         </div>
       )}
@@ -7597,6 +7612,9 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }
 
         {tab === "changelog" && (() => {
           const CHANGELOG = [
+            { version:"5.12.2", date:"2026-04-12", items:[
+              "Melhoria: barra de Total Semanal em Horários redesenhada — padding generoso, ícone ✅/⚠️, total em 28px mono, descrição do status CLT",
+            ]},
             { version:"5.12.1", date:"2026-04-12", items:[
               "Melhoria: botões de ação em Horários (Salvar Dias / Validar e Salvar) com padding 14px 24px no desktop",
               "Melhoria: botão 'Confirmar e Salvar' com padding generoso e peso 700",
