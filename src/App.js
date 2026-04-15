@@ -3,7 +3,7 @@ import { useState, useEffect, Component } from "react";
 import { db } from "./firebase";
 import { doc, getDoc, setDoc } from "firebase/firestore";
 
-const APP_VERSION = "5.11.0";
+const APP_VERSION = "5.12.0";
 
 const DEFAULT_ADMISSION = () => `${new Date().getFullYear()}-01-01`;
 const round2 = (v) => Math.round(v * 100) / 100;
@@ -1680,8 +1680,9 @@ function WorkScheduleManagerTab({ restaurantId, employees, roles, workSchedules,
       {names:["qui","quinta"], idx:4}, {names:["sex","sexta"], idx:5},
       {names:["sab","sabado","sábado"], idx:6},
     ];
+    const normText = (s) => s.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g,"").replace(/\s+/g," ").trim();
     // Normaliza: lowercase, remove acentos, normaliza espaços
-    const lower = text.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g,"").replace(/\s+/g," ").trim();
+    const lower = normText(text);
     const newDays = JSON.parse(JSON.stringify(editDays));
     const changes = [];
 
@@ -1702,6 +1703,92 @@ function WorkScheduleManagerTab({ restaurantId, employees, roles, workSchedules,
         for (const n of sorted) { if (txt.includes(n)) { found.add(d.idx); break; } }
       });
       return [...found];
+    }
+
+    // Helper: formata hora "HH:MM" a partir de captura (h, m opcional); aceita "24" como "00:00" (fim de jornada)
+    function fmtTime(h, m) {
+      const hi = parseInt(h);
+      if (isNaN(hi)) return null;
+      const mi = m ? String(parseInt(m)).padStart(2,"0") : "00";
+      if (hi === 24) return "00:00"; // cruza meia-noite, calcDayHours lida
+      if (hi < 0 || hi > 23) return null;
+      return `${String(hi).padStart(2,"0")}:${mi}`;
+    }
+
+    // ═══ 0. MODO MULTI-GRUPO ═══
+    // Detecta listas como:
+    //   "Quarta e Quinta: das 15h às 24h com 1h de intervalo"
+    //   "Sexta e Sábado: das 12:20h às 24h com 2h de intervalo"
+    //   "Domingo: das 11h às 19:30h com 1h de intervalo"
+    // Separadores suportados: linha nova, •, ·, ;, - inicial
+    const rawSegs = text.split(/[\n•·;]|(?:^\s*[-*]\s)/m).map(s => s.trim()).filter(s => s.length > 2);
+    const groupSegs = rawSegs.map(seg => {
+      const segLow = normText(seg);
+      const dayIds = extractDays(segLow);
+      // Precisa ter pelo menos um dia E algum horário (d{1,2}h ou d{1,2}:d{1,2})
+      const hasTime = /\b\d{1,2}\s*[:.h]/.test(segLow) || /das?\s+\d/.test(segLow);
+      return { seg, segLow, dayIds, hasTime };
+    }).filter(g => g.dayIds.length > 0 && g.hasTime);
+
+    if (groupSegs.length >= 2) {
+      const mentioned = new Set();
+      groupSegs.forEach(({ seg, segLow, dayIds }) => {
+        // "das 15h às 24h", "das 12:20 às 24h", "12:20 às 24:00", "das 11h as 19h30"
+        const rangeMatch = segLow.match(/(?:das?\s+)?(\d{1,2})\s*[:.h]?\s*(\d{2})?\s*(?:h\s*)?(?:as?|até|ate|a)\s+(\d{1,2})\s*[:.h]?\s*(\d{2})?/);
+        let inTime = null, outTime = null;
+        if (rangeMatch) {
+          inTime = fmtTime(rangeMatch[1], rangeMatch[2]);
+          outTime = fmtTime(rangeMatch[3], rangeMatch[4]);
+        } else {
+          const entM = segLow.match(/(?:entra(?:da|ndo)?|inicia\w*)\s*(?:as?\s*)?(\d{1,2})\s*[:.h]?\s*(\d{2})?/);
+          const saiM = segLow.match(/(?:sai(?:da|ndo)?|termin\w*)\s*(?:as?\s*)?(\d{1,2})\s*[:.h]?\s*(\d{2})?/);
+          if (entM) inTime = fmtTime(entM[1], entM[2]);
+          if (saiM) outTime = fmtTime(saiM[1], saiM[2]);
+        }
+        // Intervalo: "1h de intervalo", "2h de intervalo", "30 min de intervalo", "intervalo 60min", "com 1h"
+        let breakMin = null;
+        const intHoraM = segLow.match(/(\d+)\s*h(?:ora)?s?\s*(?:de\s+)?intervalo|(?:com\s+)?intervalo\s*(?:de\s+)?(\d+)\s*h(?:ora)?s?/);
+        const intMinM = segLow.match(/(\d+)\s*(?:min|minutos?)\s*(?:de\s+)?intervalo|intervalo\s*(?:de\s+)?(\d+)\s*(?:min|minutos?)/);
+        if (intHoraM) breakMin = parseInt(intHoraM[1] || intHoraM[2]) * 60;
+        else if (intMinM) breakMin = parseInt(intMinM[1] || intMinM[2]);
+
+        dayIds.forEach(idx => {
+          mentioned.add(idx);
+          newDays[idx] = {
+            active: true,
+            in: inTime || newDays[idx]?.in || "",
+            out: outTime || newDays[idx]?.out || "",
+            break: breakMin != null ? breakMin : (newDays[idx]?.break || 0),
+          };
+        });
+        const label = dayIds.sort().map(i => WEEK_DAYS_LABEL[i]).join("/");
+        const parts = [];
+        if (inTime && outTime) parts.push(`${inTime}-${outTime}`);
+        else { if (inTime) parts.push(`ent ${inTime}`); if (outTime) parts.push(`sai ${outTime}`); }
+        if (breakMin != null) parts.push(`int ${breakMin}min`);
+        changes.push(`${label}: ${parts.join(", ") || "(sem horário)"}`);
+      });
+      // Dias não mencionados em nenhum grupo = folga
+      for (let i = 0; i < 7; i++) {
+        if (!mentioned.has(i)) {
+          newDays[i] = { active: false };
+          changes.push(`${WEEK_DAYS_LABEL[i]}: Folga`);
+        }
+      }
+      // Validação CLT
+      const warnings = [];
+      const activeDays = Object.values(newDays).filter(d => d.active);
+      if (activeDays.length === 0) warnings.push("Nenhum dia de trabalho definido.");
+      if (activeDays.length > 6) warnings.push("Mais de 6 dias pode violar a CLT.");
+      const allHaveHours = activeDays.every(d => d.in && d.out);
+      if (allHaveHours && activeDays.length > 0) {
+        const stDays = {};
+        Object.entries(newDays).forEach(([idx, d]) => { if (d.active && d.in && d.out) stDays[idx] = { in:d.in, out:d.out, break:d.break??0 }; });
+        const { errors: errs, totalContract: tc } = validateWeekSchedule(stDays);
+        if (tc > 0) changes.push(`Carga semanal: ${fmtHHMM(tc)}`);
+        errs.forEach(e => warnings.push(e));
+      }
+      return { days: newDays, message: changes.join("\n"), warnings };
     }
 
     // ═══ 1. Parse carga horária semanal ═══
@@ -1947,6 +2034,28 @@ function WorkScheduleManagerTab({ restaurantId, employees, roles, workSchedules,
           <div style={{color:"var(--text)",fontWeight:700,fontSize:mobileOnly?14:15}}>{selEmp?.name}</div>
           <div style={{color:"var(--text3)",fontSize:mobileOnly?10:11}}>{mobileOnly?`${activeDayCount} dias · ${folgaDayCount} folga(s)`:`Horario semanal · ${activeDayCount} dias · ${folgaDayCount} folga(s)`}</div>
         </div>
+        {empSchedules.length > 0 && (
+          <button onClick={()=>{
+            if (!window.confirm(`Resetar o horário de ${selEmp?.name}?\n\nTodas as versões (${empSchedules.length}) serão apagadas permanentemente. O empregado ficará sem horário cadastrado.`)) return;
+            const w = { ...(workSchedules ?? {}) };
+            if (w[restaurantId]) {
+              const emp = { ...w[restaurantId] };
+              delete emp[selEmpId];
+              w[restaurantId] = emp;
+            }
+            onUpdate("workSchedules", w);
+            // Reset edit state
+            const fresh = {};
+            for (let i = 0; i < 7; i++) fresh[i] = { active: true };
+            setEditDays(fresh);
+            setErrors([]);
+            setShowValidFrom(false);
+            setSaveMode(null);
+            onUpdate("_toast", `🔄 Horário de ${selEmp?.name} resetado`);
+          }} style={{...S.btnSecondary,fontSize:mobileOnly?11:12,padding:mobileOnly?"5px 10px":"6px 14px",color:"var(--red)",borderColor:"var(--red)44"}}>
+            🔄 {mobileOnly?"Resetar":"Resetar horário"}
+          </button>
+        )}
       </div>
 
       {/* History */}
@@ -2156,8 +2265,8 @@ function WorkScheduleManagerTab({ restaurantId, employees, roles, workSchedules,
           })}
         </div>
       ) : (
-        /* ── DESKTOP: individual cards per day ── */
-        <div style={{marginBottom:16}}>
+        /* ── DESKTOP: linhas espaçosas com grid generoso ── */
+        <div style={{...S.card,padding:0,marginBottom:16,overflow:"hidden"}}>
           {[0,1,2,3,4,5,6].map(dayIdx => {
             const d = editDays[dayIdx] ?? { active: true };
             const isActive = d.active;
@@ -2167,52 +2276,61 @@ function WorkScheduleManagerTab({ restaurantId, employees, roles, workSchedules,
             const contractOver = calc && calc.totalContract > 10*60;
             return (
               <div key={dayIdx} style={{
-                ...cardS,
-                borderColor: isActive ? (hasHours ? (contractOver ? "var(--red)" : "var(--ac)33") : "var(--border)") : "var(--border)",
-                opacity: isActive ? 1 : 0.6,
-                background: isActive ? "var(--card-bg)" : "var(--bg1)",
+                padding:"16px 20px",
+                borderBottom: dayIdx < 6 ? "1px solid var(--border)" : "none",
+                background: isActive ? (hasHours && contractOver ? "#fef2f2" : "transparent") : "var(--bg1)",
+                opacity: isActive ? 1 : 0.55,
+                display:"grid",
+                gridTemplateColumns:"120px 1fr auto",
+                gap:20,
+                alignItems:"center",
               }}>
-                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom: isActive ? 12 : 0}}>
-                  <div style={{display:"flex",alignItems:"center",gap:10}}>
-                    <span style={{color:isWeekend?"#f59e0b":"var(--text)",fontWeight:700,fontSize:15,minWidth:36}}>{WEEK_DAYS_LABEL[dayIdx]}</span>
-                    <span style={{color: isActive ? (hasHours ? "var(--green)" : "var(--text3)") : "var(--text3)", fontSize:12, fontWeight: isActive ? 600 : 400}}>
-                      {isActive ? (hasHours ? "Trabalha" : "Trabalha (sem horario)") : "FOLGA"}
-                    </span>
-                  </div>
-                  <button onClick={()=>toggleDay(dayIdx)} style={isActive ? toggleOn : toggleOff}>
-                    <div style={toggleDot(isActive)} />
-                  </button>
+                {/* Coluna 1: Dia + status */}
+                <div style={{display:"flex",flexDirection:"column",gap:2}}>
+                  <span style={{color:isWeekend?"#f59e0b":"var(--text)",fontWeight:700,fontSize:16,letterSpacing:0.3}}>{WEEK_DAYS_LABEL[dayIdx]}</span>
+                  <span style={{color: isActive ? (hasHours ? "var(--green)" : "var(--text3)") : "var(--text3)", fontSize:11, fontWeight: isActive ? 600 : 500, letterSpacing:0.3}}>
+                    {isActive ? (hasHours ? "Trabalha" : "Sem horário") : "Folga"}
+                  </span>
                 </div>
-                {isActive && (
-                  <div>
-                    <div style={{display:"grid",gridTemplateColumns:"1fr 1fr auto",gap:8,alignItems:"end",marginBottom:8}}>
+
+                {/* Coluna 2: Inputs + métricas */}
+                {isActive ? (
+                  <div style={{display:"flex",flexDirection:"column",gap:8}}>
+                    <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 110px",gap:12,alignItems:"end"}}>
                       <div>
-                        <label style={{color:"var(--text3)",fontSize:10,display:"block",marginBottom:2}}>Entrada</label>
+                        <label style={{color:"var(--text3)",fontSize:10,display:"block",marginBottom:4,letterSpacing:0.5,textTransform:"uppercase",fontWeight:600}}>Entrada</label>
                         <input type="time" value={d.in||""} onChange={e=>handleDayChange(dayIdx,"in",e.target.value)}
-                          style={{...S.input,fontSize:14,padding:"10px 8px",textAlign:"center",width:"100%",boxSizing:"border-box"}}/>
+                          style={{...S.input,fontSize:15,padding:"11px 12px",textAlign:"center",width:"100%",boxSizing:"border-box"}}/>
                       </div>
                       <div>
-                        <label style={{color:"var(--text3)",fontSize:10,display:"block",marginBottom:2}}>Saída</label>
+                        <label style={{color:"var(--text3)",fontSize:10,display:"block",marginBottom:4,letterSpacing:0.5,textTransform:"uppercase",fontWeight:600}}>Saída</label>
                         <input type="time" value={d.out||""} onChange={e=>handleDayChange(dayIdx,"out",e.target.value)}
-                          style={{...S.input,fontSize:14,padding:"10px 8px",textAlign:"center",width:"100%",boxSizing:"border-box"}}/>
+                          style={{...S.input,fontSize:15,padding:"11px 12px",textAlign:"center",width:"100%",boxSizing:"border-box"}}/>
                       </div>
-                      <div style={{width:64}}>
-                        <label style={{color:"var(--text3)",fontSize:10,display:"block",marginBottom:2,textAlign:"center"}}>Int.(min)</label>
+                      <div>
+                        <label style={{color:"var(--text3)",fontSize:10,display:"block",marginBottom:4,letterSpacing:0.5,textTransform:"uppercase",fontWeight:600}}>Intervalo (min)</label>
                         <input type="number" min="0" max="120" value={d.break||""} onChange={e=>handleDayChange(dayIdx,"break",parseInt(e.target.value)||0)}
-                          placeholder="30" style={{...S.input,fontSize:14,padding:"10px 4px",textAlign:"center",width:"100%",boxSizing:"border-box"}}/>
+                          placeholder="30" style={{...S.input,fontSize:15,padding:"11px 10px",textAlign:"center",width:"100%",boxSizing:"border-box"}}/>
                       </div>
                     </div>
                     {calc && (
-                      <div style={{display:"flex",gap:6,flexWrap:"wrap",fontSize:11,fontFamily:"'DM Mono',monospace"}}>
-                        <span style={{color:"var(--text3)"}}>Real: <strong style={{color:"var(--text2)"}}>{fmtHHMM(calc.worked)}</strong></span>
-                        <span style={{color:"var(--text3)"}}>Diurna: <strong style={{color:"var(--text2)"}}>{fmtHHMM(calc.diurnal)}</strong></span>
-                        {calc.nocturnal > 0 && <span style={{color:"#8b5cf6"}}>Not.real: <strong>{fmtHHMM(calc.nocturnal)}</strong></span>}
-                        {calc.nocturnalFicta > 0 && <span style={{color:"#ec4899"}}>Not.ficta: <strong>{fmtHHMM(calc.nocturnalFicta)}</strong></span>}
-                        <span style={{color:contractOver?"var(--red)":ac,fontWeight:700}}>Contratual: {fmtHHMM(calc.totalContract)}</span>
+                      <div style={{display:"flex",gap:14,flexWrap:"wrap",fontSize:11,fontFamily:"'DM Mono',monospace",paddingTop:4}}>
+                        <span style={{color:"var(--text3)"}}>Real <strong style={{color:"var(--text2)"}}>{fmtHHMM(calc.worked)}</strong></span>
+                        <span style={{color:"var(--text3)"}}>Diurna <strong style={{color:"var(--text2)"}}>{fmtHHMM(calc.diurnal)}</strong></span>
+                        {calc.nocturnal > 0 && <span style={{color:"#8b5cf6"}}>Not.real <strong>{fmtHHMM(calc.nocturnal)}</strong></span>}
+                        {calc.nocturnalFicta > 0 && <span style={{color:"#ec4899"}}>Not.ficta <strong>{fmtHHMM(calc.nocturnalFicta)}</strong></span>}
+                        <span style={{color:contractOver?"var(--red)":ac,fontWeight:700,marginLeft:"auto"}}>Contratual {fmtHHMM(calc.totalContract)}</span>
                       </div>
                     )}
                   </div>
+                ) : (
+                  <div style={{color:"var(--text3)",fontSize:12,fontStyle:"italic"}}>— dia não trabalhado</div>
                 )}
+
+                {/* Coluna 3: Toggle */}
+                <button onClick={()=>toggleDay(dayIdx)} style={isActive ? toggleOn : toggleOff}>
+                  <div style={toggleDot(isActive)} />
+                </button>
               </div>
             );
           })}
@@ -7438,6 +7556,14 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }
 
         {tab === "changelog" && (() => {
           const CHANGELOG = [
+            { version:"5.12.0", date:"2026-04-12", items:[
+              "Novo: IA de horários entende listas estruturadas por dia (ex: 'Qua e Qui: das 15h às 24h com 1h de intervalo')",
+              "Novo: IA reconhece separadores como linha nova, •, ·, ; e dias não mencionados viram folga automaticamente",
+              "Novo: IA aceita 'das X às Y' como entrada+saída na mesma expressão (inclui 24h → meia-noite)",
+              "Novo: botão 'Resetar horário' do empregado — apaga todas as versões do horário atual",
+              "Melhoria: layout desktop dos horários refeito — linhas espaçosas em grid (dia | campos | toggle), intervalo com 110px, labels uppercase",
+              "Melhoria: dias de folga no desktop mostram texto discreto ao invés de card vazio",
+            ]},
             { version:"5.11.0", date:"2026-04-12", items:[
               "Novo: Horários — copiar horário de outro empregado ao cadastrar/editar (seletor por área com carga semanal)",
               "Melhoria: Horários mobile redesenhado — 7 dias em um único card compacto com divisores (em vez de 7 cards separados)",
