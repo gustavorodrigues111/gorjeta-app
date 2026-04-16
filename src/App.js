@@ -4256,7 +4256,7 @@ function ValeTransporteTab({ restaurantId, employees, roles, workSchedules, sche
       const escalaSt = schedDayMap[dateStr];
       if (escalaSt === "comptrab") { count++; continue; } // trabalho por compensação = dia trabalhado (recebe VT)
       if (escalaSt === "vac" || escalaSt === "off" || escalaSt === "comp" || escalaSt === "faultj" || escalaSt === "faultu") continue;
-      if (sched.days[dow]) count++;
+      { const dayData = sched.days[dow]; if (dayData && dayData?.active !== false) count++; }
     }
     return count;
   }
@@ -4277,7 +4277,7 @@ function ValeTransporteTab({ restaurantId, employees, roles, workSchedules, sche
       const escalaSt = schedDayMap[dateStr];
       if (escalaSt === "comptrab") { count++; continue; } // trabalho por compensação = dia trabalhado (recebe VT)
       if (escalaSt === "vac" || escalaSt === "off" || escalaSt === "comp" || escalaSt === "faultj" || escalaSt === "faultu") continue;
-      if (sched.days[dow]) count++;
+      { const dayData = sched.days[dow]; if (dayData && dayData?.active !== false) count++; }
     }
     return count;
   }
@@ -5790,8 +5790,10 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                     const escalaSt = schedDayMap[dateStr];
                     const isSkip = escalaSt === "vac" || escalaSt === "off" || escalaSt === "comp" || escalaSt === "faultj" || escalaSt === "faultu";
                     const isCompTrab = escalaSt === "comptrab";
-                    if (isCompTrab || (!isSkip && sched?.days?.[dow])) plannedFullMonth++;
-                    if (d < demDay && (isCompTrab || (!isSkip && sched?.days?.[dow]))) workedUntilDismissal++;
+                    const schDay = sched?.days?.[dow];
+                    const isWorkDay = schDay && schDay?.active !== false;
+                    if (isCompTrab || (!isSkip && isWorkDay)) plannedFullMonth++;
+                    if (d < demDay && (isCompTrab || (!isSkip && isWorkDay))) workedUntilDismissal++;
                   }
 
                   const vtPaidMonth = dailyRate * plannedFullMonth;
@@ -6353,7 +6355,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                           if (st === DAY_COMP_TRAB) { workC++; continue; }
                           if (st === DAY_OFF || st === DAY_FREELA || st === DAY_FAULT_J || st === DAY_FAULT_U || st === DAY_VACATION) { offC++; continue; }
                           if (st === DAY_COMP) { offC++; continue; }
-                          if (empSched?.days?.[dow2]) workC++;
+                          { const dayData2 = empSched?.days?.[dow2]; if (dayData2 && dayData2?.active !== false) workC++; }
                         }
 
                         const prevEmp = areaEmps[ei-1];
