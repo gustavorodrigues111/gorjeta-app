@@ -89,35 +89,38 @@ const AREAS = ["Bar", "Cozinha", "Salão", "Limpeza"];
 const AREA_COLORS = { Bar: "#3b82f6", Cozinha: "#f59e0b", Salão: "var(--green)", Limpeza: "#8b5cf6" };
 const DEFAULT_SPLIT = { Bar: 12, Cozinha: 40, Salão: 40, Limpeza: 8 };
 const TAX = 0.33;
-const DAY_OFF       = "off";    // folga programada
-const DAY_COMP      = "comp";   // compensacao banco de horas
-const DAY_VACATION  = "vac";    // ferias
-const DAY_FAULT_J   = "faultj"; // falta justificada
-const DAY_FAULT_U   = "faultu"; // falta injustificada
-const DAY_FREELA    = "freela"; // freela — presente mas sem gorjeta
+const DAY_OFF       = "off";      // folga programada
+const DAY_COMP      = "comp";     // folga por compensação (banco de horas — folgando)
+const DAY_COMP_TRAB = "comptrab"; // trabalho por compensação (deve horas — trabalhando)
+const DAY_VACATION  = "vac";      // ferias
+const DAY_FAULT_J   = "faultj";   // falta justificada
+const DAY_FAULT_U   = "faultu";   // falta injustificada
+const DAY_FREELA    = "freela";   // freela — presente mas sem gorjeta
 
 // eslint-disable-next-line no-unused-vars
 const DAY_LABELS = {
-  [DAY_OFF]:      { label: "Folga",          color: "var(--red)" },
-  [DAY_COMP]:     { label: "Compensação",    color: "#3b82f6" },
-  [DAY_VACATION]: { label: "Férias",         color: "#8b5cf6" },
-  [DAY_FAULT_J]:  { label: "Falta Just.",    color: "#f59e0b" },
-  [DAY_FAULT_U]:  { label: "Falta Injust.",  color: "var(--red)" },
-  [DAY_FREELA]:   { label: "Freela",         color: "#06b6d4" },
+  [DAY_OFF]:       { label: "Folga",              color: "var(--red)" },
+  [DAY_COMP]:      { label: "Folga p/ Comp.",     color: "#3b82f6" },
+  [DAY_COMP_TRAB]: { label: "Trab. p/ Comp.",     color: "#0ea5e9" },
+  [DAY_VACATION]:  { label: "Férias",             color: "#8b5cf6" },
+  [DAY_FAULT_J]:   { label: "Falta Just.",        color: "#f59e0b" },
+  [DAY_FAULT_U]:   { label: "Falta Injust.",      color: "var(--red)" },
+  [DAY_FREELA]:    { label: "Freela",             color: "#06b6d4" },
 };
-// Days that count for gorjeta
+// Days that count for gorjeta (além do dia normal de trabalho)
 // eslint-disable-next-line no-unused-vars
-const DAYS_EARN_TIP = new Set([DAY_COMP]);
+const DAYS_EARN_TIP = new Set([DAY_COMP, DAY_COMP_TRAB]);
 // eslint-disable-next-line no-unused-vars
 const DAYS_NO_TIP   = new Set([DAY_OFF, DAY_VACATION, DAY_FAULT_J, DAY_FAULT_U, DAY_FREELA]);
 
 const STATUS_SHORT = {
-  [DAY_OFF]:"F",[DAY_FREELA]:"FL",[DAY_COMP]:"C",[DAY_VACATION]:"Fér",
-  [DAY_FAULT_J]:"FJ",[DAY_FAULT_U]:"FI",
+  [DAY_OFF]:"F",[DAY_FREELA]:"FL",[DAY_COMP]:"FC",[DAY_COMP_TRAB]:"TC",
+  [DAY_VACATION]:"Fér",[DAY_FAULT_J]:"FJ",[DAY_FAULT_U]:"FI",
 };
 const STATUS_COLORS = {
   [DAY_OFF]:"var(--red)",[DAY_FREELA]:"#06b6d4",[DAY_COMP]:"#3b82f6",
-  [DAY_VACATION]:"#8b5cf6",[DAY_FAULT_J]:"#f59e0b",[DAY_FAULT_U]:"var(--red)",
+  [DAY_COMP_TRAB]:"#0ea5e9",[DAY_VACATION]:"#8b5cf6",
+  [DAY_FAULT_J]:"#f59e0b",[DAY_FAULT_U]:"var(--red)",
 };
 
 // Division mode constants
@@ -372,12 +375,13 @@ function CalendarGrid({ year, month, dayMap, onDayClick, readOnly }) {
   const colorOf = (dateStr) => {
     if (!dateStr) return null;
     const s = dayMap?.[dateStr];
-    if (s === DAY_OFF)      return { bg: "#e74c3c22", border: "var(--red)",  text: "var(--red)"  };
-    if (s === DAY_FREELA)   return { bg: "#06b6d422", border: "#06b6d4",  text: "#06b6d4"  };
-    if (s === DAY_COMP)     return { bg: "#3b82f622", border: "#3b82f6",  text: "#3b82f6"  };
-    if (s === DAY_VACATION) return { bg: "#8b5cf622", border: "#8b5cf6",  text: "#8b5cf6"  };
-    if (s === DAY_FAULT_J)  return { bg: "#f59e0b22", border: "#f59e0b",  text: "#f59e0b"  };
-    if (s === DAY_FAULT_U)  return { bg: "#ef444422", border: "var(--red)",  text: "var(--red)"  };
+    if (s === DAY_OFF)       return { bg: "#e74c3c22", border: "var(--red)",  text: "var(--red)"  };
+    if (s === DAY_FREELA)    return { bg: "#06b6d422", border: "#06b6d4",  text: "#06b6d4"  };
+    if (s === DAY_COMP)      return { bg: "#3b82f622", border: "#3b82f6",  text: "#3b82f6"  };
+    if (s === DAY_COMP_TRAB) return { bg: "#0ea5e922", border: "#0ea5e9",  text: "#0ea5e9"  };
+    if (s === DAY_VACATION)  return { bg: "#8b5cf622", border: "#8b5cf6",  text: "#8b5cf6"  };
+    if (s === DAY_FAULT_J)   return { bg: "#f59e0b22", border: "#f59e0b",  text: "#f59e0b"  };
+    if (s === DAY_FAULT_U)   return { bg: "#ef444422", border: "var(--red)",  text: "var(--red)"  };
     return { bg: "#10b98122", border: "var(--green)", text: "var(--green)" };
   };
 
@@ -385,7 +389,8 @@ function CalendarGrid({ year, month, dayMap, onDayClick, readOnly }) {
     ["var(--green)", "Trabalho"],
     ["var(--red)", "Folga"],
     ["#06b6d4", "Freela"],
-    ["#3b82f6", "Compensação"],
+    ["#3b82f6", "Folga p/ Comp. (FC)"],
+    ["#0ea5e9", "Trab. p/ Comp. (TC)"],
     ["#8b5cf6", "Férias"],
     ["#f59e0b", "Falta Just."],
     ["var(--red)", "Falta Injust."],
@@ -422,7 +427,7 @@ function CalendarGrid({ year, month, dayMap, onDayClick, readOnly }) {
 }
 
 // Cycle order: work > off > freela > comp > faultJ > faultU > work (férias só via formulário)
-const DAY_CYCLE = [DAY_OFF, DAY_FREELA, DAY_COMP, DAY_FAULT_J, DAY_FAULT_U];
+const DAY_CYCLE = [DAY_OFF, DAY_FREELA, DAY_COMP, DAY_COMP_TRAB, DAY_FAULT_J, DAY_FAULT_U];
 
 // eslint-disable-next-line no-unused-vars
 function ScheduleCalendar({ empId, restaurantId, year, month, schedules, onUpdate }) {
@@ -3153,13 +3158,14 @@ function EmployeePortal({ employees, roles, tips, schedules, splits, restaurants
                 <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 8, marginTop: 20 }}>
                   {(() => {
                     const dim = new Date(year, month + 1, 0).getDate();
-                    const counts = { work: 0, off: 0, freela: 0, comp: 0, vac: 0, fj: 0, fu: 0 };
+                    const counts = { work: 0, off: 0, freela: 0, comp: 0, comptrab: 0, vac: 0, fj: 0, fu: 0 };
                     for (let d = 1; d <= dim; d++) {
                       const k = `${year}-${String(month+1).padStart(2,"0")}-${String(d).padStart(2,"0")}`;
                       const s = dayMap[k];
                       if (s === DAY_OFF) counts.off++;
                       else if (s === DAY_FREELA) counts.freela++;
                       else if (s === DAY_COMP) counts.comp++;
+                      else if (s === DAY_COMP_TRAB) counts.comptrab++;
                       else if (s === DAY_VACATION) counts.vac++;
                       else if (s === DAY_FAULT_J) counts.fj++;
                       else if (s === DAY_FAULT_U) counts.fu++;
@@ -3168,7 +3174,8 @@ function EmployeePortal({ employees, roles, tips, schedules, splits, restaurants
                     return [
                       ["Trabalho", counts.work, "var(--green)"], ["Folga", counts.off, "var(--red)"],
                       ["Freela", counts.freela, "#06b6d4"],
-                      ["Compensação", counts.comp, "#3b82f6"], ["Férias", counts.vac, "#8b5cf6"],
+                      ["Folga Comp.", counts.comp, "#3b82f6"], ["Trab. Comp.", counts.comptrab, "#0ea5e9"],
+                      ["Férias", counts.vac, "#8b5cf6"],
                       ["Falta Just.", counts.fj, "#f59e0b"], ["Falta Injust.", counts.fu, "var(--red)"],
                     ].map(([lbl, val, col]) => (
                       <div key={lbl} style={{ ...S.card, textAlign: "center", padding: "12px 8px" }}>
@@ -3192,7 +3199,8 @@ function EmployeePortal({ employees, roles, tips, schedules, splits, restaurants
 
               const dim = new Date(year, month+1, 0).getDate();
               const LEGEND = [
-                ["var(--green)","Trabalho"],["var(--red)","Folga"],["#06b6d4","Freela"],["#3b82f6","Comp."],
+                ["var(--green)","Trabalho"],["var(--red)","Folga"],["#06b6d4","Freela"],
+                ["#3b82f6","FC"],["#0ea5e9","TC"],
                 ["#8b5cf6","Férias"],["#f59e0b","F.Just."],["var(--red)","F.Injust."],
               ];
 
@@ -3667,14 +3675,15 @@ const EMP_COLS        = "80px 2fr 1.2fr 100px auto 1.5fr auto";
 const EMP_COLS_HEADER = "80px 2fr 1.2fr 100px auto 1.5fr auto";
 const empInS2 = { background:"var(--bg1)", border:"1px solid var(--border)", borderRadius:6, color:"var(--text)", fontFamily:"'DM Mono',monospace", fontSize:12, padding:"6px 8px", outline:"none", width:"100%", boxSizing:"border-box" };
 
-function EmpRowLine({ emp, isNew, row, restRoles, isSaved, isOwner, onChange, onSave, onToggleInactive, onDelete, onAdd, onResetPin, onToggleProd, onToggleFreela, employees, privacyMask }) {
+function EmpRowLine({ emp, isNew, row, restRoles, isSaved, isOwner, onChange, onSave, onToggleInactive, onDelete, onAdd, onResetPin, onToggleProd, onToggleFreela, onDismiss, onUndoDismiss, onGenerateReport, employees, privacyMask }) {
   const ac = "var(--ac)";
   const isInactive = !isNew && emp?.inactive && emp?.inactiveFrom <= today();
+  const isDemitido = !isNew && emp?.demitidoEm && emp.demitidoEm <= today();
   return (
     <div style={{display:"grid",gridTemplateColumns:EMP_COLS,gap:6,padding:"6px 8px",marginBottom:4,
-      background:isNew?"#f0fdf4":isInactive?"#1a1a2a":"var(--card-bg)",borderRadius:10,
-      border:`1px solid ${isSaved?"#10b98166":isNew?"#10b98144":isInactive?"#8b5cf644":"var(--border)"}`,
-      alignItems:"center",opacity:isInactive?0.75:1}}>
+      background:isNew?"#f0fdf4":isDemitido?"#2a1a1a":isInactive?"#1a1a2a":"var(--card-bg)",borderRadius:10,
+      border:`1px solid ${isSaved?"#10b98166":isNew?"#10b98144":isDemitido?"#e74c3c44":isInactive?"#8b5cf644":"var(--border)"}`,
+      alignItems:"center",opacity:isDemitido?0.65:isInactive?0.75:1}}>
 
       {/* ID / código */}
       <div style={{color:"var(--text3)",fontSize:11,fontFamily:"'DM Mono',monospace",textAlign:"center"}}>
@@ -3729,10 +3738,26 @@ function EmpRowLine({ emp, isNew, row, restRoles, isSaved, isOwner, onChange, on
           ? <button onClick={onAdd} style={{padding:"6px 12px",borderRadius:8,border:"none",background:"var(--green)",color:"var(--text)",fontWeight:700,cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:12,whiteSpace:"nowrap"}}>+ Add</button>
           : <>
               <button onClick={onSave} style={{padding:"4px 10px",borderRadius:6,border:"none",background:isSaved?"var(--green)":ac,color:"var(--text)",fontWeight:700,cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:11}}>{isSaved?"✓":"Salvar"}</button>
-              <button onClick={onToggleInactive} title={isInactive?"Reativar":"Inativar"}
-                style={{padding:"4px 8px",borderRadius:6,border:`1px solid ${isInactive?"#10b98144":"#f59e0b44"}`,background:"transparent",color:isInactive?"var(--green)":"#f59e0b",cursor:"pointer",fontSize:11,fontFamily:"'DM Mono',monospace"}}>
-                {isInactive?"↑":"↓"}
-              </button>
+              {isDemitido ? (
+                <>
+                  <span style={{fontSize:9,color:"var(--red)",fontWeight:700,padding:"2px 6px",background:"#e74c3c22",borderRadius:4}}>DEM {emp.demitidoEm ? new Date(emp.demitidoEm+"T12:00:00").toLocaleDateString("pt-BR") : ""}</span>
+                  {onGenerateReport && <button onClick={()=>onGenerateReport(emp)} title="Relatório de desligamento"
+                    style={{padding:"4px 8px",borderRadius:6,border:"1px solid #3b82f644",background:"transparent",color:"#3b82f6",cursor:"pointer",fontSize:10,fontFamily:"'DM Mono',monospace"}}>📄</button>}
+                  <button onClick={onUndoDismiss} title="Reverter demissão"
+                    style={{padding:"4px 8px",borderRadius:6,border:"1px solid #10b98144",background:"transparent",color:"var(--green)",cursor:"pointer",fontSize:11,fontFamily:"'DM Mono',monospace"}}>↩️</button>
+                </>
+              ) : (
+                <>
+                  <button onClick={onToggleInactive} title={isInactive?"Reativar":"Inativar"}
+                    style={{padding:"4px 8px",borderRadius:6,border:`1px solid ${isInactive?"#10b98144":"#f59e0b44"}`,background:"transparent",color:isInactive?"var(--green)":"#f59e0b",cursor:"pointer",fontSize:11,fontFamily:"'DM Mono',monospace"}}>
+                    {isInactive?"↑":"↓"}
+                  </button>
+                  {!isInactive && onDismiss && (
+                    <button onClick={onDismiss} title="Demitir"
+                      style={{padding:"4px 8px",borderRadius:6,border:"1px solid #e74c3c44",background:"transparent",color:"var(--red)",cursor:"pointer",fontSize:10,fontFamily:"'DM Mono',monospace"}}>Demitir</button>
+                  )}
+                </>
+              )}
               {isOwner && isInactive && (
                 <button onClick={onDelete} title="Excluir permanentemente"
                   style={{padding:"4px 8px",borderRadius:6,border:"1px solid #e74c3c44",background:"transparent",color:"var(--red)",cursor:"pointer",fontSize:11,fontFamily:"'DM Mono',monospace"}}>✕</button>
@@ -3744,7 +3769,7 @@ function EmpRowLine({ emp, isNew, row, restRoles, isSaved, isOwner, onChange, on
   );
 }
 
-function EmployeeSpreadsheet({ restEmps, restRoles, rid, employees, onUpdate, restCode: restCode_, isOwner, restaurant, notifications, privacyMask }) {
+function EmployeeSpreadsheet({ restEmps, restRoles, rid, employees, onUpdate, restCode: restCode_, isOwner, restaurant, notifications, privacyMask, onGenerateDismissalReport }) {
   const PLANOS = [
     { id:"p10",  empMax:10  },
     { id:"p20",  empMax:20  },
@@ -3939,6 +3964,25 @@ Inclua apenas as ações solicitadas. Arrays vazios se não houver ação daquel
     onUpdate("employees", employees.map(x => x.id===emp.id ? {...emp, inactive:!emp.inactive, inactiveFrom:row.inactiveFrom||today()} : x));
   }
 
+  function dismissEmp(emp) {
+    const dataStr = window.prompt(`Demitir "${emp.name}"?\n\nInforme a data da demissão (DD/MM/AAAA):`, new Date().toLocaleDateString("pt-BR"));
+    if (!dataStr) return;
+    const parts = dataStr.split("/");
+    if (parts.length !== 3) { window.alert("Data inválida. Use o formato DD/MM/AAAA."); return; }
+    const [dd,mm,yyyy] = parts;
+    const demitidoEm = `${yyyy}-${mm.padStart(2,"0")}-${dd.padStart(2,"0")}`;
+    if (isNaN(new Date(demitidoEm+"T12:00:00").getTime())) { window.alert("Data inválida."); return; }
+    if (!window.confirm(`Confirmar demissão de "${emp.name}" em ${dataStr}?\n\nA partir desta data:\n• Sai do cálculo de gorjeta\n• Consta como "DEM" na escala\n• No próximo mês será movido para inativo`)) return;
+    onUpdate("employees", employees.map(x => x.id===emp.id ? {...x, demitidoEm, demitidoPor: isOwner ? "Admin AppTip" : "Gestor"} : x));
+    onUpdate("_toast", `📋 ${emp.name} demitido em ${dataStr}`);
+  }
+
+  function undoDismiss(emp) {
+    if (!window.confirm(`Reverter demissão de "${emp.name}"?`)) return;
+    onUpdate("employees", employees.map(x => x.id===emp.id ? {...x, demitidoEm: undefined, demitidoPor: undefined} : x));
+    onUpdate("_toast", `↩️ Demissão de ${emp.name} revertida`);
+  }
+
   function deleteEmp(emp) {
     if (!window.confirm(`Excluir permanentemente "${emp.name}"? Esta ação não pode ser desfeita.`)) return;
     onUpdate("employees", employees.filter(x => x.id !== emp.id));
@@ -4130,6 +4174,9 @@ Inclua apenas as ações solicitadas. Arrays vazios se não houver ação daquel
                   onSave={()=>saveEmp(emp)}
                   onToggleInactive={()=>toggleInactive(emp)}
                   onDelete={()=>deleteEmp(emp)}
+                  onDismiss={()=>dismissEmp(emp)}
+                  onUndoDismiss={()=>undoDismiss(emp)}
+                  onGenerateReport={onGenerateDismissalReport}
                   onResetPin={resetPin}
                   onToggleProd={()=>{
                     onUpdate("employees", employees.map(x => x.id===emp.id ? {...x, isProducao:!x.isProducao} : x));
@@ -4207,6 +4254,7 @@ function ValeTransporteTab({ restaurantId, employees, roles, workSchedules, sche
       const dateStr = `${year}-${String(month+1).padStart(2,"0")}-${String(d).padStart(2,"0")}`;
       const dow = new Date(year, month, d).getDay();
       const escalaSt = schedDayMap[dateStr];
+      if (escalaSt === "comptrab") { count++; continue; } // trabalho por compensação = dia trabalhado (recebe VT)
       if (escalaSt === "vac" || escalaSt === "off" || escalaSt === "comp" || escalaSt === "faultj" || escalaSt === "faultu") continue;
       if (sched.days[dow]) count++;
     }
@@ -4227,6 +4275,7 @@ function ValeTransporteTab({ restaurantId, employees, roles, workSchedules, sche
       const dateStr = `${targetYear}-${String(targetMonth+1).padStart(2,"0")}-${String(d).padStart(2,"0")}`;
       const dow = new Date(targetYear, targetMonth, d).getDay();
       const escalaSt = schedDayMap[dateStr];
+      if (escalaSt === "comptrab") { count++; continue; } // trabalho por compensação = dia trabalhado (recebe VT)
       if (escalaSt === "vac" || escalaSt === "off" || escalaSt === "comp" || escalaSt === "faultj" || escalaSt === "faultu") continue;
       if (sched.days[dow]) count++;
     }
@@ -4652,10 +4701,11 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
       const admDate = emp.admission || DEFAULT_ADMISSION();
       if (admDate > date) return false;
       if (emp.inactive && emp.inactiveFrom && emp.inactiveFrom <= date) return false;
+      if (emp.demitidoEm && emp.demitidoEm <= date) return false;
       const status = empDayStatus(emp.id);
       if (status === DAY_VACATION || status === DAY_FREELA) return false;
       if (emp.isProducao) return true;
-      if (!status || status === DAY_COMP) return true;
+      if (!status || status === DAY_COMP || status === DAY_COMP_TRAB) return true;
       if (status === DAY_FAULT_J || status === DAY_FAULT_U) return false;
       if (status === DAY_OFF) return false;
       return true;
@@ -4767,12 +4817,13 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
       if (!r || r.noTip) return false;
       if (emp.isFreela) return false; // freela nunca entra na gorjeta
       if (emp.admission && emp.admission > date) return false;
+      if (emp.demitidoEm && emp.demitidoEm <= date) return false; // demitido = não entra
       const status = empDayStatus(emp.id);
       if (status === DAY_VACATION) return false; // férias = ninguém entra, nem produção
       if (status === DAY_FREELA) return false; // freela no dia = não entra
       if (emp.isProducao) return true; // produção entra em todos os outros dias
       if (!status) return true; // trabalho = entra
-      if (status === DAY_COMP) return true; // compensacao = entra
+      if (status === DAY_COMP || status === DAY_COMP_TRAB) return true; // compensação (folga ou trabalho) = entra
       if (status === DAY_FAULT_J || status === DAY_FAULT_U) return false; // faltas = nao entra
       return false; // demais: folga = nao entra
     }).map(emp => ({
@@ -5048,7 +5099,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
           const todayTips = monthTips.filter(t => t.date === todayStr);
           const gorjetaHoje = todayTips.length > 0 ? todayTips[0].poolTotal : null;
           const escalaHoje = schedules?.[rid]?.[mk] ?? {};
-          const teamToday = { work:[], off:[], vacation:[], comp:[], faultJ:[], faultU:[], freela:[] };
+          const teamToday = { work:[], off:[], vacation:[], comp:[], comptrab:[], faultJ:[], faultU:[], freela:[] };
           restEmps.forEach(e => {
             const status = (escalaHoje[e.id] ?? {})[todayStr];
             const role = restRoles.find(r => r.id === e.roleId);
@@ -5063,11 +5114,12 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
             else if (status === DAY_FREELA) teamToday.freela.push(entry);
             else if (status === DAY_VACATION) teamToday.vacation.push(entry);
             else if (status === DAY_COMP) teamToday.comp.push(entry);
+            else if (status === DAY_COMP_TRAB) teamToday.comptrab.push(entry);
             else if (status === DAY_FAULT_J) teamToday.faultJ.push(entry);
             else if (status === DAY_FAULT_U) teamToday.faultU.push(entry);
             else teamToday.work.push(entry);
           });
-          const trabalhando = teamToday.work.length;
+          const trabalhando = teamToday.work.length + teamToday.comptrab.length;
 
           return (
             <div>
@@ -5108,7 +5160,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
               )}
 
               {/* Equipe hoje — detalhamento por área */}
-              {isCurrentMonth && teamToday.work.length + teamToday.off.length + teamToday.vacation.length + teamToday.freela.length > 0 && (() => {
+              {isCurrentMonth && teamToday.work.length + teamToday.comptrab.length + teamToday.off.length + teamToday.vacation.length + teamToday.freela.length > 0 && (() => {
                 // Separate workers by area, production, and off-duty
                 const byArea = {};
                 AREAS.forEach(a => { byArea[a] = []; });
@@ -5118,10 +5170,15 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                   else if (e.area && byArea[e.area]) byArea[e.area].push(e);
                   else if (e.area) { byArea[e.area] = byArea[e.area] || []; byArea[e.area].push(e); }
                 });
-                // Comp goes into their area too
+                // Folga por comp goes into off section
                 teamToday.comp.forEach(e => {
                   if (e.isProducao) prodSection.push({...e, isComp:true});
                   else if (e.area && byArea[e.area]) byArea[e.area].push({...e, isComp:true});
+                });
+                // Trabalho por comp goes into working section
+                teamToday.comptrab.forEach(e => {
+                  if (e.isProducao) prodSection.push({...e, isCompTrab:true});
+                  else if (e.area && byArea[e.area]) byArea[e.area].push({...e, isCompTrab:true});
                 });
                 // Freela-day employees go to their area with badge
                 teamToday.freela.forEach(e => {
@@ -5136,7 +5193,8 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                       <span style={{color:"var(--text2)",fontWeight:500}}>{e.name}</span>
                       {e.isProducao && <span style={{fontSize:10,marginLeft:3}} title="Produção">🏭</span>}
                       {e.isFreela && <span style={{fontSize:10,marginLeft:3}} title="Freela">🎯</span>}
-                      {e.isComp && <span style={{fontSize:9,marginLeft:4,color:"#3b82f6"}}>comp</span>}
+                      {e.isComp && <span style={{fontSize:9,marginLeft:4,color:"#3b82f6"}}>folga comp.</span>}
+                      {e.isCompTrab && <span style={{fontSize:9,marginLeft:4,color:"#0ea5e9"}}>trab. comp.</span>}
                       {e.isFreelaDia && <span style={{fontSize:9,marginLeft:4,color:"#06b6d4"}}>freela</span>}
                       {e.isVac && <span style={{fontSize:9,marginLeft:4,color:"#8b5cf6"}}>férias</span>}
                       {e.isFJ && <span style={{fontSize:9,marginLeft:4,color:"#f59e0b"}}>falta just.</span>}
@@ -5596,6 +5654,185 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
               isOwner={isOwner} restaurant={restaurant}
               notifications={data?.notifications??[]}
               privacyMask={privacyMask}
+              onGenerateDismissalReport={async (emp) => {
+                try {
+                  await loadScript("https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js");
+                  await loadScript("https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js");
+                  const { jsPDF } = window.jspdf;
+                  const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
+                  const role = restRoles.find(r => r.id === emp.roleId);
+                  const demDate = emp.demitidoEm;
+                  const admDate = emp.admission || "—";
+                  const W = doc.internal.pageSize.getWidth();
+                  let y = 15;
+
+                  // Header
+                  doc.setFontSize(16);
+                  doc.setTextColor(30,30,30);
+                  doc.text("RELATÓRIO DE DESLIGAMENTO", W/2, y, {align:"center"});
+                  y += 8;
+                  doc.setFontSize(10);
+                  doc.setTextColor(100,100,100);
+                  doc.text(`${restaurant.name} — Gerado em ${new Date().toLocaleDateString("pt-BR")}`, W/2, y, {align:"center"});
+                  y += 10;
+
+                  // Employee info
+                  doc.setFontSize(12);
+                  doc.setTextColor(30,30,30);
+                  doc.text("DADOS DO EMPREGADO", 14, y);
+                  y += 2;
+                  doc.autoTable({
+                    startY: y,
+                    head: [],
+                    body: [
+                      ["Nome Completo", emp.name],
+                      ["CPF", emp.cpf || "—"],
+                      ["Código", emp.empCode || "—"],
+                      ["Cargo", role?.name || "—"],
+                      ["Área", role?.area || "—"],
+                      ["Data de Admissão", admDate !== "—" ? new Date(admDate+"T12:00:00").toLocaleDateString("pt-BR") : "—"],
+                      ["Data de Demissão", new Date(demDate+"T12:00:00").toLocaleDateString("pt-BR")],
+                      ["Demitido por", emp.demitidoPor || "—"],
+                    ],
+                    theme: "grid",
+                    styles: { fontSize: 10, cellPadding: 3 },
+                    columnStyles: { 0: { fontStyle: "bold", cellWidth: 50 } },
+                    margin: { left: 14, right: 14 },
+                  });
+                  y = doc.lastAutoTable.finalY + 10;
+
+                  // Tip report — day by day
+                  const empTips = tips.filter(t => t.restaurantId === rid && t.employeeId === emp.id);
+                  const tipsByMonth = {};
+                  empTips.forEach(t => {
+                    if (!tipsByMonth[t.monthKey]) tipsByMonth[t.monthKey] = [];
+                    tipsByMonth[t.monthKey].push(t);
+                  });
+                  const sortedMonths = Object.keys(tipsByMonth).sort();
+
+                  doc.setFontSize(12);
+                  doc.setTextColor(30,30,30);
+                  doc.text("RELATÓRIO DE GORJETAS", 14, y);
+                  y += 2;
+
+                  let grandTotal = 0;
+                  const tipSummaryRows = [];
+                  sortedMonths.forEach(mk => {
+                    const monthTips = tipsByMonth[mk].sort((a,b) => a.date.localeCompare(b.date));
+                    const monthTotal = monthTips.reduce((s,t) => s + (t.myNet ?? 0), 0);
+                    grandTotal += monthTotal;
+                    tipSummaryRows.push([mk, `${monthTips.length} dias`, `R$ ${monthTotal.toLocaleString("pt-BR",{minimumFractionDigits:2})}`]);
+                  });
+                  tipSummaryRows.push([{content:"TOTAL GORJETAS", styles:{fontStyle:"bold"}}, "", {content:`R$ ${grandTotal.toLocaleString("pt-BR",{minimumFractionDigits:2})}`, styles:{fontStyle:"bold"}}]);
+
+                  doc.autoTable({
+                    startY: y,
+                    head: [["Mês", "Dias", "Valor Líquido"]],
+                    body: tipSummaryRows,
+                    theme: "striped",
+                    styles: { fontSize: 9, cellPadding: 3 },
+                    headStyles: { fillColor: [59,130,246] },
+                    margin: { left: 14, right: 14 },
+                  });
+                  y = doc.lastAutoTable.finalY + 6;
+
+                  // Detailed day-by-day for last month worked
+                  if (sortedMonths.length > 0) {
+                    const lastMk = sortedMonths[sortedMonths.length - 1];
+                    const lastTips = tipsByMonth[lastMk].sort((a,b) => a.date.localeCompare(b.date));
+                    doc.setFontSize(10);
+                    doc.text(`Detalhamento dia a dia — ${lastMk}`, 14, y);
+                    y += 2;
+                    doc.autoTable({
+                      startY: y,
+                      head: [["Data", "Pool Total", "Minha Parte", "Penalidade", "Líquido"]],
+                      body: lastTips.map(t => [
+                        new Date(t.date+"T12:00:00").toLocaleDateString("pt-BR"),
+                        `R$ ${(t.totalPool??0).toLocaleString("pt-BR",{minimumFractionDigits:2})}`,
+                        `R$ ${(t.myGross??t.myNet??0).toLocaleString("pt-BR",{minimumFractionDigits:2})}`,
+                        t.penalty ? `- R$ ${t.penalty.toLocaleString("pt-BR",{minimumFractionDigits:2})}` : "—",
+                        `R$ ${(t.myNet??0).toLocaleString("pt-BR",{minimumFractionDigits:2})}`,
+                      ]),
+                      theme: "striped",
+                      styles: { fontSize: 8, cellPadding: 2 },
+                      headStyles: { fillColor: [100,100,100] },
+                      margin: { left: 14, right: 14 },
+                    });
+                    y = doc.lastAutoTable.finalY + 10;
+                  }
+
+                  // VT restitution report
+                  if (y > 250) { doc.addPage(); y = 15; }
+                  doc.setFontSize(12);
+                  doc.setTextColor(30,30,30);
+                  doc.text("RESTITUIÇÃO DE VALE TRANSPORTE", 14, y);
+                  y += 2;
+
+                  const vtConf = data?.vtConfig?.[rid]?.[emp.id];
+                  const dailyRate = vtConf?.dailyRate ?? 0;
+                  const demMk = demDate.slice(0,7);
+                  const [demY, demM] = demMk.split("-").map(Number);
+                  const demDay = parseInt(demDate.slice(8,10));
+                  const daysInDemMonth = new Date(demY, demM, 0).getDate();
+
+                  // Count planned days (full month) and actual days worked until dismissal
+                  const empScheds = data?.workSchedules?.[rid]?.[emp.id] ?? [];
+                  const monthEnd = `${demY}-${String(demM).padStart(2,"0")}-${String(daysInDemMonth).padStart(2,"0")}`;
+                  const validScheds = empScheds.filter(s => !s.validFrom || s.validFrom <= monthEnd).sort((a,b) => (b.validFrom??"").localeCompare(a.validFrom??""));
+                  const sched = validScheds[0];
+                  const schedDayMap = schedules?.[rid]?.[demMk]?.[emp.id] ?? {};
+
+                  let plannedFullMonth = 0;
+                  let workedUntilDismissal = 0;
+                  for (let d = 1; d <= daysInDemMonth; d++) {
+                    const dateStr = `${demY}-${String(demM).padStart(2,"0")}-${String(d).padStart(2,"0")}`;
+                    const dow = new Date(demY, demM-1, d).getDay();
+                    const escalaSt = schedDayMap[dateStr];
+                    const isSkip = escalaSt === "vac" || escalaSt === "off" || escalaSt === "comp" || escalaSt === "faultj" || escalaSt === "faultu";
+                    const isCompTrab = escalaSt === "comptrab";
+                    if (isCompTrab || (!isSkip && sched?.days?.[dow])) plannedFullMonth++;
+                    if (d < demDay && (isCompTrab || (!isSkip && sched?.days?.[dow]))) workedUntilDismissal++;
+                  }
+
+                  const vtPaidMonth = dailyRate * plannedFullMonth;
+                  const vtOwed = dailyRate * workedUntilDismissal;
+                  const vtToReturn = Math.max(0, vtPaidMonth - vtOwed);
+
+                  doc.autoTable({
+                    startY: y,
+                    head: [["Item", "Valor"]],
+                    body: [
+                      ["Valor diário VT", `R$ ${dailyRate.toLocaleString("pt-BR",{minimumFractionDigits:2})}`],
+                      ["Dias planejados no mês", String(plannedFullMonth)],
+                      ["Dias trabalhados até demissão", String(workedUntilDismissal)],
+                      ["VT pago (mês inteiro)", `R$ ${vtPaidMonth.toLocaleString("pt-BR",{minimumFractionDigits:2})}`],
+                      ["VT devido (até demissão)", `R$ ${vtOwed.toLocaleString("pt-BR",{minimumFractionDigits:2})}`],
+                      [{content:"VT A RESTITUIR", styles:{fontStyle:"bold",textColor:[220,50,50]}}, {content:`R$ ${vtToReturn.toLocaleString("pt-BR",{minimumFractionDigits:2})}`, styles:{fontStyle:"bold",textColor:[220,50,50]}}],
+                    ],
+                    theme: "grid",
+                    styles: { fontSize: 10, cellPadding: 3 },
+                    columnStyles: { 0: { fontStyle: "bold", cellWidth: 80 } },
+                    headStyles: { fillColor: [39,174,96] },
+                    margin: { left: 14, right: 14 },
+                  });
+
+                  // Footer
+                  const pages = doc.internal.getNumberOfPages();
+                  for (let i = 1; i <= pages; i++) {
+                    doc.setPage(i);
+                    doc.setFontSize(8);
+                    doc.setTextColor(150,150,150);
+                    doc.text(`AppTip · Relatório de Desligamento · ${emp.name} · Página ${i}/${pages}`, W/2, doc.internal.pageSize.getHeight() - 8, {align:"center"});
+                  }
+
+                  const safeName = emp.name.replace(/[^a-zA-Z0-9]/g,"_").toLowerCase();
+                  doc.save(`relatorio_desligamento_${safeName}_${demDate}.pdf`);
+                  onUpdate("_toast", `📄 Relatório de ${emp.name} exportado!`);
+                } catch (err) {
+                  console.error("Erro ao gerar relatório:", err);
+                  onUpdate("_toast", "⚠️ Erro ao gerar relatório: " + (err.message || "desconhecido"));
+                }
+              }}
             />
           </div>
         )}
@@ -5748,6 +5985,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                     off:  [231,76,60],
                     freela:[6,182,212],
                     comp: [59,130,246],
+                    comptrab:[14,165,233],
                     vac:  [139,92,246],
                     faultj:[245,158,11],
                     faultu:[180,30,30],
@@ -5761,7 +5999,8 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                     ["T  Trabalho", PDF_STATUS_COLORS.work],
                     ["F  Folga", PDF_STATUS_COLORS.off],
                     ["FL  Freela", PDF_STATUS_COLORS.freela],
-                    ["C  Compensação", PDF_STATUS_COLORS.comp],
+                    ["FC  Folga Comp.", PDF_STATUS_COLORS.comp],
+                    ["TC  Trab. Comp.", PDF_STATUS_COLORS.comptrab],
                     ["FÉR  Férias", PDF_STATUS_COLORS.vac],
                     ["FJ  Falta Just.", PDF_STATUS_COLORS.faultj],
                     ["FI  Falta Injust.", PDF_STATUS_COLORS.faultu],
@@ -6044,14 +6283,15 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                             {/* 7 dias da semana */}
                             {curWeek.map((slot, di) => {
                               if (!slot) return <div key={di} style={{minHeight:36}}></div>;
-                              const status = dayMap[slot.date];
-                              const color = STATUS_COLORS[status] ?? "var(--green)";
-                              const label = STATUS_SHORT[status] ?? "T";
-                              const locked = restaurant.serviceStartDate && slot.date < restaurant.serviceStartDate;
+                              const isDem = emp.demitidoEm && slot.date >= emp.demitidoEm;
+                              const status = isDem ? null : dayMap[slot.date];
+                              const color = isDem ? "#6b7280" : (STATUS_COLORS[status] ?? "var(--green)");
+                              const label = isDem ? "DEM" : (STATUS_SHORT[status] ?? "T");
+                              const locked = isDem || (restaurant.serviceStartDate && slot.date < restaurant.serviceStartDate);
                               return (
                                 <div key={di} onClick={()=>!locked && cycleStatus(emp.id, slot.date)}
-                                  style={{display:"flex",alignItems:"center",justifyContent:"center",minHeight:36,borderRadius:6,cursor:locked?"not-allowed":"pointer",background:status?color+"22":"transparent",border:`1px solid ${status?color+"44":"var(--border)"}`,opacity:locked?0.35:1}}>
-                                  <span style={{color:locked?"var(--text3)":color,fontSize:11,fontWeight:700}}>{locked?"🔒":label}</span>
+                                  style={{display:"flex",alignItems:"center",justifyContent:"center",minHeight:36,borderRadius:6,cursor:locked?"not-allowed":"pointer",background:isDem?"#6b728022":(status?color+"22":"transparent"),border:`1px solid ${isDem?"#6b728044":(status?color+"44":"var(--border)")}`,opacity:locked?0.35:1}}>
+                                  <span style={{color:locked?"var(--text3)":color,fontSize:isDem?9:11,fontWeight:700}}>{restaurant.serviceStartDate && !isDem && slot.date < restaurant.serviceStartDate?"🔒":label}</span>
                                 </div>
                               );
                             })}
@@ -6126,16 +6366,17 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                             {Array.from({length:daysInMonth},(_,i)=>{
                               const d = i+1;
                               const date = `${year}-${String(month+1).padStart(2,"0")}-${String(d).padStart(2,"0")}`;
-                              const status = dayMap[date];
-                              const color = STATUS_COLORS[status] ?? "var(--green)";
-                              const label = STATUS_SHORT[status] ?? "•";
+                              const isDem = emp.demitidoEm && date >= emp.demitidoEm;
+                              const status = isDem ? null : dayMap[date];
+                              const color = isDem ? "#6b7280" : (STATUS_COLORS[status] ?? "var(--green)");
+                              const label = isDem ? "D" : (STATUS_SHORT[status] ?? "•");
                               const wd = new Date(date+"T12:00:00").getDay();
                               const isWe = wd===0||wd===6;
-                              const locked = restaurant.serviceStartDate && date < restaurant.serviceStartDate;
+                              const locked = isDem || (restaurant.serviceStartDate && date < restaurant.serviceStartDate);
                               return (
-                                <td key={d} onClick={()=>cycleStatus(emp.id, date)}
-                                  style={{textAlign:"center",padding:"2px 0",cursor:locked?"not-allowed":"pointer",background:locked?"var(--bg3)":(status?color+"22":(isWe?"var(--bg3)":"transparent")),borderRight:"1px solid var(--border)",opacity:locked?0.35:1}}>
-                                  <span style={{color:locked?"var(--text3)":color,fontSize:status?8:10,fontWeight:status?700:400}}>{locked?"🔒":label}</span>
+                                <td key={d} onClick={()=>!isDem && cycleStatus(emp.id, date)}
+                                  style={{textAlign:"center",padding:"2px 0",cursor:locked?"not-allowed":"pointer",background:isDem?"#6b728022":(locked?"var(--bg3)":(status?color+"22":(isWe?"var(--bg3)":"transparent"))),borderRight:"1px solid var(--border)",opacity:locked?0.35:1}}>
+                                  <span style={{color:locked?"var(--text3)":color,fontSize:isDem?7:(status?8:10),fontWeight:isDem||status?700:400}}>{!isDem&&restaurant.serviceStartDate&&date<restaurant.serviceStartDate?"🔒":label}</span>
                                 </td>
                               );
                             })}
@@ -10710,6 +10951,23 @@ export default function App() {
           await save(K.employees, fixed);
           setEmployees(fixed);
           console.log(`Migrados ${needsFix.length} empregado(s) sem empCode/PIN`);
+        }
+      }
+
+      // Auto-inativar empregados demitidos cujo mês de demissão já passou
+      {
+        const allEmps = loaded_data.employees ?? [];
+        const currentMonth = today().slice(0,7); // "YYYY-MM"
+        const demitidosParaInativar = allEmps.filter(e => e.demitidoEm && !e.inactive && e.demitidoEm.slice(0,7) < currentMonth);
+        if (demitidosParaInativar.length > 0) {
+          const updated = allEmps.map(e =>
+            e.demitidoEm && !e.inactive && e.demitidoEm.slice(0,7) < currentMonth
+              ? { ...e, inactive: true, inactiveFrom: e.demitidoEm }
+              : e
+          );
+          await save(K.employees, updated);
+          setEmployees(updated);
+          console.log(`Auto-inativados ${demitidosParaInativar.length} empregado(s) demitido(s)`);
         }
       }
 
