@@ -4954,7 +4954,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
     (isOwner || tabVisible("roles"))           && ["roles",       "🏷️ Cargos"],
     (isOwner || canTips || tabVisible("employees")) && ["employees","👥 Equipe"],
     (isOwner || tabVisible("horarios"))          && ["horarios",    "🕐 Horários"],
-    (isOwner || (perms.vt !== false && tabVisible("vt"))) && ["vt",          "🚌 Vale Transporte"],
+    (isOwner || (!isLider && perms.vt !== false && tabVisible("vt"))) && ["vt",          "🚌 Vale Transporte"],
     (isOwner || tabVisible("faq"))               && ["faq",         "❓ FAQ"],
     (isOwner || tabVisible("comunicados"))        && ["comunicados", "📢 Comunicados"],
     (isOwner || tabVisible("dp"))                && ["dp",          "💬 Fale com DP"],
