@@ -3979,7 +3979,13 @@ Inclua apenas as ações solicitadas. Arrays vazios se não houver ação daquel
 
   function undoDismiss(emp) {
     if (!window.confirm(`Reverter demissão de "${emp.name}"?`)) return;
-    onUpdate("employees", employees.map(x => x.id===emp.id ? {...x, demitidoEm: undefined, demitidoPor: undefined} : x));
+    onUpdate("employees", employees.map(x => {
+      if (x.id !== emp.id) return x;
+      const copy = {...x};
+      delete copy.demitidoEm;
+      delete copy.demitidoPor;
+      return copy;
+    }));
     onUpdate("_toast", `↩️ Demissão de ${emp.name} revertida`);
   }
 
@@ -5699,19 +5705,28 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                   doc.text("RELATÓRIO DE GORJETAS", 14, y);
                   y += 2;
 
-                  let grandTotal = 0;
+                  let grandBruto = 0, grandDed = 0, grandLiq = 0;
                   const tipSummaryRows = [];
                   sortedMonths.forEach(mk => {
                     const monthTips = tipsByMonth[mk].sort((a,b) => a.date.localeCompare(b.date));
-                    const monthTotal = monthTips.reduce((s,t) => s + (t.myNet ?? 0), 0);
-                    grandTotal += monthTotal;
-                    tipSummaryRows.push([mk, `${monthTips.length} dias`, `R$ ${monthTotal.toLocaleString("pt-BR",{minimumFractionDigits:2})}`]);
+                    const mBruto = monthTips.reduce((s,t) => s + (t.myShare ?? 0), 0);
+                    const mDed = monthTips.reduce((s,t) => s + (t.myTax ?? 0), 0);
+                    const mLiq = monthTips.reduce((s,t) => s + (t.myNet ?? 0), 0);
+                    grandBruto += mBruto; grandDed += mDed; grandLiq += mLiq;
+                    const f2 = v => `R$ ${v.toLocaleString("pt-BR",{minimumFractionDigits:2})}`;
+                    tipSummaryRows.push([mk, `${monthTips.length} dias`, f2(mBruto), f2(mDed), f2(mLiq)]);
                   });
-                  tipSummaryRows.push([{content:"TOTAL GORJETAS", styles:{fontStyle:"bold"}}, "", {content:`R$ ${grandTotal.toLocaleString("pt-BR",{minimumFractionDigits:2})}`, styles:{fontStyle:"bold"}}]);
+                  const f2 = v => `R$ ${v.toLocaleString("pt-BR",{minimumFractionDigits:2})}`;
+                  tipSummaryRows.push([
+                    {content:"TOTAL", styles:{fontStyle:"bold"}}, "",
+                    {content:f2(grandBruto), styles:{fontStyle:"bold"}},
+                    {content:f2(grandDed), styles:{fontStyle:"bold",textColor:[220,50,50]}},
+                    {content:f2(grandLiq), styles:{fontStyle:"bold",textColor:[16,185,129]}},
+                  ]);
 
                   doc.autoTable({
                     startY: y,
-                    head: [["Mês", "Dias", "Valor Líquido"]],
+                    head: [["Mês", "Dias", "Bruto", "Dedução", "Líquido"]],
                     body: tipSummaryRows,
                     theme: "striped",
                     styles: { fontSize: 9, cellPadding: 3 },
@@ -5729,14 +5744,17 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                     y += 2;
                     doc.autoTable({
                       startY: y,
-                      head: [["Data", "Pool Total", "Minha Parte", "Penalidade", "Líquido"]],
-                      body: lastTips.map(t => [
-                        new Date(t.date+"T12:00:00").toLocaleDateString("pt-BR"),
-                        `R$ ${(t.totalPool??0).toLocaleString("pt-BR",{minimumFractionDigits:2})}`,
-                        `R$ ${(t.myGross??t.myNet??0).toLocaleString("pt-BR",{minimumFractionDigits:2})}`,
-                        t.penalty ? `- R$ ${t.penalty.toLocaleString("pt-BR",{minimumFractionDigits:2})}` : "—",
-                        `R$ ${(t.myNet??0).toLocaleString("pt-BR",{minimumFractionDigits:2})}`,
-                      ]),
+                      head: [["Data", "Bruto", "Dedução", "Penalidade", "Líquido"]],
+                      body: lastTips.map(t => {
+                        const f = v => `R$ ${(v??0).toLocaleString("pt-BR",{minimumFractionDigits:2})}`;
+                        return [
+                          new Date(t.date+"T12:00:00").toLocaleDateString("pt-BR"),
+                          f(t.myShare),
+                          f(t.myTax),
+                          t.penalty ? `- ${f(t.penalty)}` : "—",
+                          f(t.myNet),
+                        ];
+                      }),
                       theme: "striped",
                       styles: { fontSize: 8, cellPadding: 2 },
                       headStyles: { fillColor: [100,100,100] },
