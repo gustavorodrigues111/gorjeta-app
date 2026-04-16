@@ -6144,7 +6144,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
 
             {/* Legend */}
             <div style={{display:"flex",gap:mobileOnly?0:8,flexWrap:mobileOnly?"nowrap":"wrap",justifyContent:mobileOnly?"space-between":"flex-start",marginBottom:12}}>
-              {[["var(--green)","T","Trabalho"],["var(--red)","F","Folga"],["#06b6d4","FL","Freela"],["#3b82f6","C","Comp."],["#8b5cf6","Fér","Férias"],["#f59e0b","FJ","F.Just."],["var(--red)","FI","F.Inj."]].map(([c,s,l])=>(
+              {[["var(--green)","T","Trabalho"],["var(--red)","F","Folga"],["#06b6d4","FL","Freela"],["#3b82f6","FC","Folga Comp."],["#0ea5e9","TC","Trab. Comp."],["#8b5cf6","Fér","Férias"],["#f59e0b","FJ","F.Just."],["var(--red)","FI","F.Inj."]].map(([c,s,l])=>(
                 <div key={s} style={{display:"flex",alignItems:"center",gap:mobileOnly?1:3,flexShrink:0}}>
                   <div style={{width:mobileOnly?14:20,height:mobileOnly?14:16,borderRadius:3,background:c+"33",border:`1px solid ${c}`,display:"flex",alignItems:"center",justifyContent:"center"}}>
                     <span style={{color:c,fontSize:mobileOnly?7:9,fontWeight:700}}>{s}</span>
