@@ -3109,17 +3109,17 @@ function EmployeePortal({ employees, roles, tips, schedules, splits, restaurants
   return (
     <div style={{ minHeight:"100vh", background:"var(--bg)", fontFamily:"'DM Sans',sans-serif", paddingBottom:76 }}>
       {/* Header */}
-      <div style={{ background:"var(--header-bg)", borderBottom:"1px solid var(--border)", padding:"12px 16px", display:"flex", justifyContent:"space-between", alignItems:"center", boxShadow:"0 1px 4px rgba(0,0,0,0.04)" }}>
-        <div>
-          <div style={{ color:"var(--text)", fontWeight:700, fontSize:15 }}>{emp?.name}</div>
-          <div style={{ color:"var(--text3)", fontSize:11 }}>{role?.name} · {restaurant?.name}</div>
+      <div style={{ background:"var(--header-bg)", borderBottom:"1px solid var(--border)", padding:"12px 16px", display:"flex", justifyContent:"space-between", alignItems:"center", boxShadow:"0 1px 4px rgba(0,0,0,0.04)", gap:8 }}>
+        <div style={{minWidth:0,flex:1}}>
+          <div style={{ color:"var(--text)", fontWeight:700, fontSize:15, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{emp?.name}</div>
+          <div style={{ color:"var(--text3)", fontSize:11, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{role?.name} · {restaurant?.name}</div>
         </div>
-        <div style={{display:"flex",gap:8,alignItems:"center"}}>
-          <button onClick={toggleTheme} style={{background:"none",border:"1px solid var(--border)",borderRadius:20,padding:"6px 10px",cursor:"pointer",fontSize:16,color:"var(--text2)"}}>
+        <div style={{display:"flex",gap:6,alignItems:"center",flexShrink:0}}>
+          <button onClick={toggleTheme} style={{background:"none",border:"1px solid var(--border)",borderRadius:20,padding:"5px 8px",cursor:"pointer",fontSize:14,color:"var(--text2)"}}>
             {theme==="dark"?"☀️":"🌙"}
           </button>
-          {onSwitchToManager && <button onClick={onSwitchToManager} style={{...S.btnSecondary,fontSize:12,padding:"6px 14px",color:"var(--ac)",borderColor:"var(--ac)"}}>📊 Gestor</button>}
-          <button onClick={() => { setEmpId(null); onBack(); }} style={{ ...S.btnSecondary, fontSize:12, padding:"6px 14px" }}>Sair</button>
+          {onSwitchToManager && <button onClick={onSwitchToManager} style={{...S.btnSecondary,fontSize:11,padding:"5px 10px",color:"var(--ac)",borderColor:"var(--ac)"}}>📊</button>}
+          <button onClick={() => { setEmpId(null); onBack(); }} style={{ ...S.btnSecondary, fontSize:11, padding:"5px 10px" }}>Sair</button>
         </div>
       </div>
 
@@ -9562,7 +9562,10 @@ function UnifiedLogin({ owners, managers, employees, restaurants, onLoginOwner, 
         }
         // Verificar se o CPF desse empregado também é de um gestor
         const empCpf = emp.cpf?.replace(/\D/g,"");
-        const mgr = empCpf ? managers.find(m => m.cpf?.replace(/\D/g,"") === empCpf) : null;
+        let mgr = empCpf ? managers.find(m => m.cpf?.replace(/\D/g,"") === empCpf) : null;
+        // Fallback: linkedManagerId ou nome exato no mesmo restaurante
+        if (!mgr && emp.linkedManagerId) mgr = managers.find(m => m.id === emp.linkedManagerId);
+        if (!mgr && emp.name) mgr = managers.find(m => m.name === emp.name && (m.restaurantIds ?? []).includes(emp.restaurantId));
         if (mgr) {
           // Dual-role — mostrar tela de escolha
           const found = [];
@@ -11140,7 +11143,14 @@ export default function App() {
         <ManagerPortal manager={currentUser} data={data} onUpdate={handleUpdate} onBack={doLogout} toggleTheme={toggleTheme} theme={theme}
           onSwitchToEmployee={(() => {
             const cpf = currentUser?.cpf?.replace(/\D/g,"");
-            const emp = cpf ? employees.find(e => e.cpf?.replace(/\D/g,"") === cpf && !(e.inactive && e.inactiveFrom && e.inactiveFrom <= today())) : null;
+            let emp = cpf ? employees.find(e => e.cpf?.replace(/\D/g,"") === cpf && !(e.inactive && e.inactiveFrom && e.inactiveFrom <= today())) : null;
+            // Fallback: match por linkedEmpId do gestor
+            if (!emp && currentUser?.linkedEmpId) emp = employees.find(e => e.id === currentUser.linkedEmpId && !(e.inactive && e.inactiveFrom && e.inactiveFrom <= today()));
+            // Fallback: match por nome exato nos restaurantes do gestor
+            if (!emp && currentUser?.name) {
+              const mgrRids = currentUser.restaurantIds ?? (currentUser.restaurantId ? [currentUser.restaurantId] : []);
+              emp = employees.find(e => e.name === currentUser.name && mgrRids.includes(e.restaurantId) && !(e.inactive && e.inactiveFrom && e.inactiveFrom <= today()));
+            }
             if (!emp) return null;
             return () => { setCurrentUser(emp); setUserRole("employee"); localStorage.setItem("apptip_role","employee"); localStorage.setItem("apptip_userid",emp.id); localStorage.setItem("apptip_empid",emp.id); setView("employee"); };
           })()} />
@@ -11148,7 +11158,13 @@ export default function App() {
       {view === "employee" && <EmployeePortal employees={employees} roles={roles} tips={tips} schedules={schedules} splits={splits} restaurants={restaurants} communications={communications} commAcks={commAcks} faq={faq} dpMessages={dpMessages} workSchedules={workSchedules} onBack={doLogout} onUpdateEmployee={emp=>{const next=employees.map(e=>e.id===emp.id?emp:e);handleUpdate("employees",next);}} onUpdate={handleUpdate} toggleTheme={toggleTheme} theme={theme}
         onSwitchToManager={(() => {
           const cpf = currentUser?.cpf?.replace(/\D/g,"");
-          const mgr = cpf ? managers.find(m => m.cpf?.replace(/\D/g,"") === cpf) : null;
+          let mgr = cpf ? managers.find(m => m.cpf?.replace(/\D/g,"") === cpf) : null;
+          // Fallback: match por linkedManagerId do empregado
+          if (!mgr && currentUser?.linkedManagerId) mgr = managers.find(m => m.id === currentUser.linkedManagerId);
+          // Fallback: match por nome exato no mesmo restaurante
+          if (!mgr && currentUser?.name) {
+            mgr = managers.find(m => m.name === currentUser.name && (m.restaurantIds ?? []).includes(currentUser.restaurantId));
+          }
           if (!mgr) return null;
           return () => { setCurrentUser(mgr); setUserRole("manager"); localStorage.setItem("apptip_role","manager"); localStorage.setItem("apptip_userid",mgr.id); setView("manager"); };
         })()} />}
