@@ -6752,6 +6752,38 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                 <span style={{color:"var(--text)",fontSize:14,fontWeight:600}}>{localRest.privacyMode ? "Ativo — dados ocultos para o admin" : "Desativado"}</span>
               </label>
             </div>
+            {/* Backup do restaurante — admin only */}
+            {isOwner && (
+              <div style={{...S.card,marginBottom:20}}>
+                <p style={{color:ac,fontSize:14,fontWeight:700,margin:"0 0 4px"}}>💾 Backup do Restaurante</p>
+                <p style={{color:"var(--text3)",fontSize:12,marginBottom:14}}>Exporta todos os dados deste restaurante: empregados, cargos, gorjetas, escalas, gestores vinculados e configurações financeiras.</p>
+                <button onClick={()=>{
+                  const restEmps = employees.filter(e=>e.restaurantId===restaurant.id);
+                  const restRoles = roles.filter(ro=>ro.restaurantId===restaurant.id);
+                  const restTips = tips.filter(t=>t.restaurantId===restaurant.id);
+                  const restSchedules = schedules.filter(s=>s.restaurantId===restaurant.id);
+                  const restMgrs = (data?.managers??[]).filter(m=>m.restaurantIds?.includes(restaurant.id)).map(m=>({...m,pin:"***"}));
+                  const exportData = {
+                    exportedAt: new Date().toISOString(),
+                    restaurante: restaurant,
+                    empregados: restEmps,
+                    cargos: restRoles,
+                    gorjetas: restTips,
+                    escalas: restSchedules,
+                    gestores: restMgrs,
+                  };
+                  const safeName = restaurant.name.replace(/[^a-zA-Z0-9]/g,"_").toLowerCase();
+                  const blob = new Blob([JSON.stringify(exportData,null,2)],{type:"application/json"});
+                  const url = URL.createObjectURL(blob);
+                  const a = document.createElement("a");
+                  a.href=url; a.download=`apptip_backup_${safeName}_${today()}.json`; a.click();
+                  URL.revokeObjectURL(url);
+                  onUpdate("_toast",`✅ Backup de ${restaurant.name} exportado!`);
+                }} style={{...S.btnSecondary,color:"var(--green)",borderColor:"var(--green)",fontSize:13,width:"100%",textAlign:"center",padding:"12px"}}>
+                  💾 Exportar backup de {restaurant.name}
+                </button>
+              </div>
+            )}
             {(localRest.divisionMode ?? MODE_AREA_POINTS) === MODE_AREA_POINTS && (
               <div style={{...S.card,marginBottom:20}}>
                 <p style={{color:ac,fontSize:14,fontWeight:700,margin:"0 0 4px"}}>Distribuição por Área</p>
@@ -6948,7 +6980,6 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }
   const ac = "var(--ac)";
   const TABS = [
     ["financeiro_geral", "💰 Financeiro"],
-    ["restaurants","🏢 Restaurantes"],
     ["managers","👔 Gestores"],
     ["owners","⭐ Admins AppTip"],
     ["inbox", `📬 Caixa${unreadNotifs > 0 ? ` (${unreadNotifs})` : ""}`],
@@ -7998,6 +8029,32 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }
 
           return (
             <div>
+              {/* ── Ações rápidas ── */}
+              <div style={{display:"flex",gap:8,marginBottom:isMobile?12:16,flexWrap:"wrap"}}>
+                <button onClick={()=>{setEditRestId(null);setRestForm({name:"",cnpj:"",address:"",whatsappFin:"",whatsappOp:"",serviceStartDate:""});setShowRestModal(true);}} style={{...S.btnPrimary,fontSize:isMobile?12:14}}>+ Novo Restaurante</button>
+                {restaurants.length > 0 && (
+                  <button onClick={()=>{
+                    const exportData = {
+                      exportedAt: new Date().toISOString(),
+                      restaurantes: restaurants,
+                      empregados: employees,
+                      cargos: roles,
+                      gorjetas: tips,
+                      escalas: schedules,
+                      gestores: managers.map(m=>({...m,pin:"***"})),
+                    };
+                    const blob = new Blob([JSON.stringify(exportData,null,2)],{type:"application/json"});
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement("a");
+                    a.href=url; a.download=`apptip_backup_${today()}.json`; a.click();
+                    URL.revokeObjectURL(url);
+                    onUpdate("_toast","✅ Backup exportado com sucesso!");
+                  }} style={{...S.btnSecondary,fontSize:isMobile?11:12,color:"var(--green)",borderColor:"var(--green)"}}>
+                    💾 Backup completo
+                  </button>
+                )}
+              </div>
+
               {/* ── Overview rápido ── */}
               <div style={{display:"grid",gridTemplateColumns:isMobile?"repeat(2,1fr)":"repeat(4,1fr)",gap:isMobile?8:14,marginBottom:isMobile?16:24}}>
                 {[
@@ -8133,22 +8190,31 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }
                     const statusLabel = isInad ? "🔴 Inadimplente" : isVencido ? `⏰ Vencido ${Math.abs(diasRow)}d` : isVencendo ? `⚡ ${diasRow}d` : emTrialRow ? `🎯 Trial ${diasTrialRow}d` : !cicloInicioRow ? "⚙️ Não iniciado" : "✅ Em dia";
 
                     return (
-                      <div key={r.id} onClick={()=>{ setSelRestaurant(r.id); setRestTab("financeiro"); }}
-                        style={{...S.card,padding:"12px",cursor:"pointer",borderLeft:`3px solid ${semColor}`}}>
-                        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
+                      <div key={r.id} style={{...S.card,padding:"12px",borderLeft:`3px solid ${semColor}`}}>
+                        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}} onClick={()=>{ setSelRestaurant(r.id); setRestTab("financeiro"); }}>
                           <div style={{display:"flex",alignItems:"center",gap:6,minWidth:0}}>
                             <span style={{color:"var(--text)",fontWeight:700,fontSize:14}}>{r.name}</span>
                             {r.earlyAdopter && <span style={{fontSize:9,color:"#d4a017",fontWeight:700,background:"#d4a01715",padding:"1px 4px",borderRadius:6}}>EA</span>}
                           </div>
                           <span style={{color:semColor,fontWeight:700,fontSize:11,flexShrink:0}}>{statusLabel}</span>
                         </div>
-                        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:4,fontSize:11,color:"var(--text3)"}}>
+                        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:4,fontSize:11,color:"var(--text3)",marginBottom:8}} onClick={()=>{ setSelRestaurant(r.id); setRestTab("financeiro"); }}>
                           <div><span style={{fontWeight:600}}>Plano:</span> {plano.label}</div>
                           <div><span style={{fontWeight:600}}>Valor:</span> {valorTotal ? `R$${valorTotal.toLocaleString("pt-BR",{minimumFractionDigits:2})}` : "—"}</div>
                           <div><span style={{fontWeight:600}}>Emp.:</span> {empAtivos}/{empMax}</div>
                           <div><span style={{fontWeight:600}}>Gorjetas:</span> {diasGorjeta}d no mês</div>
                           <div><span style={{fontWeight:600}}>Últ. pag.:</span> {ultimoPag ? new Date(ultimoPag.data+"T12:00:00").toLocaleDateString("pt-BR") : "—"}</div>
                           <div><span style={{fontWeight:600}}>Venc.:</span> {venc ? new Date(venc+"T12:00:00").toLocaleDateString("pt-BR") : "—"}</div>
+                        </div>
+                        <div style={{display:"flex",gap:6,borderTop:"1px solid var(--border)",paddingTop:8}}>
+                          <button onClick={()=>setSelRestaurant(r.id)} style={{...S.btnSecondary,fontSize:11,flex:1,textAlign:"center",color:ac,borderColor:ac,padding:"6px"}}>Abrir →</button>
+                          <button onClick={()=>{setEditRestId(r.id);setRestForm({name:r.name,shortCode:r.shortCode??"",cnpj:r.cnpj??"",address:r.address??"",whatsappFin:r.whatsappFin??"",whatsappOp:r.whatsappOp??"",serviceStartDate:r.serviceStartDate??""});setShowRestModal(true);}} style={{...S.btnSecondary,fontSize:11,flex:1,textAlign:"center",padding:"6px"}}>✏️ Editar</button>
+                          <button onClick={()=>{
+                            if(!window.confirm(`Mover "${r.name}" para a lixeira?`)) return;
+                            softDelete("restaurants", r);
+                            onUpdate("restaurants", restaurants.filter(x=>x.id!==r.id));
+                            onUpdate("_toast", `🗑️ ${r.name} movido para a lixeira.`);
+                          }} style={{background:"none",border:"1px solid var(--red)33",borderRadius:8,color:"var(--red)",cursor:"pointer",fontSize:11,padding:"6px 12px",fontFamily:"'DM Sans',sans-serif"}}>🗑️</button>
                         </div>
                       </div>
                     );
@@ -8157,8 +8223,8 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }
               ) : (
                 /* Desktop: tabela */
                 <div style={{...S.card,padding:0,overflow:"hidden"}}>
-                  <div style={{display:"grid",gridTemplateColumns:"2fr 0.8fr 0.7fr 1fr 0.8fr 0.8fr 1fr",gap:0,padding:"10px 16px",background:"var(--bg2)",borderBottom:"1px solid var(--border)"}}>
-                    {["Restaurante","Plano","Emp.","Valor/mês","Últ. pag.","Vencimento","Status"].map(h=>(
+                  <div style={{display:"grid",gridTemplateColumns:"2fr 0.8fr 0.7fr 1fr 0.8fr 0.8fr 1fr 0.6fr",gap:0,padding:"10px 16px",background:"var(--bg2)",borderBottom:"1px solid var(--border)"}}>
+                    {["Restaurante","Plano","Emp.","Valor/mês","Últ. pag.","Vencimento","Status","Ações"].map(h=>(
                       <div key={h} style={{color:"var(--text3)",fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:0.5}}>{h}</div>
                     ))}
                   </div>
@@ -8192,16 +8258,15 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }
                       : <span style={{color:"var(--green)",fontWeight:600,fontSize:11}}>✅ Em dia</span>;
 
                     return (
-                      <div key={r.id} style={{display:"grid",gridTemplateColumns:"2fr 0.8fr 0.7fr 1fr 0.8fr 0.8fr 1fr",gap:0,padding:"10px 16px",borderBottom:"1px solid var(--border)",background:rowBg,alignItems:"center",cursor:"pointer"}}
-                        onClick={()=>{ setSelRestaurant(r.id); setRestTab("financeiro"); }}>
-                        <div>
+                      <div key={r.id} style={{display:"grid",gridTemplateColumns:"2fr 0.8fr 0.7fr 1fr 0.8fr 0.8fr 1fr 0.6fr",gap:0,padding:"10px 16px",borderBottom:"1px solid var(--border)",background:rowBg,alignItems:"center"}}>
+                        <div style={{cursor:"pointer"}} onClick={()=>{ setSelRestaurant(r.id); setRestTab("financeiro"); }}>
                           <div style={{color:"var(--text)",fontWeight:700,fontSize:13}}>
                             {r.name}
                             {r.earlyAdopter && <span style={{marginLeft:6,fontSize:9,color:"#d4a017",fontWeight:700,background:"#d4a01715",padding:"1px 5px",borderRadius:6}}>🚀 EA</span>}
                           </div>
                           <div style={{color:"var(--text3)",fontSize:10}}>{r.tipoCobranca==="anual"?"Anual":"Mensal"} {diasGorjeta>0?`· ${diasGorjeta}d gorjeta`:""}</div>
                         </div>
-                        <div style={{color:"var(--text2)",fontSize:12}}>{plano.label}</div>
+                        <div style={{color:"var(--text2)",fontSize:12,cursor:"pointer"}} onClick={()=>{ setSelRestaurant(r.id); setRestTab("financeiro"); }}>{plano.label}</div>
                         <div style={{color:"var(--text2)",fontSize:12,fontFamily:"'DM Mono',monospace"}}>{empAtivos}/{empMax}</div>
                         <div style={{color:"var(--text)",fontWeight:700,fontSize:12,fontFamily:"'DM Mono',monospace"}}>
                           {valorTotal ? `R$${valorTotal.toLocaleString("pt-BR",{minimumFractionDigits:2})}` : "—"}
@@ -8214,7 +8279,16 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }
                         </div>
                         <div style={{display:"flex",alignItems:"center",gap:6}}>
                           {statusEl}
-                          <span style={{color:"var(--text3)",fontSize:14,marginLeft:"auto"}}>›</span>
+                        </div>
+                        <div style={{display:"flex",gap:4,alignItems:"center"}} onClick={e=>e.stopPropagation()}>
+                          <button onClick={()=>setSelRestaurant(r.id)} title="Abrir" style={{background:"none",border:`1px solid ${ac}33`,borderRadius:6,color:ac,cursor:"pointer",fontSize:11,padding:"4px 8px",fontFamily:"'DM Sans',sans-serif"}}>Abrir</button>
+                          <button onClick={()=>{setEditRestId(r.id);setRestForm({name:r.name,shortCode:r.shortCode??"",cnpj:r.cnpj??"",address:r.address??"",whatsappFin:r.whatsappFin??"",whatsappOp:r.whatsappOp??"",serviceStartDate:r.serviceStartDate??""});setShowRestModal(true);}} title="Editar" style={{background:"none",border:"1px solid var(--border)",borderRadius:6,color:"var(--text3)",cursor:"pointer",fontSize:11,padding:"4px 8px",fontFamily:"'DM Sans',sans-serif"}}>✏️</button>
+                          <button onClick={()=>{
+                            if(!window.confirm(`Mover "${r.name}" para a lixeira?`)) return;
+                            softDelete("restaurants", r);
+                            onUpdate("restaurants", restaurants.filter(x=>x.id!==r.id));
+                            onUpdate("_toast", `🗑️ ${r.name} movido para a lixeira.`);
+                          }} title="Excluir" style={{background:"none",border:"1px solid var(--red)22",borderRadius:6,color:"var(--red)",cursor:"pointer",fontSize:11,padding:"4px 8px",fontFamily:"'DM Sans',sans-serif"}}>🗑️</button>
                         </div>
                       </div>
                     );
@@ -8230,77 +8304,6 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }
           );
         })()}
 
-        {/* RESTAURANTES */}
-        {tab === "restaurants" && (
-          <div>
-            <button onClick={()=>{setEditRestId(null);setRestForm({name:"",cnpj:"",address:"",whatsappFin:"",whatsappOp:"",serviceStartDate:""});setShowRestModal(true);}} style={{...S.btnPrimary,marginBottom:20}}>+ Novo Restaurante</button>
-            {restaurants.length === 0 && <p style={{color:"var(--text3)",textAlign:"center"}}>Nenhum restaurante cadastrado.</p>}
-            {/* Export geral */}
-            {restaurants.length > 0 && (
-              <button onClick={()=>{
-                const exportData = {
-                  exportedAt: new Date().toISOString(),
-                  restaurantes: restaurants,
-                  empregados: employees,
-                  cargos: roles,
-                  gorjetas: tips,
-                  escalas: schedules,
-                  gestores: managers.map(m=>({...m,pin:"***"})),
-                };
-                const blob = new Blob([JSON.stringify(exportData,null,2)],{type:"application/json"});
-                const url = URL.createObjectURL(blob);
-                const a = document.createElement("a");
-                a.href=url; a.download=`apptip_backup_${today()}.json`; a.click();
-                URL.revokeObjectURL(url);
-                onUpdate("_toast","✅ Backup exportado com sucesso!");
-              }} style={{...S.btnSecondary,marginBottom:16,fontSize:12,color:"var(--green)",borderColor:"var(--green)"}}>
-                💾 Exportar backup completo
-              </button>
-            )}
-            {restaurants.map(r => {
-              const empCount = employees.filter(e=>e.restaurantId===r.id&&!e.inactive).length;
-              const mgrCount = managers.filter(m=>m.restaurantIds?.includes(r.id)).length;
-              const plano = getPlano(r);
-              const atLimit = empCount >= plano.empMax;
-              const pct = Math.min(100, Math.round((empCount/plano.empMax)*100));
-              return (
-                <div key={r.id} style={{...S.card,marginBottom:10}}>
-                  <div style={{display:"flex",flexDirection:isMobile?"column":"row",justifyContent:"space-between",alignItems:isMobile?"stretch":"flex-start",gap:isMobile?10:0}}>
-                    <div style={{flex:1,minWidth:0}}>
-                      <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:2,flexWrap:"wrap"}}>
-                        <span style={{color:ac,fontWeight:700,fontSize:isMobile?11:13,background:"var(--ac)22",borderRadius:6,padding:"2px 8px"}}>{r.shortCode||"—"}</span>
-                        <span style={{color:"var(--text)",fontWeight:700,fontSize:isMobile?14:16}}>{r.name}</span>
-                        <span style={{background:atLimit?"#ef444422":"#10b98122",color:atLimit?"var(--red)":"var(--green)",borderRadius:6,padding:"2px 8px",fontSize:11,fontWeight:700}}>{plano.label}</span>
-                      </div>
-                      {r.cnpj && <div style={{color:"var(--text3)",fontSize:isMobile?11:12}}>CNPJ: {r.cnpj}</div>}
-                      {r.address && <div style={{color:"var(--text3)",fontSize:isMobile?11:12,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{r.address}</div>}
-                      <div style={{marginTop:8,display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
-                        <div style={{flex:"0 0 auto",width:isMobile?80:120,background:"var(--bg1)",borderRadius:4,height:6,overflow:"hidden"}}>
-                          <div style={{width:`${pct}%`,height:"100%",background:atLimit?"var(--red)":pct>80?"#f59e0b":"var(--green)",borderRadius:4}}/>
-                        </div>
-                        <span style={{color:atLimit?"var(--red)":"var(--text3)",fontSize:isMobile?11:12,fontWeight:atLimit?700:400}}>
-                          {empCount}/{plano.empMax} emp. · {mgrCount} gestor{mgrCount!==1?"es":""}
-                        </span>
-                        {plano.mensal && <span style={{color:"var(--text3)",fontSize:11}}>R${plano.mensal}/mês</span>}
-                      </div>
-                    </div>
-                    <div style={{display:"flex",gap:8,flexWrap:"nowrap",justifyContent:isMobile?"stretch":"flex-end"}}>
-                      <button onClick={()=>setSelRestaurant(r.id)} style={{...S.btnSecondary,fontSize:12,color:ac,borderColor:ac,flex:isMobile?1:undefined,textAlign:"center"}}>Abrir →</button>
-                      <button onClick={()=>{setSelRestaurant(r.id);setRestTab("financeiro");}} style={{...S.btnSecondary,fontSize:12,color:"var(--green)",borderColor:"var(--green)",flex:isMobile?1:undefined,textAlign:"center"}}>💳</button>
-                      <button onClick={()=>{setEditRestId(r.id);setRestForm({name:r.name,shortCode:r.shortCode??"",cnpj:r.cnpj??"",address:r.address??"",whatsappFin:r.whatsappFin??"",whatsappOp:r.whatsappOp??"",serviceStartDate:r.serviceStartDate??""});setShowRestModal(true);}} style={{...S.btnSecondary,fontSize:12,flex:isMobile?1:undefined,textAlign:"center"}}>Editar</button>
-                      <button onClick={()=>{
-                        if(!window.confirm(`Mover "${r.name}" para a lixeira? Você poderá restaurar depois.`)) return;
-                        softDelete("restaurants", r);
-                        onUpdate("restaurants", restaurants.filter(x=>x.id!==r.id));
-                        onUpdate("_toast", `🗑️ ${r.name} movido para a lixeira.`);
-                      }} style={{background:"none",border:"1px solid var(--red)33",borderRadius:8,color:"var(--red)",cursor:"pointer",fontSize:12,padding:"6px 12px",fontFamily:"'DM Sans',sans-serif",flex:isMobile?1:undefined,textAlign:"center"}}>🗑️</button>
-                    </div>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        )}
 
         {/* GESTORES */}
         {tab === "managers" && (
