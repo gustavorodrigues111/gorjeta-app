@@ -4639,6 +4639,20 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
   const [schedArea, setSchedArea]           = useState("Todos");
   const [showVacForm, setShowVacForm]       = useState(false);
   const [showSchedHistory, setShowSchedHistory] = useState(false);
+  // Local schedule edits — accumulated before saving as new version
+  const [schedLocalEdits, setSchedLocalEdits] = useState(null); // null = no pending edits, object = pending edits overlay
+  const schedDirty = schedLocalEdits !== null;
+  // Effective schedule month: saved data + local edits overlay
+  const effectiveMonth = (() => {
+    const base = { ...(schedules?.[rid]?.[mk] ?? {}) };
+    if (schedLocalEdits) {
+      Object.entries(schedLocalEdits).forEach(([eid, dayMap]) => {
+        base[eid] = { ...(base[eid] ?? {}), ...dayMap };
+        Object.entries(base[eid]).forEach(([dt, val]) => { if (val === null) delete base[eid][dt]; });
+      });
+    }
+    return base;
+  })();
   const [showTipHistory, setShowTipHistory]     = useState(false);
   const [vacEmpId, setVacEmpId]             = useState("");
   const [vacFrom, setVacFrom]               = useState("");
@@ -5050,6 +5064,24 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
               if (action) { saveTipRows(); }
               else { discardTipRows(); }
             }
+            if (tab === "schedule" && id !== "schedule" && schedDirty) {
+              const action = window.confirm("Você tem edições na escala não salvas.\n\nDeseja salvar como nova versão antes de sair?");
+              if (action) {
+                // Save as new version
+                const preSnap = snapshotSchedulesMonth(schedules, rid, mk);
+                saveVersion("schedules", rid, mk, data?.scheduleVersions, preSnap, currentUser?.name || (isOwner?"Admin AppTip":"Gestor"), "Edição manual", onUpdate, true);
+                let newMonth = { ...(schedules?.[rid]?.[mk] ?? {}) };
+                Object.entries(schedLocalEdits).forEach(([eid, dayEdits]) => {
+                  const empMap = { ...(newMonth[eid] ?? {}) };
+                  Object.entries(dayEdits).forEach(([dt, val]) => {
+                    if (val === null) delete empMap[dt]; else empMap[dt] = val;
+                  });
+                  newMonth[eid] = empMap;
+                });
+                onUpdate("schedules", { ...schedules, [rid]: { ...(schedules?.[rid]??{}), [mk]: newMonth } });
+              }
+              setSchedLocalEdits(null);
+            }
             setTab(id);
           }}
             style={{ padding:"11px 16px", background:"none", border:"none", borderBottom:`2px solid ${tab===id?ac:"transparent"}`, color:tab===id?ac:"var(--text3)", cursor:"pointer", fontSize:13, fontFamily:"'DM Sans',sans-serif", fontWeight:tab===id?700:500, whiteSpace:"nowrap", flexShrink:0 }}>
@@ -5060,14 +5092,48 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
 
       {/* Botão voltar ao Dashboard no mobile */}
       {mobileOnly && tab !== "dashboard" && (
-        <button onClick={()=>setTab("dashboard")} style={{display:"flex",alignItems:"center",gap:6,padding:"10px 16px",background:"none",border:"none",borderBottom:"1px solid var(--border)",color:"var(--ac-text,var(--ac))",cursor:"pointer",fontSize:13,fontWeight:600,fontFamily:"'DM Sans',sans-serif",width:"100%"}}>
+        <button onClick={()=>{
+          if (tab === "schedule" && schedDirty) {
+            const action = window.confirm("Você tem edições na escala não salvas.\n\nDeseja salvar como nova versão antes de sair?");
+            if (action) {
+              const preSnap = snapshotSchedulesMonth(schedules, rid, mk);
+              saveVersion("schedules", rid, mk, data?.scheduleVersions, preSnap, currentUser?.name || (isOwner?"Admin AppTip":"Gestor"), "Edição manual", onUpdate, true);
+              let newMonth = { ...(schedules?.[rid]?.[mk] ?? {}) };
+              Object.entries(schedLocalEdits).forEach(([eid, dayEdits]) => {
+                const empMap = { ...(newMonth[eid] ?? {}) };
+                Object.entries(dayEdits).forEach(([dt, val]) => { if (val === null) delete empMap[dt]; else empMap[dt] = val; });
+                newMonth[eid] = empMap;
+              });
+              onUpdate("schedules", { ...schedules, [rid]: { ...(schedules?.[rid]??{}), [mk]: newMonth } });
+            }
+            setSchedLocalEdits(null);
+          }
+          setTab("dashboard");
+        }} style={{display:"flex",alignItems:"center",gap:6,padding:"10px 16px",background:"none",border:"none",borderBottom:"1px solid var(--border)",color:"var(--ac-text,var(--ac))",cursor:"pointer",fontSize:13,fontWeight:600,fontFamily:"'DM Sans',sans-serif",width:"100%"}}>
           ← Dashboard
         </button>
       )}
 
       <div style={{ padding:mobileOnly?"12px 10px":"20px 24px", maxWidth:1100, margin:"0 auto" }}>
         {["dashboard","tips","schedule"].includes(tab) && (
-          <div style={{ marginBottom: 20 }}><MonthNav year={year} month={month} onChange={(y,m)=>{setYear(y);setMonth(m);setWeekIdx(calcWeekForToday(y,m));}} /></div>
+          <div style={{ marginBottom: 20 }}><MonthNav year={year} month={month} onChange={(y,m)=>{
+            if (tab === "schedule" && schedDirty) {
+              const action = window.confirm("Você tem edições na escala não salvas.\n\nDeseja salvar como nova versão antes de mudar de mês?");
+              if (action) {
+                const preSnap = snapshotSchedulesMonth(schedules, rid, mk);
+                saveVersion("schedules", rid, mk, data?.scheduleVersions, preSnap, currentUser?.name || (isOwner?"Admin AppTip":"Gestor"), "Edição manual", onUpdate, true);
+                let newMonth2 = { ...(schedules?.[rid]?.[mk] ?? {}) };
+                Object.entries(schedLocalEdits).forEach(([eid, dayEdits]) => {
+                  const empMap = { ...(newMonth2[eid] ?? {}) };
+                  Object.entries(dayEdits).forEach(([dt, val]) => { if (val === null) delete empMap[dt]; else empMap[dt] = val; });
+                  newMonth2[eid] = empMap;
+                });
+                onUpdate("schedules", { ...schedules, [rid]: { ...(schedules?.[rid]??{}), [mk]: newMonth2 } });
+              }
+              setSchedLocalEdits(null);
+            }
+            setYear(y);setMonth(m);setWeekIdx(calcWeekForToday(y,m));
+          }} /></div>
         )}
 
         {/* Banner de privacidade */}
@@ -5174,12 +5240,13 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                   <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
                     <span style={{color:"var(--ac-text)",fontWeight:700,fontSize:mobileOnly?14:16}}>📅 Hoje — {new Date().toLocaleDateString("pt-BR",{weekday:"long",day:"numeric",month:"long"})}</span>
                   </div>
-                  <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:8}}>
+                  <div style={{display:"grid",gridTemplateColumns:isLider?"1fr":"repeat(3,1fr)",gap:8}}>
                     <div style={{background:"var(--card-bg)",borderRadius:10,padding:"10px 6px",textAlign:"center"}}>
                       <div style={{fontSize:18,marginBottom:2}}>👥</div>
                       <div style={{color:"var(--text)",fontWeight:700,fontSize:16}}>{trabalhando}</div>
                       <div style={{color:"var(--text3)",fontSize:9,marginTop:2}}>trabalhando</div>
                     </div>
+                    {!isLider && (
                     <div style={{background:"var(--card-bg)",borderRadius:10,padding:"10px 6px",textAlign:"center"}}>
                       <div style={{fontSize:18,marginBottom:2}}>💸</div>
                       <div style={{color: gorjetaHoje!==null?"var(--green)":"var(--text3)", fontWeight:700,fontSize:gorjetaHoje!==null?13:12}}>
@@ -5187,6 +5254,8 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                       </div>
                       <div style={{color:"var(--text3)",fontSize:9,marginTop:2}}>gorjeta</div>
                     </div>
+                    )}
+                    {!isLider && (
                     <div style={{background:"var(--card-bg)",borderRadius:10,padding:"10px 6px",textAlign:"center"}}>
                       <div style={{fontSize:18,marginBottom:2}}>{diasSemLancamento>0?"⚠️":"✅"}</div>
                       <div style={{color:diasSemLancamento>0?"#f59e0b":"var(--green)",fontWeight:700,fontSize:14}}>
@@ -5194,8 +5263,9 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                       </div>
                       <div style={{color:"var(--text3)",fontSize:9,marginTop:2}}>pendência</div>
                     </div>
+                    )}
                   </div>
-                  {gorjetaHoje === null && isCurrentMonth && !mobileOnly && (
+                  {!isLider && gorjetaHoje === null && isCurrentMonth && !mobileOnly && (
                     <button onClick={()=>setTab("tips")}
                       style={{...S.btnPrimary, width:"100%", marginTop:10, padding:"10px", fontSize:13}}>
                       💸 Lançar gorjeta de hoje
@@ -5912,13 +5982,53 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
         {tab === "schedule" && (
           <div>
             {/* Header */}
-            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:12,marginBottom:16}}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:12,marginBottom:schedDirty?8:16}}>
               <h3 style={{color:"var(--text)",margin:0,fontSize:mobileOnly?16:20}}>📅 Escala — {monthLabel(year,month)}</h3>
               {isOwner && !mobileOnly && <button onClick={()=>{
+                if (schedDirty && !window.confirm("Você tem edições não salvas. Deseja descartar e resetar?")) return;
                 const ok = resetTab("schedule","Escala",()=>({schedules:schedules?.[rid]}));
-                if(ok){ const s={...schedules}; delete s[rid]; onUpdate("schedules",s); onUpdate("_toast","🗑️ Escala enviada para a lixeira"); }
+                if(ok){ const s={...schedules}; delete s[rid]; onUpdate("schedules",s); setSchedLocalEdits(null); onUpdate("_toast","🗑️ Escala enviada para a lixeira"); }
               }} style={{...S.btnSecondary,fontSize:12,color:"var(--red)",borderColor:"var(--red)44"}}>🗑️ Reset</button>}
             </div>
+            {/* Pending edits banner */}
+            {schedDirty && (
+              <div style={{background:"#f59e0b15",border:"1px solid #f59e0b44",borderRadius:10,padding:mobileOnly?"10px 12px":"12px 16px",marginBottom:12,display:"flex",alignItems:"center",justifyContent:"space-between",gap:10,flexWrap:"wrap"}}>
+                <div style={{display:"flex",alignItems:"center",gap:8}}>
+                  <span style={{fontSize:16}}>✏️</span>
+                  <span style={{color:"#f59e0b",fontSize:mobileOnly?12:13,fontWeight:600}}>Edições pendentes</span>
+                  <span style={{color:"var(--text3)",fontSize:mobileOnly?10:11}}>— salve para criar nova versão</span>
+                </div>
+                <div style={{display:"flex",gap:8}}>
+                  <button onClick={()=>{
+                    // Save as new version
+                    const preSnap = snapshotSchedulesMonth(schedules, rid, mk);
+                    saveVersion("schedules", rid, mk, data?.scheduleVersions, preSnap, currentUser?.name || (isOwner?"Admin AppTip":"Gestor"), "Edição manual", onUpdate, true);
+                    // Apply local edits to schedules
+                    let newMonth = { ...(schedules?.[rid]?.[mk] ?? {}) };
+                    Object.entries(schedLocalEdits).forEach(([eid, dayEdits]) => {
+                      const empMap = { ...(newMonth[eid] ?? {}) };
+                      Object.entries(dayEdits).forEach(([dt, val]) => {
+                        if (val === null) delete empMap[dt]; else empMap[dt] = val;
+                      });
+                      newMonth[eid] = empMap;
+                    });
+                    onUpdate("schedules", {
+                      ...schedules,
+                      [rid]: { ...(schedules?.[rid]??{}), [mk]: newMonth }
+                    });
+                    setSchedLocalEdits(null);
+                    onUpdate("_toast", "✅ Escala salva como nova versão");
+                  }} style={{...S.btnPrimary,fontSize:mobileOnly?11:12,padding:mobileOnly?"8px 14px":"8px 18px",fontWeight:700}}>
+                    💾 {mobileOnly?"Salvar":"Salvar nova versão"}
+                  </button>
+                  <button onClick={()=>{
+                    if (window.confirm("Descartar todas as edições pendentes?")) setSchedLocalEdits(null);
+                  }} style={{...S.btnSecondary,fontSize:mobileOnly?11:12,padding:mobileOnly?"8px 10px":"8px 14px"}}>
+                    Descartar
+                  </button>
+                </div>
+              </div>
+            )}
             {/* Area filter */}
             <div style={{marginBottom:12}}>
               <PillBar options={["Todos", ...AREAS]} value={schedArea} onChange={setSchedArea}/>
@@ -5961,6 +6071,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                   const preSnap1 = snapshotSchedulesMonth(schedules, rid, mk);
                   saveVersion("schedules", rid, mk, data?.scheduleVersions, preSnap1, currentUser?.name || (isOwner?"Admin AppTip":"Gestor"), "Folgas do contrato aplicadas", onUpdate, true);
                   onUpdate("schedules", newSchedules);
+                  setSchedLocalEdits(null);
                   const parts = [];
                   if (added) parts.push(`${added} folga(s) adicionada(s)`);
                   if (removed) parts.push(`${removed} folga(s) removida(s) fora do contrato`);
@@ -5982,6 +6093,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                   if (!newSched[rid][mk]) newSched[rid][mk] = {};
                   areaEmps.forEach(emp => { newSched[rid][mk][emp.id] = {}; });
                   onUpdate("schedules", newSched);
+                  setSchedLocalEdits(null);
                   onUpdate("_toast", `🔄 Escala de ${mesNome} reiniciada — ${n} empregado(s)`);
                 }} style={{...S.btnSecondary,fontSize:mobileOnly?11:12,color:"var(--red)",borderColor:"var(--red)44",whiteSpace:"nowrap"}}>
                   {mobileOnly?"🔄 Reiniciar":"🔄 Reiniciar escala"}
@@ -6021,6 +6133,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                     if (!newSched[rid]) newSched[rid] = {};
                     newSched[rid][mk] = JSON.parse(JSON.stringify(v.snapshot ?? {}));
                     onUpdate("schedules", newSched);
+                    setSchedLocalEdits(null);
                     setShowSchedHistory(false);
                     onUpdate("_toast", `♻️ Escala restaurada para "${v.reason}" (${fmtRelTime(v.ts)})`);
                   }}
@@ -6075,7 +6188,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                   function buildAreaBody(empsForArea) {
                     return empsForArea.map(emp => {
                       const role = restRoles.find(r=>r.id===emp.roleId);
-                      const dayMap = schedules?.[rid]?.[mk]?.[emp.id] ?? {};
+                      const dayMap = effectiveMonth[emp.id] ?? {};
                       let workDays = 0;
                       const dayCells = Array.from({length:daysInMonth},(_,i)=>{
                         const k = `${year}-${String(month+1).padStart(2,"0")}-${String(i+1).padStart(2,"0")}`;
@@ -6100,7 +6213,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                           const emp = empsForArea[data.row.index];
                           if(!emp) return;
                           const k = `${year}-${String(month+1).padStart(2,"0")}-${String(dayIdx+1).padStart(2,"0")}`;
-                          const s = schedules?.[rid]?.[mk]?.[emp.id]?.[k];
+                          const s = (effectiveMonth[emp.id] ?? {})[k];
                           const {x,y,width,height} = data.cell;
                           const color = !s ? PDF_STATUS_COLORS.work : PDF_STATUS_COLORS[s];
                           const label = !s ? "T" : (STATUS_SHORT[s] ?? "");
@@ -6219,6 +6332,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                       const preSnapV = snapshotSchedulesMonth(schedules, rid, mk);
                       saveVersion("schedules", rid, mk, data?.scheduleVersions, preSnapV, currentUser?.name || (isOwner?"Admin AppTip":"Gestor"), `Férias marcadas (${emp.name}, ${count} dia${count>1?"s":""})`, onUpdate, true);
                       onUpdate("schedules", newSched);
+                      setSchedLocalEdits(null);
                       setShowVacForm(false);
                       onUpdate("_toast", `🏖️ ${count} dia(s) de férias marcados para ${emp.name}`);
                     }} disabled={!vacEmpId||!vacFrom||!vacTo||vacFrom>vacTo}
@@ -6238,18 +6352,17 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
 
               function cycleStatus(empId, dateStr) {
                 if (restaurant.serviceStartDate && dateStr < restaurant.serviceStartDate) return;
-                const empDayMap = schedules?.[rid]?.[mk]?.[empId] ?? {};
+                const empDayMap = effectiveMonth[empId] ?? {};
                 const cur = empDayMap[dateStr];
                 const idx = DAY_CYCLE.indexOf(cur);
                 const next = idx === DAY_CYCLE.length - 1 ? null : DAY_CYCLE[idx + 1];
-                const newMap = { ...empDayMap };
-                if (next === null) delete newMap[dateStr]; else newMap[dateStr] = next;
-                // Snapshot PRE-edit (debounced — agrupa cliques em 30s)
-                const preSnap = snapshotSchedulesMonth(schedules, rid, mk);
-                saveVersion("schedules", rid, mk, data?.scheduleVersions, preSnap, currentUser?.name || (isOwner?"Admin AppTip":"Gestor"), "Edição manual", onUpdate, false);
-                onUpdate("schedules", {
-                  ...schedules,
-                  [rid]: { ...(schedules?.[rid]??{}), [mk]: { ...(schedules?.[rid]?.[mk]??{}), [empId]: newMap } }
+                // Accumulate in local edits (not saved to Firestore yet)
+                setSchedLocalEdits(prev => {
+                  const edits = prev ? { ...prev } : {};
+                  if (!edits[empId]) edits[empId] = {};
+                  if (next === null) edits[empId][dateStr] = null; // null = mark for deletion
+                  else edits[empId][dateStr] = next;
+                  return edits;
                 });
               }
 
@@ -6315,7 +6428,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                     {/* Grid de empregados */}
                     {areaEmps.map((emp, ei) => {
                       const role = restRoles.find(r=>r.id===emp.roleId);
-                      const dayMap = schedules?.[rid]?.[mk]?.[emp.id] ?? {};
+                      const dayMap = effectiveMonth[emp.id] ?? {};
                       const curArea = role?.area;
                       const prevEmp = areaEmps[ei-1];
                       const prevArea = prevEmp ? restRoles.find(r=>r.id===prevEmp.roleId)?.area : null;
@@ -6391,7 +6504,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                     <tbody>
                       {areaEmps.map((emp,ei) => {
                         const role = restRoles.find(r=>r.id===emp.roleId);
-                        const dayMap = schedules?.[rid]?.[mk]?.[emp.id] ?? {};
+                        const dayMap = effectiveMonth[emp.id] ?? {};
                         // Contagem alinhada com o visual: sem status = "•" = trabalho
                         let workC=0, offC=0;
                         for (let dd = 1; dd <= daysInMonth; dd++) {
