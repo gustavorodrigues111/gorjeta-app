@@ -1561,37 +1561,45 @@ function fmtHHMM(totalMin) {
   return `${sign}${String(Math.floor(abs/60)).padStart(2,"0")}:${String(abs%60).padStart(2,"0")}`;
 }
 
-// Calcula horas do dia respeitando hora ficta noturna
-// Retorna {worked, diurnal, nocturnal, nocturnalFicta, error}
+// Calcula horas do dia respeitando hora ficta noturna (CLT Art. 73)
+// Método padrão folha: intervalo descontado das horas diurnas primeiro,
+// horas noturnas mantidas intactas, ficta aplicada sobre noturnas reais.
+// Retorna {worked, diurnal, nocturnal, nocturnalFicta, totalContract, error}
 function calcDayHours(inTime, outTime, breakMin) {
-  if (!inTime || !outTime) return { worked: 0, diurnal: 0, nocturnal: 0, nocturnalFicta: 0 };
+  if (!inTime || !outTime) return { worked: 0, diurnal: 0, nocturnal: 0, nocturnalFicta: 0, totalContract: 0 };
   let inM = timeToMin(inTime);
   let outM = timeToMin(outTime);
-  // Handle overnight (e.g. 22:00 -> 02:00)
+  // Handle overnight (e.g. 22:00 -> 06:00)
   if (outM <= inM) outM += 24 * 60;
-  const totalMin = outM - inM - (breakMin || 0);
-  if (totalMin <= 0) return { worked: 0, diurnal: 0, nocturnal: 0, nocturnalFicta: 0, error: "Horário inválido" };
 
-  // Nocturnal: 22:00 to 05:00 next day = 840min to 1740min (in 24h cycle)
-  // Count minutes in nocturnal window
-  let noctMin = 0;
-  const NOC_START = 22 * 60; // 1320
-  // eslint-disable-next-line no-unused-vars
-  const NOC_END = 5 * 60 + 24 * 60; // 300 + 1440 = 1740 (next day 5am)
+  const totalPeriod = outM - inM;
+  const bk = breakMin || 0;
+  const worked = totalPeriod - bk;
+  if (worked <= 0) return { worked: 0, diurnal: 0, nocturnal: 0, nocturnalFicta: 0, totalContract: 0, error: "Horário inválido" };
+
+  // Count raw nocturnal minutes (22:00-05:00, CLT Art. 73)
+  let noctRaw = 0;
   for (let t = inM; t < outM; t++) {
     const tMod = t % (24 * 60);
-    if (tMod >= NOC_START || tMod < 5 * 60) noctMin++;
+    if (tMod >= 22 * 60 || tMod < 5 * 60) noctRaw++;
   }
-  // Subtract break proportionally from nocturnal (simplified: subtract from total)
-  const noctProportion = noctMin / (outM - inM);
-  const noctAfterBreak = Math.round(noctMin - (breakMin || 0) * noctProportion);
-  const diurnAfterBreak = totalMin - noctAfterBreak;
+  const diurnRaw = totalPeriod - noctRaw;
 
-  // Hora ficta: each 52.5 real nocturnal minutes = 60 contract minutes
+  // Desconta intervalo das horas diurnas primeiro; se sobrar, desconta das noturnas
+  let diurnAfterBreak, noctAfterBreak;
+  if (bk <= diurnRaw) {
+    diurnAfterBreak = diurnRaw - bk;
+    noctAfterBreak = noctRaw;
+  } else {
+    diurnAfterBreak = 0;
+    noctAfterBreak = noctRaw - (bk - diurnRaw);
+  }
+
+  // Hora ficta: 52min30s reais = 60min contratuais (CLT Art. 73 §1)
   const nocturnalFicta = Math.round(noctAfterBreak * (60 / 52.5));
 
   return {
-    worked: totalMin,
+    worked,
     diurnal: diurnAfterBreak,
     nocturnal: noctAfterBreak,
     nocturnalFicta,
@@ -1599,36 +1607,70 @@ function calcDayHours(inTime, outTime, breakMin) {
   };
 }
 
-// Validate a full week schedule
+// Validate a full week schedule (CLT compliant)
 function validateWeekSchedule(days) {
   const errors = [];
   const activeDays = Object.entries(days).filter(([,d]) => d && d.in && d.out);
+  const allDayIdxs = Object.keys(days).map(Number);
 
-  // Per day validations
+  // ── Per day validations ──
   activeDays.forEach(([dayIdx, d]) => {
     const label = WEEK_DAYS_LABEL[parseInt(dayIdx)];
     const calc = calcDayHours(d.in, d.out, d.break || 0);
     if (calc.error) { errors.push(`${label}: ${calc.error}`); return; }
-    // 10h limit applies to CONTRACT hours (nocturnal ficta already inflated)
-    if (calc.totalContract > 10 * 60) errors.push(`${label}: jornada contratual de ${fmtHHMM(calc.totalContract)} ultrapassa o máximo de 10h (${fmtHHMM(calc.diurnal)} diurnas + ${fmtHHMM(calc.nocturnalFicta)} noturnas fictas).`);
-    if ((d.break || 0) < 30) errors.push(`${label}: intervalo mínimo é 30 minutos (atual: ${d.break || 0}min).`);
+
+    // Jornada máxima: 10h contratuais/dia (Art. 59 CLT)
+    if (calc.totalContract > 10 * 60) {
+      errors.push(`${label}: jornada contratual de ${fmtHHMM(calc.totalContract)} ultrapassa o máximo de 10h (${fmtHHMM(calc.diurnal)} diurnas + ${fmtHHMM(calc.nocturnalFicta)} noturnas fictas).`);
+    }
+
+    // Intervalo intrajornada (Art. 71 CLT)
+    const bk = d.break || 0;
+    if (calc.worked > 6 * 60 && bk < 60) {
+      errors.push(`${label}: jornada de ${fmtHHMM(calc.worked)} exige intervalo mínimo de 60 minutos (atual: ${bk}min). Art. 71 CLT.`);
+    } else if (calc.worked > 4 * 60 && calc.worked <= 6 * 60 && bk < 15) {
+      errors.push(`${label}: jornada de ${fmtHHMM(calc.worked)} exige intervalo mínimo de 15 minutos (atual: ${bk}min). Art. 71 §1 CLT.`);
+    }
   });
 
-  // Interjornada (≥ 11h between end of one day and start of next)
-  const sorted = activeDays.sort((a, b) => parseInt(a[0]) - parseInt(b[0]));
-  for (let i = 0; i < sorted.length - 1; i++) {
-    const [, cur] = sorted[i];
-    const [, nxt] = sorted[i + 1];
-    const curOut = timeToMin(cur.out);
-    const nxtIn = timeToMin(nxt.in);
-    // If next day starts before current ends, it's next calendar day
-    const gap = nxtIn >= curOut ? nxtIn - curOut : nxtIn + 24*60 - curOut;
+  // ── Interjornada ≥ 11h (Art. 66 CLT) — com wrap-around (último→primeiro) ──
+  const sorted = [...activeDays].sort((a, b) => parseInt(a[0]) - parseInt(b[0]));
+  for (let i = 0; i < sorted.length; i++) {
+    const curIdx = parseInt(sorted[i][0]);
+    const nxtI = (i + 1) % sorted.length;
+    const nxtIdx = parseInt(sorted[nxtI][0]);
+    const [, curD] = sorted[i];
+    const [, nxtD] = sorted[nxtI];
+
+    // Calendar days between (wrap around week)
+    const daysBetween = nxtIdx > curIdx ? nxtIdx - curIdx : nxtIdx + 7 - curIdx;
+
+    const curIn = timeToMin(curD.in);
+    const curOut = timeToMin(curD.out);
+    const nxtIn = timeToMin(nxtD.in);
+    const isOvernight = curOut <= curIn;
+
+    // Gap = (minutes remaining in day after out) + (full days between -1) * 1440 + nxtIn
+    // For overnight shifts, out is actually next calendar morning
+    let gap;
+    if (isOvernight) {
+      // Shift ends at curOut on the NEXT calendar day
+      gap = (24 * 60 - curOut) + (daysBetween - 2) * 24 * 60 + nxtIn;
+    } else {
+      gap = (24 * 60 - curOut) + (daysBetween - 1) * 24 * 60 + nxtIn;
+    }
+
     if (gap < 11 * 60) {
-      errors.push(`Interjornada entre ${WEEK_DAYS_LABEL[parseInt(sorted[i][0])]} e ${WEEK_DAYS_LABEL[parseInt(sorted[i+1][0])]} é de ${fmtHHMM(gap)}, mínimo exigido é 11h.`);
+      errors.push(`Interjornada entre ${WEEK_DAYS_LABEL[curIdx]} e ${WEEK_DAYS_LABEL[nxtIdx]} é de ${fmtHHMM(gap)}, mínimo exigido é 11h. Art. 66 CLT.`);
     }
   }
 
-  // Weekly total: must be between 43h55 and 44h00
+  // ── DSR: mínimo 1 folga por semana (Art. 67 CLT) ──
+  if (activeDays.length >= 7) {
+    errors.push("Sem dia de folga na semana. O empregado deve ter pelo menos 1 descanso semanal remunerado. Art. 67 CLT.");
+  }
+
+  // ── Carga semanal: 43:55 a 44:00 (Art. 58 CLT + Art. 7 XIV CF) ──
   const totalContract = activeDays.reduce((sum, [,d]) => {
     const c = calcDayHours(d.in, d.out, d.break || 0);
     return sum + (c.totalContract || 0);
@@ -1786,15 +1828,10 @@ function WorkScheduleManagerTab({ restaurantId, employees, roles, workSchedules,
 
   // ── Save schedule ──
   function saveSchedule() {
-    const daysOnly = saveMode === "days";
-    const storageDays = toStorage(editDays, daysOnly);
+    const storageDays = toStorage(editDays, false);
 
-    let totalContract = 0;
-    if (!daysOnly) {
-      const { errors: errs, totalContract: tc } = validateWeekSchedule(storageDays);
-      if (errs.length > 0) { setErrors(errs); return; }
-      totalContract = tc;
-    }
+    const { errors: errs, totalContract } = validateWeekSchedule(storageDays);
+    if (errs.length > 0) { setErrors(errs); return; }
 
     const newEntry = {
       id: `${Date.now()}-${Math.random().toString(36).slice(2,5)}`,
@@ -1803,7 +1840,7 @@ function WorkScheduleManagerTab({ restaurantId, employees, roles, workSchedules,
       createdBy: currentManagerName,
       createdAt: new Date().toISOString(),
       totalContract,
-      hoursComplete: !daysOnly,
+      hoursComplete: true,
     };
 
     const empScheds = [...(workSchedules?.[restaurantId]?.[selEmpId] ?? []), newEntry];
@@ -1823,7 +1860,7 @@ function WorkScheduleManagerTab({ restaurantId, employees, roles, workSchedules,
     // Notify DP managers
     const dpMgrs = managers.filter(m => m.isDP && (m.restaurantIds ?? []).includes(restaurantId));
     if (dpMgrs.length > 0) {
-      const body = `Horario alterado\n\nEmpregado: ${selEmp?.name}\nAlterado por: ${currentManagerName}\nVigencia a partir de: ${fmtDate(validFrom)}${daysOnly ? "\n(Apenas dias definidos, horarios pendentes)" : ""}\n\nNovo horario:\n${[0,1,2,3,4,5,6].map(fmtSchedLine).join("\n")}`;
+      const body = `Horario alterado\n\nEmpregado: ${selEmp?.name}\nAlterado por: ${currentManagerName}\nVigencia a partir de: ${fmtDate(validFrom)}\n\nNovo horario:\n${[0,1,2,3,4,5,6].map(fmtSchedLine).join("\n")}`;
       const notif = {
         id: `${Date.now()}-notif-${Math.random().toString(36).slice(2,5)}`,
         restaurantId, type: "horario", body,
@@ -1833,7 +1870,7 @@ function WorkScheduleManagerTab({ restaurantId, employees, roles, workSchedules,
     }
 
     // Comunicado for employee
-    const schedBody = `Seu horario de trabalho foi atualizado por ${currentManagerName}.\nVigencia a partir de: ${fmtDate(validFrom)}${daysOnly ? "\n(Dias de trabalho e folga definidos, horarios serao preenchidos em breve)" : ""}\n\nNovo horario:\n${[0,1,2,3,4,5,6].map(fmtSchedLine).join("\n")}`;
+    const schedBody = `Seu horario de trabalho foi atualizado por ${currentManagerName}.\nVigencia a partir de: ${fmtDate(validFrom)}\n\nNovo horario:\n${[0,1,2,3,4,5,6].map(fmtSchedLine).join("\n")}`;
     const commForEmp = {
       id: `${Date.now()}-comm-${Math.random().toString(36).slice(2,5)}`,
       restaurantId,
@@ -1850,10 +1887,7 @@ function WorkScheduleManagerTab({ restaurantId, employees, roles, workSchedules,
     setSaveMode(null);
     setValidated(false);
     setErrors([]);
-    onUpdate("_toast", daysOnly
-      ? `Dias de ${selEmp?.name} salvos (horarios pendentes)`
-      : `Horario completo de ${selEmp?.name} salvo com vigencia a partir de ${fmtDate(validFrom)}`
-    );
+    onUpdate("_toast", `Horario de ${selEmp?.name} salvo com vigencia a partir de ${fmtDate(validFrom)}`);
   }
 
   // ── Calculated values ──
@@ -2656,16 +2690,11 @@ function WorkScheduleManagerTab({ restaurantId, employees, roles, workSchedules,
       {showValidFrom && (
         <div style={{...cardS,border:"1px solid var(--ac)44"}}>
           <p style={{color:ac,fontWeight:700,fontSize:mobileOnly?13:14,margin:"0 0 8px"}}>
-            {saveMode === "days" ? "Salvar dias de trabalho e folga" : "Salvar horario completo"}
+            Salvar horário
           </p>
           <p style={{color:"var(--text3)",fontSize:mobileOnly?11:12,marginBottom:8}}>A partir de quando entra em vigor?</p>
           <input type="date" value={validFrom} onChange={e=>setValidFrom(e.target.value)} style={{...S.input,marginBottom:10,fontSize:mobileOnly?14:15,padding:mobileOnly?"10px 10px":"12px 14px",width:"100%",boxSizing:"border-box"}}/>
-          {saveMode === "days" && (
-            <p style={{color:"#f59e0b",fontSize:12,marginBottom:12}}>Os horarios de cada dia poderao ser preenchidos depois. A escala usara os dias de trabalho/folga.</p>
-          )}
-          {saveMode === "full" && (
-            <p style={{color:"var(--text3)",fontSize:12,marginBottom:12}}>Todos os gestores DP receberao uma notificacao com esta alteracao.</p>
-          )}
+          <p style={{color:"var(--text3)",fontSize:12,marginBottom:12}}>Todos os gestores DP receberão uma notificação com esta alteração.</p>
           <div style={{display:"flex",gap:mobileOnly?10:12,flexWrap:"wrap"}}>
             <button onClick={saveSchedule} style={{...S.btnPrimary,flex:1,minWidth:mobileOnly?140:200,padding:mobileOnly?undefined:"14px 24px",fontSize:mobileOnly?undefined:14,fontWeight:700}}>✓ Confirmar e Salvar</button>
             <button onClick={()=>{setShowValidFrom(false);setSaveMode(null);}} style={{...S.btnSecondary,flex:1,minWidth:mobileOnly?100:140,padding:mobileOnly?undefined:"14px 24px",fontSize:mobileOnly?undefined:14}}>Voltar</button>
