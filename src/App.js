@@ -6338,9 +6338,23 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                       {areaEmps.map((emp,ei) => {
                         const role = restRoles.find(r=>r.id===emp.roleId);
                         const dayMap = schedules?.[rid]?.[mk]?.[emp.id] ?? {};
+                        // Contagem alinhada com VT: usa contrato + status diário
                         let workC=0, offC=0;
-                        Object.values(dayMap).forEach(v=>{ if(v===DAY_OFF||v===DAY_FREELA||v===DAY_FAULT_J||v===DAY_FAULT_U||v===DAY_VACATION) offC++; });
-                        workC = daysInMonth - offC - Object.values(dayMap).filter(v=>v===DAY_COMP).length;
+                        const empScheds = data?.workSchedules?.[rid]?.[emp.id] ?? [];
+                        const monthEnd2 = `${year}-${String(month+1).padStart(2,"0")}-${String(daysInMonth).padStart(2,"0")}`;
+                        const validScheds2 = empScheds.filter(s => !s.validFrom || s.validFrom <= monthEnd2).sort((a,b) => (b.validFrom??"").localeCompare(a.validFrom??""));
+                        const empSched = validScheds2[0];
+                        for (let dd = 1; dd <= daysInMonth; dd++) {
+                          const dateStr2 = `${year}-${String(month+1).padStart(2,"0")}-${String(dd).padStart(2,"0")}`;
+                          const isDem2 = emp.demitidoEm && dateStr2 >= emp.demitidoEm;
+                          if (isDem2) continue;
+                          const dow2 = new Date(year, month, dd).getDay();
+                          const st = dayMap[dateStr2];
+                          if (st === DAY_COMP_TRAB) { workC++; continue; }
+                          if (st === DAY_OFF || st === DAY_FREELA || st === DAY_FAULT_J || st === DAY_FAULT_U || st === DAY_VACATION) { offC++; continue; }
+                          if (st === DAY_COMP) { offC++; continue; }
+                          if (empSched?.days?.[dow2]) workC++;
+                        }
 
                         const prevEmp = areaEmps[ei-1];
                         const prevArea = prevEmp ? restRoles.find(r=>r.id===prevEmp.roleId)?.area : null;
