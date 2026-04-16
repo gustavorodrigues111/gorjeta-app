@@ -6784,6 +6784,46 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                 </button>
               </div>
             )}
+            {/* Zona de perigo — excluir restaurante (admin only) */}
+            {isOwner && (
+              <div style={{...S.card,marginBottom:20,border:"1px solid var(--red)33",background:"#fef2f2"}}>
+                <p style={{color:"var(--red)",fontSize:14,fontWeight:700,margin:"0 0 4px"}}>⚠️ Zona de Perigo</p>
+                <p style={{color:"var(--text3)",fontSize:12,marginBottom:14}}>Mover este restaurante para a lixeira. Você poderá restaurá-lo posteriormente pela aba Lixeira.</p>
+                <button onClick={()=>{
+                  if(!window.confirm(`Tem certeza que deseja mover "${restaurant.name}" para a lixeira?\n\nTodos os dados do restaurante serão preservados na lixeira.`)) return;
+                  if(window.confirm(`Deseja exportar um backup de "${restaurant.name}" antes de excluir?`)) {
+                    const restEmps = employees.filter(e=>e.restaurantId===restaurant.id);
+                    const restRoles = roles.filter(ro=>ro.restaurantId===restaurant.id);
+                    const restTips = tips.filter(t=>t.restaurantId===restaurant.id);
+                    const restSchedules = schedules.filter(s=>s.restaurantId===restaurant.id);
+                    const restMgrs = (data?.managers??[]).filter(m=>m.restaurantIds?.includes(restaurant.id)).map(m=>({...m,pin:"***"}));
+                    const exportData = {
+                      exportedAt: new Date().toISOString(),
+                      restaurante: restaurant,
+                      empregados: restEmps,
+                      cargos: restRoles,
+                      gorjetas: restTips,
+                      escalas: restSchedules,
+                      gestores: restMgrs,
+                    };
+                    const safeName = restaurant.name.replace(/[^a-zA-Z0-9]/g,"_").toLowerCase();
+                    const blob = new Blob([JSON.stringify(exportData,null,2)],{type:"application/json"});
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement("a");
+                    a.href=url; a.download=`apptip_backup_${safeName}_${today()}.json`; a.click();
+                    URL.revokeObjectURL(url);
+                  }
+                  const trash = data?.trash ?? { restaurants:[], managers:[], employees:[] };
+                  const entry = { ...restaurant, deletedAt: new Date().toISOString(), deletedBy: currentUser?.name ?? "Admin" };
+                  const newTrash = { ...trash, restaurants: [...(trash.restaurants??[]), entry] };
+                  onUpdate("trash", newTrash);
+                  onUpdate("restaurants", restaurants.filter(x=>x.id!==restaurant.id));
+                  onUpdate("_toast", `🗑️ ${restaurant.name} movido para a lixeira.`);
+                }} style={{...S.btnSecondary,color:"var(--red)",borderColor:"var(--red)",fontSize:13,width:"100%",textAlign:"center",padding:"12px"}}>
+                  🗑️ Excluir {restaurant.name}
+                </button>
+              </div>
+            )}
             {(localRest.divisionMode ?? MODE_AREA_POINTS) === MODE_AREA_POINTS && (
               <div style={{...S.card,marginBottom:20}}>
                 <p style={{color:ac,fontSize:14,fontWeight:700,margin:"0 0 4px"}}>Distribuição por Área</p>
@@ -8208,13 +8248,8 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }
                         </div>
                         <div style={{display:"flex",gap:6,borderTop:"1px solid var(--border)",paddingTop:8}}>
                           <button onClick={()=>setSelRestaurant(r.id)} style={{...S.btnSecondary,fontSize:11,flex:1,textAlign:"center",color:ac,borderColor:ac,padding:"6px"}}>Abrir →</button>
+                          <button onClick={()=>{setSelRestaurant(r.id);setRestTab("financeiro");}} style={{...S.btnSecondary,fontSize:11,flex:1,textAlign:"center",color:"var(--green)",borderColor:"var(--green)",padding:"6px"}}>💳</button>
                           <button onClick={()=>{setEditRestId(r.id);setRestForm({name:r.name,shortCode:r.shortCode??"",cnpj:r.cnpj??"",address:r.address??"",whatsappFin:r.whatsappFin??"",whatsappOp:r.whatsappOp??"",serviceStartDate:r.serviceStartDate??""});setShowRestModal(true);}} style={{...S.btnSecondary,fontSize:11,flex:1,textAlign:"center",padding:"6px"}}>✏️ Editar</button>
-                          <button onClick={()=>{
-                            if(!window.confirm(`Mover "${r.name}" para a lixeira?`)) return;
-                            softDelete("restaurants", r);
-                            onUpdate("restaurants", restaurants.filter(x=>x.id!==r.id));
-                            onUpdate("_toast", `🗑️ ${r.name} movido para a lixeira.`);
-                          }} style={{background:"none",border:"1px solid var(--red)33",borderRadius:8,color:"var(--red)",cursor:"pointer",fontSize:11,padding:"6px 12px",fontFamily:"'DM Sans',sans-serif"}}>🗑️</button>
                         </div>
                       </div>
                     );
@@ -8283,12 +8318,6 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }
                         <div style={{display:"flex",gap:4,alignItems:"center"}} onClick={e=>e.stopPropagation()}>
                           <button onClick={()=>setSelRestaurant(r.id)} title="Abrir" style={{background:"none",border:`1px solid ${ac}33`,borderRadius:6,color:ac,cursor:"pointer",fontSize:11,padding:"4px 8px",fontFamily:"'DM Sans',sans-serif"}}>Abrir</button>
                           <button onClick={()=>{setEditRestId(r.id);setRestForm({name:r.name,shortCode:r.shortCode??"",cnpj:r.cnpj??"",address:r.address??"",whatsappFin:r.whatsappFin??"",whatsappOp:r.whatsappOp??"",serviceStartDate:r.serviceStartDate??""});setShowRestModal(true);}} title="Editar" style={{background:"none",border:"1px solid var(--border)",borderRadius:6,color:"var(--text3)",cursor:"pointer",fontSize:11,padding:"4px 8px",fontFamily:"'DM Sans',sans-serif"}}>✏️</button>
-                          <button onClick={()=>{
-                            if(!window.confirm(`Mover "${r.name}" para a lixeira?`)) return;
-                            softDelete("restaurants", r);
-                            onUpdate("restaurants", restaurants.filter(x=>x.id!==r.id));
-                            onUpdate("_toast", `🗑️ ${r.name} movido para a lixeira.`);
-                          }} title="Excluir" style={{background:"none",border:"1px solid var(--red)22",borderRadius:6,color:"var(--red)",cursor:"pointer",fontSize:11,padding:"4px 8px",fontFamily:"'DM Sans',sans-serif"}}>🗑️</button>
                         </div>
                       </div>
                     );
