@@ -3092,7 +3092,7 @@ function EmployeePortal({ employees, roles, tips, schedules, splits, restaurants
               ⚠️ <strong style={{ color: "var(--text2)" }}>Aviso:</strong> Os valores exibidos são aproximados, apurados até o momento atual e sujeitos a alterações. Esta tela tem caráter informativo e de transparência, podendo conter imprecisões. Os valores definitivos serão apurados pela empresa e comunicados pelos canais oficiais.
             </div>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10, marginBottom: 20 }}>
-              {[["Bruto", grossTotal, "#fff"], ["Imposto", taxTotal, "var(--red)"], ["Líquido", netTotal, ac]].map(([lbl, val, col]) => (
+              {[["Bruto", grossTotal, "var(--text)"], ["Imposto", taxTotal, "var(--red)"], ["Líquido", netTotal, ac]].map(([lbl, val, col]) => (
                 <div key={lbl} style={{ ...S.card, textAlign: "center" }}>
                   <div style={{ color: "var(--text3)", fontSize: 10, marginBottom: 4 }}>{lbl}</div>
                   <div style={{ color: col, fontWeight: 700, fontSize: 14 }}>{fmt(val)}</div>
