@@ -33,16 +33,37 @@ class ErrorBoundary extends Component {
   }
 }
 //
-async function load(key) {
+// ── localStorage cache helpers ──
+function cacheSet(key, value) {
+  try { localStorage.setItem("apptip_cache_" + key, JSON.stringify(value)); } catch { /* quota */ }
+}
+function cacheGet(key) {
   try {
-    const snap = await getDoc(doc(db, "appdata", key));
-    return snap.exists() ? snap.data().value : null;
-  } catch (e) { console.error("load error", e); return null; }
+    const raw = localStorage.getItem("apptip_cache_" + key);
+    return raw ? JSON.parse(raw) : null;
+  } catch { return null; }
+}
+
+async function load(key, retries = 3) {
+  for (let i = 0; i < retries; i++) {
+    try {
+      const snap = await getDoc(doc(db, "appdata", key));
+      const val = snap.exists() ? snap.data().value : null;
+      if (val !== null) cacheSet(key, val);
+      return val;
+    } catch (e) {
+      console.error(`load error (tentativa ${i+1}/${retries}):`, key, e);
+      if (i < retries - 1) await new Promise(r => setTimeout(r, 800 * (i + 1)));
+    }
+  }
+  console.warn(`load FAILED after ${retries} retries — usando cache local:`, key);
+  return cacheGet(key);
 }
 async function save(key, value, retries = 3) {
   for (let i = 0; i < retries; i++) {
     try {
       await setDoc(doc(db, "appdata", key), { value });
+      cacheSet(key, value);
       return true;
     } catch (e) {
       console.error(`save error (tentativa ${i+1}/${retries}):`, key, e);
@@ -52,6 +73,8 @@ async function save(key, value, retries = 3) {
   console.error(`save FAILED after ${retries} retries:`, key);
   return false;
 }
+// Flag global para detectar se o load principal conseguiu conectar
+let _loadSuccess = false;
 
 //
 const fmt = (v) => new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(v ?? 0);
@@ -9101,7 +9124,7 @@ function ManagerPinChange({ manager, onDone, onBack }) {
 //
 // LOGIN
 //
-function UnifiedLogin({ owners, managers, employees, restaurants, onLoginOwner, onLoginManager, onLoginEmployee, onSetupFirst, onGoHome, toggleTheme, theme }) {
+function UnifiedLogin({ owners, managers, employees, restaurants, onLoginOwner, onLoginManager, onLoginEmployee, onSetupFirst, onGoHome, toggleTheme, theme, dataLoaded }) {
   const [credential, setCredential] = useState("");
   const [pin, setPin] = useState("");
   const [err, setErr] = useState("");
@@ -9128,6 +9151,13 @@ function UnifiedLogin({ owners, managers, employees, restaurants, onLoginOwner, 
     const clean = credential.trim();
     const cleanCpf = clean.replace(/\D/g,"");
     const cleanPin = pin.trim();
+
+    // Detecta se os dados não carregaram (conexão falhou)
+    const noData = owners.length === 0 && managers.length === 0 && employees.length === 0;
+    if (noData && !dataLoaded) {
+      setErr("⚠️ Erro de conexão — os dados não foram carregados. Verifique sua internet e recarregue a página.");
+      return;
+    }
 
     if (!isEmpId) {
       // 1) Admin AppTip — acesso direto, sem tela de escolha
@@ -9331,8 +9361,14 @@ function UnifiedLogin({ owners, managers, employees, restaurants, onLoginOwner, 
             )}
 
             {err && (
-              <div style={{background:isBlocked?"#f59e0b12":"var(--red-bg)",border:`1px solid ${isBlocked?"#f59e0b33":"var(--red)33"}`,borderRadius:8,padding:"10px 12px",color:isBlocked?"#d97706":"var(--red)",fontSize:13,fontWeight:500}}>
+              <div style={{background:isBlocked?"#f59e0b12":err.includes("conexão")?"#3b82f612":"var(--red-bg)",border:`1px solid ${isBlocked?"#f59e0b33":err.includes("conexão")?"#3b82f633":"var(--red)33"}`,borderRadius:8,padding:"10px 12px",color:isBlocked?"#d97706":err.includes("conexão")?"#2563eb":"var(--red)",fontSize:13,fontWeight:500}}>
                 {err}
+                {err.includes("conexão") && (
+                  <button onClick={()=>window.location.reload()}
+                    style={{display:"block",marginTop:8,padding:"6px 16px",borderRadius:8,background:"#3b82f6",border:"none",color:"#fff",fontWeight:700,cursor:"pointer",fontSize:12,fontFamily:"'DM Sans',sans-serif"}}>
+                    Recarregar página
+                  </button>
+                )}
               </div>
             )}
 
@@ -10459,6 +10495,8 @@ export default function App() {
     return "login";
   });
   const [loaded, setLoaded] = useState(false);
+  const [loadProgress, setLoadProgress] = useState(""); // feedback visual durante carregamento
+  const [loadError, setLoadError] = useState(false);    // true se não conseguiu conectar
   const [toast, setToast] = useState("");
   const [currentUser, setCurrentUser] = useState(null);
   const [currentUserId] = useState(() => {
@@ -10503,12 +10541,40 @@ export default function App() {
 
   useEffect(() => {
     const savedId = currentUserId;
+    // Timeout: se demorar mais de 12s, mostra mensagem
+    let slowTimer = setTimeout(() => setLoadProgress("Conexão lenta — tentando novamente..."), 6000);
+    let verySlowTimer = setTimeout(() => setLoadProgress("Servidor demorando a responder... aguarde"), 12000);
     (async () => {
-      const vals = await Promise.all(Object.values(K).map(load));
-      const keys = Object.keys(K);
+      setLoadProgress("Conectando ao servidor...");
+      const allKeys = Object.values(K);
+      const keyNames = Object.keys(K);
+
+      // Carregar em paralelo com tracking
+      let loadedCount = 0;
+      const totalKeys = allKeys.length;
+      const vals = await Promise.all(allKeys.map(async (k) => {
+        const result = await load(k);
+        loadedCount++;
+        if (loadedCount <= 3) setLoadProgress("Conectando ao servidor...");
+        else setLoadProgress(`Carregando dados... ${Math.round((loadedCount/totalKeys)*100)}%`);
+        return result;
+      }));
+
+      clearTimeout(slowTimer);
+      clearTimeout(verySlowTimer);
+      setLoadProgress("Preparando o sistema...");
+
+      const keys = keyNames;
       const map = { owners:setOwners, managers:setManagers, restaurants:setRestaurants, employees:setEmployees, roles:setRoles, tips:setTips, splits:setSplits, schedules:setSchedules, communications:setCommunications, commAcks:setCommAcks, faq:setFaq, dpMessages:setDpMessages, workSchedules:setWorkSchedules, notifications:setNotifications, noTipDays:setNoTipDays, trash:setTrash, schedTemplates:setSchedTemplates, schedDrafts:setSchedDrafts, scheduleVersions:setScheduleVersions, tipVersions:setTipVersions, vtConfig:setVtConfig, vtMonthly:setVtMonthly, vtPayments:setVtPayments };
       const loaded_data = {};
-      keys.forEach((k, i) => { if (k !== "receipts" && vals[i]) { map[k]?.(vals[i]); loaded_data[k] = vals[i]; } });
+      let successCount = 0;
+      keys.forEach((k, i) => {
+        if (k !== "receipts" && vals[i]) { map[k]?.(vals[i]); loaded_data[k] = vals[i]; successCount++; }
+      });
+
+      // Se nenhuma key carregou com sucesso, marca como erro de conexão
+      _loadSuccess = successCount > 0;
+      if (!_loadSuccess) setLoadError(true);
 
       // Migração automática: v4:superManagers → v4:owners (executa só uma vez)
       if (!loaded_data.owners || loaded_data.owners.length === 0) {
@@ -10604,8 +10670,10 @@ export default function App() {
         }
       }
 
+      setLoadProgress("");
       setLoaded(true);
     })();
+    return () => { clearTimeout(slowTimer); clearTimeout(verySlowTimer); };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const data = { owners, managers, restaurants, employees, roles, tips, splits, schedules, communications, commAcks, faq, dpMessages, workSchedules, notifications, noTipDays, trash, schedTemplates, schedDrafts, scheduleVersions, tipVersions, vtConfig, vtMonthly, vtPayments };
@@ -10646,9 +10714,29 @@ export default function App() {
   }, [loaded, currentUser, view]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (!loaded) return (
-    <div style={{minHeight:"100vh",background:"var(--bg)",display:"flex",alignItems:"center",justifyContent:"center",flexDirection:"column",gap:16}}>
+    <div style={{minHeight:"100vh",background:"var(--bg)",display:"flex",alignItems:"center",justifyContent:"center",flexDirection:"column",gap:16,padding:24}}>
       <div style={{fontSize:40}}>🍽️</div>
-      <div style={{color:"var(--text3)",fontFamily:"'DM Sans',sans-serif",fontSize:15,animation:"pulse 1.5s ease-in-out infinite"}}>Carregando…</div>
+      {loadError ? (
+        <div style={{textAlign:"center",fontFamily:"'DM Sans',sans-serif",maxWidth:360}}>
+          <div style={{color:"var(--red,#e74c3c)",fontSize:15,fontWeight:700,marginBottom:8}}>Erro de conexão</div>
+          <div style={{color:"var(--text3,#888)",fontSize:13,marginBottom:16}}>Não foi possível conectar ao servidor. Verifique sua conexão com a internet e tente novamente.</div>
+          <button onClick={()=>window.location.reload()}
+            style={{padding:"10px 24px",borderRadius:10,background:"var(--ac,#d4a017)",border:"none",color:"#fff",fontWeight:700,cursor:"pointer",fontSize:14,fontFamily:"'DM Sans',sans-serif"}}>
+            Tentar novamente
+          </button>
+        </div>
+      ) : (
+        <div style={{textAlign:"center",fontFamily:"'DM Sans',sans-serif"}}>
+          <div style={{color:"var(--text3,#888)",fontSize:15,marginBottom:8,animation:"pulse 1.5s ease-in-out infinite"}}>
+            {loadProgress || "Carregando…"}
+          </div>
+          {loadProgress && loadProgress.includes("lenta") && (
+            <div style={{color:"var(--text3,#888)",fontSize:12,marginTop:4}}>
+              Isso pode levar alguns segundos em conexões lentas
+            </div>
+          )}
+        </div>
+      )}
       <style>{`@keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.3} }`}</style>
     </div>
   );
@@ -10658,6 +10746,7 @@ export default function App() {
       {view === "login" && (
         <UnifiedLogin
           owners={owners} managers={managers} employees={employees} restaurants={restaurants}
+          dataLoaded={_loadSuccess}
           onLoginOwner={u=>{setCurrentUser(u);setUserRole("super");setView("super");}}
           onLoginManager={u=>{setCurrentUser(u);setUserRole("manager");setView("manager");}}
           onLoginEmployee={u=>{
