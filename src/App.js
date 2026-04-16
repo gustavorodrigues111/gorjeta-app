@@ -1807,6 +1807,13 @@ function WorkScheduleManagerTab({ restaurantId, employees, roles, workSchedules,
       setValidated(false);
       return;
     }
+    // Freela: pula validação CLT
+    if (selEmp?.isFreela) {
+      setErrors([]);
+      setValidated(true);
+      onUpdate("_toast", "✅ Horário registrado (freela — sem validação CLT)");
+      return;
+    }
     const storageDays = toStorage(editDays, false);
     const { errors: errs } = validateWeekSchedule(storageDays);
     setErrors(errs);
@@ -1828,8 +1835,21 @@ function WorkScheduleManagerTab({ restaurantId, employees, roles, workSchedules,
   function saveSchedule() {
     const storageDays = toStorage(editDays, false);
 
-    const { errors: errs, totalContract } = validateWeekSchedule(storageDays);
-    if (errs.length > 0) { setErrors(errs); return; }
+    // Freela: pula validação CLT (jornada, interjornada, carga semanal, etc.)
+    const isFreela = selEmp?.isFreela;
+    let totalContract = 0;
+    if (!isFreela) {
+      const { errors: errs, totalContract: tc } = validateWeekSchedule(storageDays);
+      totalContract = tc;
+      if (errs.length > 0) { setErrors(errs); return; }
+    } else {
+      // Calcula totalContract apenas para exibição, sem validar
+      const activeDays = Object.entries(storageDays).filter(([,d]) => d && d.in && d.out);
+      totalContract = activeDays.reduce((sum, [,d]) => {
+        const c = calcDayHours(d.in, d.out, d.break || 0);
+        return sum + (c.totalContract || 0);
+      }, 0);
+    }
 
     const newEntry = {
       id: `${Date.now()}-${Math.random().toString(36).slice(2,5)}`,
@@ -1839,6 +1859,7 @@ function WorkScheduleManagerTab({ restaurantId, employees, roles, workSchedules,
       createdAt: new Date().toISOString(),
       totalContract,
       hoursComplete: true,
+      ...(isFreela ? { freela: true } : {}),
     };
 
     onUpdate("workSchedules", prev => {
@@ -1894,7 +1915,8 @@ function WorkScheduleManagerTab({ restaurantId, employees, roles, workSchedules,
   const storageDaysCalc = allHoursFilled && activeDayCount > 0 ? toStorage(editDays, false) : {};
   const { totalContract } = allHoursFilled && activeDayCount > 0 ? validateWeekSchedule(storageDaysCalc) : { totalContract: 0 };
   const MIN_WEEK = 43*60+55, MAX_WEEK = 44*60;
-  const weekOk = allHoursFilled && activeDayCount > 0 && totalContract >= MIN_WEEK && totalContract <= MAX_WEEK;
+  const isEmpFreela = selEmp?.isFreela;
+  const weekOk = allHoursFilled && activeDayCount > 0 && (isEmpFreela || (totalContract >= MIN_WEEK && totalContract <= MAX_WEEK));
 
   // ── IA Assistant state ──
   const [aiOpen, setAiOpen] = useState(false);
@@ -2664,7 +2686,7 @@ function WorkScheduleManagerTab({ restaurantId, employees, roles, workSchedules,
             <div>
               <div style={{color:"var(--text3)",fontSize:mobileOnly?11:12,fontWeight:500,letterSpacing:0.3,textTransform:"uppercase"}}>{mobileOnly?"Total semanal":"Total semanal contratual"}</div>
               <div style={{color:weekOk?"var(--green)":"var(--red)",fontSize:mobileOnly?11:12,fontWeight:600,marginTop:2}}>
-                {weekOk ? "Dentro do limite CLT" : "Fora do limite — deve estar entre 43:55 e 44:00"}
+                {isEmpFreela ? "Freela — sem validação CLT" : weekOk ? "Dentro do limite CLT" : "Fora do limite — deve estar entre 43:55 e 44:00"}
               </div>
             </div>
           </div>
@@ -2708,7 +2730,7 @@ function WorkScheduleManagerTab({ restaurantId, employees, roles, workSchedules,
               <span style={{fontSize:mobileOnly?18:22}}>✅</span>
               <div style={{flex:1,minWidth:0}}>
                 <div style={{color:"var(--green)",fontWeight:700,fontSize:mobileOnly?13:14}}>Horário validado</div>
-                <div style={{color:"var(--text3)",fontSize:mobileOnly?11:12,marginTop:2}}>Todas as regras da CLT estão atendidas. Pode salvar com segurança.</div>
+                <div style={{color:"var(--text3)",fontSize:mobileOnly?11:12,marginTop:2}}>{isEmpFreela ? "Freela — horário registrado sem validação CLT." : "Todas as regras da CLT estão atendidas. Pode salvar com segurança."}</div>
               </div>
             </div>
           )}
