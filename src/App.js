@@ -6765,6 +6765,12 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }
   // eslint-disable-next-line no-unused-vars
   const { owners, managers, restaurants, employees, roles, tips, splits, schedules, noTipDays } = data;
   const [tab, setTab] = useState("dashboard");
+  const [isMobile, setIsMobile] = useState(() => window.innerWidth < 768);
+  useEffect(() => {
+    const handler = () => setIsMobile(window.innerWidth < 768);
+    window.addEventListener("resize", handler);
+    return () => window.removeEventListener("resize", handler);
+  }, []);
   const [selRestaurant, setSelRestaurantState] = useState(() => {
     const saved = localStorage.getItem("apptip_selrest");
     if (saved && restaurants.find(r => r.id === saved)) return saved;
@@ -6935,21 +6941,21 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }
     return (
       <div style={{ minHeight:"100vh", background:"var(--bg)", fontFamily:"'DM Sans',sans-serif" }}>
         {/* Header */}
-        <div style={{ background:"var(--header-bg)", borderBottom:"1px solid var(--border)", padding:"12px 20px", display:"flex", justifyContent:"space-between", alignItems:"center", boxShadow:"0 1px 4px rgba(0,0,0,0.04)" }}>
-          <div style={{ display:"flex", alignItems:"center", gap:8 }}>
-            <button onClick={()=>setSelRestaurant(null)} style={{ ...S.btnSecondary, fontSize:12, padding:"6px 12px" }}>← Voltar</button>
-            <span style={{ color:"var(--text)", fontWeight:700, fontSize:15 }}>{rest?.name}</span>
-            <span style={{ background:"var(--ac-bg)", color:"var(--ac-text)", borderRadius:6, padding:"2px 8px", fontSize:11, fontWeight:700 }}>{getPlano(rest).label}</span>
-            {rest?.earlyAdopter && <span style={{background:"#d4a01715",color:"#d4a017",borderRadius:6,padding:"2px 8px",fontSize:11,fontWeight:700}}>🚀 Early Adopter</span>}
+        <div style={{ background:"var(--header-bg)", borderBottom:"1px solid var(--border)", padding:isMobile?"10px 12px":"12px 20px", display:"flex", justifyContent:"space-between", alignItems:"center", boxShadow:"0 1px 4px rgba(0,0,0,0.04)", gap:8 }}>
+          <div style={{ display:"flex", alignItems:"center", gap:isMobile?6:8, minWidth:0, flex:1 }}>
+            <button onClick={()=>setSelRestaurant(null)} style={{ ...S.btnSecondary, fontSize:isMobile?11:12, padding:isMobile?"5px 8px":"6px 12px",flexShrink:0 }}>← {isMobile?"":"Voltar"}</button>
+            <span style={{ color:"var(--text)", fontWeight:700, fontSize:isMobile?13:15, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{rest?.name}</span>
+            {!isMobile && <span style={{ background:"var(--ac-bg)", color:"var(--ac-text)", borderRadius:6, padding:"2px 8px", fontSize:11, fontWeight:700 }}>{getPlano(rest).label}</span>}
+            {!isMobile && rest?.earlyAdopter && <span style={{background:"#d4a01715",color:"#d4a017",borderRadius:6,padding:"2px 8px",fontSize:11,fontWeight:700}}>🚀 Early Adopter</span>}
           </div>
           <button onClick={onBack} style={{ ...S.btnSecondary, fontSize:12 }}>Sair</button>
         </div>
 
         {/* Sub-tabs */}
         <div style={{ display:"flex", borderBottom:"1px solid var(--border)", background:"var(--header-bg)", overflowX:"auto" }}>
-          {[["operacional","⚙️ Operacional"],["gestores","👔 Gestores"],["financeiro","💳 Financeiro"]].map(([id,lbl])=>(
+          {[["operacional",isMobile?"⚙️ Op.":"⚙️ Operacional"],["gestores","👔 Gestores"],["financeiro","💳 Financeiro"]].map(([id,lbl])=>(
             <button key={id} onClick={()=>setRestTab(id)}
-              style={{ padding:"10px 20px", background:"none", border:"none", borderBottom:`2px solid ${restTab===id?ac:"transparent"}`, color:restTab===id?ac:"var(--text3)", cursor:"pointer", fontSize:13, fontFamily:"'DM Sans',sans-serif", fontWeight:restTab===id?700:500, whiteSpace:"nowrap" }}>
+              style={{ padding:isMobile?"10px 14px":"10px 20px", background:"none", border:"none", borderBottom:`2px solid ${restTab===id?ac:"transparent"}`, color:restTab===id?ac:"var(--text3)", cursor:"pointer", fontSize:isMobile?12:13, fontFamily:"'DM Sans',sans-serif", fontWeight:restTab===id?700:500, whiteSpace:"nowrap", flex:isMobile?1:undefined, textAlign:"center" }}>
               {lbl}
             </button>
           ))}
@@ -6957,22 +6963,22 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }
 
         {/* Operacional */}
         {restTab === "operacional" && (
-          <RestaurantPanel restaurant={rest} restaurants={restaurants} employees={employees} roles={roles} tips={tips} splits={splits} schedules={schedules} onUpdate={onUpdate} perms={{ tips:true, schedule:true }} isOwner data={data} currentUser={currentUser} privacyMask={rest?.privacyMode === true} />
+          <RestaurantPanel restaurant={rest} restaurants={restaurants} employees={employees} roles={roles} tips={tips} splits={splits} schedules={schedules} onUpdate={onUpdate} perms={{ tips:true, schedule:true }} isOwner data={data} currentUser={currentUser} privacyMask={rest?.privacyMode === true} mobileOnly={isMobile} />
         )}
 
         {/* Gestores deste restaurante */}
         {restTab === "gestores" && (
-          <div style={{ padding:"24px", maxWidth:800, margin:"0 auto" }}>
-            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:20 }}>
-              <div>
-                <h3 style={{ color:"var(--text)", fontSize:16, fontWeight:700, margin:"0 0 4px" }}>Gestores de {rest?.name}</h3>
-                <p style={{ color:"var(--text3)", fontSize:13, margin:0 }}>{restMgrs.length} gestor{restMgrs.length!==1?"es":""} com acesso</p>
+          <div style={{ padding:isMobile?"12px 10px":"24px", maxWidth:800, margin:"0 auto" }}>
+            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:isMobile?14:20, gap:8 }}>
+              <div style={{minWidth:0}}>
+                <h3 style={{ color:"var(--text)", fontSize:isMobile?14:16, fontWeight:700, margin:"0 0 4px" }}>Gestores de {rest?.name}</h3>
+                <p style={{ color:"var(--text3)", fontSize:isMobile?11:13, margin:0 }}>{restMgrs.length} gestor{restMgrs.length!==1?"es":""} com acesso</p>
               </div>
               <button onClick={()=>{
                 setEditMgrId(null);
                 setMgrForm({name:"",cpf:"",pin:"",restaurantIds:[selRestaurant],perms:{tips:true,schedule:true},isDP:false,profile:"custom",areas:[]});
                 setShowMgrModal(true);
-              }} style={{...S.btnPrimary,width:"auto",padding:"10px 20px"}}>+ Novo Gestor</button>
+              }} style={{...S.btnPrimary,width:"auto",padding:isMobile?"8px 14px":"10px 20px",fontSize:isMobile?12:14,whiteSpace:"nowrap"}}>+ Novo Gestor</button>
             </div>
 
             {restMgrs.length === 0 && (
@@ -6990,31 +6996,30 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }
             <div style={{display:"flex",flexDirection:"column",gap:10}}>
               {restMgrs.map(m => (
                 <div key={m.id} style={{...S.card}}>
-                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
-                    <div>
-                      <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:2}}>
-                        <span style={{color:"var(--text)",fontWeight:700,fontSize:15}}>{m.name}</span>
+                  <div style={{display:"flex",flexDirection:isMobile?"column":"row",justifyContent:"space-between",alignItems:isMobile?"stretch":"flex-start",gap:isMobile?10:0}}>
+                    <div style={{minWidth:0}}>
+                      <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:2,flexWrap:"wrap"}}>
+                        <span style={{color:"var(--text)",fontWeight:700,fontSize:isMobile?14:15}}>{m.name}</span>
                         {m.profile==="dp" && <span style={{background:"var(--blue-bg)",color:"var(--blue)",borderRadius:6,padding:"2px 8px",fontSize:10,fontWeight:700}}>📬 DP</span>}
                         {m.profile==="lider" && <span style={{background:"#f59e0b22",color:"#f59e0b",borderRadius:6,padding:"2px 8px",fontSize:10,fontWeight:700}}>👔 Líder</span>}
                       </div>
-                      <div style={{color:"var(--text3)",fontSize:12,marginBottom:4}}>CPF: {isPrivate(selRestaurant) ? "•••.•••.•••-••" : (m.cpf||"—")}</div>
+                      <div style={{color:"var(--text3)",fontSize:isMobile?11:12,marginBottom:4}}>CPF: {isPrivate(selRestaurant) ? "•••.•••.•••-••" : (m.cpf||"—")}</div>
                       {m.profile==="lider" && (m.areas??[]).length>0 && (
                         <div style={{color:"var(--text3)",fontSize:11,marginBottom:6}}>Áreas: {m.areas.join(", ")}</div>
                       )}
-                      <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:6}}>
+                      <div style={{display:"flex",gap:isMobile?4:6,flexWrap:"wrap",marginBottom:6}}>
                         {[["tips","💸 Gorjetas"],["schedule","📅 Escala"],["roles","🏷️ Cargos"],["employees","👥 Equipe"],["comunicados","📢 Comuns."],["faq","❓ FAQ"],["dp","💬 DP"],["horarios","🕐 Horários"],["vt","🚌 VT"]].map(([k,lbl])=>
-                          m.perms?.[k]!==false ? <span key={k} style={{background:"var(--green-bg)",color:"var(--green)",borderRadius:6,padding:"2px 8px",fontSize:11,fontWeight:600}}>{lbl}</span> : null
+                          m.perms?.[k]!==false ? <span key={k} style={{background:"var(--green-bg)",color:"var(--green)",borderRadius:6,padding:"2px 6px",fontSize:isMobile?10:11,fontWeight:600}}>{lbl}</span> : null
                         )}
-                        {m.isDP && !m.profile && <span style={{background:"var(--blue-bg)",color:"var(--blue)",borderRadius:6,padding:"2px 8px",fontSize:11,fontWeight:600}}>📬 DP</span>}
+                        {m.isDP && !m.profile && <span style={{background:"var(--blue-bg)",color:"var(--blue)",borderRadius:6,padding:"2px 6px",fontSize:isMobile?10:11,fontWeight:600}}>📬 DP</span>}
                       </div>
-                      {/* Outros restaurantes que esse gestor acessa */}
                       {(m.restaurantIds??[]).filter(rid=>rid!==selRestaurant).length > 0 && (
                         <div style={{color:"var(--text3)",fontSize:11}}>
                           Também acessa: {(m.restaurantIds??[]).filter(rid=>rid!==selRestaurant).map(rid=>restaurants.find(r=>r.id===rid)?.name).filter(Boolean).join(", ")}
                         </div>
                       )}
                     </div>
-                    <div style={{display:"flex",gap:8,flexShrink:0,flexWrap:"wrap"}}>
+                    <div style={{display:"flex",gap:8,flexShrink:0,flexWrap:"nowrap"}}>
                       <button onClick={()=>{
                         const cpfDigits = (m.cpf??"").replace(/\D/g,"");
                         if (cpfDigits.length < 4) { onUpdate("_toast","⚠️ CPF inválido — não foi possível gerar PIN automático"); return; }
@@ -7022,8 +7027,8 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }
                         if(!window.confirm(`Resetar PIN de "${m.name}"?\n\nO PIN voltará para ${newPin} (4 primeiros dígitos do CPF) e ele será obrigado a trocar no próximo acesso.`)) return;
                         onUpdate("managers", managers.map(x=>x.id===m.id?{...x,pin:newPin,mustChangePin:true}:x));
                         onUpdate("_toast", `🔑 PIN de ${m.name} resetado para ${newPin}`);
-                      }} title="Resetar PIN para os 4 primeiros dígitos do CPF" style={{...S.btnSecondary,fontSize:12}}>🔑 Resetar PIN</button>
-                      <button onClick={()=>{setEditMgrId(m.id);setMgrForm({name:m.name,cpf:m.cpf??"",pin:m.pin??"",restaurantIds:m.restaurantIds??[],perms:m.perms??{tips:true,schedule:true},isDP:m.isDP??false,profile:m.profile??"custom",areas:m.areas??[]});setShowMgrModal(true);}} style={{...S.btnSecondary,fontSize:12}}>Editar</button>
+                      }} title="Resetar PIN para os 4 primeiros dígitos do CPF" style={{...S.btnSecondary,fontSize:isMobile?11:12,flex:isMobile?1:undefined,textAlign:"center",padding:isMobile?"6px 8px":undefined}}>{isMobile?"🔑 PIN":"🔑 Resetar PIN"}</button>
+                      <button onClick={()=>{setEditMgrId(m.id);setMgrForm({name:m.name,cpf:m.cpf??"",pin:m.pin??"",restaurantIds:m.restaurantIds??[],perms:m.perms??{tips:true,schedule:true},isDP:m.isDP??false,profile:m.profile??"custom",areas:m.areas??[]});setShowMgrModal(true);}} style={{...S.btnSecondary,fontSize:isMobile?11:12,flex:isMobile?1:undefined,textAlign:"center",padding:isMobile?"6px 8px":undefined}}>Editar</button>
                       <button onClick={()=>{
                         if(!window.confirm(`Remover ${m.name} deste restaurante?`)) return;
                         const newIds = (m.restaurantIds??[]).filter(rid=>rid!==selRestaurant);
@@ -7035,7 +7040,7 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }
                           onUpdate("managers", managers.map(x=>x.id===m.id?{...x,restaurantIds:newIds}:x));
                           onUpdate("_toast", `✅ ${m.name} removido deste restaurante.`);
                         }
-                      }} style={{background:"none",border:"1px solid var(--red)33",borderRadius:8,color:"var(--red)",cursor:"pointer",fontSize:12,padding:"6px 12px",fontFamily:"'DM Sans',sans-serif"}}>Remover</button>
+                      }} style={{background:"none",border:"1px solid var(--red)33",borderRadius:8,color:"var(--red)",cursor:"pointer",fontSize:isMobile?11:12,padding:isMobile?"6px 8px":"6px 12px",fontFamily:"'DM Sans',sans-serif",flex:isMobile?1:undefined,textAlign:"center"}}>Remover</button>
                     </div>
                   </div>
                 </div>
@@ -7635,29 +7640,29 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }
 
   return (
     <div style={{ minHeight:"100vh", background:"var(--bg)", fontFamily:"'DM Sans',sans-serif" }}>
-      <div style={{ background:"var(--header-bg)", borderBottom:"1px solid var(--border)", padding:"14px 20px", display:"flex", justifyContent:"space-between", alignItems:"center", boxShadow:"0 1px 4px rgba(0,0,0,0.04)" }}>
-        <div style={{ display:"flex", alignItems:"center", gap:8 }}>
-          <span style={{ fontSize:18 }}>⭐</span>
-          <span style={{ color:"var(--text)", fontWeight:800, fontSize:16 }}>Admin AppTip</span>
-          <span style={{ color:"var(--text3)", fontSize:12 }}>· {currentUser?.name}</span>
+      <div style={{ background:"var(--header-bg)", borderBottom:"1px solid var(--border)", padding:isMobile?"10px 12px":"14px 20px", display:"flex", justifyContent:"space-between", alignItems:"center", boxShadow:"0 1px 4px rgba(0,0,0,0.04)", gap:8 }}>
+        <div style={{ display:"flex", alignItems:"center", gap:isMobile?6:8, minWidth:0 }}>
+          <span style={{ fontSize:isMobile?14:18 }}>⭐</span>
+          <span style={{ color:"var(--text)", fontWeight:800, fontSize:isMobile?13:16 }}>{isMobile?"Admin":"Admin AppTip"}</span>
+          {!isMobile && <span style={{ color:"var(--text3)", fontSize:12 }}>· {currentUser?.name}</span>}
         </div>
-        <div style={{display:"flex",gap:6,alignItems:"center"}}>
+        <div style={{display:"flex",gap:isMobile?4:6,alignItems:"center",flexShrink:0}}>
           <button onClick={()=>setViewOnly(!viewOnly)} title={viewOnly?"Modo somente leitura ativo — clique para desbloquear":"Clique para ativar modo somente leitura"}
-            style={{background:viewOnly?"var(--ac)22":"none",border:`1px solid ${viewOnly?"var(--ac)":"var(--border)"}`,borderRadius:20,padding:"6px 10px",cursor:"pointer",fontSize:14,color:viewOnly?"var(--ac)":"var(--text3)"}}>
+            style={{background:viewOnly?"var(--ac)22":"none",border:`1px solid ${viewOnly?"var(--ac)":"var(--border)"}`,borderRadius:20,padding:isMobile?"5px 8px":"6px 10px",cursor:"pointer",fontSize:isMobile?12:14,color:viewOnly?"var(--ac)":"var(--text3)"}}>
             {viewOnly?"🔒":"🔓"}
           </button>
-          <button onClick={toggleTheme} style={{background:"none",border:"1px solid var(--border)",borderRadius:20,padding:"6px 10px",cursor:"pointer",fontSize:14,color:"var(--text2)"}}>{theme==="dark"?"☀️":"🌙"}</button>
-          <button onClick={onBack} style={{ ...S.btnSecondary, fontSize:12 }}>Sair</button>
+          <button onClick={toggleTheme} style={{background:"none",border:"1px solid var(--border)",borderRadius:20,padding:isMobile?"5px 8px":"6px 10px",cursor:"pointer",fontSize:isMobile?12:14,color:"var(--text2)"}}>{theme==="dark"?"☀️":"🌙"}</button>
+          <button onClick={onBack} style={{ ...S.btnSecondary, fontSize:isMobile?11:12, padding:isMobile?"5px 10px":undefined }}>Sair</button>
         </div>
       </div>
-      {viewOnly && <div style={{background:"var(--ac)11",borderBottom:"1px solid var(--ac)33",padding:"6px 20px",textAlign:"center",fontSize:12,color:"var(--ac)",fontWeight:600}}>🔒 Modo somente leitura — edições bloqueadas</div>}
-      <div style={{ display:"flex", borderBottom:"1px solid var(--border)", background:"var(--header-bg)", overflowX:"auto" }}>
+      {viewOnly && <div style={{background:"var(--ac)11",borderBottom:"1px solid var(--ac)33",padding:isMobile?"5px 12px":"6px 20px",textAlign:"center",fontSize:isMobile?11:12,color:"var(--ac)",fontWeight:600}}>🔒 Modo somente leitura — edições bloqueadas</div>}
+      <div style={{ display:"flex", borderBottom:"1px solid var(--border)", background:"var(--header-bg)", overflowX:"auto", WebkitOverflowScrolling:"touch" }}>
         {TABS.map(([id,lbl])=>(
-          <button key={id} onClick={()=>setTab(id)} style={{ padding:"12px 20px", background:"none", border:"none", borderBottom:`2px solid ${tab===id?ac:"transparent"}`, color:tab===id?ac:"var(--text3)", cursor:"pointer", fontSize:14, fontFamily:"'DM Sans',sans-serif", fontWeight:tab===id?700:500, whiteSpace:"nowrap" }}>{lbl}</button>
+          <button key={id} onClick={()=>setTab(id)} style={{ padding:isMobile?"10px 12px":"12px 20px", background:"none", border:"none", borderBottom:`2px solid ${tab===id?ac:"transparent"}`, color:tab===id?ac:"var(--text3)", cursor:"pointer", fontSize:isMobile?11:14, fontFamily:"'DM Sans',sans-serif", fontWeight:tab===id?700:500, whiteSpace:"nowrap" }}>{lbl}</button>
         ))}
       </div>
 
-      <div style={{ padding:"20px 24px", maxWidth:1100, margin:"0 auto" }}>
+      <div style={{ padding:isMobile?"12px 10px":"20px 24px", maxWidth:1100, margin:"0 auto" }}>
 
         {/* DASHBOARD */}
         {tab === "dashboard" && (() => {
@@ -7779,7 +7784,7 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }
                       <span style={{color:"#92400e",fontWeight:700,fontSize:14}}>💬 {aguardando.length} pagamento{aguardando.length>1?"s":""} aguardando confirmação</span>
                     </div>
                     {aguardando.map(c=>(
-                      <div key={c.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"10px 12px",borderRadius:10,background:"#fff",border:"1px solid #fde68a",marginBottom:8}}>
+                      <div key={c.id} style={{display:"flex",flexDirection:isMobile?"column":"row",justifyContent:"space-between",alignItems:isMobile?"stretch":"center",gap:isMobile?8:0,padding:isMobile?"10px":"10px 12px",borderRadius:10,background:"#fff",border:"1px solid #fde68a",marginBottom:8}}>
                         <div>
                           <div style={{color:"var(--text)",fontWeight:700,fontSize:13}}>{c.restName}</div>
                           <div style={{color:"var(--text3)",fontSize:12}}>
@@ -8100,35 +8105,35 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }
               const pct = Math.min(100, Math.round((empCount/plano.empMax)*100));
               return (
                 <div key={r.id} style={{...S.card,marginBottom:10}}>
-                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
-                    <div style={{flex:1}}>
-                      <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:2}}>
-                        <span style={{color:ac,fontWeight:700,fontSize:13,background:"var(--ac)22",borderRadius:6,padding:"2px 8px"}}>{r.shortCode||"—"}</span>
-                        <span style={{color:"var(--text)",fontWeight:700,fontSize:16}}>{r.name}</span>
+                  <div style={{display:"flex",flexDirection:isMobile?"column":"row",justifyContent:"space-between",alignItems:isMobile?"stretch":"flex-start",gap:isMobile?10:0}}>
+                    <div style={{flex:1,minWidth:0}}>
+                      <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:2,flexWrap:"wrap"}}>
+                        <span style={{color:ac,fontWeight:700,fontSize:isMobile?11:13,background:"var(--ac)22",borderRadius:6,padding:"2px 8px"}}>{r.shortCode||"—"}</span>
+                        <span style={{color:"var(--text)",fontWeight:700,fontSize:isMobile?14:16}}>{r.name}</span>
                         <span style={{background:atLimit?"#ef444422":"#10b98122",color:atLimit?"var(--red)":"var(--green)",borderRadius:6,padding:"2px 8px",fontSize:11,fontWeight:700}}>{plano.label}</span>
                       </div>
-                      {r.cnpj && <div style={{color:"var(--text3)",fontSize:12}}>CNPJ: {r.cnpj}</div>}
-                      {r.address && <div style={{color:"var(--text3)",fontSize:12}}>{r.address}</div>}
-                      <div style={{marginTop:8,display:"flex",alignItems:"center",gap:8}}>
-                        <div style={{flex:1,background:"var(--bg1)",borderRadius:4,height:6,overflow:"hidden",maxWidth:120}}>
+                      {r.cnpj && <div style={{color:"var(--text3)",fontSize:isMobile?11:12}}>CNPJ: {r.cnpj}</div>}
+                      {r.address && <div style={{color:"var(--text3)",fontSize:isMobile?11:12,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{r.address}</div>}
+                      <div style={{marginTop:8,display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
+                        <div style={{flex:"0 0 auto",width:isMobile?80:120,background:"var(--bg1)",borderRadius:4,height:6,overflow:"hidden"}}>
                           <div style={{width:`${pct}%`,height:"100%",background:atLimit?"var(--red)":pct>80?"#f59e0b":"var(--green)",borderRadius:4}}/>
                         </div>
-                        <span style={{color:atLimit?"var(--red)":"var(--text3)",fontSize:12,fontWeight:atLimit?700:400}}>
+                        <span style={{color:atLimit?"var(--red)":"var(--text3)",fontSize:isMobile?11:12,fontWeight:atLimit?700:400}}>
                           {empCount}/{plano.empMax} emp. · {mgrCount} gestor{mgrCount!==1?"es":""}
                         </span>
                         {plano.mensal && <span style={{color:"var(--text3)",fontSize:11}}>R${plano.mensal}/mês</span>}
                       </div>
                     </div>
-                    <div style={{display:"flex",gap:8,flexWrap:"wrap",justifyContent:"flex-end"}}>
-                      <button onClick={()=>setSelRestaurant(r.id)} style={{...S.btnSecondary,fontSize:12,color:ac,borderColor:ac}}>Abrir →</button>
-                      <button onClick={()=>{setSelRestaurant(r.id);setRestTab("financeiro");}} style={{...S.btnSecondary,fontSize:12,color:"var(--green)",borderColor:"var(--green)"}}>💳</button>
-                      <button onClick={()=>{setEditRestId(r.id);setRestForm({name:r.name,shortCode:r.shortCode??"",cnpj:r.cnpj??"",address:r.address??"",whatsappFin:r.whatsappFin??"",whatsappOp:r.whatsappOp??"",serviceStartDate:r.serviceStartDate??""});setShowRestModal(true);}} style={{...S.btnSecondary,fontSize:12}}>Editar</button>
+                    <div style={{display:"flex",gap:8,flexWrap:"nowrap",justifyContent:isMobile?"stretch":"flex-end"}}>
+                      <button onClick={()=>setSelRestaurant(r.id)} style={{...S.btnSecondary,fontSize:12,color:ac,borderColor:ac,flex:isMobile?1:undefined,textAlign:"center"}}>Abrir →</button>
+                      <button onClick={()=>{setSelRestaurant(r.id);setRestTab("financeiro");}} style={{...S.btnSecondary,fontSize:12,color:"var(--green)",borderColor:"var(--green)",flex:isMobile?1:undefined,textAlign:"center"}}>💳</button>
+                      <button onClick={()=>{setEditRestId(r.id);setRestForm({name:r.name,shortCode:r.shortCode??"",cnpj:r.cnpj??"",address:r.address??"",whatsappFin:r.whatsappFin??"",whatsappOp:r.whatsappOp??"",serviceStartDate:r.serviceStartDate??""});setShowRestModal(true);}} style={{...S.btnSecondary,fontSize:12,flex:isMobile?1:undefined,textAlign:"center"}}>Editar</button>
                       <button onClick={()=>{
                         if(!window.confirm(`Mover "${r.name}" para a lixeira? Você poderá restaurar depois.`)) return;
                         softDelete("restaurants", r);
                         onUpdate("restaurants", restaurants.filter(x=>x.id!==r.id));
                         onUpdate("_toast", `🗑️ ${r.name} movido para a lixeira.`);
-                      }} style={{background:"none",border:"1px solid var(--red)33",borderRadius:8,color:"var(--red)",cursor:"pointer",fontSize:12,padding:"6px 12px",fontFamily:"'DM Sans',sans-serif"}}>🗑️</button>
+                      }} style={{background:"none",border:"1px solid var(--red)33",borderRadius:8,color:"var(--red)",cursor:"pointer",fontSize:12,padding:"6px 12px",fontFamily:"'DM Sans',sans-serif",flex:isMobile?1:undefined,textAlign:"center"}}>🗑️</button>
                     </div>
                   </div>
                 </div>
@@ -8147,25 +8152,23 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }
             {managers.length === 0 && <p style={{color:"var(--text3)",textAlign:"center"}}>Nenhum gestor cadastrado. Crie gestores dentro de cada restaurante.</p>}
             {managers.map(m=>(
               <div key={m.id} style={{...S.card,marginBottom:10}}>
-                <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
-                  <div style={{flex:1}}>
-                    <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:2}}>
-                      <span style={{color:"var(--text)",fontWeight:700,fontSize:15}}>{m.name}</span>
-                      {m.isDP && <span style={{background:"var(--blue-bg)",color:"var(--blue)",borderRadius:6,padding:"2px 8px",fontSize:11,fontWeight:700}}>📬 DP</span>}
-                    </div>
-                    <div style={{color:"var(--text3)",fontSize:12,marginBottom:8}}>CPF: {(m.restaurantIds??[]).some(rid=>isPrivate(rid)) ? maskCpfPriv(m.cpf, (m.restaurantIds??[])[0]) : (m.cpf||"—")}</div>
-                    <div style={{display:"flex",gap:4,flexWrap:"wrap"}}>
-                      {(m.restaurantIds??[]).map(rid=>{
-                        const r=restaurants.find(x=>x.id===rid);
-                        return r ? (
-                          <button key={rid} onClick={()=>setSelRestaurant(rid)}
-                            style={{background:"var(--ac-bg)",color:"var(--ac-text)",borderRadius:6,padding:"3px 10px",fontSize:12,fontWeight:600,border:"none",cursor:"pointer",fontFamily:"'DM Sans',sans-serif"}}>
-                            {r.name} →
-                          </button>
-                        ) : null;
-                      })}
-                      {(!m.restaurantIds||m.restaurantIds.length===0)&&<span style={{color:"var(--text3)",fontSize:12}}>Sem restaurantes atribuídos</span>}
-                    </div>
+                <div>
+                  <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:2,flexWrap:"wrap"}}>
+                    <span style={{color:"var(--text)",fontWeight:700,fontSize:isMobile?13:15}}>{m.name}</span>
+                    {m.isDP && <span style={{background:"var(--blue-bg)",color:"var(--blue)",borderRadius:6,padding:"2px 8px",fontSize:isMobile?10:11,fontWeight:700}}>📬 DP</span>}
+                  </div>
+                  <div style={{color:"var(--text3)",fontSize:isMobile?11:12,marginBottom:8}}>CPF: {(m.restaurantIds??[]).some(rid=>isPrivate(rid)) ? maskCpfPriv(m.cpf, (m.restaurantIds??[])[0]) : (m.cpf||"—")}</div>
+                  <div style={{display:"flex",gap:4,flexWrap:"wrap"}}>
+                    {(m.restaurantIds??[]).map(rid=>{
+                      const r=restaurants.find(x=>x.id===rid);
+                      return r ? (
+                        <button key={rid} onClick={()=>setSelRestaurant(rid)}
+                          style={{background:"var(--ac-bg)",color:"var(--ac-text)",borderRadius:6,padding:"3px 10px",fontSize:isMobile?11:12,fontWeight:600,border:"none",cursor:"pointer",fontFamily:"'DM Sans',sans-serif"}}>
+                          {r.name} →
+                        </button>
+                      ) : null;
+                    })}
+                    {(!m.restaurantIds||m.restaurantIds.length===0)&&<span style={{color:"var(--text3)",fontSize:isMobile?11:12}}>Sem restaurantes atribuídos</span>}
                   </div>
                 </div>
               </div>
