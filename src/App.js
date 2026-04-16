@@ -3,7 +3,7 @@ import { useState, useEffect, Component } from "react";
 import { db } from "./firebase";
 import { doc, getDoc, setDoc } from "firebase/firestore";
 
-const APP_VERSION = "5.15.0";
+const APP_VERSION = "5.15.1";
 
 const DEFAULT_ADMISSION = () => `${new Date().getFullYear()}-01-01`;
 const round2 = (v) => Math.round(v * 100) / 100;
@@ -5059,7 +5059,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
               {isCurrentMonth && (
                 <div style={{...S.card, marginBottom:14, background:"var(--ac-bg)", border:"1px solid var(--ac)22"}}>
                   <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
-                    <span style={{color:"var(--ac-text)",fontWeight:700,fontSize:13}}>📅 Hoje — {new Date().toLocaleDateString("pt-BR",{weekday:"long",day:"numeric",month:"long"})}</span>
+                    <span style={{color:"var(--ac-text)",fontWeight:700,fontSize:mobileOnly?14:16}}>📅 Hoje — {new Date().toLocaleDateString("pt-BR",{weekday:"long",day:"numeric",month:"long"})}</span>
                   </div>
                   <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:8}}>
                     <div style={{background:"var(--card-bg)",borderRadius:10,padding:"10px 6px",textAlign:"center"}}>
@@ -5139,25 +5139,26 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
 
                 return (
                   <div style={{...S.card,marginBottom:14}}>
-                    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
-                      <span style={{color:ac,fontWeight:700,fontSize:13}}>👥 Equipe hoje <span style={{color:"var(--text3)",fontWeight:400,fontSize:11}}>({new Date().toLocaleDateString("pt-BR")})</span></span>
-                      <button onClick={()=>setTab("schedule")} style={{...S.btnSecondary,fontSize:11,padding:"4px 10px"}}>Escala →</button>
+                    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
+                      <span style={{color:"var(--text)",fontWeight:700,fontSize:mobileOnly?14:16}}>👥 Equipe hoje <span style={{color:"var(--text3)",fontWeight:400,fontSize:mobileOnly?11:12}}>({new Date().toLocaleDateString("pt-BR")})</span></span>
+                      <button onClick={()=>setTab("schedule")} style={{...S.btnSecondary,fontSize:12,padding:"6px 14px"}}>Escala →</button>
                     </div>
                     {/* Áreas */}
                     {AREAS.map(area => byArea[area].length > 0 && (
-                      <div key={area} style={{marginBottom:8}}>
-                        <div style={{color:AREA_COLORS[area]??"var(--green)",fontSize:11,fontWeight:700,marginBottom:4,display:"flex",alignItems:"center",gap:4}}>
-                          <span style={{width:8,height:8,borderRadius:"50%",background:AREA_COLORS[area],display:"inline-block"}}></span>
-                          {area} ({byArea[area].length})
+                      <div key={area} style={{marginBottom:10}}>
+                        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:mobileOnly?"6px 10px":"8px 14px",background:`${AREA_COLORS[area]??"var(--green)"}12`,borderRadius:10,borderLeft:`4px solid ${AREA_COLORS[area]??"var(--green)"}`,marginBottom:6}}>
+                          <span style={{color:AREA_COLORS[area]??"var(--green)",fontSize:mobileOnly?12:13,fontWeight:700}}>{area}</span>
+                          <span style={{color:AREA_COLORS[area]??"var(--green)",fontSize:mobileOnly?11:12,fontWeight:600}}>{byArea[area].length}</span>
                         </div>
                         {byArea[area].map((e,i) => <EmpLine key={i} e={e} i={i} color={AREA_COLORS[area]} />)}
                       </div>
                     ))}
                     {/* Produção */}
                     {prodSection.length > 0 && (
-                      <div style={{marginBottom:8}}>
-                        <div style={{color:"#ec4899",fontSize:11,fontWeight:700,marginBottom:4,display:"flex",alignItems:"center",gap:4}}>
-                          <span>🏭</span> Produção ({prodSection.length})
+                      <div style={{marginBottom:10}}>
+                        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:mobileOnly?"6px 10px":"8px 14px",background:"#ec489912",borderRadius:10,borderLeft:"4px solid #ec4899",marginBottom:6}}>
+                          <span style={{color:"#ec4899",fontSize:mobileOnly?12:13,fontWeight:700}}>🏭 Produção</span>
+                          <span style={{color:"#ec4899",fontSize:mobileOnly?11:12,fontWeight:600}}>{prodSection.length}</span>
                         </div>
                         {prodSection.map((e,i) => <EmpLine key={i} e={e} i={i} color="#ec4899" />)}
                       </div>
@@ -5165,9 +5166,9 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                     {/* Folga / Férias / Faltas */}
                     {offSection.length > 0 && (
                       <div style={{marginBottom:4}}>
-                        <div style={{color:"var(--text3)",fontSize:11,fontWeight:700,marginBottom:4,display:"flex",alignItems:"center",gap:4}}>
-                          <span style={{width:8,height:8,borderRadius:"50%",background:"var(--text3)",display:"inline-block"}}></span>
-                          Folga ({offSection.length})
+                        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:mobileOnly?"6px 10px":"8px 14px",background:"var(--bg1)",borderRadius:10,borderLeft:"4px solid var(--text3)",marginBottom:6}}>
+                          <span style={{color:"var(--text3)",fontSize:mobileOnly?12:13,fontWeight:700}}>Folga / Ausentes</span>
+                          <span style={{color:"var(--text3)",fontSize:mobileOnly?11:12,fontWeight:600}}>{offSection.length}</span>
                         </div>
                         {offSection.map((e,i) => (
                           <div key={i} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"4px 0",borderBottom:"1px solid var(--border)",fontSize:12}}>
@@ -5189,8 +5190,8 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
 
               <div style={{...S.card, marginBottom:14}}>
                 <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
-                  <span style={{color:ac,fontWeight:700,fontSize:13}}>💸 Gorjetas — {monthLabel(year,month)}</span>
-                  {!mobileOnly && <button onClick={()=>setTab("tips")} style={{...S.btnSecondary,fontSize:11,padding:"4px 10px"}}>Ver tudo →</button>}
+                  <span style={{color:"var(--text)",fontWeight:700,fontSize:mobileOnly?14:16}}>💸 Gorjetas — {monthLabel(year,month)}</span>
+                  {!mobileOnly && <button onClick={()=>setTab("tips")} style={{...S.btnSecondary,fontSize:12,padding:"6px 14px"}}>Ver tudo →</button>}
                 </div>
                 <div style={{display:"grid",gridTemplateColumns:mobileOnly?"1fr 1fr":"1fr 1fr 1fr 1fr",gap:mobileOnly?6:8}}>
                   {[
@@ -5211,12 +5212,12 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                       const aNet = monthTips.filter(t=>t.area===a).reduce((s,t)=>s+t.myNet,0);
                       if(!aNet) return null;
                       return (
-                        <div key={a} style={{display:"flex",alignItems:"center",gap:8}}>
-                          <span style={{color:AREA_COLORS[a],fontSize:11,minWidth:70,fontWeight:600}}>{a}</span>
-                          <div style={{flex:1,background:"var(--bg2)",borderRadius:4,height:5,overflow:"hidden"}}>
+                        <div key={a} style={{display:"flex",alignItems:"center",gap:10,padding:"6px 10px",borderLeft:`3px solid ${AREA_COLORS[a]}`,background:`${AREA_COLORS[a]}08`,borderRadius:"0 8px 8px 0"}}>
+                          <span style={{color:AREA_COLORS[a],fontSize:12,minWidth:70,fontWeight:700}}>{a}</span>
+                          <div style={{flex:1,background:"var(--bg2)",borderRadius:4,height:6,overflow:"hidden"}}>
                             <div style={{width:`${(aNet/totalNet)*100}%`,height:"100%",background:AREA_COLORS[a],borderRadius:4}}/>
                           </div>
-                          <span style={{color:"var(--text2)",fontSize:11,minWidth:70,textAlign:"right"}}>{pFmt(aNet)}</span>
+                          <span style={{color:"var(--text2)",fontSize:12,minWidth:80,textAlign:"right",fontFamily:"'DM Mono',monospace",fontWeight:600}}>{pFmt(aNet)}</span>
                         </div>
                       );
                     })}
@@ -5227,7 +5228,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
               {/* Pendências */}
               {alerts.length > 0 ? (
                 <div style={{...S.card,marginBottom:14,border:"1px solid var(--red)33",background:"#fef2f2"}}>
-                  <span style={{color:"var(--red)",fontWeight:700,fontSize:13,display:"block",marginBottom:10}}>⚡ Pendências</span>
+                  <span style={{color:"var(--red)",fontWeight:700,fontSize:mobileOnly?14:16,display:"block",marginBottom:10}}>⚡ Pendências</span>
                   {alerts.map((a,i)=>(
                     <div key={i} onClick={()=>setTab(a.tab)} style={{display:"flex",alignItems:"center",gap:10,padding:"8px 10px",borderRadius:8,cursor:"pointer",marginBottom:4,background:"#fff",border:`1px solid ${a.color}33`}}>
                       <span style={{fontSize:15}}>{a.icon}</span>
@@ -5248,8 +5249,8 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
               {(recentDp.length > 0 || recentNotifs.length > 0) && (
                 <div style={{...S.card,marginBottom:14}}>
                   <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
-                    <span style={{color:ac,fontWeight:700,fontSize:13}}>📬 Recentes</span>
-                    <button onClick={()=>setTab("notificacoes")} style={{...S.btnSecondary,fontSize:11,padding:"4px 10px"}}>Ver tudo →</button>
+                    <span style={{color:"var(--text)",fontWeight:700,fontSize:mobileOnly?14:16}}>📬 Recentes</span>
+                    <button onClick={()=>setTab("notificacoes")} style={{...S.btnSecondary,fontSize:12,padding:"6px 14px"}}>Ver tudo →</button>
                   </div>
                   {recentDp.map(m=>(
                     <div key={m.id} style={{display:"flex",gap:10,padding:"8px 0",borderBottom:"1px solid var(--border)",alignItems:"flex-start"}}>
@@ -5281,7 +5282,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
 
               {/* Ações rápidas — só no desktop */}
               {!mobileOnly && <div style={{...S.card}}>
-                <span style={{color:ac,fontWeight:700,fontSize:13,display:"block",marginBottom:10}}>⚡ Ações rápidas</span>
+                <span style={{color:"var(--text)",fontWeight:700,fontSize:mobileOnly?14:16,display:"block",marginBottom:10}}>⚡ Ações rápidas</span>
                 <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
                   {[
                     ["💸 Lançar gorjeta", "tips"],
@@ -5302,9 +5303,10 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
         {/* GORJETAS */}
         {tab === "tips" && (
           <div>
-            {/* Export button inside tips tab */}
-            {canTips && (
-              <div style={{display:"flex",justifyContent:"flex-end",gap:8,marginBottom:12,flexWrap:"wrap"}}>
+            {/* Header */}
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:12,marginBottom:16}}>
+              <h3 style={{color:"var(--text)",margin:0,fontSize:mobileOnly?16:20}}>💸 Gorjetas</h3>
+              {canTips && <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
                 {(isOwner || isDP) && (() => {
                   const vCount = (data?.tipVersions?.[rid]?.[mk] ?? []).length;
                   return (
@@ -5319,9 +5321,9 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                   const ok = resetTab("tips","Gorjetas",()=>({tips:tips.filter(t=>t.restaurantId===rid), splits:splits?.[rid]}));
                   if(ok){ onUpdate("tips",tips.filter(t=>t.restaurantId!==rid)); onUpdate("_toast","🗑️ Gorjetas enviadas para a lixeira"); }
                 }} style={{...S.btnSecondary,fontSize:12,color:"var(--red)",borderColor:"var(--red)44"}}>🗑️ Resetar gorjetas</button>}
-                <button onClick={() => setShowExport(true)} style={{ ...S.btnSecondary, fontSize: 12, color: ac, borderColor: ac }}>📤 Exportar Gorjeta</button>
-              </div>
-            )}
+                <button onClick={() => setShowExport(true)} style={{ ...S.btnSecondary, fontSize: 12, color: ac, borderColor: ac }}>📤 Exportar</button>
+              </div>}
+            </div>
 
             {/* Modal de histórico das gorjetas */}
             {showTipHistory && (
@@ -5356,7 +5358,6 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
             )}
 
             <div style={{ ...S.card, marginBottom: 24 }}>
-              <p style={{ color: ac, fontSize: 14, margin: "0 0 14px", fontWeight: 700 }}>💸 Gorjetas — {monthLabel(year,month)}</p>
               {(() => {
                 const daysInMonth = new Date(year, month+1, 0).getDate();
                 const noTipDays = data?.noTipDays?.[rid] ?? [];
@@ -5564,13 +5565,14 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
         {/* EQUIPE */}
         {tab === "employees" && (
           <div>
-            {isOwner && <div style={{display:"flex",justifyContent:"flex-end",marginBottom:8,paddingRight:16,paddingTop:12}}>
-              <button onClick={()=>{
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:12,marginBottom:16}}>
+              <h3 style={{color:"var(--text)",margin:0,fontSize:mobileOnly?16:20}}>👥 Equipe</h3>
+              {isOwner && <button onClick={()=>{
                 const emps = employees.filter(e=>e.restaurantId===rid);
                 const ok = resetTab("employees","Equipe",()=>({employees:emps}));
                 if(ok){ onUpdate("employees",employees.filter(e=>e.restaurantId!==rid)); onUpdate("_toast","🗑️ Equipe enviada para a lixeira"); }
-              }} style={{...S.btnSecondary,fontSize:12,color:"var(--red)",borderColor:"var(--red)44"}}>🗑️ Resetar equipe</button>
-            </div>}
+              }} style={{...S.btnSecondary,fontSize:12,color:"var(--red)",borderColor:"var(--red)44"}}>🗑️ Resetar</button>}
+            </div>
             <EmployeeSpreadsheet
               restEmps={employees.filter(e => e.restaurantId === rid)}
               restRoles={restRoles} rid={rid}
@@ -5585,12 +5587,13 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
         {/* CARGOS (super only) */}
         {tab === "roles" && (
           <div>
-            {isOwner && <div style={{display:"flex",justifyContent:"flex-end",marginBottom:8,paddingRight:16,paddingTop:12}}>
-              <button onClick={()=>{
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:12,marginBottom:16}}>
+              <h3 style={{color:"var(--text)",margin:0,fontSize:mobileOnly?16:20}}>🏷️ Cargos</h3>
+              {isOwner && <button onClick={()=>{
                 const ok = resetTab("roles","Cargos",()=>({roles:roles.filter(r=>r.restaurantId===rid)}));
                 if(ok){ onUpdate("roles",roles.filter(r=>r.restaurantId!==rid)); onUpdate("_toast","🗑️ Cargos enviados para a lixeira"); }
-              }} style={{...S.btnSecondary,fontSize:12,color:"var(--red)",borderColor:"var(--red)44"}}>🗑️ Resetar cargos</button>
-            </div>}
+              }} style={{...S.btnSecondary,fontSize:12,color:"var(--red)",borderColor:"var(--red)44"}}>🗑️ Resetar</button>}
+            </div>
             <RoleSpreadsheet
               restRoles={restRoles} rid={rid}
               roles={roles} employees={employees} onUpdate={onUpdate}
@@ -5601,12 +5604,14 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
         {/* ESCALA */}
         {tab === "schedule" && (
           <div>
-            {isOwner && !mobileOnly && <div style={{display:"flex",justifyContent:"flex-end",marginBottom:10}}>
-              <button onClick={()=>{
+            {/* Header */}
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:12,marginBottom:16}}>
+              <h3 style={{color:"var(--text)",margin:0,fontSize:mobileOnly?16:20}}>📅 Escala — {monthLabel(year,month)}</h3>
+              {isOwner && !mobileOnly && <button onClick={()=>{
                 const ok = resetTab("schedule","Escala",()=>({schedules:schedules?.[rid]}));
                 if(ok){ const s={...schedules}; delete s[rid]; onUpdate("schedules",s); onUpdate("_toast","🗑️ Escala enviada para a lixeira"); }
-              }} style={{...S.btnSecondary,fontSize:11,color:"var(--red)",borderColor:"var(--red)44",padding:"5px 10px"}}>🗑️ Reset</button>
-            </div>}
+              }} style={{...S.btnSecondary,fontSize:12,color:"var(--red)",borderColor:"var(--red)44"}}>🗑️ Reset</button>}
+            </div>
             {/* Area filter */}
             <div style={{marginBottom:12}}>
               <PillBar options={["Todos", ...AREAS]} value={schedArea} onChange={setSchedArea}/>
@@ -5653,7 +5658,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                   if (added) parts.push(`${added} folga(s) adicionada(s)`);
                   if (removed) parts.push(`${removed} folga(s) removida(s) fora do contrato`);
                   onUpdate("_toast", parts.length ? `✅ ${parts.join(" · ")}` : "Escala já está de acordo com o contrato");
-                }} style={{padding:mobileOnly?"6px 8px":"8px 12px",borderRadius:10,border:"1px solid #e74c3c44",background:"transparent",color:"var(--red)",cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:mobileOnly?10:12,whiteSpace:"nowrap"}}>
+                }} style={{...S.btnSecondary,fontSize:mobileOnly?11:12,color:"var(--red)",borderColor:"var(--red)44",whiteSpace:"nowrap"}}>
                   {mobileOnly?"📅 Folgas":"📅 Folgas do contrato"}
                 </button>
                 {/* Reiniciar escala */}
@@ -5671,13 +5676,13 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                   areaEmps.forEach(emp => { newSched[rid][mk][emp.id] = {}; });
                   onUpdate("schedules", newSched);
                   onUpdate("_toast", `🔄 Escala de ${mesNome} reiniciada — ${n} empregado(s)`);
-                }} style={{padding:mobileOnly?"6px 8px":"8px 12px",borderRadius:10,border:"1px solid #e74c3c44",background:"transparent",color:"var(--red)",cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:mobileOnly?10:12,whiteSpace:"nowrap"}}>
+                }} style={{...S.btnSecondary,fontSize:mobileOnly?11:12,color:"var(--red)",borderColor:"var(--red)44",whiteSpace:"nowrap"}}>
                   {mobileOnly?"🔄 Reiniciar":"🔄 Reiniciar escala"}
                 </button>
 
                 {/* Marcar férias */}
                 <button onClick={()=>{setShowVacForm(!showVacForm);setVacEmpId("");setVacFrom("");setVacTo("");}}
-                  style={{padding:mobileOnly?"6px 8px":"8px 12px",borderRadius:10,border:`1px solid ${showVacForm?"#8b5cf6":"#8b5cf644"}`,background:showVacForm?"#8b5cf622":"transparent",color:"#8b5cf6",cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:mobileOnly?10:12,whiteSpace:"nowrap"}}>
+                  style={{...S.btnSecondary,fontSize:mobileOnly?11:12,border:`1px solid ${showVacForm?"#8b5cf6":"#8b5cf644"}`,background:showVacForm?"#8b5cf622":"transparent",color:"#8b5cf6",whiteSpace:"nowrap"}}>
                   {mobileOnly?"🏖️ Férias":"🏖️ Marcar férias"}
                 </button>
 
@@ -5687,8 +5692,8 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                   return (
                     <button onClick={()=>setShowSchedHistory(true)}
                       title="Ver e restaurar versões anteriores desta escala"
-                      style={{padding:mobileOnly?"6px 8px":"8px 12px",borderRadius:10,border:"1px solid var(--ac)44",background:"transparent",color:"var(--ac-text)",cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:mobileOnly?10:12,whiteSpace:"nowrap"}}>
-                      🕐 {mobileOnly?"Histórico":"Histórico"}{vCount>0?` (${vCount})`:""}
+                      style={{...S.btnSecondary,fontSize:mobileOnly?11:12,color:"var(--ac-text)",borderColor:"var(--ac)44",whiteSpace:"nowrap"}}>
+                      🕐 Histórico{vCount>0?` (${vCount})`:""}
                     </button>
                   );
                 })()}
@@ -6129,13 +6134,14 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
         {/* COMUNICADOS */}
         {tab === "comunicados" && (
           <div>
-            {isOwner && <div style={{display:"flex",justifyContent:"flex-end",padding:"12px 16px 0"}}>
-              <button onClick={()=>{
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:12,marginBottom:16}}>
+              <h3 style={{color:"var(--text)",margin:0,fontSize:mobileOnly?16:20}}>📢 Comunicados</h3>
+              {isOwner && <button onClick={()=>{
                 const comms = (data?.communications??[]).filter(c=>c.restaurantId===rid);
                 const ok = resetTab("comunicados","Comunicados",()=>({communications:comms}));
                 if(ok){ onUpdate("communications",(data?.communications??[]).filter(c=>c.restaurantId!==rid)); onUpdate("_toast","🗑️ Comunicados enviados para a lixeira"); }
-              }} style={{...S.btnSecondary,fontSize:12,color:"var(--red)",borderColor:"var(--red)44"}}>🗑️ Resetar comunicados</button>
-            </div>}
+              }} style={{...S.btnSecondary,fontSize:12,color:"var(--red)",borderColor:"var(--red)44"}}>🗑️ Resetar</button>}
+            </div>
             {privacyMask ? (
               <div style={{...S.card,textAlign:"center",padding:40}}>
                 <div style={{fontSize:36,marginBottom:12}}>🔒</div>
@@ -6155,13 +6161,14 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
         {/* FAQ */}
         {tab === "faq" && (
           <div>
-            {isOwner && <div style={{display:"flex",justifyContent:"flex-end",padding:"12px 16px 0"}}>
-              <button onClick={()=>{
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:12,marginBottom:16}}>
+              <h3 style={{color:"var(--text)",margin:0,fontSize:mobileOnly?16:20}}>❓ FAQ</h3>
+              {isOwner && <button onClick={()=>{
                 const faqRest = data?.faq?.[rid];
                 const ok = resetTab("faq","FAQ",()=>({faq:faqRest}));
                 if(ok){ const f={...data?.faq}; delete f[rid]; onUpdate("faq",f); onUpdate("_toast","🗑️ FAQ enviado para a lixeira"); }
-              }} style={{...S.btnSecondary,fontSize:12,color:"var(--red)",borderColor:"var(--red)44"}}>🗑️ Resetar FAQ</button>
-            </div>}
+              }} style={{...S.btnSecondary,fontSize:12,color:"var(--red)",borderColor:"var(--red)44"}}>🗑️ Resetar</button>}
+            </div>
 
             {/* FAQs automáticas — expansíveis e com toggle */}
             {(()=>{
@@ -6279,13 +6286,14 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
         {/* FALE COM DP */}
         {tab === "dp" && (
           <div>
-            {isOwner && <div style={{display:"flex",justifyContent:"flex-end",padding:"12px 16px 0"}}>
-              <button onClick={()=>{
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:12,marginBottom:16}}>
+              <h3 style={{color:"var(--text)",margin:0,fontSize:mobileOnly?16:20}}>💬 Fale com DP</h3>
+              {isOwner && <button onClick={()=>{
                 const msgs = (data?.dpMessages??[]).filter(m=>m.restaurantId===rid);
                 const ok = resetTab("dp","Fale com DP",()=>({dpMessages:msgs}));
                 if(ok){ onUpdate("dpMessages",(data?.dpMessages??[]).filter(m=>m.restaurantId!==rid)); onUpdate("_toast","🗑️ Mensagens DP enviadas para a lixeira"); }
-              }} style={{...S.btnSecondary,fontSize:12,color:"var(--red)",borderColor:"var(--red)44"}}>🗑️ Resetar Fale com DP</button>
-            </div>}
+              }} style={{...S.btnSecondary,fontSize:12,color:"var(--red)",borderColor:"var(--red)44"}}>🗑️ Resetar</button>}
+            </div>
             {privacyMask ? (
               <div style={{...S.card,textAlign:"center",padding:40}}>
                 <div style={{fontSize:36,marginBottom:12}}>🔒</div>
@@ -6311,14 +6319,19 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
 
         {/* NOTIFICAÇÕES */}
         {tab === "notificacoes" && (
-          privacyMask ? (
+          <div>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:12,marginBottom:16}}>
+              <h3 style={{color:"var(--text)",margin:0,fontSize:mobileOnly?16:20}}>📬 Notificações</h3>
+            </div>
+          {privacyMask ? (
             <div style={{...S.card,textAlign:"center",padding:40,margin:20}}>
               <div style={{fontSize:36,marginBottom:12}}>🔒</div>
               <p style={{color:"var(--text3)",fontSize:14}}>Notificações ocultas pelo modo privacidade.</p>
             </div>
           ) : (
             <NotificacoesTab restaurantId={rid} dpMessages={data?.dpMessages??[]} notifications={data?.notifications??[]} onUpdate={onUpdate} />
-          )
+          )}
+          </div>
         )}
 
 
@@ -6527,6 +6540,9 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
         {/* CONFIG */}
         {tab === "config" && (
           <div>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:12,marginBottom:16}}>
+              <h3 style={{color:"var(--text)",margin:0,fontSize:mobileOnly?16:20}}>⚙️ Configurações</h3>
+            </div>
             {/* Salvar / Descartar configurações — topo fixo */}
             {configDirty && (
               <div style={{position:"sticky",top:0,zIndex:50,marginBottom:16}}>
@@ -8335,6 +8351,15 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }
 
         {tab === "changelog" && (() => {
           const CHANGELOG = [
+            { version:"5.15.1", date:"2026-04-16", items:[
+              "Melhoria: design unificado em todas as abas do painel do gestor — mesma linguagem visual em cabeçalhos, botões, cards e espaçamentos",
+              "Melhoria: todas as abas agora têm título H3 consistente (fontSize 16/20) com botões de ação à direita",
+              "Melhoria: Dashboard — seções de área agora usam barras com borda lateral colorida (mesmo padrão do VT)",
+              "Melhoria: Dashboard — barras de distribuição de gorjeta por área com borda lateral e DM Mono nos valores",
+              "Melhoria: Escala — botões de ação unificados com S.btnSecondary (padding e fontSize consistentes)",
+              "Melhoria: Gorjetas — cabeçalho h3 + botões de exportar/histórico alinhados à direita",
+              "Melhoria: Cargos, Equipe, FAQ, Comunicados, DP, Notificações, Configurações — todos com layout de cabeçalho padrão",
+            ]},
             { version:"5.15.0", date:"2026-04-16", items:[
               "Novo: Aba Vale Transporte (🚌 VT) — cálculo mensal de VT por empregado com base na escala de trabalho",
               "Novo: VT Diário editável por empregado, persistido entre meses (altera valor dali pra frente)",
