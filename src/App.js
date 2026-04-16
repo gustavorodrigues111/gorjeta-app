@@ -1611,8 +1611,6 @@ function calcDayHours(inTime, outTime, breakMin) {
 function validateWeekSchedule(days) {
   const errors = [];
   const activeDays = Object.entries(days).filter(([,d]) => d && d.in && d.out);
-  const allDayIdxs = Object.keys(days).map(Number);
-
   // ── Per day validations ──
   activeDays.forEach(([dayIdx, d]) => {
     const label = WEEK_DAYS_LABEL[parseInt(dayIdx)];
@@ -1696,7 +1694,7 @@ function WorkScheduleManagerTab({ restaurantId, employees, roles, workSchedules,
   const [showValidFrom, setShowValidFrom]   = useState(false);
   const [validFrom, setValidFrom]           = useState(today());
   const [selectedSchedIds, setSelectedSchedIds] = useState(new Set());
-  const [saveMode, setSaveMode]             = useState(null); // "days" or "full"
+  const [saveMode, setSaveMode]             = useState(null); // eslint-disable-line no-unused-vars
   const [validated, setValidated]           = useState(false); // true após validar horários com sucesso
 
   const selEmp = restEmps.find(e => e.id === selEmpId);
