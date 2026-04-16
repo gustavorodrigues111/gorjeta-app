@@ -5109,7 +5109,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
           ).length;
 
           const alerts = [];
-          if (diasSemLancamento > 0)
+          if (!isLider && diasSemLancamento > 0)
             alerts.push({ icon:"💸", color:"#f59e0b", msg:`${diasSemLancamento} dia${diasSemLancamento>1?"s":""} útil${diasSemLancamento>1?"eis":""} sem gorjeta lançada`, tab:"tips" });
           if (semCargo > 0)
             alerts.push({ icon:"👤", color:"var(--red)", msg:`${semCargo} empregado${semCargo>1?"s":""} sem cargo definido`, tab:"employees" });
