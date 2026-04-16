@@ -6043,10 +6043,16 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
               /* ——— DESKTOP: Tabela completa ——— */
               return (
                 <div style={{overflowX:"auto",WebkitOverflowScrolling:"touch"}}>
-                  <table style={{borderCollapse:"collapse",fontFamily:"'DM Mono',monospace",fontSize:11,minWidth:"100%"}}>
+                  <table style={{borderCollapse:"collapse",fontFamily:"'DM Mono',monospace",fontSize:11,width:"100%",tableLayout:"fixed"}}>
+                    <colgroup>
+                      <col style={{width:110,minWidth:110}}/>
+                      {Array.from({length:daysInMonth},(_,i)=><col key={i} style={{width:26,minWidth:22}}/>)}
+                      <col style={{width:30,minWidth:28}}/>
+                      <col style={{width:30,minWidth:28}}/>
+                    </colgroup>
                     <thead>
                       <tr>
-                        <th style={{position:"sticky",left:0,background:"var(--card-bg)",zIndex:2,padding:"6px 10px",textAlign:"left",color:"var(--text3)",fontSize:11,borderBottom:"1px solid var(--border)",whiteSpace:"nowrap",minWidth:120}}>
+                        <th style={{position:"sticky",left:0,background:"var(--card-bg)",zIndex:2,padding:"6px 6px",textAlign:"left",color:"var(--text3)",fontSize:10,borderBottom:"1px solid var(--border)",whiteSpace:"nowrap"}}>
                           Empregado
                         </th>
                         {Array.from({length:daysInMonth},(_,i)=>{
@@ -6055,14 +6061,14 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                           const wd = new Date(date+"T12:00:00").getDay();
                           const isWe = wd===0||wd===6;
                           return (
-                            <th key={d} style={{padding:"3px 1px",textAlign:"center",color:isWe?"#f59e0b":"#555",fontSize:9,borderBottom:"1px solid var(--border)",minWidth:30,width:30}}>
+                            <th key={d} style={{padding:"2px 0",textAlign:"center",color:isWe?"#f59e0b":"#555",fontSize:8,borderBottom:"1px solid var(--border)"}}>
                               <div>{d}</div>
-                              <div style={{fontSize:8}}>{["D","S","T","Q","Q","S","S"][wd]}</div>
+                              <div style={{fontSize:7}}>{["D","S","T","Q","Q","S","S"][wd]}</div>
                             </th>
                           );
                         })}
-                        <th style={{padding:"4px 6px",textAlign:"center",color:"var(--green)",fontSize:10,borderBottom:"1px solid var(--border)",minWidth:22}}>T</th>
-                        <th style={{padding:"4px 6px",textAlign:"center",color:"var(--red)",fontSize:10,borderBottom:"1px solid var(--border)",minWidth:22}}>F</th>
+                        <th style={{position:"sticky",right:30,background:"var(--card-bg)",zIndex:2,padding:"4px 2px",textAlign:"center",color:"var(--green)",fontSize:9,borderBottom:"1px solid var(--border)",borderLeft:"1px solid var(--border)"}}>T</th>
+                        <th style={{position:"sticky",right:0,background:"var(--card-bg)",zIndex:2,padding:"4px 2px",textAlign:"center",color:"var(--red)",fontSize:9,borderBottom:"1px solid var(--border)",borderLeft:"1px solid var(--border)"}}>F</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -6090,9 +6096,9 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                         }
                         rows.push(
                           <tr key={emp.id} style={{background:ei%2===0?"var(--bg1)":"var(--bg2)"}}>
-                            <td style={{position:"sticky",left:0,background:ei%2===0?"var(--bg1)":"var(--bg2)",zIndex:1,padding:"5px 10px",borderRight:"1px solid var(--border)",minWidth:130}}>
-                              <div style={{color:"var(--text)",fontSize:11,fontWeight:600}}>{emp.name}</div>
-                              <div style={{color:"var(--text3)",fontSize:9}}>{role?.name}</div>
+                            <td style={{position:"sticky",left:0,background:ei%2===0?"var(--bg1)":"var(--bg2)",zIndex:1,padding:"4px 6px",borderRight:"1px solid var(--border)",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
+                              <div style={{color:"var(--text)",fontSize:10,fontWeight:600,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{emp.name}</div>
+                              <div style={{color:"var(--text3)",fontSize:8,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{role?.name}</div>
                             </td>
                             {Array.from({length:daysInMonth},(_,i)=>{
                               const d = i+1;
@@ -6105,13 +6111,13 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                               const locked = restaurant.serviceStartDate && date < restaurant.serviceStartDate;
                               return (
                                 <td key={d} onClick={()=>cycleStatus(emp.id, date)}
-                                  style={{textAlign:"center",padding:"3px 2px",cursor:locked?"not-allowed":"pointer",background:locked?"var(--bg3)":(status?color+"22":(isWe?"var(--bg3)":"transparent")),borderRight:"1px solid var(--border)",width:30,opacity:locked?0.35:1}}>
-                                  <span style={{color:locked?"var(--text3)":color,fontSize:status?9:11,fontWeight:status?700:400}}>{locked?"🔒":label}</span>
+                                  style={{textAlign:"center",padding:"2px 0",cursor:locked?"not-allowed":"pointer",background:locked?"var(--bg3)":(status?color+"22":(isWe?"var(--bg3)":"transparent")),borderRight:"1px solid var(--border)",opacity:locked?0.35:1}}>
+                                  <span style={{color:locked?"var(--text3)":color,fontSize:status?8:10,fontWeight:status?700:400}}>{locked?"🔒":label}</span>
                                 </td>
                               );
                             })}
-                            <td style={{textAlign:"center",color:"var(--green)",fontSize:11,fontWeight:700,padding:"3px 6px"}}>{workC}</td>
-                            <td style={{textAlign:"center",color:"var(--red)",fontSize:11,padding:"3px 6px"}}>{offC}</td>
+                            <td style={{position:"sticky",right:30,background:ei%2===0?"var(--bg1)":"var(--bg2)",zIndex:1,textAlign:"center",color:"var(--green)",fontSize:10,fontWeight:700,padding:"3px 2px",borderLeft:"1px solid var(--border)"}}>{workC}</td>
+                            <td style={{position:"sticky",right:0,background:ei%2===0?"var(--bg1)":"var(--bg2)",zIndex:1,textAlign:"center",color:"var(--red)",fontSize:10,padding:"3px 2px",borderLeft:"1px solid var(--border)"}}>{offC}</td>
                           </tr>
                         );
                         return rows;
