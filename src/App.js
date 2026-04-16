@@ -5058,6 +5058,13 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
         ))}
       </div>
 
+      {/* Botão voltar ao Dashboard no mobile */}
+      {mobileOnly && tab !== "dashboard" && (
+        <button onClick={()=>setTab("dashboard")} style={{display:"flex",alignItems:"center",gap:6,padding:"10px 16px",background:"none",border:"none",borderBottom:"1px solid var(--border)",color:"var(--ac-text,var(--ac))",cursor:"pointer",fontSize:13,fontWeight:600,fontFamily:"'DM Sans',sans-serif",width:"100%"}}>
+          ← Dashboard
+        </button>
+      )}
+
       <div style={{ padding:mobileOnly?"12px 10px":"20px 24px", maxWidth:1100, margin:"0 auto" }}>
         {["dashboard","tips","schedule"].includes(tab) && (
           <div style={{ marginBottom: 20 }}><MonthNav year={year} month={month} onChange={(y,m)=>{setYear(y);setMonth(m);setWeekIdx(calcWeekForToday(y,m));}} /></div>
