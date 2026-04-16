@@ -5300,6 +5300,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                 );
               })()}
 
+              {!isLider && (
               <div style={{...S.card, marginBottom:14}}>
                 <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
                   <span style={{color:"var(--text)",fontWeight:700,fontSize:mobileOnly?14:16}}>💸 Gorjetas — {monthLabel(year,month)}</span>
@@ -5336,6 +5337,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                   </div>
                 )}
               </div>
+              )}
 
               {/* Pendências */}
               {alerts.length > 0 ? (
