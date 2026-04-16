@@ -4961,14 +4961,19 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
 
   const inboxUnread = ((data?.notifications??[]).filter(n=>n.restaurantId===rid&&!n.read&&!n.deleted&&n.targetRole!=="admin"&&n.type!=="upgrade_request").length + (data?.dpMessages??[]).filter(m=>m.restaurantId===rid&&!m.read&&!m.deleted).length);
 
-  const TABS = [
+  // Líder de área: acesso restrito a Dashboard + Escala + Horários apenas
+  const TABS = isLider ? [
+    ["dashboard",   "📊 Dashboard"],
+    canSched && ["schedule",    "📅 Escala"],
+    ["horarios",    "🕐 Horários"],
+  ].filter(Boolean) : [
     canTips                                           && ["dashboard",   "📊 Dashboard"],
     canTips                                           && ["tips",        "💸 Gorjetas"],
     canSched                                          && ["schedule",    "📅 Escala"],
     (isOwner || tabVisible("roles"))           && ["roles",       "🏷️ Cargos"],
     (isOwner || canTips || tabVisible("employees")) && ["employees","👥 Equipe"],
     (isOwner || tabVisible("horarios"))          && ["horarios",    "🕐 Horários"],
-    (isOwner || (!isLider && perms.vt !== false && tabVisible("vt"))) && ["vt",          "🚌 Vale Transporte"],
+    (isOwner || (perms.vt !== false && tabVisible("vt"))) && ["vt",          "🚌 Vale Transporte"],
     (isOwner || tabVisible("faq"))               && ["faq",         "❓ FAQ"],
     (isOwner || tabVisible("comunicados"))        && ["comunicados", "📢 Comunicados"],
     (isOwner || tabVisible("dp"))                && ["dp",          "💬 Fale com DP"],
@@ -6879,7 +6884,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                 <div style={{display:"flex",flexDirection:"column",gap:8}}>
                   {[
                     {id:"dp",icon:"📬",title:"DP (Departamento Pessoal)",desc:"Acesso completo: gorjetas, escala, cargos, equipe, comunicados, FAQ, DP e notificações."},
-                    {id:"lider",icon:"👔",title:"Líder de Área",desc:"Acesso à escala e equipe da(s) sua(s) área(s). Sem gorjetas, sem DP."},
+                    {id:"lider",icon:"👔",title:"Líder de Área",desc:"Acesso apenas à escala e horários da(s) sua(s) área(s)."},
                     {id:"custom",icon:"⚙️",title:"Personalizado",desc:"Escolha as permissões manualmente."},
                   ].map(p=>{
                     const on = dpMgrForm.profile === p.id;
@@ -6887,7 +6892,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                       <button key={p.id} onClick={()=>{
                         const presets = {
                           dp: {perms:{tips:true,schedule:true,roles:true,employees:true,comunicados:true,faq:true,dp:true,horarios:true},isDP:true,areas:[]},
-                          lider: {perms:{tips:false,schedule:true,roles:false,employees:true,comunicados:true,faq:true,dp:false,horarios:false,vt:false},isDP:false},
+                          lider: {perms:{tips:false,schedule:true,roles:false,employees:false,comunicados:false,faq:false,dp:false,horarios:true,vt:false},isDP:false},
                           custom: {isDP:dpMgrForm.isDP},
                         };
                         setDpMgrForm(f=>({...f,...presets[p.id],profile:p.id,areas:p.id==="lider"?f.areas:[]}));
@@ -8049,7 +8054,7 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }
                 <div style={{display:"flex",flexDirection:"column",gap:8}}>
                   {[
                     {id:"dp",icon:"📬",title:"DP (Departamento Pessoal)",desc:"Acesso completo: gorjetas, escala, cargos, equipe, comunicados, FAQ, DP e notificações. Recebe mensagens do Fale com DP."},
-                    {id:"lider",icon:"👔",title:"Líder de Área",desc:"Acesso à escala e equipe da(s) sua(s) área(s). Sem gorjetas, sem DP."},
+                    {id:"lider",icon:"👔",title:"Líder de Área",desc:"Acesso apenas à escala e horários da(s) sua(s) área(s)."},
                     {id:"custom",icon:"⚙️",title:"Personalizado",desc:"Escolha as permissões manualmente."},
                   ].map(p=>{
                     const on = mgrForm.profile === p.id;
@@ -8057,7 +8062,7 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }
                       <button key={p.id} onClick={()=>{
                         const presets = {
                           dp: {perms:{tips:true,schedule:true,roles:true,employees:true,comunicados:true,faq:true,dp:true,horarios:true},isDP:true,areas:[]},
-                          lider: {perms:{tips:false,schedule:true,roles:false,employees:true,comunicados:true,faq:true,dp:false,horarios:false,vt:false},isDP:false},
+                          lider: {perms:{tips:false,schedule:true,roles:false,employees:false,comunicados:false,faq:false,dp:false,horarios:true,vt:false},isDP:false},
                           custom: {isDP:mgrForm.isDP},
                         };
                         const preset = presets[p.id];
