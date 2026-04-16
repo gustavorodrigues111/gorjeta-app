@@ -4954,7 +4954,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
     (isOwner || tabVisible("roles"))           && ["roles",       "🏷️ Cargos"],
     (isOwner || canTips || tabVisible("employees")) && ["employees","👥 Equipe"],
     (isOwner || tabVisible("horarios"))          && ["horarios",    "🕐 Horários"],
-    (isOwner || tabVisible("vt"))               && ["vt",          "🚌 Vale Transporte"],
+    (isOwner || (perms.vt !== false && tabVisible("vt"))) && ["vt",          "🚌 Vale Transporte"],
     (isOwner || tabVisible("faq"))               && ["faq",         "❓ FAQ"],
     (isOwner || tabVisible("comunicados"))        && ["comunicados", "📢 Comunicados"],
     (isOwner || tabVisible("dp"))                && ["dp",          "💬 Fale com DP"],
@@ -6765,7 +6765,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                       <button key={p.id} onClick={()=>{
                         const presets = {
                           dp: {perms:{tips:true,schedule:true,roles:true,employees:true,comunicados:true,faq:true,dp:true,horarios:true},isDP:true,areas:[]},
-                          lider: {perms:{tips:false,schedule:true,roles:false,employees:true,comunicados:true,faq:true,dp:false,horarios:false},isDP:false},
+                          lider: {perms:{tips:false,schedule:true,roles:false,employees:true,comunicados:true,faq:true,dp:false,horarios:false,vt:false},isDP:false},
                           custom: {isDP:dpMgrForm.isDP},
                         };
                         setDpMgrForm(f=>({...f,...presets[p.id],profile:p.id,areas:p.id==="lider"?f.areas:[]}));
@@ -7935,7 +7935,7 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }
                       <button key={p.id} onClick={()=>{
                         const presets = {
                           dp: {perms:{tips:true,schedule:true,roles:true,employees:true,comunicados:true,faq:true,dp:true,horarios:true},isDP:true,areas:[]},
-                          lider: {perms:{tips:false,schedule:true,roles:false,employees:true,comunicados:true,faq:true,dp:false,horarios:false},isDP:false},
+                          lider: {perms:{tips:false,schedule:true,roles:false,employees:true,comunicados:true,faq:true,dp:false,horarios:false,vt:false},isDP:false},
                           custom: {isDP:mgrForm.isDP},
                         };
                         const preset = presets[p.id];
