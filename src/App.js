@@ -6764,7 +6764,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
 function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }) {
   // eslint-disable-next-line no-unused-vars
   const { owners, managers, restaurants, employees, roles, tips, splits, schedules, noTipDays } = data;
-  const [tab, setTab] = useState("dashboard");
+  const [tab, setTab] = useState("financeiro_geral");
   const [isMobile, setIsMobile] = useState(() => window.innerWidth < 768);
   useEffect(() => {
     const handler = () => setIsMobile(window.innerWidth < 768);
@@ -6924,7 +6924,6 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }
 
   const ac = "var(--ac)";
   const TABS = [
-    ["dashboard", "📊 Dashboard"],
     ["financeiro_geral", "💰 Financeiro"],
     ["restaurants","🏢 Restaurantes"],
     ["managers","👔 Gestores"],
@@ -7664,8 +7663,8 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }
 
       <div style={{ padding:isMobile?"12px 10px":"20px 24px", maxWidth:1100, margin:"0 auto" }}>
 
-        {/* DASHBOARD */}
-        {tab === "dashboard" && (() => {
+        {/* DASHBOARD (removido — info consolidada no Financeiro) */}
+        {false && (() => {
           const totalRests = restaurants.length;
           const totalEmps = employees.filter(e=>!e.inactive).length;
           const totalMgrs = managers.length;
@@ -7921,6 +7920,10 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }
 
         {/* FINANCEIRO GERAL */}
         {tab === "financeiro_geral" && (() => {
+          const totalEmps = employees.filter(e=>!e.inactive).length;
+          const totalMgrs = managers.length;
+          const thisMonth = today().slice(0,7);
+
           const rows = restaurants.map(r => {
             const plano = getPlano(r);
             const fin = r.financeiro ?? {};
@@ -7942,13 +7945,17 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }
             const venc = fin.proximoVencimento;
             const diasParaVencer = venc ? Math.ceil((new Date(venc+"T12:00:00") - new Date()) / (1000*60*60*24)) : null;
             const ultimoPag = fin.pagamentos?.[0];
-            return { r, plano, fin, tipoCobranca, valorTotal, status, venc, diasParaVencer, ultimoPag };
+            const empAtivos = employees.filter(e=>e.restaurantId===r.id&&!e.inactive).length;
+            const gorjetasMes = tips.filter(t=>t.restaurantId===r.id&&t.monthKey===thisMonth);
+            const diasGorjeta = [...new Set(gorjetasMes.map(t=>t.date))].length;
+            return { r, plano, fin, tipoCobranca, valorTotal, status, venc, diasParaVencer, ultimoPag, empAtivos, empMax, diasGorjeta };
           });
 
           const receitaTotal = rows.reduce((s, x) => s + (x.valorTotal ?? 0), 0);
           const inadimplentes = rows.filter(x => x.status === "inadimplente").length;
           const vencendo = rows.filter(x => x.status !== "inadimplente" && x.diasParaVencer !== null && x.diasParaVencer <= 7 && x.diasParaVencer >= 0).length;
           const vencidos = rows.filter(x => x.status !== "inadimplente" && x.diasParaVencer !== null && x.diasParaVencer < 0).length;
+          const emDia = rows.length - inadimplentes - vencidos - vencendo;
 
           const [filtro, setFiltro] = [filtroFinanceiro, setFiltroFinanceiro];
           const rowsFiltrados = rows.filter(x => {
@@ -7959,111 +7966,241 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }
             return true;
           });
 
+          // Pagamentos aguardando confirmação
+          const aguardando = restaurants.flatMap(r =>
+            (r.financeiro?.cobrancas??[])
+              .filter(c => c.status === "aguardando_confirmacao")
+              .map(c => ({ ...c, restName: r.name, restId: r.id }))
+          );
+
           return (
             <div>
-              {/* Métricas */}
-              <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(160px,1fr))",gap:14,marginBottom:24}}>
+              {/* ── Overview rápido ── */}
+              <div style={{display:"grid",gridTemplateColumns:isMobile?"repeat(2,1fr)":"repeat(4,1fr)",gap:isMobile?8:14,marginBottom:isMobile?16:24}}>
                 {[
-                  { label:"Receita mensal", value:`R$${receitaTotal.toLocaleString("pt-BR",{minimumFractionDigits:2})}`, color:"var(--ac)", icon:"💰" },
-                  { label:"Em dia", value:rows.length - inadimplentes - vencidos - vencendo, color:"var(--green)", icon:"✅" },
-                  { label:"Vencendo em 7d", value:vencendo, color:"#f59e0b", icon:"⚡" },
-                  { label:"Vencidos", value:vencidos, color:"var(--red)", icon:"⏰" },
-                  { label:"Inadimplentes", value:inadimplentes, color:"var(--red)", icon:"🔴" },
+                  { label:"Restaurantes", value:restaurants.length, icon:"🏢", color:"var(--blue)" },
+                  { label:"Empregados", value:totalEmps, icon:"👥", color:"var(--green)" },
+                  { label:"Gestores", value:totalMgrs, icon:"👔", color:"#8b5cf6" },
+                  { label:"Receita/mês", value:`R$${receitaTotal.toLocaleString("pt-BR",{minimumFractionDigits:0,maximumFractionDigits:0})}`, icon:"💰", color:"var(--ac)" },
                 ].map(m=>(
-                  <div key={m.label} style={{...S.card,display:"flex",alignItems:"center",gap:12}}>
-                    <span style={{fontSize:24}}>{m.icon}</span>
-                    <div>
-                      <div style={{color:"var(--text3)",fontSize:10,fontWeight:600,textTransform:"uppercase",letterSpacing:0.5}}>{m.label}</div>
-                      <div style={{color:m.color,fontSize:20,fontWeight:800,fontFamily:"'DM Mono',monospace"}}>{m.value}</div>
+                  <div key={m.label} style={{...S.card,display:"flex",alignItems:"center",gap:isMobile?10:14,padding:isMobile?"10px 12px":undefined}}>
+                    <div style={{fontSize:isMobile?20:28,width:isMobile?36:48,height:isMobile?36:48,borderRadius:12,background:m.color+"15",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>{m.icon}</div>
+                    <div style={{minWidth:0}}>
+                      <div style={{color:"var(--text3)",fontSize:isMobile?9:11,fontWeight:600,textTransform:"uppercase",letterSpacing:0.5,marginBottom:1}}>{m.label}</div>
+                      <div style={{color:"var(--text)",fontSize:isMobile?16:22,fontWeight:800,fontFamily:"'DM Mono',monospace"}}>{m.value}</div>
                     </div>
                   </div>
                 ))}
               </div>
 
-              {/* Filtros */}
-              <div style={{display:"flex",gap:8,marginBottom:16,flexWrap:"wrap"}}>
+              {/* ── Semáforo financeiro ── */}
+              <div style={{display:"flex",gap:isMobile?6:12,marginBottom:isMobile?16:24}}>
+                {[
+                  { label:"Em dia", value:emDia, color:"var(--green)", bg:"#10b98112" },
+                  { label:"Vencendo", value:vencendo, color:"#f59e0b", bg:"#f59e0b12" },
+                  { label:"Vencidos", value:vencidos, color:"var(--red)", bg:"#ef444412" },
+                  { label:"Inadimpl.", value:inadimplentes, color:"var(--red)", bg:"#ef444412" },
+                ].map(s=>(
+                  <div key={s.label} style={{flex:1,background:s.bg,borderRadius:12,padding:isMobile?"10px 8px":"14px 16px",textAlign:"center",border:`1px solid ${s.color}22`}}>
+                    <div style={{color:s.color,fontSize:isMobile?20:28,fontWeight:800,fontFamily:"'DM Mono',monospace"}}>{s.value}</div>
+                    <div style={{color:s.color,fontSize:isMobile?9:11,fontWeight:600,marginTop:2}}>{s.label}</div>
+                  </div>
+                ))}
+              </div>
+
+              {/* ── Alertas de pagamento aguardando ── */}
+              {aguardando.length > 0 && (
+                <div style={{...S.card,marginBottom:isMobile?16:24,border:"1px solid #f59e0b44",background:"#fffbeb",padding:isMobile?"12px":"16px"}}>
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
+                    <span style={{color:"#92400e",fontWeight:700,fontSize:isMobile?12:14}}>💬 {aguardando.length} pagamento{aguardando.length>1?"s":""} aguardando confirmação</span>
+                  </div>
+                  {aguardando.map(c=>(
+                    <div key={c.id} style={{display:"flex",flexDirection:isMobile?"column":"row",justifyContent:"space-between",alignItems:isMobile?"stretch":"center",gap:isMobile?8:0,padding:isMobile?"10px":"10px 12px",borderRadius:10,background:"#fff",border:"1px solid #fde68a",marginBottom:8}}>
+                      <div style={{minWidth:0}}>
+                        <div style={{color:"var(--text)",fontWeight:700,fontSize:13}}>{c.restName}</div>
+                        <div style={{color:"var(--text3)",fontSize:isMobile?11:12}}>
+                          {c.periodoLabel} · R$ {c.valor?.toLocaleString("pt-BR",{minimumFractionDigits:2})} · {c.clienteConfirmouEm ? new Date(c.clienteConfirmouEm).toLocaleDateString("pt-BR") : "—"}
+                        </div>
+                      </div>
+                      <div style={{display:"flex",gap:6,flexShrink:0}}>
+                        <button onClick={()=>{
+                          const r = restaurants.find(x=>x.id===c.restId);
+                          if (!r) return;
+                          const dataPag = c.clienteConfirmouEm?.slice(0,10) ?? today();
+                          const cicloEnd = (() => {
+                            const d = new Date(dataPag+"T12:00:00");
+                            if ((r.tipoCobranca??"mensal") === "anual") d.setFullYear(d.getFullYear()+1);
+                            else d.setDate(d.getDate()+30);
+                            return d.toISOString().slice(0,10);
+                          })();
+                          const [ano,mes] = cicloEnd.split("-");
+                          const mesesNome = ["Janeiro","Fevereiro","Março","Abril","Maio","Junho","Julho","Agosto","Setembro","Outubro","Novembro","Dezembro"];
+                          const proxLabel = `${mesesNome[parseInt(mes)-1]}/${ano}`;
+                          const proxCob = { id:(Date.now()).toString(), periodo:cicloEnd.slice(0,7), periodoLabel:proxLabel, venc:cicloEnd, valor:c.valor, forma:c.forma, chave:c.chave, criadaEm:new Date().toISOString(), status:"pendente", autoGerada:true };
+                          const updatedCobs = (r.financeiro?.cobrancas??[]).map(x=>x.id===c.id?{...x,status:"pago",pagoEm:new Date().toISOString()}:x);
+                          const novoPag = { id:(Date.now()+1).toString(), data:dataPag, valor:c.valor, forma:c.forma, obs:`Ref. ${c.periodoLabel}`, registradoEm:new Date().toISOString() };
+                          const updated = restaurants.map(x=>x.id===c.restId?{...x,financeiro:{...x.financeiro,cobrancas:[...updatedCobs,proxCob],pagamentos:[novoPag,...(x.financeiro?.pagamentos??[])],status:"ativo",cicloInicio:dataPag,cicloFim:cicloEnd,proximoVencimento:cicloEnd}}:x);
+                          onUpdate("restaurants",updated);
+                          onUpdate("_toast",`✅ Pagamento de ${c.restName} confirmado!`);
+                        }} style={{padding:"6px 12px",borderRadius:8,border:"1px solid var(--green)44",background:"var(--green-bg)",color:"var(--green)",cursor:"pointer",fontFamily:"'DM Sans',sans-serif",fontSize:12,fontWeight:700,flex:isMobile?1:undefined,textAlign:"center"}}>
+                          ✅ Confirmar
+                        </button>
+                        <button onClick={()=>{
+                          const updated = restaurants.map(r=>r.id===c.restId?{...r,financeiro:{...r.financeiro,cobrancas:(r.financeiro?.cobrancas??[]).map(x=>x.id===c.id?{...x,status:"pendente",clienteConfirmou:false}:x),status:"inadimplente"}}:r);
+                          onUpdate("restaurants",updated);
+                          onUpdate("_toast",`🔴 ${c.restName} marcado como inadimplente.`);
+                        }} style={{padding:"6px 12px",borderRadius:8,border:"1px solid var(--red)33",background:"transparent",color:"var(--red)",cursor:"pointer",fontFamily:"'DM Sans',sans-serif",fontSize:12,fontWeight:600,flex:isMobile?1:undefined,textAlign:"center"}}>
+                          ✕ Negar
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* ── Notificações não lidas ── */}
+              {unreadNotifs > 0 && (
+                <div style={{...S.card,marginBottom:isMobile?16:24,border:"1px solid var(--ac)33",background:"var(--ac-bg)",padding:isMobile?"12px":"16px"}}>
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
+                    <span style={{color:"var(--ac-text)",fontWeight:700,fontSize:isMobile?12:14}}>📬 {unreadNotifs} mensagem{unreadNotifs>1?"ns":""} não lida{unreadNotifs>1?"s":""}</span>
+                    <button onClick={()=>setTab("inbox")} style={{...S.btnSecondary,fontSize:11,padding:"4px 12px"}}>Ver caixa →</button>
+                  </div>
+                  {notifications.filter(n=>!n.read&&n.targetRole==="admin").slice(0,3).map(n=>(
+                    <div key={n.id} style={{padding:"6px 0",borderBottom:"1px solid var(--border)",fontSize:isMobile?12:13,color:"var(--text2)"}}>
+                      {n.body}
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* ── Filtros ── */}
+              <div style={{display:"flex",gap:isMobile?4:8,marginBottom:isMobile?12:16,flexWrap:"wrap"}}>
                 {[
                   ["todos","Todos"],
                   ["emdia","✅ Em dia"],
                   ["vencendo","⚡ Vencendo"],
                   ["vencido","⏰ Vencidos"],
-                  ["inadimplente","🔴 Inadimplentes"],
+                  ["inadimplente","🔴 Inadimpl."],
                 ].map(([v,l])=>(
                   <button key={v} onClick={()=>setFiltro(v)}
-                    style={{padding:"6px 16px",borderRadius:20,border:`1px solid ${filtro===v?ac:"var(--border)"}`,background:filtro===v?"var(--ac-bg)":"transparent",color:filtro===v?"var(--ac-text)":"var(--text3)",cursor:"pointer",fontFamily:"'DM Sans',sans-serif",fontSize:13,fontWeight:filtro===v?700:400}}>
+                    style={{padding:isMobile?"5px 10px":"6px 16px",borderRadius:20,border:`1px solid ${filtro===v?ac:"var(--border)"}`,background:filtro===v?"var(--ac-bg)":"transparent",color:filtro===v?"var(--ac-text)":"var(--text3)",cursor:"pointer",fontFamily:"'DM Sans',sans-serif",fontSize:isMobile?11:13,fontWeight:filtro===v?700:400}}>
                     {l}
                   </button>
                 ))}
               </div>
 
-              {/* Tabela */}
-              <div style={{...S.card,padding:0,overflow:"hidden"}}>
-                {/* Header */}
-                <div style={{display:"grid",gridTemplateColumns:"2fr 1fr 1fr 1fr 1fr 1fr",gap:0,padding:"10px 16px",background:"var(--bg2)",borderBottom:"1px solid var(--border)"}}>
-                  {["Restaurante","Plano","Valor/mês","Último pag.","Próx. venc.","Status"].map(h=>(
-                    <div key={h} style={{color:"var(--text3)",fontSize:11,fontWeight:700,textTransform:"uppercase",letterSpacing:0.5}}>{h}</div>
-                  ))}
-                </div>
+              {/* ── Tabela / Cards de restaurantes ── */}
+              {isMobile ? (
+                /* Mobile: cards empilhados */
+                <div style={{display:"flex",flexDirection:"column",gap:8}}>
+                  {rowsFiltrados.length === 0 && (
+                    <div style={{...S.card,textAlign:"center",padding:32,color:"var(--text3)"}}>Nenhum restaurante neste filtro.</div>
+                  )}
+                  {rowsFiltrados.map(({r, plano, valorTotal, status, venc, diasParaVencer, ultimoPag, empAtivos, empMax, diasGorjeta})=>{
+                    const isInad = status === "inadimplente";
+                    const cicloFimRow = r.financeiro?.cicloFim;
+                    const cicloInicioRow = r.financeiro?.cicloInicio;
+                    const trialFimRow = r.financeiro?.trialFim;
+                    const emTrialRow = !cicloInicioRow && trialFimRow;
+                    const diasRow = cicloFimRow ? Math.ceil((new Date(cicloFimRow+"T12:00:00")-new Date())/(1000*60*60*24)) : null;
+                    const diasTrialRow = emTrialRow ? Math.ceil((new Date(trialFimRow+"T12:00:00")-new Date())/(1000*60*60*24)) : null;
+                    const isVencido = !isInad && cicloFimRow && diasRow < 0;
+                    const isVencendo = !isInad && diasRow !== null && diasRow >= 0 && diasRow <= 7;
+                    const semColor = isInad||isVencido ? "var(--red)" : isVencendo ? "#f59e0b" : emTrialRow ? "#92400e" : "var(--green)";
+                    const statusLabel = isInad ? "🔴 Inadimplente" : isVencido ? `⏰ Vencido ${Math.abs(diasRow)}d` : isVencendo ? `⚡ ${diasRow}d` : emTrialRow ? `🎯 Trial ${diasTrialRow}d` : !cicloInicioRow ? "⚙️ Não iniciado" : "✅ Em dia";
 
-                {rowsFiltrados.length === 0 && (
-                  <div style={{padding:"32px",textAlign:"center",color:"var(--text3)"}}>Nenhum restaurante neste filtro.</div>
-                )}
-
-                {rowsFiltrados.map(({r, plano, fin, valorTotal, status, venc, diasParaVencer, ultimoPag})=>{
-                  const isInad = status === "inadimplente";
-                  const cicloFimRow = r.financeiro?.cicloFim;
-                  const cicloInicioRow = r.financeiro?.cicloInicio;
-                  const trialFimRow = r.financeiro?.trialFim;
-                  const emTrialRow = !cicloInicioRow && trialFimRow;
-                  const diasRow = cicloFimRow ? Math.ceil((new Date(cicloFimRow+"T12:00:00")-new Date())/(1000*60*60*24)) : null;
-                  const diasTrialRow = emTrialRow ? Math.ceil((new Date(trialFimRow+"T12:00:00")-new Date())/(1000*60*60*24)) : null;
-                  const isVencido = !isInad && cicloFimRow && diasRow < 0;
-                  const isVencendo = !isInad && diasRow !== null && diasRow >= 0 && diasRow <= 7;
-
-                  const rowBg = isInad ? "var(--red-bg)" : isVencido ? "#fff8f0" : "transparent";
-                  const statusEl = isInad
-                    ? <span style={{color:"var(--red)",fontWeight:700,fontSize:12}}>🔴 Inadimplente</span>
-                    : isVencido
-                    ? <span style={{color:"var(--red)",fontWeight:600,fontSize:12}}>⏰ Vencido {Math.abs(diasRow)}d</span>
-                    : isVencendo
-                    ? <span style={{color:"#f59e0b",fontWeight:600,fontSize:12}}>⚡ {diasRow}d</span>
-                    : emTrialRow
-                    ? <span style={{color:"#92400e",fontWeight:600,fontSize:12}}>🎯 Trial {diasTrialRow}d</span>
-                    : !cicloInicioRow
-                    ? <span style={{color:"var(--text3)",fontSize:12}}>⚙️ Não iniciado</span>
-                    : <span style={{color:"var(--green)",fontWeight:600,fontSize:12}}>✅ Em dia</span>;
-
-                  return (
-                    <div key={r.id} style={{display:"grid",gridTemplateColumns:"2fr 1fr 1fr 1fr 1fr 1fr",gap:0,padding:"12px 16px",borderBottom:"1px solid var(--border)",background:rowBg,alignItems:"center",cursor:"pointer"}}
-                      onClick={()=>{ setSelRestaurant(r.id); setRestTab("financeiro"); }}>
-                      <div>
-                        <div style={{color:"var(--text)",fontWeight:700,fontSize:14}}>
-                          {r.name}
-                          {r.earlyAdopter && <span style={{marginLeft:6,fontSize:10,color:"#d4a017",fontWeight:700,background:"#d4a01715",padding:"1px 6px",borderRadius:8}}>🚀 EA</span>}
+                    return (
+                      <div key={r.id} onClick={()=>{ setSelRestaurant(r.id); setRestTab("financeiro"); }}
+                        style={{...S.card,padding:"12px",cursor:"pointer",borderLeft:`3px solid ${semColor}`}}>
+                        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
+                          <div style={{display:"flex",alignItems:"center",gap:6,minWidth:0}}>
+                            <span style={{color:"var(--text)",fontWeight:700,fontSize:14}}>{r.name}</span>
+                            {r.earlyAdopter && <span style={{fontSize:9,color:"#d4a017",fontWeight:700,background:"#d4a01715",padding:"1px 4px",borderRadius:6}}>EA</span>}
+                          </div>
+                          <span style={{color:semColor,fontWeight:700,fontSize:11,flexShrink:0}}>{statusLabel}</span>
                         </div>
-                        <div style={{color:"var(--text3)",fontSize:11}}>{r.tipoCobranca==="anual"?"Anual":"Mensal"}</div>
+                        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:4,fontSize:11,color:"var(--text3)"}}>
+                          <div><span style={{fontWeight:600}}>Plano:</span> {plano.label}</div>
+                          <div><span style={{fontWeight:600}}>Valor:</span> {valorTotal ? `R$${valorTotal.toLocaleString("pt-BR",{minimumFractionDigits:2})}` : "—"}</div>
+                          <div><span style={{fontWeight:600}}>Emp.:</span> {empAtivos}/{empMax}</div>
+                          <div><span style={{fontWeight:600}}>Gorjetas:</span> {diasGorjeta}d no mês</div>
+                          <div><span style={{fontWeight:600}}>Últ. pag.:</span> {ultimoPag ? new Date(ultimoPag.data+"T12:00:00").toLocaleDateString("pt-BR") : "—"}</div>
+                          <div><span style={{fontWeight:600}}>Venc.:</span> {venc ? new Date(venc+"T12:00:00").toLocaleDateString("pt-BR") : "—"}</div>
+                        </div>
                       </div>
-                      <div style={{color:"var(--text2)",fontSize:13}}>{plano.label}</div>
-                      <div style={{color:"var(--text)",fontWeight:700,fontSize:13,fontFamily:"'DM Mono',monospace"}}>
-                        {valorTotal ? `R$${valorTotal.toLocaleString("pt-BR",{minimumFractionDigits:2})}` : "—"}
+                    );
+                  })}
+                </div>
+              ) : (
+                /* Desktop: tabela */
+                <div style={{...S.card,padding:0,overflow:"hidden"}}>
+                  <div style={{display:"grid",gridTemplateColumns:"2fr 0.8fr 0.7fr 1fr 0.8fr 0.8fr 1fr",gap:0,padding:"10px 16px",background:"var(--bg2)",borderBottom:"1px solid var(--border)"}}>
+                    {["Restaurante","Plano","Emp.","Valor/mês","Últ. pag.","Vencimento","Status"].map(h=>(
+                      <div key={h} style={{color:"var(--text3)",fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:0.5}}>{h}</div>
+                    ))}
+                  </div>
+
+                  {rowsFiltrados.length === 0 && (
+                    <div style={{padding:"32px",textAlign:"center",color:"var(--text3)"}}>Nenhum restaurante neste filtro.</div>
+                  )}
+
+                  {rowsFiltrados.map(({r, plano, valorTotal, status, venc, diasParaVencer, ultimoPag, empAtivos, empMax, diasGorjeta})=>{
+                    const isInad = status === "inadimplente";
+                    const cicloFimRow = r.financeiro?.cicloFim;
+                    const cicloInicioRow = r.financeiro?.cicloInicio;
+                    const trialFimRow = r.financeiro?.trialFim;
+                    const emTrialRow = !cicloInicioRow && trialFimRow;
+                    const diasRow = cicloFimRow ? Math.ceil((new Date(cicloFimRow+"T12:00:00")-new Date())/(1000*60*60*24)) : null;
+                    const diasTrialRow = emTrialRow ? Math.ceil((new Date(trialFimRow+"T12:00:00")-new Date())/(1000*60*60*24)) : null;
+                    const isVencido = !isInad && cicloFimRow && diasRow < 0;
+                    const isVencendo = !isInad && diasRow !== null && diasRow >= 0 && diasRow <= 7;
+
+                    const rowBg = isInad ? "var(--red-bg)" : isVencido ? "#fff8f0" : "transparent";
+                    const statusEl = isInad
+                      ? <span style={{color:"var(--red)",fontWeight:700,fontSize:11}}>🔴 Inadimplente</span>
+                      : isVencido
+                      ? <span style={{color:"var(--red)",fontWeight:600,fontSize:11}}>⏰ Vencido {Math.abs(diasRow)}d</span>
+                      : isVencendo
+                      ? <span style={{color:"#f59e0b",fontWeight:600,fontSize:11}}>⚡ {diasRow}d</span>
+                      : emTrialRow
+                      ? <span style={{color:"#92400e",fontWeight:600,fontSize:11}}>🎯 Trial {diasTrialRow}d</span>
+                      : !cicloInicioRow
+                      ? <span style={{color:"var(--text3)",fontSize:11}}>⚙️ Não iniciado</span>
+                      : <span style={{color:"var(--green)",fontWeight:600,fontSize:11}}>✅ Em dia</span>;
+
+                    return (
+                      <div key={r.id} style={{display:"grid",gridTemplateColumns:"2fr 0.8fr 0.7fr 1fr 0.8fr 0.8fr 1fr",gap:0,padding:"10px 16px",borderBottom:"1px solid var(--border)",background:rowBg,alignItems:"center",cursor:"pointer"}}
+                        onClick={()=>{ setSelRestaurant(r.id); setRestTab("financeiro"); }}>
+                        <div>
+                          <div style={{color:"var(--text)",fontWeight:700,fontSize:13}}>
+                            {r.name}
+                            {r.earlyAdopter && <span style={{marginLeft:6,fontSize:9,color:"#d4a017",fontWeight:700,background:"#d4a01715",padding:"1px 5px",borderRadius:6}}>🚀 EA</span>}
+                          </div>
+                          <div style={{color:"var(--text3)",fontSize:10}}>{r.tipoCobranca==="anual"?"Anual":"Mensal"} {diasGorjeta>0?`· ${diasGorjeta}d gorjeta`:""}</div>
+                        </div>
+                        <div style={{color:"var(--text2)",fontSize:12}}>{plano.label}</div>
+                        <div style={{color:"var(--text2)",fontSize:12,fontFamily:"'DM Mono',monospace"}}>{empAtivos}/{empMax}</div>
+                        <div style={{color:"var(--text)",fontWeight:700,fontSize:12,fontFamily:"'DM Mono',monospace"}}>
+                          {valorTotal ? `R$${valorTotal.toLocaleString("pt-BR",{minimumFractionDigits:2})}` : "—"}
+                        </div>
+                        <div style={{color:"var(--text3)",fontSize:11}}>
+                          {ultimoPag ? new Date(ultimoPag.data+"T12:00:00").toLocaleDateString("pt-BR") : "—"}
+                        </div>
+                        <div style={{color:isVencido||isInad?"var(--red)":isVencendo?"#f59e0b":"var(--text3)",fontSize:11,fontWeight:isVencido||isVencendo||isInad?700:400}}>
+                          {venc ? new Date(venc+"T12:00:00").toLocaleDateString("pt-BR") : "—"}
+                        </div>
+                        <div style={{display:"flex",alignItems:"center",gap:6}}>
+                          {statusEl}
+                          <span style={{color:"var(--text3)",fontSize:14,marginLeft:"auto"}}>›</span>
+                        </div>
                       </div>
-                      <div style={{color:"var(--text3)",fontSize:12}}>
-                        {ultimoPag ? new Date(ultimoPag.data+"T12:00:00").toLocaleDateString("pt-BR") : "—"}
-                      </div>
-                      <div style={{color:isVencido||isInad?"var(--red)":isVencendo?"#f59e0b":"var(--text3)",fontSize:12,fontWeight:isVencido||isVencendo||isInad?700:400}}>
-                        {venc ? new Date(venc+"T12:00:00").toLocaleDateString("pt-BR") : "—"}
-                      </div>
-                      <div style={{display:"flex",alignItems:"center",gap:8}}>
-                        {statusEl}
-                        <span style={{color:"var(--text3)",fontSize:14,marginLeft:"auto"}}>›</span>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
+                    );
+                  })}
+                </div>
+              )}
 
               {/* Resumo */}
-              <div style={{marginTop:12,color:"var(--text3)",fontSize:12,textAlign:"right"}}>
+              <div style={{marginTop:12,color:"var(--text3)",fontSize:isMobile?11:12,textAlign:"right"}}>
                 {rowsFiltrados.length} de {rows.length} restaurantes · Receita filtrada: R${rowsFiltrados.reduce((s,x)=>s+(x.valorTotal??0),0).toLocaleString("pt-BR",{minimumFractionDigits:2})}
               </div>
             </div>
@@ -8179,27 +8316,26 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }
         {/* SUPER GESTORES */}
         {tab === "owners" && (
           <div>
-            <button onClick={()=>{setEditOwnerId(null);setOwnerForm({name:"",cpf:"",pin:""});setShowOwnerModal(true);}} style={{...S.btnPrimary,marginBottom:20}}>+ Novo Admin AppTip</button>
+            <button onClick={()=>{setEditOwnerId(null);setOwnerForm({name:"",cpf:"",pin:""});setShowOwnerModal(true);}} style={{...S.btnPrimary,marginBottom:20,fontSize:isMobile?12:14}}>+ Novo Admin AppTip</button>
             {owners.map(s=>(
-              <div key={s.id} style={{...S.card,marginBottom:10,display:"flex",justifyContent:"space-between",alignItems:"center",border:s.isMaster?"1px solid var(--ac)44":"1px solid var(--border)"}}>
-                <div>
-                  <div style={{display:"flex",alignItems:"center",gap:8}}>
-                    <span style={{color:"var(--text)",fontWeight:700,fontSize:15}}>{s.name}</span>
-                    {s.isMaster && <span style={{background:"var(--ac-bg)",color:"var(--ac-text)",borderRadius:6,padding:"2px 8px",fontSize:11,fontWeight:700}}>👑 Master</span>}
-                    {s.id===currentUser?.id&&<span style={{color:"var(--text3)",fontSize:11}}>← você</span>}
+              <div key={s.id} style={{...S.card,marginBottom:10,display:"flex",flexDirection:isMobile?"column":"row",justifyContent:"space-between",alignItems:isMobile?"stretch":"center",gap:isMobile?10:0,border:s.isMaster?"1px solid var(--ac)44":"1px solid var(--border)"}}>
+                <div style={{minWidth:0}}>
+                  <div style={{display:"flex",alignItems:"center",gap:6,flexWrap:"wrap"}}>
+                    <span style={{color:"var(--text)",fontWeight:700,fontSize:isMobile?14:15}}>{s.name}</span>
+                    {s.isMaster && <span style={{background:"var(--ac-bg)",color:"var(--ac-text)",borderRadius:6,padding:"2px 8px",fontSize:isMobile?10:11,fontWeight:700}}>👑 Master</span>}
+                    {s.id===currentUser?.id&&<span style={{color:"var(--text3)",fontSize:isMobile?10:11}}>← você</span>}
                   </div>
-                  <div style={{color:"var(--text3)",fontSize:12}}>CPF: {anyPrivate() ? "•••.•••.•••-••" : (s.cpf||"—")}</div>
+                  <div style={{color:"var(--text3)",fontSize:isMobile?11:12}}>CPF: {anyPrivate() ? "•••.•••.•••-••" : (s.cpf||"—")}</div>
                 </div>
                 <div style={{display:"flex",gap:8}}>
-                  <button onClick={()=>{setEditOwnerId(s.id);setOwnerForm({name:s.name,cpf:s.cpf??"",pin:s.pin??"",isMaster:s.isMaster??false});setShowOwnerModal(true);}} style={{...S.btnSecondary,fontSize:12}}>Editar</button>
-                  {/* Master não pode ser excluído */}
+                  <button onClick={()=>{setEditOwnerId(s.id);setOwnerForm({name:s.name,cpf:s.cpf??"",pin:s.pin??"",isMaster:s.isMaster??false});setShowOwnerModal(true);}} style={{...S.btnSecondary,fontSize:isMobile?11:12,flex:isMobile?1:undefined,textAlign:"center"}}>Editar</button>
                   {!s.isMaster && owners.length>1 && isMaster && (
                     <button onClick={()=>{
                       if(!window.confirm(`Excluir admin "${s.name}"?`)) return;
                       onUpdate("owners",owners.filter(x=>x.id!==s.id));
-                    }} style={{background:"none",border:"1px solid var(--red)33",borderRadius:8,color:"var(--red)",cursor:"pointer",fontSize:12,padding:"6px 12px",fontFamily:"'DM Sans',sans-serif"}}>✕</button>
+                    }} style={{background:"none",border:"1px solid var(--red)33",borderRadius:8,color:"var(--red)",cursor:"pointer",fontSize:isMobile?11:12,padding:"6px 12px",fontFamily:"'DM Sans',sans-serif",flex:isMobile?1:undefined,textAlign:"center"}}>✕ Excluir</button>
                   )}
-                  {s.isMaster && <span style={{color:"var(--text3)",fontSize:11,padding:"6px 8px"}}>🔒 Protegido</span>}
+                  {s.isMaster && <span style={{color:"var(--text3)",fontSize:isMobile?10:11,padding:"6px 8px"}}>🔒 Protegido</span>}
                 </div>
               </div>
             ))}
