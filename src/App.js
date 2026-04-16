@@ -4259,9 +4259,6 @@ function ValeTransporteTab({ restaurantId, employees, roles, workSchedules, sche
     setDirty(false);
   }
 
-  function handleBlur() {
-    if (dirty) persistAll();
-  }
 
   // ── Mark as paid ──
   function markAsPaid() {
@@ -4322,26 +4319,22 @@ function ValeTransporteTab({ restaurantId, employees, roles, workSchedules, sche
   const inputStyle = { ...S.input, width: mobileOnly ? 80 : 100, textAlign: "right", padding: "8px 10px", fontSize: 14 };
   const cellPad = mobileOnly ? "8px 6px" : "12px 16px";
 
-  // ── BR money input component ──
-  const MoneyInput = ({ value, onChange, onBlurExtra, style: extraStyle, placeholder }) => (
-    <input
-      type="text" inputMode="decimal" placeholder={placeholder ?? "0,00"}
-      value={value ?? ""}
-      onChange={e => {
-        // Allow digits, comma, dot, minus
-        const raw = e.target.value.replace(/[^0-9,.\u002D]/g, "");
-        onChange(raw);
-      }}
-      onBlur={e => {
-        // Format on blur: parse → format as X,XX
-        const n = fromBR(e.target.value);
-        onChange(n ? n.toFixed(2).replace(".", ",") : "");
-        if (onBlurExtra) onBlurExtra();
-        handleBlur();
-      }}
-      style={{ ...inputStyle, ...extraStyle }}
-    />
-  );
+  // ── BR money input helpers (inline, not a component — avoids focus loss) ──
+  const moneyOnChange = (e, setter, empId, field) => {
+    const raw = e.target.value.replace(/[^0-9,.\u002D]/g, "");
+    if (field === "rate") { setter(prev => ({ ...prev, [empId]: raw })); }
+    else if (field === "adjust") { setter(prev => ({ ...prev, [empId]: { ...(prev[empId] ?? {}), adjustOverride: fromBR(raw), adjustDisplay: raw } })); }
+    else if (field === "discount") { setter(prev => ({ ...prev, [empId]: { ...(prev[empId] ?? {}), manualDiscount: fromBR(raw), discountDisplay: raw } })); }
+    setDirty(true);
+  };
+  const moneyOnBlur = (e, setter, empId, field) => {
+    const n = fromBR(e.target.value);
+    const formatted = n ? n.toFixed(2).replace(".", ",") : "";
+    if (field === "rate") { setter(prev => ({ ...prev, [empId]: formatted })); }
+    else if (field === "adjust") { setter(prev => ({ ...prev, [empId]: { ...(prev[empId] ?? {}), adjustOverride: n || null, adjustDisplay: formatted } })); }
+    else if (field === "discount") { setter(prev => ({ ...prev, [empId]: { ...(prev[empId] ?? {}), manualDiscount: n || 0, discountDisplay: formatted } })); }
+    if (dirty) persistAll();
+  };
 
   // ── Area section renderer ──
   const renderAreaSection = (area, areaRows) => {
@@ -4372,15 +4365,15 @@ function ValeTransporteTab({ restaurantId, employees, roles, workSchedules, sche
                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 6 }}>
                   <div>
                     <div style={{ color: "var(--text3)", fontSize: 9, marginBottom: 3 }}>VT Diário</div>
-                    <MoneyInput value={localRates[r.emp.id]} onChange={v => { setLocalRates(prev => ({ ...prev, [r.emp.id]: v })); setDirty(true); }} style={{ width: "100%", padding: "5px 7px", fontSize: 12 }} />
+                    <input type="text" inputMode="decimal" placeholder="0,00" value={localRates[r.emp.id] ?? ""} onChange={e => moneyOnChange(e, setLocalRates, r.emp.id, "rate")} onBlur={e => moneyOnBlur(e, setLocalRates, r.emp.id, "rate")} style={{ ...inputStyle, width: "100%", padding: "5px 7px", fontSize: 12 }} />
                   </div>
                   <div>
                     <div style={{ color: "var(--text3)", fontSize: 9, marginBottom: 3 }}>Ajuste {r.suggestedAdjust !== 0 && <span style={{ color: adjustColor }}>({r.suggestedAdjust > 0 ? "+" : ""}{fmtBR(r.suggestedAdjust)})</span>}</div>
-                    <MoneyInput value={localOverrides[r.emp.id]?.adjustDisplay ?? toBR(r.autoAdjust)} onChange={v => { setLocalOverrides(prev => ({ ...prev, [r.emp.id]: { ...(prev[r.emp.id] ?? {}), adjustOverride: fromBR(v), adjustDisplay: v } })); setDirty(true); }} style={{ width: "100%", padding: "5px 7px", fontSize: 12, color: adjustColor }} />
+                    <input type="text" inputMode="decimal" placeholder="0,00" value={localOverrides[r.emp.id]?.adjustDisplay ?? toBR(r.autoAdjust)} onChange={e => moneyOnChange(e, setLocalOverrides, r.emp.id, "adjust")} onBlur={e => moneyOnBlur(e, setLocalOverrides, r.emp.id, "adjust")} style={{ ...inputStyle, width: "100%", padding: "5px 7px", fontSize: 12, color: adjustColor }} />
                   </div>
                   <div>
                     <div style={{ color: "var(--text3)", fontSize: 9, marginBottom: 3 }}>Desconto</div>
-                    <MoneyInput value={localOverrides[r.emp.id]?.discountDisplay ?? toBR(r.manualDiscount)} onChange={v => { setLocalOverrides(prev => ({ ...prev, [r.emp.id]: { ...(prev[r.emp.id] ?? {}), manualDiscount: fromBR(v), discountDisplay: v } })); setDirty(true); }} style={{ width: "100%", padding: "5px 7px", fontSize: 12 }} />
+                    <input type="text" inputMode="decimal" placeholder="0,00" value={localOverrides[r.emp.id]?.discountDisplay ?? toBR(r.manualDiscount)} onChange={e => moneyOnChange(e, setLocalOverrides, r.emp.id, "discount")} onBlur={e => moneyOnBlur(e, setLocalOverrides, r.emp.id, "discount")} style={{ ...inputStyle, width: "100%", padding: "5px 7px", fontSize: 12 }} />
                   </div>
                 </div>
               </div>
@@ -4410,18 +4403,18 @@ function ValeTransporteTab({ restaurantId, employees, roles, workSchedules, sche
                       <td style={{ padding: cellPad, color: "var(--text)", fontWeight: 600 }}>{r.emp.name}</td>
                       <td style={{ padding: cellPad, color: "var(--text3)" }}>{r.role?.name ?? "—"}</td>
                       <td style={{ padding: cellPad, textAlign: "right" }}>
-                        <MoneyInput value={localRates[r.emp.id]} onChange={v => { setLocalRates(prev => ({ ...prev, [r.emp.id]: v })); setDirty(true); }} />
+                        <input type="text" inputMode="decimal" placeholder="0,00" value={localRates[r.emp.id] ?? ""} onChange={e => moneyOnChange(e, setLocalRates, r.emp.id, "rate")} onBlur={e => moneyOnBlur(e, setLocalRates, r.emp.id, "rate")} style={inputStyle} />
                       </td>
                       <td style={{ padding: cellPad, textAlign: "center", color: "var(--text)", fontWeight: 600, fontFamily: "'DM Mono',monospace" }}>{r.plannedDays}</td>
                       <td style={{ padding: cellPad, textAlign: "right", color: "var(--text)", fontFamily: "'DM Mono',monospace" }}>{fmt(r.grossVT)}</td>
                       <td style={{ padding: cellPad, textAlign: "right" }}>
                         <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 6 }}>
                           {r.suggestedAdjust !== 0 && <span style={{ fontSize: 10, color: "var(--text3)" }} title="Sugerido pelo sistema">({r.suggestedAdjust > 0 ? "+" : ""}{fmtBR(r.suggestedAdjust)})</span>}
-                          <MoneyInput value={localOverrides[r.emp.id]?.adjustDisplay ?? toBR(r.autoAdjust)} onChange={v => { setLocalOverrides(prev => ({ ...prev, [r.emp.id]: { ...(prev[r.emp.id] ?? {}), adjustOverride: fromBR(v), adjustDisplay: v } })); setDirty(true); }} style={{ color: adjustColor }} />
+                          <input type="text" inputMode="decimal" placeholder="0,00" value={localOverrides[r.emp.id]?.adjustDisplay ?? toBR(r.autoAdjust)} onChange={e => moneyOnChange(e, setLocalOverrides, r.emp.id, "adjust")} onBlur={e => moneyOnBlur(e, setLocalOverrides, r.emp.id, "adjust")} style={{ ...inputStyle, color: adjustColor }} />
                         </div>
                       </td>
                       <td style={{ padding: cellPad, textAlign: "right" }}>
-                        <MoneyInput value={localOverrides[r.emp.id]?.discountDisplay ?? toBR(r.manualDiscount)} onChange={v => { setLocalOverrides(prev => ({ ...prev, [r.emp.id]: { ...(prev[r.emp.id] ?? {}), manualDiscount: fromBR(v), discountDisplay: v } })); setDirty(true); }} />
+                        <input type="text" inputMode="decimal" placeholder="0,00" value={localOverrides[r.emp.id]?.discountDisplay ?? toBR(r.manualDiscount)} onChange={e => moneyOnChange(e, setLocalOverrides, r.emp.id, "discount")} onBlur={e => moneyOnBlur(e, setLocalOverrides, r.emp.id, "discount")} style={inputStyle} />
                       </td>
                       <td style={{ padding: cellPad, textAlign: "right", fontWeight: 700, fontSize: 15, fontFamily: "'DM Mono',monospace", color: r.totalPaid < 0 ? "var(--red)" : "var(--text)" }}>{fmt(Math.max(0, r.totalPaid))}</td>
                     </tr>
