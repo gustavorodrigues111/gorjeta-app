@@ -1841,10 +1841,9 @@ function WorkScheduleManagerTab({ restaurantId, employees, roles, workSchedules,
       hoursComplete: true,
     };
 
-    const empScheds = [...(workSchedules?.[restaurantId]?.[selEmpId] ?? []), newEntry];
-    onUpdate("workSchedules", {
-      ...workSchedules,
-      [restaurantId]: { ...(workSchedules?.[restaurantId] ?? {}), [selEmpId]: empScheds }
+    onUpdate("workSchedules", prev => {
+      const empScheds = [...(prev?.[restaurantId]?.[selEmpId] ?? []), newEntry];
+      return { ...prev, [restaurantId]: { ...(prev?.[restaurantId] ?? {}), [selEmpId]: empScheds } };
     });
 
     // Format schedule description for notifications
@@ -2324,13 +2323,15 @@ function WorkScheduleManagerTab({ restaurantId, employees, roles, workSchedules,
         {empSchedules.length > 0 && (
           <button onClick={()=>{
             if (!window.confirm(`Resetar o horário de ${selEmp?.name}?\n\nTodas as versões (${empSchedules.length}) serão apagadas permanentemente. O empregado ficará sem horário cadastrado.`)) return;
-            const w = { ...(workSchedules ?? {}) };
-            if (w[restaurantId]) {
-              const emp = { ...w[restaurantId] };
-              delete emp[selEmpId];
-              w[restaurantId] = emp;
-            }
-            onUpdate("workSchedules", w);
+            onUpdate("workSchedules", prev => {
+              const w = { ...(prev ?? {}) };
+              if (w[restaurantId]) {
+                const emp = { ...w[restaurantId] };
+                delete emp[selEmpId];
+                w[restaurantId] = emp;
+              }
+              return w;
+            });
             // Reset edit state
             const fresh = {};
             for (let i = 0; i < 7; i++) fresh[i] = { active: true };
@@ -2358,10 +2359,9 @@ function WorkScheduleManagerTab({ restaurantId, employees, roles, workSchedules,
                 {selectedSchedIds.size > 0 && (
                   <button onClick={()=>{
                     if(!window.confirm(`Apagar ${selectedSchedIds.size} versao(oes)?`)) return;
-                    const remaining = empSchedules.filter(s => !selectedSchedIds.has(s.id));
-                    onUpdate("workSchedules", {
-                      ...workSchedules,
-                      [restaurantId]: { ...(workSchedules?.[restaurantId]??{}), [selEmpId]: remaining }
+                    onUpdate("workSchedules", prev => {
+                      const remaining = (prev?.[restaurantId]?.[selEmpId] ?? []).filter(s => !selectedSchedIds.has(s.id));
+                      return { ...prev, [restaurantId]: { ...(prev?.[restaurantId]??{}), [selEmpId]: remaining } };
                     });
                     setSelectedSchedIds(new Set());
                     onUpdate("_toast", `${selectedSchedIds.size} versao(oes) apagada(s)`);
@@ -2393,10 +2393,9 @@ function WorkScheduleManagerTab({ restaurantId, employees, roles, workSchedules,
                     createdAt: new Date().toISOString(),
                     reactivatedFrom: s.id,
                   };
-                  const newList = [...empSchedules, reactivated];
-                  onUpdate("workSchedules", {
-                    ...workSchedules,
-                    [restaurantId]: { ...(workSchedules?.[restaurantId]??{}), [selEmpId]: newList }
+                  onUpdate("workSchedules", prev => {
+                    const newList = [...(prev?.[restaurantId]?.[selEmpId] ?? []), reactivated];
+                    return { ...prev, [restaurantId]: { ...(prev?.[restaurantId]??{}), [selEmpId]: newList } };
                   });
                   // Carrega a versão reativada no editor
                   setEditDays(toInternal(reactivated));
@@ -8705,14 +8704,14 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }
             if (tabKey === "comunicados") onUpdate("communications", [...(data?.communications??[]).filter(c=>c.restaurantId!==restaurantId), ...(snapshot.communications??[])]);
             if (tabKey === "faq") onUpdate("faq", {...(data?.faq??{}), [restaurantId]: snapshot.faq});
             if (tabKey === "dp") onUpdate("dpMessages", [...(data?.dpMessages??[]).filter(m=>m.restaurantId!==restaurantId), ...(snapshot.dpMessages??[])]);
-            if (tabKey === "horarios") onUpdate("workSchedules", {...(data?.workSchedules??{}), [restaurantId]: snapshot.workSchedules});
-            onUpdate("trash", {...trash, tabData:(trash.tabData??[]).filter(x=>x.id!==entry.id)});
+            if (tabKey === "horarios") onUpdate("workSchedules", prev => ({...(prev??{}), [restaurantId]: snapshot.workSchedules}));
+            onUpdate("trash", prev => ({...prev, tabData:(prev.tabData??[]).filter(x=>x.id!==entry.id)}));
             onUpdate("_toast", `↩ ${entry.tabLabel} restaurado!`);
           }
 
           function hardDeleteTab(entry) {
             if(!window.confirm(`Excluir permanentemente "${entry.tabLabel}" de ${entry.restaurantName}? Não tem volta.`)) return;
-            onUpdate("trash", {...trash, tabData:(trash.tabData??[]).filter(x=>x.id!==entry.id)});
+            onUpdate("trash", prev => ({...prev, tabData:(prev.tabData??[]).filter(x=>x.id!==entry.id)}));
             onUpdate("_toast","🗑️ Excluído permanentemente.");
           }
 
@@ -11014,9 +11013,20 @@ export default function App() {
     if (field === "_toast") { setToast(value); return; }
     const setters = { owners:setOwners, managers:setManagers, restaurants:setRestaurants, employees:setEmployees, roles:setRoles, tips:setTips, splits:setSplits, schedules:setSchedules, communications:setCommunications, commAcks:setCommAcks, faq:setFaq, dpMessages:setDpMessages, workSchedules:setWorkSchedules, notifications:setNotifications, noTipDays:setNoTipDays, trash:setTrash, schedTemplates:setSchedTemplates, schedDrafts:setSchedDrafts, scheduleVersions:setScheduleVersions, tipVersions:setTipVersions, vtConfig:setVtConfig, vtMonthly:setVtMonthly, vtPayments:setVtPayments };
     const keys    = { owners:K.owners, managers:K.managers, restaurants:K.restaurants, employees:K.employees, roles:K.roles, tips:K.tips, splits:K.splits, schedules:K.schedules, communications:K.communications, commAcks:K.commAcks, faq:K.faq, dpMessages:K.dpMessages, workSchedules:K.workSchedules, notifications:K.notifications, noTipDays:K.noTipDays, trash:K.trash, schedTemplates:K.schedTemplates, schedDrafts:K.schedDrafts, scheduleVersions:K.scheduleVersions, tipVersions:K.tipVersions, vtConfig:K.vtConfig, vtMonthly:K.vtMonthly, vtPayments:K.vtPayments };
-    setters[field]?.(value);
+    // Support functional updates to prevent stale-state race conditions:
+    // When value is a function, it receives the latest state (like setState(prev => ...))
+    let resolvedValue;
+    if (typeof value === 'function') {
+      setters[field]?.(prev => {
+        resolvedValue = value(prev);
+        return resolvedValue;
+      });
+    } else {
+      resolvedValue = value;
+      setters[field]?.(value);
+    }
     if (keys[field]) {
-      const ok = await save(keys[field], value);
+      const ok = await save(keys[field], resolvedValue);
       if (!ok) {
         setToast("Erro ao salvar — tente novamente");
         return;
