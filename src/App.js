@@ -3,7 +3,7 @@ import { useState, useEffect, Component } from "react";
 import { db } from "./firebase";
 import { doc, getDoc, setDoc } from "firebase/firestore";
 
-const APP_VERSION = "5.14.1";
+const APP_VERSION = "5.15.0";
 
 const DEFAULT_ADMISSION = () => `${new Date().getFullYear()}-01-01`;
 const round2 = (v) => Math.round(v * 100) / 100;
@@ -137,6 +137,9 @@ const K = {
   schedDrafts:   "v4:schedDrafts",     // {[restaurantId]: {[empId]: {days,savedAt}}}
   scheduleVersions: "v4:scheduleVersions", // {[restaurantId]: {[monthKey]: [{id,ts,author,reason,snapshot}]}}
   tipVersions:      "v4:tipVersions",      // {[restaurantId]: {[monthKey]: [{id,ts,author,reason,snapshot}]}}
+  vtConfig:         "v4:vtConfig",          // {[restaurantId]: {[employeeId]: {dailyRate: number}}}
+  vtMonthly:        "v4:vtMonthly",         // {[restaurantId]: {[monthKey]: {[employeeId]: {adjustOverride: number|null, manualDiscount: number}}}}
+  vtPayments:       "v4:vtPayments",        // {[restaurantId]: {[monthKey]: {paidAt: ISO, paidBy: string, snapshot: [{empId,name,role,dailyRate,plannedDays,grossVT,autoAdjust,manualDiscount,totalPaid}]}}}
 };
 
 // ── Version retention ──
@@ -4121,6 +4124,362 @@ Inclua apenas as ações solicitadas. Arrays vazios se não houver ação daquel
   );
 }
 
+// ═══════════════════════════════════════════════════════════════════
+// VALE TRANSPORTE TAB
+// ═══════════════════════════════════════════════════════════════════
+function ValeTransporteTab({ restaurantId, employees, roles, workSchedules, schedules, vtConfig, vtMonthly, vtPayments, onUpdate, currentUser, isOwner, mobileOnly }) {
+  const now = new Date();
+  const [year, setYear] = useState(now.getFullYear());
+  const [month, setMonth] = useState(now.getMonth());
+  const mk = monthKey(year, month);
+  const ac = "var(--accent)";
+
+  const restEmps = (employees ?? []).filter(e => e.restaurantId === restaurantId && !e.isFreela && !(e.inactive && e.inactiveFrom && e.inactiveFrom <= today()));
+  const restRoles = (roles ?? []).filter(r => r.restaurantId === restaurantId);
+
+  // ── Editable local state for monthly overrides ──
+  const [localOverrides, setLocalOverrides] = useState({});
+  const [localRates, setLocalRates] = useState({});
+  const [dirty, setDirty] = useState(false);
+
+  // Initialize local state from saved data when month changes
+  useEffect(() => {
+    const monthData = vtMonthly?.[restaurantId]?.[mk] ?? {};
+    const overrides = {};
+    Object.entries(monthData).forEach(([empId, v]) => {
+      overrides[empId] = { adjustOverride: v.adjustOverride ?? null, manualDiscount: v.manualDiscount ?? 0 };
+    });
+    setLocalOverrides(overrides);
+
+    const rates = {};
+    const cfgRest = vtConfig?.[restaurantId] ?? {};
+    restEmps.forEach(emp => {
+      rates[emp.id] = cfgRest[emp.id]?.dailyRate ?? 0;
+    });
+    setLocalRates(rates);
+    setDirty(false);
+  }, [mk, restaurantId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── Previous month payment snapshot ──
+  const prevDate = new Date(year, month - 1, 1);
+  const prevMk = monthKey(prevDate.getFullYear(), prevDate.getMonth());
+  const prevPayment = vtPayments?.[restaurantId]?.[prevMk] ?? null;
+
+  // ── Current month payment ──
+  const currentPayment = vtPayments?.[restaurantId]?.[mk] ?? null;
+
+  // ── Count planned working days for an employee in a month ──
+  function countPlannedDays(empId) {
+    // Use workSchedules to find the employee's contracted schedule
+    const empScheds = workSchedules?.[restaurantId]?.[empId] ?? [];
+    if (!empScheds.length) return 0;
+
+    // Find the schedule valid for this month
+    const lastDay = new Date(year, month+1, 0).getDate();
+    const monthEnd = `${year}-${String(month+1).padStart(2,"0")}-${String(lastDay).padStart(2,"0")}`;
+
+    // Find the most recent schedule valid at or before month end
+    const validScheds = empScheds.filter(s => !s.validFrom || s.validFrom <= monthEnd).sort((a,b) => (b.validFrom??"").localeCompare(a.validFrom??""));
+    const sched = validScheds[0];
+    if (!sched?.days) return 0;
+
+    // Count calendar days in this month that match working days in the schedule
+    const schedDayMap = schedules?.[restaurantId]?.[mk]?.[empId] ?? {};
+    let count = 0;
+    for (let d = 1; d <= lastDay; d++) {
+      const dateStr = `${year}-${String(month+1).padStart(2,"0")}-${String(d).padStart(2,"0")}`;
+      const dow = new Date(year, month, d).getDay(); // 0=Sun
+
+      // Check escala status first (overrides contracted schedule)
+      const escalaSt = schedDayMap[dateStr];
+      if (escalaSt === "vac" || escalaSt === "off") { continue; } // vacation/off = no VT
+      if (escalaSt === "comp") { continue; } // compensation = no VT
+      if (escalaSt === "faultj" || escalaSt === "faultu") { continue; } // faults = no VT
+
+      // If escala explicitly shows working (or no entry = follows contract)
+      if (sched.days[dow]) { count++; } // contracted day
+    }
+    return count;
+  }
+
+  // ── Count actual working days (for auto-adjust from previous month) ──
+  function countActualDays(empId, targetMk, targetYear, targetMonth) {
+    const empScheds = workSchedules?.[restaurantId]?.[empId] ?? [];
+    const lastDay = new Date(targetYear, targetMonth+1, 0).getDate();
+    const monthEnd = `${targetYear}-${String(targetMonth+1).padStart(2,"0")}-${String(lastDay).padStart(2,"0")}`;
+
+    const validScheds = empScheds.filter(s => !s.validFrom || s.validFrom <= monthEnd).sort((a,b) => (b.validFrom??"").localeCompare(a.validFrom??""));
+    const sched = validScheds[0];
+    if (!sched?.days) return 0;
+
+    const schedDayMap = schedules?.[restaurantId]?.[targetMk]?.[empId] ?? {};
+    let count = 0;
+    for (let d = 1; d <= lastDay; d++) {
+      const dateStr = `${targetYear}-${String(targetMonth+1).padStart(2,"0")}-${String(d).padStart(2,"0")}`;
+      const dow = new Date(targetYear, targetMonth, d).getDay();
+      const escalaSt = schedDayMap[dateStr];
+
+      // Faults, vacation, off, comp = did NOT work
+      if (escalaSt === "vac" || escalaSt === "off" || escalaSt === "comp") continue;
+      if (escalaSt === "faultj" || escalaSt === "faultu") continue;
+
+      if (sched.days[dow]) count++;
+    }
+    return count;
+  }
+
+  // ── Calculate auto-adjust from previous month ──
+  function calcAutoAdjust(empId) {
+    if (!prevPayment?.snapshot) return 0;
+    const prevSnap = prevPayment.snapshot.find(s => s.empId === empId);
+    if (!prevSnap) return 0;
+
+    // Actual days worked in prev month vs what was paid
+    const actualDays = countActualDays(empId, prevMk, prevDate.getFullYear(), prevDate.getMonth());
+    const diff = actualDays - prevSnap.plannedDays;
+    return round2(diff * prevSnap.dailyRate);
+  }
+
+  // ── Build table rows ──
+  const rows = restEmps.map(emp => {
+    const role = restRoles.find(r => r.id === emp.roleId);
+    const dailyRate = localRates[emp.id] ?? vtConfig?.[restaurantId]?.[emp.id]?.dailyRate ?? 0;
+    const plannedDays = countPlannedDays(emp.id);
+    const grossVT = round2(dailyRate * plannedDays);
+    const suggestedAdjust = calcAutoAdjust(emp.id);
+    const overrides = localOverrides[emp.id] ?? {};
+    const autoAdjust = overrides.adjustOverride !== null && overrides.adjustOverride !== undefined ? overrides.adjustOverride : suggestedAdjust;
+    const manualDiscount = overrides.manualDiscount ?? 0;
+    const totalPaid = round2(grossVT + autoAdjust - manualDiscount);
+
+    return { emp, role, dailyRate, plannedDays, grossVT, suggestedAdjust, autoAdjust, manualDiscount, totalPaid };
+  }).sort((a,b) => (a.emp.name??"").localeCompare(b.emp.name??""));
+
+  const grandTotal = rows.reduce((s,r) => s + Math.max(0, r.totalPaid), 0);
+
+  // ── Save changes ──
+  function saveChanges() {
+    // Save daily rates to vtConfig
+    const newCfg = { ...(vtConfig ?? {}), [restaurantId]: { ...(vtConfig?.[restaurantId] ?? {}) } };
+    Object.entries(localRates).forEach(([empId, rate]) => {
+      newCfg[restaurantId][empId] = { dailyRate: parseFloat(rate) || 0 };
+    });
+    onUpdate("vtConfig", newCfg);
+
+    // Save monthly overrides to vtMonthly
+    const newMonthly = { ...(vtMonthly ?? {}), [restaurantId]: { ...(vtMonthly?.[restaurantId] ?? {}), [mk]: {} } };
+    Object.entries(localOverrides).forEach(([empId, v]) => {
+      newMonthly[restaurantId][mk][empId] = { adjustOverride: v.adjustOverride ?? null, manualDiscount: v.manualDiscount ?? 0 };
+    });
+    onUpdate("vtMonthly", newMonthly);
+    setDirty(false);
+    onUpdate("_toast", "✅ Valores de VT salvos");
+  }
+
+  // ── Mark as paid ──
+  function markAsPaid() {
+    if (!window.confirm("Marcar este mês como PAGO?\n\nOs valores atuais serão congelados como referência para o cálculo de ajuste do próximo mês.")) return;
+    saveChanges(); // ensure latest is saved
+    const snapshot = rows.map(r => ({
+      empId: r.emp.id, name: r.emp.name, role: r.role?.name ?? "—",
+      dailyRate: r.dailyRate, plannedDays: r.plannedDays, grossVT: r.grossVT,
+      autoAdjust: r.autoAdjust, manualDiscount: r.manualDiscount, totalPaid: Math.max(0, r.totalPaid),
+    }));
+    const newPayments = { ...(vtPayments ?? {}), [restaurantId]: { ...(vtPayments?.[restaurantId] ?? {}), [mk]: { paidAt: new Date().toISOString(), paidBy: currentUser?.name ?? "Gestor", snapshot, grandTotal: round2(grandTotal) } } };
+    onUpdate("vtPayments", newPayments);
+    onUpdate("_toast", "💰 VT marcado como pago!");
+  }
+
+  // ── Export helpers ──
+  function exportCSV() {
+    const header = "Empregado;Cargo;VT Diário;Dias Previstos;VT Bruto;Ajuste Mês Ant.;Desconto Manual;Total";
+    const csvRows = rows.map(r => `${r.emp.name};${r.role?.name??"—"};${fmtBR(r.dailyRate)};${r.plannedDays};${fmtBR(r.grossVT)};${fmtBR(r.autoAdjust)};${fmtBR(r.manualDiscount)};${fmtBR(Math.max(0,r.totalPaid))}`);
+    csvRows.push(`;;;;;;TOTAL;${fmtBR(grandTotal)}`);
+    const blob = new Blob(["\uFEFF" + header + "\n" + csvRows.join("\n")], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a"); a.href = url; a.download = `VT_${mk}.csv`; a.click(); URL.revokeObjectURL(url);
+    onUpdate("_toast", "📊 CSV exportado");
+  }
+
+  function exportPDF() {
+    const w = window.open("", "_blank");
+    if (!w) { onUpdate("_toast", "⚠️ Permita pop-ups para exportar PDF"); return; }
+    const paidInfo = currentPayment ? `<p style="color:green;font-weight:700">✅ Pago em ${new Date(currentPayment.paidAt).toLocaleString("pt-BR")} por ${currentPayment.paidBy}</p>` : `<p style="color:#b45309;font-weight:700">⏳ Ainda não marcado como pago</p>`;
+    const tableRows = rows.map(r => `<tr><td>${r.emp.name}</td><td>${r.role?.name??"—"}</td><td style="text-align:right">${fmt(r.dailyRate)}</td><td style="text-align:center">${r.plannedDays}</td><td style="text-align:right">${fmt(r.grossVT)}</td><td style="text-align:right;color:${r.autoAdjust>=0?"green":"#b45309"}">${r.autoAdjust>=0?"+":""}${fmt(r.autoAdjust)}</td><td style="text-align:right;color:#b45309">${r.manualDiscount?"-"+fmt(r.manualDiscount):"—"}</td><td style="text-align:right;font-weight:700">${fmt(Math.max(0,r.totalPaid))}</td></tr>`).join("");
+    w.document.write(`<!DOCTYPE html><html><head><title>VT ${mk}</title><style>body{font-family:Arial,sans-serif;margin:24px}table{border-collapse:collapse;width:100%}th,td{border:1px solid #ccc;padding:8px 12px;font-size:13px}th{background:#f5f5f5;font-weight:700}tr:nth-child(even){background:#fafafa}h1{font-size:20px}h2{font-size:15px;color:#666}</style></head><body><h1>🚌 Vale Transporte — ${monthLabel(year,month)}</h1>${paidInfo}<table><thead><tr><th>Empregado</th><th>Cargo</th><th>VT Diário</th><th>Dias</th><th>VT Bruto</th><th>Ajuste Mês Ant.</th><th>Desconto</th><th>Total</th></tr></thead><tbody>${tableRows}<tr style="font-weight:700;background:#e8e8e8"><td colspan="7" style="text-align:right">TOTAL GERAL</td><td style="text-align:right">${fmt(grandTotal)}</td></tr></tbody></table><p style="font-size:11px;color:#999;margin-top:24px">Gerado por AppTip em ${new Date().toLocaleString("pt-BR")}</p></body></html>`);
+    w.document.close();
+    setTimeout(() => w.print(), 500);
+    onUpdate("_toast", "🖨️ PDF pronto para impressão");
+  }
+
+  // ── Month navigation ──
+  const goMonth = (dir) => {
+    const d = new Date(year, month + dir, 1);
+    setYear(d.getFullYear());
+    setMonth(d.getMonth());
+  };
+
+  // ── UI ──
+  const inputStyle = { ...S.input, width: mobileOnly ? 80 : 100, textAlign: "right", padding: "8px 10px", fontSize: 14 };
+  const cellPad = mobileOnly ? "8px 6px" : "12px 16px";
+
+  return (
+    <div>
+      {/* Header */}
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 12, marginBottom: 16 }}>
+        <h3 style={{ color: "var(--text)", margin: 0, fontSize: mobileOnly ? 16 : 20 }}>🚌 Vale Transporte</h3>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <button onClick={exportCSV} style={{ ...S.btnSecondary, fontSize: 12, padding: "6px 14px" }}>📊 Exportar CSV</button>
+          <button onClick={exportPDF} style={{ ...S.btnSecondary, fontSize: 12, padding: "6px 14px" }}>🖨️ Exportar PDF</button>
+        </div>
+      </div>
+
+      {/* Month selector */}
+      <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 16 }}>
+        <button onClick={() => goMonth(-1)} style={{ ...S.btnSecondary, padding: "6px 12px", fontSize: 16 }}>◀</button>
+        <span style={{ color: "var(--text)", fontWeight: 700, fontSize: mobileOnly ? 14 : 16, textTransform: "capitalize" }}>{monthLabel(year, month)}</span>
+        <button onClick={() => goMonth(1)} style={{ ...S.btnSecondary, padding: "6px 12px", fontSize: 16 }}>▶</button>
+      </div>
+
+      {/* Payment status */}
+      {currentPayment && (
+        <div style={{ ...S.card, background: "#10b98118", borderColor: "#10b98133", marginBottom: 16, padding: "14px 20px" }}>
+          <div style={{ color: "#047857", fontWeight: 700, fontSize: 14 }}>✅ Pago em {new Date(currentPayment.paidAt).toLocaleString("pt-BR")} por {currentPayment.paidBy}</div>
+          <div style={{ color: "#047857", fontSize: 12, marginTop: 4 }}>Total pago: {fmt(currentPayment.grandTotal)} • Valores congelados como referência</div>
+        </div>
+      )}
+
+      {/* Previous month info */}
+      {prevPayment && (
+        <div style={{ ...S.card, background: "#3b82f618", borderColor: "#3b82f633", marginBottom: 16, padding: "12px 20px" }}>
+          <div style={{ color: "#2563eb", fontWeight: 600, fontSize: 13 }}>ℹ️ Ajustes automáticos calculados a partir do pagamento de {new Date(prevPayment.paidAt).toLocaleDateString("pt-BR")}</div>
+        </div>
+      )}
+      {!prevPayment && month > 0 && (
+        <div style={{ ...S.card, background: "#f59e0b18", borderColor: "#f59e0b33", marginBottom: 16, padding: "12px 20px" }}>
+          <div style={{ color: "#b45309", fontWeight: 600, fontSize: 13 }}>⚠️ Mês anterior não marcado como pago — ajustes automáticos indisponíveis</div>
+        </div>
+      )}
+
+      {/* Table */}
+      {mobileOnly ? (
+        /* ── MOBILE: card-based layout ── */
+        <div>
+          {rows.map(r => {
+            const adjustColor = r.autoAdjust > 0 ? "#047857" : r.autoAdjust < 0 ? "#b45309" : "var(--text3)";
+            return (
+              <div key={r.emp.id} style={{ ...S.card, marginBottom: 8, padding: "12px 14px" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+                  <div>
+                    <div style={{ color: "var(--text)", fontWeight: 700, fontSize: 14 }}>{r.emp.name}</div>
+                    <div style={{ color: "var(--text3)", fontSize: 11 }}>{r.role?.name ?? "—"}</div>
+                  </div>
+                  <div style={{ textAlign: "right" }}>
+                    <div style={{ color: "var(--text)", fontWeight: 700, fontSize: 16, fontFamily: "'DM Mono',monospace" }}>{fmt(Math.max(0, r.totalPaid))}</div>
+                    <div style={{ color: "var(--text3)", fontSize: 10 }}>{r.plannedDays} dias</div>
+                  </div>
+                </div>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8 }}>
+                  <div>
+                    <div style={{ color: "var(--text3)", fontSize: 10, marginBottom: 4 }}>VT Diário</div>
+                    <input type="number" step="0.01" min="0" value={localRates[r.emp.id] ?? ""} onChange={e => { setLocalRates(prev => ({ ...prev, [r.emp.id]: e.target.value })); setDirty(true); }} style={{ ...S.input, width: "100%", textAlign: "right", padding: "6px 8px", fontSize: 13 }} />
+                  </div>
+                  <div>
+                    <div style={{ color: "var(--text3)", fontSize: 10, marginBottom: 4 }}>Ajuste Ant. <span style={{ color: adjustColor }}>{r.suggestedAdjust !== 0 ? `(${r.suggestedAdjust > 0 ? "+" : ""}${fmtBR(r.suggestedAdjust)})` : ""}</span></div>
+                    <input type="number" step="0.01" value={r.autoAdjust || ""} onChange={e => { const v = e.target.value === "" ? null : parseFloat(e.target.value); setLocalOverrides(prev => ({ ...prev, [r.emp.id]: { ...(prev[r.emp.id] ?? {}), adjustOverride: v } })); setDirty(true); }} style={{ ...S.input, width: "100%", textAlign: "right", padding: "6px 8px", fontSize: 13 }} />
+                  </div>
+                  <div>
+                    <div style={{ color: "var(--text3)", fontSize: 10, marginBottom: 4 }}>Desconto</div>
+                    <input type="number" step="0.01" min="0" value={localOverrides[r.emp.id]?.manualDiscount || ""} onChange={e => { setLocalOverrides(prev => ({ ...prev, [r.emp.id]: { ...(prev[r.emp.id] ?? {}), manualDiscount: parseFloat(e.target.value) || 0 } })); setDirty(true); }} style={{ ...S.input, width: "100%", textAlign: "right", padding: "6px 8px", fontSize: 13 }} />
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      ) : (
+        /* ── DESKTOP: full table ── */
+        <div style={{ ...S.card, padding: 0, overflow: "auto", marginBottom: 16 }}>
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 14 }}>
+            <thead>
+              <tr style={{ background: "var(--bg1)" }}>
+                <th style={{ padding: cellPad, textAlign: "left", color: "var(--text)", fontWeight: 700, borderBottom: "2px solid var(--border)" }}>Empregado</th>
+                <th style={{ padding: cellPad, textAlign: "left", color: "var(--text3)", fontWeight: 600, borderBottom: "2px solid var(--border)" }}>Cargo</th>
+                <th style={{ padding: cellPad, textAlign: "right", color: "var(--text3)", fontWeight: 600, borderBottom: "2px solid var(--border)", width: 110 }}>VT Diário</th>
+                <th style={{ padding: cellPad, textAlign: "center", color: "var(--text3)", fontWeight: 600, borderBottom: "2px solid var(--border)", width: 70 }}>Dias</th>
+                <th style={{ padding: cellPad, textAlign: "right", color: "var(--text3)", fontWeight: 600, borderBottom: "2px solid var(--border)", width: 110 }}>VT Bruto</th>
+                <th style={{ padding: cellPad, textAlign: "right", color: "var(--text3)", fontWeight: 600, borderBottom: "2px solid var(--border)", width: 130 }}>Ajuste Mês Ant.</th>
+                <th style={{ padding: cellPad, textAlign: "right", color: "var(--text3)", fontWeight: 600, borderBottom: "2px solid var(--border)", width: 120 }}>Desconto</th>
+                <th style={{ padding: cellPad, textAlign: "right", color: "var(--text)", fontWeight: 700, borderBottom: "2px solid var(--border)", width: 120 }}>Total</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((r, i) => {
+                const adjustColor = r.autoAdjust > 0 ? "#047857" : r.autoAdjust < 0 ? "#b45309" : "var(--text3)";
+                return (
+                  <tr key={r.emp.id} style={{ borderBottom: i < rows.length - 1 ? "1px solid var(--border)" : "none" }}>
+                    <td style={{ padding: cellPad, color: "var(--text)", fontWeight: 600 }}>{r.emp.name}</td>
+                    <td style={{ padding: cellPad, color: "var(--text3)" }}>{r.role?.name ?? "—"}</td>
+                    <td style={{ padding: cellPad, textAlign: "right" }}>
+                      <input type="number" step="0.01" min="0" value={localRates[r.emp.id] ?? ""} placeholder="0,00" onChange={e => { setLocalRates(prev => ({ ...prev, [r.emp.id]: e.target.value })); setDirty(true); }} style={inputStyle} />
+                    </td>
+                    <td style={{ padding: cellPad, textAlign: "center", color: "var(--text)", fontWeight: 600, fontFamily: "'DM Mono',monospace" }}>{r.plannedDays}</td>
+                    <td style={{ padding: cellPad, textAlign: "right", color: "var(--text)", fontFamily: "'DM Mono',monospace" }}>{fmt(r.grossVT)}</td>
+                    <td style={{ padding: cellPad, textAlign: "right" }}>
+                      <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 6 }}>
+                        {r.suggestedAdjust !== 0 && <span style={{ fontSize: 10, color: "var(--text3)" }} title="Valor sugerido pelo sistema">({r.suggestedAdjust > 0 ? "+" : ""}{fmtBR(r.suggestedAdjust)})</span>}
+                        <input type="number" step="0.01" value={r.autoAdjust || ""} placeholder="0,00" onChange={e => { const v = e.target.value === "" ? null : parseFloat(e.target.value); setLocalOverrides(prev => ({ ...prev, [r.emp.id]: { ...(prev[r.emp.id] ?? {}), adjustOverride: v } })); setDirty(true); }} style={{ ...inputStyle, color: adjustColor }} />
+                      </div>
+                    </td>
+                    <td style={{ padding: cellPad, textAlign: "right" }}>
+                      <input type="number" step="0.01" min="0" value={localOverrides[r.emp.id]?.manualDiscount || ""} placeholder="0,00" onChange={e => { setLocalOverrides(prev => ({ ...prev, [r.emp.id]: { ...(prev[r.emp.id] ?? {}), manualDiscount: parseFloat(e.target.value) || 0 } })); setDirty(true); }} style={inputStyle} />
+                    </td>
+                    <td style={{ padding: cellPad, textAlign: "right", fontWeight: 700, fontSize: 15, fontFamily: "'DM Mono',monospace", color: r.totalPaid < 0 ? "var(--red)" : "var(--text)" }}>{fmt(Math.max(0, r.totalPaid))}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+            <tfoot>
+              <tr style={{ background: "var(--bg1)", borderTop: "2px solid var(--border)" }}>
+                <td colSpan={7} style={{ padding: cellPad, textAlign: "right", color: "var(--text)", fontWeight: 700, fontSize: 15 }}>TOTAL GERAL</td>
+                <td style={{ padding: cellPad, textAlign: "right", fontWeight: 700, fontSize: 18, fontFamily: "'DM Mono',monospace", color: ac }}>{fmt(grandTotal)}</td>
+              </tr>
+            </tfoot>
+          </table>
+        </div>
+      )}
+
+      {/* Mobile total */}
+      {mobileOnly && (
+        <div style={{ ...S.card, background: "var(--bg1)", padding: "14px 16px", marginBottom: 12 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <span style={{ color: "var(--text)", fontWeight: 700, fontSize: 14 }}>TOTAL GERAL</span>
+            <span style={{ color: ac, fontWeight: 700, fontSize: 20, fontFamily: "'DM Mono',monospace" }}>{fmt(grandTotal)}</span>
+          </div>
+        </div>
+      )}
+
+      {/* Action buttons */}
+      <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 8 }}>
+        <button onClick={saveChanges} disabled={!dirty} style={{ ...S.btn, background: dirty ? ac : "var(--bg2)", color: dirty ? "#1a1510" : "var(--text3)", fontWeight: 700, padding: "12px 24px", fontSize: 14, opacity: dirty ? 1 : 0.5, cursor: dirty ? "pointer" : "default" }}>
+          💾 Salvar Alterações
+        </button>
+        <button onClick={markAsPaid} style={{ ...S.btn, background: currentPayment ? "#10b981" : "#2563eb", color: "#fff", fontWeight: 700, padding: "12px 24px", fontSize: 14 }}>
+          {currentPayment ? "🔄 Remarcar como Pago" : "💰 Marcar como Pago"}
+        </button>
+      </div>
+
+      {/* Empty state */}
+      {restEmps.length === 0 && (
+        <div style={{ textAlign: "center", padding: 40, color: "var(--text3)" }}>
+          <div style={{ fontSize: 40, marginBottom: 12 }}>🚌</div>
+          <div style={{ fontSize: 15 }}>Nenhum empregado cadastrado (freelancers não aparecem)</div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, splits, schedules, onUpdate, perms, isOwner, data, currentUser, privacyMask, mobileOnly }) {
   const now = new Date();
   const [year, setYear] = useState(now.getFullYear());
@@ -4470,13 +4829,14 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
     (isOwner || tabVisible("roles"))           && ["roles",       "🏷️ Cargos"],
     (isOwner || canTips || tabVisible("employees")) && ["employees","👥 Equipe"],
     (isOwner || tabVisible("horarios"))          && ["horarios",    "🕐 Horários"],
+    (isOwner || tabVisible("vt"))               && ["vt",          "🚌 Vale Transporte"],
     (isOwner || tabVisible("faq"))               && ["faq",         "❓ FAQ"],
     (isOwner || tabVisible("comunicados"))        && ["comunicados", "📢 Comunicados"],
     (isOwner || tabVisible("dp"))                && ["dp",          "💬 Fale com DP"],
     isDP                                       && ["notificacoes",`📬 Caixa${inboxUnread>0?` (${inboxUnread})`:""}`],
     isDP                                       && ["dp_gestores", "👔 Gestores"],
     (canTips || isOwner)                       && ["config",       "⚙️ Configurações"],
-  ].filter(Boolean).filter(([id]) => !mobileOnly || ["dashboard","schedule","horarios","notificacoes"].includes(id));
+  ].filter(Boolean).filter(([id]) => !mobileOnly || ["dashboard","schedule","horarios","vt","notificacoes"].includes(id));
 
   const [tab, setTab] = useState("dashboard");
 
@@ -5924,6 +6284,11 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
           </div>
         )}
 
+        {/* VALE TRANSPORTE */}
+        {tab === "vt" && (
+          <ValeTransporteTab restaurantId={rid} employees={employees} roles={roles} workSchedules={data?.workSchedules??{}} schedules={data?.schedules??{}} vtConfig={data?.vtConfig??{}} vtMonthly={data?.vtMonthly??{}} vtPayments={data?.vtPayments??{}} onUpdate={onUpdate} currentUser={currentUser} isOwner={isOwner} mobileOnly={mobileOnly} />
+        )}
+
         {/* NOTIFICAÇÕES */}
         {tab === "notificacoes" && (
           privacyMask ? (
@@ -6091,7 +6456,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                 <div>
                   <label style={S.label}>Permissões</label>
                   <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
-                    {[["tips","💸 Gorjetas"],["schedule","📅 Escala"],["roles","🏷️ Cargos"],["employees","👥 Equipe"],["comunicados","📢 Comunicados"],["faq","❓ FAQ"],["dp","💬 Fale c/ DP"],["horarios","🕐 Horários"]].map(([k,lbl])=>{
+                    {[["tips","💸 Gorjetas"],["schedule","📅 Escala"],["roles","🏷️ Cargos"],["employees","👥 Equipe"],["comunicados","📢 Comunicados"],["faq","❓ FAQ"],["dp","💬 Fale c/ DP"],["horarios","🕐 Horários"],["vt","🚌 Vale Transporte"]].map(([k,lbl])=>{
                       const on = dpMgrForm.perms?.[k] !== false;
                       return (
                         <button key={k} onClick={()=>setDpMgrForm({...dpMgrForm,perms:{...dpMgrForm.perms,[k]:!on}})}
@@ -6602,7 +6967,7 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }
                         <div style={{color:"var(--text3)",fontSize:11,marginBottom:6}}>Áreas: {m.areas.join(", ")}</div>
                       )}
                       <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:6}}>
-                        {[["tips","💸 Gorjetas"],["schedule","📅 Escala"],["roles","🏷️ Cargos"],["employees","👥 Equipe"],["comunicados","📢 Comuns."],["faq","❓ FAQ"],["dp","💬 DP"],["horarios","🕐 Horários"]].map(([k,lbl])=>
+                        {[["tips","💸 Gorjetas"],["schedule","📅 Escala"],["roles","🏷️ Cargos"],["employees","👥 Equipe"],["comunicados","📢 Comuns."],["faq","❓ FAQ"],["dp","💬 DP"],["horarios","🕐 Horários"],["vt","🚌 VT"]].map(([k,lbl])=>
                           m.perms?.[k]!==false ? <span key={k} style={{background:"var(--green-bg)",color:"var(--green)",borderRadius:6,padding:"2px 8px",fontSize:11,fontWeight:600}}>{lbl}</span> : null
                         )}
                         {m.isDP && !m.profile && <span style={{background:"var(--blue-bg)",color:"var(--blue)",borderRadius:6,padding:"2px 8px",fontSize:11,fontWeight:600}}>📬 DP</span>}
@@ -7185,7 +7550,7 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }
                 <div>
                   <label style={S.label}>Permissões</label>
                   <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
-                    {[["tips","💸 Gorjetas"],["schedule","📅 Escala"],["roles","🏷️ Cargos"],["employees","👥 Equipe"],["comunicados","📢 Comunicados"],["faq","❓ FAQ"],["dp","💬 Fale c/ DP"],["horarios","🕐 Horários"]].map(([k,lbl])=>{
+                    {[["tips","💸 Gorjetas"],["schedule","📅 Escala"],["roles","🏷️ Cargos"],["employees","👥 Equipe"],["comunicados","📢 Comunicados"],["faq","❓ FAQ"],["dp","💬 Fale c/ DP"],["horarios","🕐 Horários"],["vt","🚌 Vale Transporte"]].map(([k,lbl])=>{
                       const on = mgrForm.perms?.[k] !== false;
                       return (
                         <button key={k} onClick={()=>setMgrForm({...mgrForm,perms:{...mgrForm.perms,[k]:!on}})}
@@ -7950,6 +8315,18 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }
 
         {tab === "changelog" && (() => {
           const CHANGELOG = [
+            { version:"5.15.0", date:"2026-04-16", items:[
+              "Novo: Aba Vale Transporte (🚌 VT) — cálculo mensal de VT por empregado com base na escala de trabalho",
+              "Novo: VT Diário editável por empregado, persistido entre meses (altera valor dali pra frente)",
+              "Novo: Dias previstos calculados automaticamente a partir do horário contratual + escala do mês",
+              "Novo: Ajuste automático do mês anterior — compara dias pagos vs dias reais (faltas descontam, dias extras somam)",
+              "Novo: Campo de ajuste editável — sistema sugere valor mas gestor pode alterar livremente",
+              "Novo: Campo de desconto manual por empregado (livre para qualquer desconto adicional)",
+              "Novo: Botão 'Marcar como Pago' — congela snapshot dos valores e usa como referência para ajuste do mês seguinte",
+              "Novo: Exportação de VT para CSV e PDF (impressão)",
+              "Novo: Layout responsivo — tabela completa no desktop, cards compactos no mobile",
+              "Regras: Férias, folgas, compensações e faltas (justificadas e injustificadas) não pagam VT. Freelancers ficam fora",
+            ]},
             { version:"5.14.1", date:"2026-04-12", items:[
               "Removido: botão 'Salvar Dias' da aba Horários — fluxo unificado em Validar → Salvar Horário",
               "Removido: botão 'Resetar horários' da página geral de Horários — ação preservada apenas na tela de edição do empregado (evita duplicação)",
@@ -8234,7 +8611,7 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }
             <div>
               <label style={S.label}>Permissões de acesso às abas</label>
               <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
-                {[["tips","💸 Gorjetas"],["schedule","📅 Escala"],["roles","🏷️ Cargos"],["employees","👥 Equipe"],["comunicados","📢 Comunicados"],["faq","❓ FAQ"],["dp","💬 Fale c/ DP"],["horarios","🕐 Horários"]].map(([k,lbl])=>{
+                {[["tips","💸 Gorjetas"],["schedule","📅 Escala"],["roles","🏷️ Cargos"],["employees","👥 Equipe"],["comunicados","📢 Comunicados"],["faq","❓ FAQ"],["dp","💬 Fale c/ DP"],["horarios","🕐 Horários"],["vt","🚌 Vale Transporte"]].map(([k,lbl])=>{
                   const on = mgrForm.perms?.[k] !== false;
                   return (
                     <button key={k} onClick={()=>setMgrForm({...mgrForm,perms:{...mgrForm.perms,[k]:!on}})}
@@ -9937,13 +10314,16 @@ export default function App() {
   const [schedDrafts,   setSchedDrafts]   = useState({});
   const [scheduleVersions, setScheduleVersions] = useState({});
   const [tipVersions,      setTipVersions]      = useState({});
+  const [vtConfig,         setVtConfig]         = useState({});
+  const [vtMonthly,        setVtMonthly]        = useState({});
+  const [vtPayments,       setVtPayments]       = useState({});
 
   useEffect(() => {
     const savedId = currentUserId;
     (async () => {
       const vals = await Promise.all(Object.values(K).map(load));
       const keys = Object.keys(K);
-      const map = { owners:setOwners, managers:setManagers, restaurants:setRestaurants, employees:setEmployees, roles:setRoles, tips:setTips, splits:setSplits, schedules:setSchedules, communications:setCommunications, commAcks:setCommAcks, faq:setFaq, dpMessages:setDpMessages, workSchedules:setWorkSchedules, notifications:setNotifications, noTipDays:setNoTipDays, trash:setTrash, schedTemplates:setSchedTemplates, schedDrafts:setSchedDrafts, scheduleVersions:setScheduleVersions, tipVersions:setTipVersions };
+      const map = { owners:setOwners, managers:setManagers, restaurants:setRestaurants, employees:setEmployees, roles:setRoles, tips:setTips, splits:setSplits, schedules:setSchedules, communications:setCommunications, commAcks:setCommAcks, faq:setFaq, dpMessages:setDpMessages, workSchedules:setWorkSchedules, notifications:setNotifications, noTipDays:setNoTipDays, trash:setTrash, schedTemplates:setSchedTemplates, schedDrafts:setSchedDrafts, scheduleVersions:setScheduleVersions, tipVersions:setTipVersions, vtConfig:setVtConfig, vtMonthly:setVtMonthly, vtPayments:setVtPayments };
       const loaded_data = {};
       keys.forEach((k, i) => { if (k !== "receipts" && vals[i]) { map[k]?.(vals[i]); loaded_data[k] = vals[i]; } });
 
@@ -10045,12 +10425,12 @@ export default function App() {
     })();
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const data = { owners, managers, restaurants, employees, roles, tips, splits, schedules, communications, commAcks, faq, dpMessages, workSchedules, notifications, noTipDays, trash, schedTemplates, schedDrafts, scheduleVersions, tipVersions };
+  const data = { owners, managers, restaurants, employees, roles, tips, splits, schedules, communications, commAcks, faq, dpMessages, workSchedules, notifications, noTipDays, trash, schedTemplates, schedDrafts, scheduleVersions, tipVersions, vtConfig, vtMonthly, vtPayments };
 
   async function handleUpdate(field, value) {
     if (field === "_toast") { setToast(value); return; }
-    const setters = { owners:setOwners, managers:setManagers, restaurants:setRestaurants, employees:setEmployees, roles:setRoles, tips:setTips, splits:setSplits, schedules:setSchedules, communications:setCommunications, commAcks:setCommAcks, faq:setFaq, dpMessages:setDpMessages, workSchedules:setWorkSchedules, notifications:setNotifications, noTipDays:setNoTipDays, trash:setTrash, schedTemplates:setSchedTemplates, schedDrafts:setSchedDrafts, scheduleVersions:setScheduleVersions, tipVersions:setTipVersions };
-    const keys    = { owners:K.owners, managers:K.managers, restaurants:K.restaurants, employees:K.employees, roles:K.roles, tips:K.tips, splits:K.splits, schedules:K.schedules, communications:K.communications, commAcks:K.commAcks, faq:K.faq, dpMessages:K.dpMessages, workSchedules:K.workSchedules, notifications:K.notifications, noTipDays:K.noTipDays, trash:K.trash, schedTemplates:K.schedTemplates, schedDrafts:K.schedDrafts, scheduleVersions:K.scheduleVersions, tipVersions:K.tipVersions };
+    const setters = { owners:setOwners, managers:setManagers, restaurants:setRestaurants, employees:setEmployees, roles:setRoles, tips:setTips, splits:setSplits, schedules:setSchedules, communications:setCommunications, commAcks:setCommAcks, faq:setFaq, dpMessages:setDpMessages, workSchedules:setWorkSchedules, notifications:setNotifications, noTipDays:setNoTipDays, trash:setTrash, schedTemplates:setSchedTemplates, schedDrafts:setSchedDrafts, scheduleVersions:setScheduleVersions, tipVersions:setTipVersions, vtConfig:setVtConfig, vtMonthly:setVtMonthly, vtPayments:setVtPayments };
+    const keys    = { owners:K.owners, managers:K.managers, restaurants:K.restaurants, employees:K.employees, roles:K.roles, tips:K.tips, splits:K.splits, schedules:K.schedules, communications:K.communications, commAcks:K.commAcks, faq:K.faq, dpMessages:K.dpMessages, workSchedules:K.workSchedules, notifications:K.notifications, noTipDays:K.noTipDays, trash:K.trash, schedTemplates:K.schedTemplates, schedDrafts:K.schedDrafts, scheduleVersions:K.scheduleVersions, tipVersions:K.tipVersions, vtConfig:K.vtConfig, vtMonthly:K.vtMonthly, vtPayments:K.vtPayments };
     setters[field]?.(value);
     if (keys[field]) {
       const ok = await save(keys[field], value);
@@ -10059,7 +10439,7 @@ export default function App() {
         return;
       }
     }
-    const labels = { owners:"Admins atualizados", managers:"Gestores atualizados", restaurants:"Restaurantes atualizados", employees:"Empregados atualizados", roles:"Cargos atualizados", tips:"Gorjetas atualizadas", splits:"Percentuais salvos", schedules:"Escala atualizada", communications:"Comunicados atualizados", commAcks:"Ciências atualizadas", faq:"FAQ atualizado", dpMessages:"Mensagem enviada", workSchedules:"Horários salvos", notifications:"Notificações atualizadas", schedTemplates:"Template salvo", schedDrafts:"Rascunho salvo", trash:"Lixeira atualizada", noTipDays:"Dias sem gorjeta atualizados", scheduleVersions:null, tipVersions:null };
+    const labels = { owners:"Admins atualizados", managers:"Gestores atualizados", restaurants:"Restaurantes atualizados", employees:"Empregados atualizados", roles:"Cargos atualizados", tips:"Gorjetas atualizadas", splits:"Percentuais salvos", schedules:"Escala atualizada", communications:"Comunicados atualizados", commAcks:"Ciências atualizadas", faq:"FAQ atualizado", dpMessages:"Mensagem enviada", workSchedules:"Horários salvos", notifications:"Notificações atualizadas", schedTemplates:"Template salvo", schedDrafts:"Rascunho salvo", trash:"Lixeira atualizada", noTipDays:"Dias sem gorjeta atualizados", scheduleVersions:null, tipVersions:null, vtConfig:null, vtMonthly:null, vtPayments:"VT registrado" };
     if (labels[field] === null) return; // silent save (e.g. version snapshots)
     setToast(labels[field] ?? (typeof value === "string" ? value : "Salvo!"));
   }
