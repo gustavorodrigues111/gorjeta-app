@@ -3,7 +3,7 @@ import { useState, useEffect, Component } from "react";
 import { db } from "./firebase";
 import { doc, getDoc, setDoc } from "firebase/firestore";
 
-const APP_VERSION = "5.15.1";
+const APP_VERSION = "5.15.2";
 
 const DEFAULT_ADMISSION = () => `${new Date().getFullYear()}-01-01`;
 const round2 = (v) => Math.round(v * 100) / 100;
@@ -6048,39 +6048,40 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                   const mesNome = monthLabel(year, month);
                   if (!window.confirm(`Aplicar folgas do contrato em ${mesNome}?\n\nIsso vai:\n• Marcar como Folga todos os dias do contrato\n• Remover folgas marcadas em dias que NÃO são de folga no contrato\n\nOutros status (férias, faltas, compensações) não serão alterados.`)) return;
                   const daysInMonth = new Date(year, month+1, 0).getDate();
-                  let newSchedules = { ...schedules };
                   let added = 0, removed = 0;
+                  const bulkEdits = {};
                   emps.forEach(emp => {
                     const empScheds = data?.workSchedules?.[rid]?.[emp.id] ?? [];
                     const currentSched = empScheds[empScheds.length - 1];
                     if (!currentSched) return;
                     const folgaDays = new Set([0,1,2,3,4,5,6].filter(d => !currentSched.days[d]));
-                    const empDayMap = { ...(newSchedules?.[rid]?.[mk]?.[emp.id] ?? {}) };
+                    const empDayMap = { ...(effectiveMonth[emp.id] ?? {}) };
+                    const empEdits = {};
                     for (let d = 1; d <= daysInMonth; d++) {
                       const date = `${year}-${String(month+1).padStart(2,"0")}-${String(d).padStart(2,"0")}`;
                       const weekday = new Date(date+"T12:00:00").getDay();
                       const current = empDayMap[date];
                       if (folgaDays.has(weekday)) {
-                        if (!current) { empDayMap[date] = DAY_OFF; added++; }
-                        else if (current === DAY_OFF) { /* já correto */ }
+                        if (!current) { empEdits[date] = DAY_OFF; added++; }
                       } else {
-                        if (current === DAY_OFF) { delete empDayMap[date]; removed++; }
+                        if (current === DAY_OFF) { empEdits[date] = null; removed++; }
                       }
                     }
-                    newSchedules = {
-                      ...newSchedules,
-                      [rid]: { ...(newSchedules?.[rid]??{}), [mk]: { ...(newSchedules?.[rid]?.[mk]??{}), [emp.id]: empDayMap } }
-                    };
+                    if (Object.keys(empEdits).length) bulkEdits[emp.id] = empEdits;
                   });
-                  // Snapshot bulk antes de aplicar "Folgas do contrato"
-                  const preSnap1 = snapshotSchedulesMonth(schedules, rid, mk);
-                  saveVersion("schedules", rid, mk, data?.scheduleVersions, preSnap1, currentUser?.name || (isOwner?"Admin AppTip":"Gestor"), "Folgas do contrato aplicadas", onUpdate, true);
-                  onUpdate("schedules", newSchedules);
-                  setSchedLocalEdits(null);
+                  if (Object.keys(bulkEdits).length) {
+                    setSchedLocalEdits(prev => {
+                      const edits = prev ? { ...prev } : {};
+                      Object.entries(bulkEdits).forEach(([eid, dayMap]) => {
+                        edits[eid] = { ...(edits[eid] ?? {}), ...dayMap };
+                      });
+                      return edits;
+                    });
+                  }
                   const parts = [];
                   if (added) parts.push(`${added} folga(s) adicionada(s)`);
                   if (removed) parts.push(`${removed} folga(s) removida(s) fora do contrato`);
-                  onUpdate("_toast", parts.length ? `✅ ${parts.join(" · ")}` : "Escala já está de acordo com o contrato");
+                  onUpdate("_toast", parts.length ? `✅ ${parts.join(" · ")} — salve para confirmar` : "Escala já está de acordo com o contrato");
                 }} style={{...S.btnSecondary,fontSize:mobileOnly?11:12,color:"var(--red)",borderColor:"var(--red)44",whiteSpace:"nowrap"}}>
                   {mobileOnly?"📅 Folgas":"📅 Folgas do contrato"}
                 </button>
@@ -6089,17 +6090,25 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                   const mesNome = monthLabel(year, month);
                   const n = areaEmps.length;
                   if (!n) return;
-                  if (!window.confirm(`Reiniciar escala de ${mesNome}?\n\nTodos os ${n} empregado(s) ${schedArea==="Todos"?"":"da área "+schedArea+" "}voltarão ao status "Trabalho" em todos os dias.\n\nIsso remove folgas, freelas, férias, faltas e compensações do mês.\n\n⚠️ Um backup será salvo no Histórico — você pode restaurar a versão anterior a qualquer momento.`)) return;
-                  // Snapshot bulk antes do reset
-                  const preSnap2 = snapshotSchedulesMonth(schedules, rid, mk);
-                  saveVersion("schedules", rid, mk, data?.scheduleVersions, preSnap2, currentUser?.name || (isOwner?"Admin AppTip":"Gestor"), `Reiniciar escala (${schedArea==="Todos"?"todas as áreas":schedArea})`, onUpdate, true);
-                  let newSched = JSON.parse(JSON.stringify(schedules ?? {}));
-                  if (!newSched[rid]) newSched[rid] = {};
-                  if (!newSched[rid][mk]) newSched[rid][mk] = {};
-                  areaEmps.forEach(emp => { newSched[rid][mk][emp.id] = {}; });
-                  onUpdate("schedules", newSched);
-                  setSchedLocalEdits(null);
-                  onUpdate("_toast", `🔄 Escala de ${mesNome} reiniciada — ${n} empregado(s)`);
+                  if (!window.confirm(`Reiniciar escala de ${mesNome}?\n\nTodos os ${n} empregado(s) ${schedArea==="Todos"?"":"da área "+schedArea+" "}voltarão ao status "Trabalho" em todos os dias.\n\nIsso remove folgas, freelas, férias, faltas e compensações do mês.\n\nSalve a escala para confirmar a alteração.`)) return;
+                  // Accumulate reset as local edits — null each existing day status
+                  const resetEdits = {};
+                  areaEmps.forEach(emp => {
+                    const empDayMap = effectiveMonth[emp.id] ?? {};
+                    const empNulls = {};
+                    Object.keys(empDayMap).forEach(date => { empNulls[date] = null; });
+                    if (Object.keys(empNulls).length) resetEdits[emp.id] = empNulls;
+                  });
+                  if (Object.keys(resetEdits).length) {
+                    setSchedLocalEdits(prev => {
+                      const edits = prev ? { ...prev } : {};
+                      Object.entries(resetEdits).forEach(([eid, dayMap]) => {
+                        edits[eid] = { ...(edits[eid] ?? {}), ...dayMap };
+                      });
+                      return edits;
+                    });
+                  }
+                  onUpdate("_toast", `🔄 Escala de ${mesNome} reiniciada para ${n} empregado(s) — salve para confirmar`);
                 }} style={{...S.btnSecondary,fontSize:mobileOnly?11:12,color:"var(--red)",borderColor:"var(--red)44",whiteSpace:"nowrap"}}>
                   {mobileOnly?"🔄 Reiniciar":"🔄 Reiniciar escala"}
                 </button>
@@ -6316,30 +6325,26 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                       if (!vacEmpId || !vacFrom || !vacTo || vacFrom > vacTo) return;
                       const emp = areaEmps.find(e => e.id === vacEmpId);
                       if (!emp) return;
-                      let newSched = JSON.parse(JSON.stringify(schedules ?? {}));
-                      if (!newSched[rid]) newSched[rid] = {};
-                      if (!newSched[rid][mk]) newSched[rid][mk] = {};
-                      const empMap = { ...(newSched[rid][mk][vacEmpId] ?? {}) };
+                      // Accumulate vacation days in local edits
+                      const vacEdits = {};
                       let count = 0;
                       const cur = new Date(vacFrom+"T12:00:00");
                       const end = new Date(vacTo+"T12:00:00");
                       while (cur <= end) {
                         const dateStr = cur.toISOString().slice(0,10);
-                        // Só aplica se a data pertence ao mês atual
                         if (dateStr.slice(0,7) === `${year}-${String(month+1).padStart(2,"0")}`) {
-                          empMap[dateStr] = DAY_VACATION;
+                          vacEdits[dateStr] = DAY_VACATION;
                           count++;
                         }
                         cur.setDate(cur.getDate() + 1);
                       }
-                      newSched[rid][mk][vacEmpId] = empMap;
-                      // Snapshot bulk antes de marcar férias
-                      const preSnapV = snapshotSchedulesMonth(schedules, rid, mk);
-                      saveVersion("schedules", rid, mk, data?.scheduleVersions, preSnapV, currentUser?.name || (isOwner?"Admin AppTip":"Gestor"), `Férias marcadas (${emp.name}, ${count} dia${count>1?"s":""})`, onUpdate, true);
-                      onUpdate("schedules", newSched);
-                      setSchedLocalEdits(null);
+                      setSchedLocalEdits(prev => {
+                        const edits = prev ? { ...prev } : {};
+                        edits[vacEmpId] = { ...(edits[vacEmpId] ?? {}), ...vacEdits };
+                        return edits;
+                      });
                       setShowVacForm(false);
-                      onUpdate("_toast", `🏖️ ${count} dia(s) de férias marcados para ${emp.name}`);
+                      onUpdate("_toast", `🏖️ ${count} dia(s) de férias marcados para ${emp.name} — salve para confirmar`);
                     }} disabled={!vacEmpId||!vacFrom||!vacTo||vacFrom>vacTo}
                       style={{...S.btnPrimary,background:"#8b5cf6",flex:1,opacity:(!vacEmpId||!vacFrom||!vacTo||vacFrom>vacTo)?0.5:1}}>
                       Confirmar férias
