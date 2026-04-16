@@ -4239,45 +4239,29 @@ function ValeTransporteTab({ restaurantId, employees, roles, workSchedules, sche
   const prevPayment = vtPayments?.[restaurantId]?.[prevMk] ?? null;
   const currentPayment = vtPayments?.[restaurantId]?.[mk] ?? null;
 
-  // ── Count planned working days ──
+  // ── Count planned working days (alinhado com visual da escala) ──
   function countPlannedDays(empId) {
-    const empScheds = workSchedules?.[restaurantId]?.[empId] ?? [];
-    if (!empScheds.length) return 0;
     const lastDay = new Date(year, month+1, 0).getDate();
-    const monthEnd = `${year}-${String(month+1).padStart(2,"0")}-${String(lastDay).padStart(2,"0")}`;
-    const validScheds = empScheds.filter(s => !s.validFrom || s.validFrom <= monthEnd).sort((a,b) => (b.validFrom??"").localeCompare(a.validFrom??""));
-    const sched = validScheds[0];
-    if (!sched?.days) return 0;
     const schedDayMap = schedules?.[restaurantId]?.[mk]?.[empId] ?? {};
     let count = 0;
     for (let d = 1; d <= lastDay; d++) {
       const dateStr = `${year}-${String(month+1).padStart(2,"0")}-${String(d).padStart(2,"0")}`;
-      const dow = new Date(year, month, d).getDay();
       const escalaSt = schedDayMap[dateStr];
-      if (escalaSt === "comptrab") { count++; continue; } // trabalho por compensação = dia trabalhado (recebe VT)
-      if (escalaSt === "vac" || escalaSt === "off" || escalaSt === "comp" || escalaSt === "faultj" || escalaSt === "faultu") continue;
-      { const dayData = sched.days[dow]; if (dayData && dayData?.active !== false) count++; }
+      if (!escalaSt || escalaSt === "comptrab") { count++; }
+      // off, comp, vac, faultj, faultu, freela = não conta
     }
     return count;
   }
 
-  // ── Count actual working days (for auto-adjust) ──
+  // ── Count actual working days (for auto-adjust, alinhado com visual) ──
   function countActualDays(empId, targetMk, targetYear, targetMonth) {
-    const empScheds = workSchedules?.[restaurantId]?.[empId] ?? [];
     const lastDay = new Date(targetYear, targetMonth+1, 0).getDate();
-    const monthEnd = `${targetYear}-${String(targetMonth+1).padStart(2,"0")}-${String(lastDay).padStart(2,"0")}`;
-    const validScheds = empScheds.filter(s => !s.validFrom || s.validFrom <= monthEnd).sort((a,b) => (b.validFrom??"").localeCompare(a.validFrom??""));
-    const sched = validScheds[0];
-    if (!sched?.days) return 0;
     const schedDayMap = schedules?.[restaurantId]?.[targetMk]?.[empId] ?? {};
     let count = 0;
     for (let d = 1; d <= lastDay; d++) {
       const dateStr = `${targetYear}-${String(targetMonth+1).padStart(2,"0")}-${String(d).padStart(2,"0")}`;
-      const dow = new Date(targetYear, targetMonth, d).getDay();
       const escalaSt = schedDayMap[dateStr];
-      if (escalaSt === "comptrab") { count++; continue; } // trabalho por compensação = dia trabalhado (recebe VT)
-      if (escalaSt === "vac" || escalaSt === "off" || escalaSt === "comp" || escalaSt === "faultj" || escalaSt === "faultu") continue;
-      { const dayData = sched.days[dow]; if (dayData && dayData?.active !== false) count++; }
+      if (!escalaSt || escalaSt === "comptrab") { count++; }
     }
     return count;
   }
@@ -5776,24 +5760,17 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                   const daysInDemMonth = new Date(demY, demM, 0).getDate();
 
                   // Count planned days (full month) and actual days worked until dismissal
-                  const empScheds = data?.workSchedules?.[rid]?.[emp.id] ?? [];
-                  const monthEnd = `${demY}-${String(demM).padStart(2,"0")}-${String(daysInDemMonth).padStart(2,"0")}`;
-                  const validScheds = empScheds.filter(s => !s.validFrom || s.validFrom <= monthEnd).sort((a,b) => (b.validFrom??"").localeCompare(a.validFrom??""));
-                  const sched = validScheds[0];
+                  // Alinhado com visual: sem status = dia de trabalho
                   const schedDayMap = schedules?.[rid]?.[demMk]?.[emp.id] ?? {};
 
                   let plannedFullMonth = 0;
                   let workedUntilDismissal = 0;
                   for (let d = 1; d <= daysInDemMonth; d++) {
                     const dateStr = `${demY}-${String(demM).padStart(2,"0")}-${String(d).padStart(2,"0")}`;
-                    const dow = new Date(demY, demM-1, d).getDay();
                     const escalaSt = schedDayMap[dateStr];
-                    const isSkip = escalaSt === "vac" || escalaSt === "off" || escalaSt === "comp" || escalaSt === "faultj" || escalaSt === "faultu";
-                    const isCompTrab = escalaSt === "comptrab";
-                    const schDay = sched?.days?.[dow];
-                    const isWorkDay = schDay && schDay?.active !== false;
-                    if (isCompTrab || (!isSkip && isWorkDay)) plannedFullMonth++;
-                    if (d < demDay && (isCompTrab || (!isSkip && isWorkDay))) workedUntilDismissal++;
+                    const isWork = !escalaSt || escalaSt === "comptrab";
+                    if (isWork) plannedFullMonth++;
+                    if (d < demDay && isWork) workedUntilDismissal++;
                   }
 
                   const vtPaidMonth = dailyRate * plannedFullMonth;
@@ -6340,22 +6317,15 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                       {areaEmps.map((emp,ei) => {
                         const role = restRoles.find(r=>r.id===emp.roleId);
                         const dayMap = schedules?.[rid]?.[mk]?.[emp.id] ?? {};
-                        // Contagem alinhada com VT: usa contrato + status diário
+                        // Contagem alinhada com o visual: sem status = "•" = trabalho
                         let workC=0, offC=0;
-                        const empScheds = data?.workSchedules?.[rid]?.[emp.id] ?? [];
-                        const monthEnd2 = `${year}-${String(month+1).padStart(2,"0")}-${String(daysInMonth).padStart(2,"0")}`;
-                        const validScheds2 = empScheds.filter(s => !s.validFrom || s.validFrom <= monthEnd2).sort((a,b) => (b.validFrom??"").localeCompare(a.validFrom??""));
-                        const empSched = validScheds2[0];
                         for (let dd = 1; dd <= daysInMonth; dd++) {
                           const dateStr2 = `${year}-${String(month+1).padStart(2,"0")}-${String(dd).padStart(2,"0")}`;
                           const isDem2 = emp.demitidoEm && dateStr2 >= emp.demitidoEm;
                           if (isDem2) continue;
-                          const dow2 = new Date(year, month, dd).getDay();
                           const st = dayMap[dateStr2];
-                          if (st === DAY_COMP_TRAB) { workC++; continue; }
-                          if (st === DAY_OFF || st === DAY_FREELA || st === DAY_FAULT_J || st === DAY_FAULT_U || st === DAY_VACATION) { offC++; continue; }
-                          if (st === DAY_COMP) { offC++; continue; }
-                          { const dayData2 = empSched?.days?.[dow2]; if (dayData2 && dayData2?.active !== false) workC++; }
+                          if (!st || st === DAY_COMP_TRAB) { workC++; }
+                          else { offC++; }
                         }
 
                         const prevEmp = areaEmps[ei-1];
