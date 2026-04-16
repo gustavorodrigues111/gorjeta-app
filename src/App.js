@@ -4137,24 +4137,27 @@ function ValeTransporteTab({ restaurantId, employees, roles, workSchedules, sche
   const restEmps = (employees ?? []).filter(e => e.restaurantId === restaurantId && !e.isFreela && !(e.inactive && e.inactiveFrom && e.inactiveFrom <= today()));
   const restRoles = (roles ?? []).filter(r => r.restaurantId === restaurantId);
 
-  // ── Editable local state for monthly overrides ──
+  // ── BR currency input helpers ──
+  const toBR = (v) => { const n = parseFloat(v); return isNaN(n) || n === 0 ? "" : n.toFixed(2).replace(".", ","); };
+  const fromBR = (s) => { if (!s) return 0; return parseFloat(s.replace(/\./g, "").replace(",", ".")) || 0; };
+
+  // ── Editable local state ──
   const [localOverrides, setLocalOverrides] = useState({});
-  const [localRates, setLocalRates] = useState({});
+  const [localRates, setLocalRates] = useState({}); // display strings in BR format
   const [dirty, setDirty] = useState(false);
 
-  // Initialize local state from saved data when month changes
   useEffect(() => {
     const monthData = vtMonthly?.[restaurantId]?.[mk] ?? {};
     const overrides = {};
     Object.entries(monthData).forEach(([empId, v]) => {
-      overrides[empId] = { adjustOverride: v.adjustOverride ?? null, manualDiscount: v.manualDiscount ?? 0 };
+      overrides[empId] = { adjustOverride: v.adjustOverride ?? null, adjustDisplay: toBR(v.adjustOverride), manualDiscount: v.manualDiscount ?? 0, discountDisplay: toBR(v.manualDiscount) };
     });
     setLocalOverrides(overrides);
 
     const rates = {};
     const cfgRest = vtConfig?.[restaurantId] ?? {};
     restEmps.forEach(emp => {
-      rates[emp.id] = cfgRest[emp.id]?.dailyRate ?? 0;
+      rates[emp.id] = toBR(cfgRest[emp.id]?.dailyRate ?? 0);
     });
     setLocalRates(rates);
     setDirty(false);
@@ -4164,86 +4167,63 @@ function ValeTransporteTab({ restaurantId, employees, roles, workSchedules, sche
   const prevDate = new Date(year, month - 1, 1);
   const prevMk = monthKey(prevDate.getFullYear(), prevDate.getMonth());
   const prevPayment = vtPayments?.[restaurantId]?.[prevMk] ?? null;
-
-  // ── Current month payment ──
   const currentPayment = vtPayments?.[restaurantId]?.[mk] ?? null;
 
-  // ── Count planned working days for an employee in a month ──
+  // ── Count planned working days ──
   function countPlannedDays(empId) {
-    // Use workSchedules to find the employee's contracted schedule
     const empScheds = workSchedules?.[restaurantId]?.[empId] ?? [];
     if (!empScheds.length) return 0;
-
-    // Find the schedule valid for this month
     const lastDay = new Date(year, month+1, 0).getDate();
     const monthEnd = `${year}-${String(month+1).padStart(2,"0")}-${String(lastDay).padStart(2,"0")}`;
-
-    // Find the most recent schedule valid at or before month end
     const validScheds = empScheds.filter(s => !s.validFrom || s.validFrom <= monthEnd).sort((a,b) => (b.validFrom??"").localeCompare(a.validFrom??""));
     const sched = validScheds[0];
     if (!sched?.days) return 0;
-
-    // Count calendar days in this month that match working days in the schedule
     const schedDayMap = schedules?.[restaurantId]?.[mk]?.[empId] ?? {};
     let count = 0;
     for (let d = 1; d <= lastDay; d++) {
       const dateStr = `${year}-${String(month+1).padStart(2,"0")}-${String(d).padStart(2,"0")}`;
-      const dow = new Date(year, month, d).getDay(); // 0=Sun
-
-      // Check escala status first (overrides contracted schedule)
+      const dow = new Date(year, month, d).getDay();
       const escalaSt = schedDayMap[dateStr];
-      if (escalaSt === "vac" || escalaSt === "off") { continue; } // vacation/off = no VT
-      if (escalaSt === "comp") { continue; } // compensation = no VT
-      if (escalaSt === "faultj" || escalaSt === "faultu") { continue; } // faults = no VT
-
-      // If escala explicitly shows working (or no entry = follows contract)
-      if (sched.days[dow]) { count++; } // contracted day
+      if (escalaSt === "vac" || escalaSt === "off" || escalaSt === "comp" || escalaSt === "faultj" || escalaSt === "faultu") continue;
+      if (sched.days[dow]) count++;
     }
     return count;
   }
 
-  // ── Count actual working days (for auto-adjust from previous month) ──
+  // ── Count actual working days (for auto-adjust) ──
   function countActualDays(empId, targetMk, targetYear, targetMonth) {
     const empScheds = workSchedules?.[restaurantId]?.[empId] ?? [];
     const lastDay = new Date(targetYear, targetMonth+1, 0).getDate();
     const monthEnd = `${targetYear}-${String(targetMonth+1).padStart(2,"0")}-${String(lastDay).padStart(2,"0")}`;
-
     const validScheds = empScheds.filter(s => !s.validFrom || s.validFrom <= monthEnd).sort((a,b) => (b.validFrom??"").localeCompare(a.validFrom??""));
     const sched = validScheds[0];
     if (!sched?.days) return 0;
-
     const schedDayMap = schedules?.[restaurantId]?.[targetMk]?.[empId] ?? {};
     let count = 0;
     for (let d = 1; d <= lastDay; d++) {
       const dateStr = `${targetYear}-${String(targetMonth+1).padStart(2,"0")}-${String(d).padStart(2,"0")}`;
       const dow = new Date(targetYear, targetMonth, d).getDay();
       const escalaSt = schedDayMap[dateStr];
-
-      // Faults, vacation, off, comp = did NOT work
-      if (escalaSt === "vac" || escalaSt === "off" || escalaSt === "comp") continue;
-      if (escalaSt === "faultj" || escalaSt === "faultu") continue;
-
+      if (escalaSt === "vac" || escalaSt === "off" || escalaSt === "comp" || escalaSt === "faultj" || escalaSt === "faultu") continue;
       if (sched.days[dow]) count++;
     }
     return count;
   }
 
-  // ── Calculate auto-adjust from previous month ──
   function calcAutoAdjust(empId) {
     if (!prevPayment?.snapshot) return 0;
     const prevSnap = prevPayment.snapshot.find(s => s.empId === empId);
     if (!prevSnap) return 0;
-
-    // Actual days worked in prev month vs what was paid
     const actualDays = countActualDays(empId, prevMk, prevDate.getFullYear(), prevDate.getMonth());
     const diff = actualDays - prevSnap.plannedDays;
     return round2(diff * prevSnap.dailyRate);
   }
 
-  // ── Build table rows ──
+  // ── Build rows ──
   const rows = restEmps.map(emp => {
     const role = restRoles.find(r => r.id === emp.roleId);
-    const dailyRate = localRates[emp.id] ?? vtConfig?.[restaurantId]?.[emp.id]?.dailyRate ?? 0;
+    const area = role?.area ?? "Outros";
+    const dailyRate = fromBR(localRates[emp.id]);
     const plannedDays = countPlannedDays(emp.id);
     const grossVT = round2(dailyRate * plannedDays);
     const suggestedAdjust = calcAutoAdjust(emp.id);
@@ -4251,37 +4231,44 @@ function ValeTransporteTab({ restaurantId, employees, roles, workSchedules, sche
     const autoAdjust = overrides.adjustOverride !== null && overrides.adjustOverride !== undefined ? overrides.adjustOverride : suggestedAdjust;
     const manualDiscount = overrides.manualDiscount ?? 0;
     const totalPaid = round2(grossVT + autoAdjust - manualDiscount);
-
-    return { emp, role, dailyRate, plannedDays, grossVT, suggestedAdjust, autoAdjust, manualDiscount, totalPaid };
+    return { emp, role, area, dailyRate, plannedDays, grossVT, suggestedAdjust, autoAdjust, manualDiscount, totalPaid };
   }).sort((a,b) => (a.emp.name??"").localeCompare(b.emp.name??""));
+
+  // ── Group by area ──
+  const areaOrder = [...AREAS, "Outros"];
+  const byArea = {};
+  areaOrder.forEach(a => { byArea[a] = []; });
+  rows.forEach(r => { const a = areaOrder.includes(r.area) ? r.area : "Outros"; byArea[a].push(r); });
+  const activeAreas = areaOrder.filter(a => byArea[a].length > 0);
 
   const grandTotal = rows.reduce((s,r) => s + Math.max(0, r.totalPaid), 0);
 
-  // ── Save changes ──
-  function saveChanges() {
-    // Save daily rates to vtConfig
+  // ── Auto-save on blur ──
+  function persistAll() {
     const newCfg = { ...(vtConfig ?? {}), [restaurantId]: { ...(vtConfig?.[restaurantId] ?? {}) } };
-    Object.entries(localRates).forEach(([empId, rate]) => {
-      newCfg[restaurantId][empId] = { dailyRate: parseFloat(rate) || 0 };
+    Object.entries(localRates).forEach(([empId, rateStr]) => {
+      newCfg[restaurantId][empId] = { dailyRate: fromBR(rateStr) };
     });
     onUpdate("vtConfig", newCfg);
 
-    // Save monthly overrides to vtMonthly
     const newMonthly = { ...(vtMonthly ?? {}), [restaurantId]: { ...(vtMonthly?.[restaurantId] ?? {}), [mk]: {} } };
     Object.entries(localOverrides).forEach(([empId, v]) => {
       newMonthly[restaurantId][mk][empId] = { adjustOverride: v.adjustOverride ?? null, manualDiscount: v.manualDiscount ?? 0 };
     });
     onUpdate("vtMonthly", newMonthly);
     setDirty(false);
-    onUpdate("_toast", "✅ Valores de VT salvos");
+  }
+
+  function handleBlur() {
+    if (dirty) persistAll();
   }
 
   // ── Mark as paid ──
   function markAsPaid() {
     if (!window.confirm("Marcar este mês como PAGO?\n\nOs valores atuais serão congelados como referência para o cálculo de ajuste do próximo mês.")) return;
-    saveChanges(); // ensure latest is saved
+    if (dirty) persistAll();
     const snapshot = rows.map(r => ({
-      empId: r.emp.id, name: r.emp.name, role: r.role?.name ?? "—",
+      empId: r.emp.id, name: r.emp.name, role: r.role?.name ?? "—", area: r.area,
       dailyRate: r.dailyRate, plannedDays: r.plannedDays, grossVT: r.grossVT,
       autoAdjust: r.autoAdjust, manualDiscount: r.manualDiscount, totalPaid: Math.max(0, r.totalPaid),
     }));
@@ -4290,38 +4277,163 @@ function ValeTransporteTab({ restaurantId, employees, roles, workSchedules, sche
     onUpdate("_toast", "💰 VT marcado como pago!");
   }
 
-  // ── Export helpers ──
+  // ── Export CSV (grouped) ──
   function exportCSV() {
-    const header = "Empregado;Cargo;VT Diário;Dias Previstos;VT Bruto;Ajuste Mês Ant.;Desconto Manual;Total";
-    const csvRows = rows.map(r => `${r.emp.name};${r.role?.name??"—"};${fmtBR(r.dailyRate)};${r.plannedDays};${fmtBR(r.grossVT)};${fmtBR(r.autoAdjust)};${fmtBR(r.manualDiscount)};${fmtBR(Math.max(0,r.totalPaid))}`);
-    csvRows.push(`;;;;;;TOTAL;${fmtBR(grandTotal)}`);
+    const header = "Área;Empregado;Cargo;VT Diário;Dias;VT Bruto;Ajuste Mês Ant.;Desconto;Total";
+    const csvRows = [];
+    activeAreas.forEach(area => {
+      const areaRows = byArea[area];
+      areaRows.forEach(r => { csvRows.push(`${area};${r.emp.name};${r.role?.name??"—"};${fmtBR(r.dailyRate)};${r.plannedDays};${fmtBR(r.grossVT)};${fmtBR(r.autoAdjust)};${fmtBR(r.manualDiscount)};${fmtBR(Math.max(0,r.totalPaid))}`); });
+      const sub = areaRows.reduce((s,r) => s + Math.max(0, r.totalPaid), 0);
+      csvRows.push(`${area};;;;;;;Subtotal;${fmtBR(sub)}`);
+    });
+    csvRows.push(`;;;;;;;;TOTAL;${fmtBR(grandTotal)}`);
     const blob = new Blob(["\uFEFF" + header + "\n" + csvRows.join("\n")], { type: "text/csv;charset=utf-8;" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a"); a.href = url; a.download = `VT_${mk}.csv`; a.click(); URL.revokeObjectURL(url);
     onUpdate("_toast", "📊 CSV exportado");
   }
 
+  // ── Export PDF (grouped) ──
   function exportPDF() {
     const w = window.open("", "_blank");
     if (!w) { onUpdate("_toast", "⚠️ Permita pop-ups para exportar PDF"); return; }
     const paidInfo = currentPayment ? `<p style="color:green;font-weight:700">✅ Pago em ${new Date(currentPayment.paidAt).toLocaleString("pt-BR")} por ${currentPayment.paidBy}</p>` : `<p style="color:#b45309;font-weight:700">⏳ Ainda não marcado como pago</p>`;
-    const tableRows = rows.map(r => `<tr><td>${r.emp.name}</td><td>${r.role?.name??"—"}</td><td style="text-align:right">${fmt(r.dailyRate)}</td><td style="text-align:center">${r.plannedDays}</td><td style="text-align:right">${fmt(r.grossVT)}</td><td style="text-align:right;color:${r.autoAdjust>=0?"green":"#b45309"}">${r.autoAdjust>=0?"+":""}${fmt(r.autoAdjust)}</td><td style="text-align:right;color:#b45309">${r.manualDiscount?"-"+fmt(r.manualDiscount):"—"}</td><td style="text-align:right;font-weight:700">${fmt(Math.max(0,r.totalPaid))}</td></tr>`).join("");
-    w.document.write(`<!DOCTYPE html><html><head><title>VT ${mk}</title><style>body{font-family:Arial,sans-serif;margin:24px}table{border-collapse:collapse;width:100%}th,td{border:1px solid #ccc;padding:8px 12px;font-size:13px}th{background:#f5f5f5;font-weight:700}tr:nth-child(even){background:#fafafa}h1{font-size:20px}h2{font-size:15px;color:#666}</style></head><body><h1>🚌 Vale Transporte — ${monthLabel(year,month)}</h1>${paidInfo}<table><thead><tr><th>Empregado</th><th>Cargo</th><th>VT Diário</th><th>Dias</th><th>VT Bruto</th><th>Ajuste Mês Ant.</th><th>Desconto</th><th>Total</th></tr></thead><tbody>${tableRows}<tr style="font-weight:700;background:#e8e8e8"><td colspan="7" style="text-align:right">TOTAL GERAL</td><td style="text-align:right">${fmt(grandTotal)}</td></tr></tbody></table><p style="font-size:11px;color:#999;margin-top:24px">Gerado por AppTip em ${new Date().toLocaleString("pt-BR")}</p></body></html>`);
+    let tableBody = "";
+    activeAreas.forEach(area => {
+      const color = AREA_COLORS[area] ?? "#666";
+      tableBody += `<tr><td colspan="8" style="background:${color}18;color:${color};font-weight:700;padding:10px 12px;font-size:14px;border-left:4px solid ${color}">${area}</td></tr>`;
+      byArea[area].forEach(r => {
+        tableBody += `<tr><td>${r.emp.name}</td><td>${r.role?.name??"—"}</td><td style="text-align:right">${fmt(r.dailyRate)}</td><td style="text-align:center">${r.plannedDays}</td><td style="text-align:right">${fmt(r.grossVT)}</td><td style="text-align:right;color:${r.autoAdjust>=0?"green":"#b45309"}">${r.autoAdjust>=0?"+":""}${fmt(r.autoAdjust)}</td><td style="text-align:right;color:#b45309">${r.manualDiscount?"-"+fmt(r.manualDiscount):"—"}</td><td style="text-align:right;font-weight:700">${fmt(Math.max(0,r.totalPaid))}</td></tr>`;
+      });
+      const sub = byArea[area].reduce((s,r) => s + Math.max(0, r.totalPaid), 0);
+      tableBody += `<tr style="background:#f9f9f9"><td colspan="7" style="text-align:right;font-weight:600;font-size:12px;color:${color}">Subtotal ${area}</td><td style="text-align:right;font-weight:700;color:${color}">${fmt(sub)}</td></tr>`;
+    });
+    tableBody += `<tr style="font-weight:700;background:#e8e8e8"><td colspan="7" style="text-align:right;font-size:15px">TOTAL GERAL</td><td style="text-align:right;font-size:15px">${fmt(grandTotal)}</td></tr>`;
+    w.document.write(`<!DOCTYPE html><html><head><title>VT ${mk}</title><style>body{font-family:Arial,sans-serif;margin:24px}table{border-collapse:collapse;width:100%}th,td{border:1px solid #ccc;padding:8px 12px;font-size:13px}th{background:#f5f5f5;font-weight:700}h1{font-size:20px}</style></head><body><h1>🚌 Vale Transporte — ${monthLabel(year,month)}</h1>${paidInfo}<table><thead><tr><th>Empregado</th><th>Cargo</th><th>VT Diário</th><th>Dias</th><th>VT Bruto</th><th>Ajuste Mês Ant.</th><th>Desconto</th><th>Total</th></tr></thead><tbody>${tableBody}</tbody></table><p style="font-size:11px;color:#999;margin-top:24px">Gerado por AppTip em ${new Date().toLocaleString("pt-BR")}</p></body></html>`);
     w.document.close();
     setTimeout(() => w.print(), 500);
     onUpdate("_toast", "🖨️ PDF pronto para impressão");
   }
 
-  // ── Month navigation ──
-  const goMonth = (dir) => {
-    const d = new Date(year, month + dir, 1);
-    setYear(d.getFullYear());
-    setMonth(d.getMonth());
-  };
+  const goMonth = (dir) => { const d = new Date(year, month + dir, 1); setYear(d.getFullYear()); setMonth(d.getMonth()); };
 
-  // ── UI ──
+  // ── Render helpers ──
   const inputStyle = { ...S.input, width: mobileOnly ? 80 : 100, textAlign: "right", padding: "8px 10px", fontSize: 14 };
   const cellPad = mobileOnly ? "8px 6px" : "12px 16px";
+
+  // ── BR money input component ──
+  const MoneyInput = ({ value, onChange, onBlurExtra, style: extraStyle, placeholder }) => (
+    <input
+      type="text" inputMode="decimal" placeholder={placeholder ?? "0,00"}
+      value={value ?? ""}
+      onChange={e => {
+        // Allow digits, comma, dot, minus
+        const raw = e.target.value.replace(/[^0-9,.\u002D]/g, "");
+        onChange(raw);
+      }}
+      onBlur={e => {
+        // Format on blur: parse → format as X,XX
+        const n = fromBR(e.target.value);
+        onChange(n ? n.toFixed(2).replace(".", ",") : "");
+        if (onBlurExtra) onBlurExtra();
+        handleBlur();
+      }}
+      style={{ ...inputStyle, ...extraStyle }}
+    />
+  );
+
+  // ── Area section renderer ──
+  const renderAreaSection = (area, areaRows) => {
+    const areaColor = AREA_COLORS[area] ?? "var(--text3)";
+    const areaSubtotal = areaRows.reduce((s,r) => s + Math.max(0, r.totalPaid), 0);
+
+    return (
+      <div key={area} style={{ marginBottom: mobileOnly ? 12 : 20 }}>
+        {/* Area header */}
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8, padding: mobileOnly ? "8px 12px" : "10px 16px", background: `${areaColor}12`, borderRadius: 12, borderLeft: `4px solid ${areaColor}` }}>
+          <span style={{ color: areaColor, fontWeight: 700, fontSize: mobileOnly ? 14 : 16 }}>{area}</span>
+          <span style={{ color: areaColor, fontWeight: 700, fontSize: mobileOnly ? 14 : 16, fontFamily: "'DM Mono',monospace" }}>{fmt(areaSubtotal)}</span>
+        </div>
+
+        {mobileOnly ? (
+          /* ── MOBILE: cards ── */
+          areaRows.map(r => {
+            const adjustColor = r.autoAdjust > 0 ? "#047857" : r.autoAdjust < 0 ? "#b45309" : "var(--text3)";
+            return (
+              <div key={r.emp.id} style={{ ...S.card, marginBottom: 6, padding: "10px 12px" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+                  <div>
+                    <div style={{ color: "var(--text)", fontWeight: 700, fontSize: 13 }}>{r.emp.name}</div>
+                    <div style={{ color: "var(--text3)", fontSize: 10 }}>{r.role?.name ?? "—"} • {r.plannedDays} dias</div>
+                  </div>
+                  <div style={{ color: "var(--text)", fontWeight: 700, fontSize: 15, fontFamily: "'DM Mono',monospace" }}>{fmt(Math.max(0, r.totalPaid))}</div>
+                </div>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 6 }}>
+                  <div>
+                    <div style={{ color: "var(--text3)", fontSize: 9, marginBottom: 3 }}>VT Diário</div>
+                    <MoneyInput value={localRates[r.emp.id]} onChange={v => { setLocalRates(prev => ({ ...prev, [r.emp.id]: v })); setDirty(true); }} style={{ width: "100%", padding: "5px 7px", fontSize: 12 }} />
+                  </div>
+                  <div>
+                    <div style={{ color: "var(--text3)", fontSize: 9, marginBottom: 3 }}>Ajuste {r.suggestedAdjust !== 0 && <span style={{ color: adjustColor }}>({r.suggestedAdjust > 0 ? "+" : ""}{fmtBR(r.suggestedAdjust)})</span>}</div>
+                    <MoneyInput value={localOverrides[r.emp.id]?.adjustDisplay ?? toBR(r.autoAdjust)} onChange={v => { setLocalOverrides(prev => ({ ...prev, [r.emp.id]: { ...(prev[r.emp.id] ?? {}), adjustOverride: fromBR(v), adjustDisplay: v } })); setDirty(true); }} style={{ width: "100%", padding: "5px 7px", fontSize: 12, color: adjustColor }} />
+                  </div>
+                  <div>
+                    <div style={{ color: "var(--text3)", fontSize: 9, marginBottom: 3 }}>Desconto</div>
+                    <MoneyInput value={localOverrides[r.emp.id]?.discountDisplay ?? toBR(r.manualDiscount)} onChange={v => { setLocalOverrides(prev => ({ ...prev, [r.emp.id]: { ...(prev[r.emp.id] ?? {}), manualDiscount: fromBR(v), discountDisplay: v } })); setDirty(true); }} style={{ width: "100%", padding: "5px 7px", fontSize: 12 }} />
+                  </div>
+                </div>
+              </div>
+            );
+          })
+        ) : (
+          /* ── DESKTOP: table section ── */
+          <div style={{ ...S.card, padding: 0, overflow: "auto", marginBottom: 4 }}>
+            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 14 }}>
+              <thead>
+                <tr style={{ background: "var(--bg1)" }}>
+                  <th style={{ padding: cellPad, textAlign: "left", color: "var(--text)", fontWeight: 700, borderBottom: "2px solid var(--border)" }}>Empregado</th>
+                  <th style={{ padding: cellPad, textAlign: "left", color: "var(--text3)", fontWeight: 600, borderBottom: "2px solid var(--border)" }}>Cargo</th>
+                  <th style={{ padding: cellPad, textAlign: "right", color: "var(--text3)", fontWeight: 600, borderBottom: "2px solid var(--border)", width: 110 }}>VT Diário</th>
+                  <th style={{ padding: cellPad, textAlign: "center", color: "var(--text3)", fontWeight: 600, borderBottom: "2px solid var(--border)", width: 60 }}>Dias</th>
+                  <th style={{ padding: cellPad, textAlign: "right", color: "var(--text3)", fontWeight: 600, borderBottom: "2px solid var(--border)", width: 110 }}>VT Bruto</th>
+                  <th style={{ padding: cellPad, textAlign: "right", color: "var(--text3)", fontWeight: 600, borderBottom: "2px solid var(--border)", width: 140 }}>Ajuste Mês Ant.</th>
+                  <th style={{ padding: cellPad, textAlign: "right", color: "var(--text3)", fontWeight: 600, borderBottom: "2px solid var(--border)", width: 110 }}>Desconto</th>
+                  <th style={{ padding: cellPad, textAlign: "right", color: "var(--text)", fontWeight: 700, borderBottom: "2px solid var(--border)", width: 120 }}>Total</th>
+                </tr>
+              </thead>
+              <tbody>
+                {areaRows.map((r, i) => {
+                  const adjustColor = r.autoAdjust > 0 ? "#047857" : r.autoAdjust < 0 ? "#b45309" : "var(--text3)";
+                  return (
+                    <tr key={r.emp.id} style={{ borderBottom: i < areaRows.length - 1 ? "1px solid var(--border)" : "none" }}>
+                      <td style={{ padding: cellPad, color: "var(--text)", fontWeight: 600 }}>{r.emp.name}</td>
+                      <td style={{ padding: cellPad, color: "var(--text3)" }}>{r.role?.name ?? "—"}</td>
+                      <td style={{ padding: cellPad, textAlign: "right" }}>
+                        <MoneyInput value={localRates[r.emp.id]} onChange={v => { setLocalRates(prev => ({ ...prev, [r.emp.id]: v })); setDirty(true); }} />
+                      </td>
+                      <td style={{ padding: cellPad, textAlign: "center", color: "var(--text)", fontWeight: 600, fontFamily: "'DM Mono',monospace" }}>{r.plannedDays}</td>
+                      <td style={{ padding: cellPad, textAlign: "right", color: "var(--text)", fontFamily: "'DM Mono',monospace" }}>{fmt(r.grossVT)}</td>
+                      <td style={{ padding: cellPad, textAlign: "right" }}>
+                        <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 6 }}>
+                          {r.suggestedAdjust !== 0 && <span style={{ fontSize: 10, color: "var(--text3)" }} title="Sugerido pelo sistema">({r.suggestedAdjust > 0 ? "+" : ""}{fmtBR(r.suggestedAdjust)})</span>}
+                          <MoneyInput value={localOverrides[r.emp.id]?.adjustDisplay ?? toBR(r.autoAdjust)} onChange={v => { setLocalOverrides(prev => ({ ...prev, [r.emp.id]: { ...(prev[r.emp.id] ?? {}), adjustOverride: fromBR(v), adjustDisplay: v } })); setDirty(true); }} style={{ color: adjustColor }} />
+                        </div>
+                      </td>
+                      <td style={{ padding: cellPad, textAlign: "right" }}>
+                        <MoneyInput value={localOverrides[r.emp.id]?.discountDisplay ?? toBR(r.manualDiscount)} onChange={v => { setLocalOverrides(prev => ({ ...prev, [r.emp.id]: { ...(prev[r.emp.id] ?? {}), manualDiscount: fromBR(v), discountDisplay: v } })); setDirty(true); }} />
+                      </td>
+                      <td style={{ padding: cellPad, textAlign: "right", fontWeight: 700, fontSize: 15, fontFamily: "'DM Mono',monospace", color: r.totalPaid < 0 ? "var(--red)" : "var(--text)" }}>{fmt(Math.max(0, r.totalPaid))}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+    );
+  };
 
   return (
     <div>
@@ -4329,8 +4441,8 @@ function ValeTransporteTab({ restaurantId, employees, roles, workSchedules, sche
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 12, marginBottom: 16 }}>
         <h3 style={{ color: "var(--text)", margin: 0, fontSize: mobileOnly ? 16 : 20 }}>🚌 Vale Transporte</h3>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-          <button onClick={exportCSV} style={{ ...S.btnSecondary, fontSize: 12, padding: "6px 14px" }}>📊 Exportar CSV</button>
-          <button onClick={exportPDF} style={{ ...S.btnSecondary, fontSize: 12, padding: "6px 14px" }}>🖨️ Exportar PDF</button>
+          <button onClick={exportCSV} style={{ ...S.btnSecondary, fontSize: 12, padding: "6px 14px" }}>📊 CSV</button>
+          <button onClick={exportPDF} style={{ ...S.btnSecondary, fontSize: 12, padding: "6px 14px" }}>🖨️ PDF</button>
         </div>
       </div>
 
@@ -4345,135 +4457,43 @@ function ValeTransporteTab({ restaurantId, employees, roles, workSchedules, sche
       {currentPayment && (
         <div style={{ ...S.card, background: "#10b98118", borderColor: "#10b98133", marginBottom: 16, padding: "14px 20px" }}>
           <div style={{ color: "#047857", fontWeight: 700, fontSize: 14 }}>✅ Pago em {new Date(currentPayment.paidAt).toLocaleString("pt-BR")} por {currentPayment.paidBy}</div>
-          <div style={{ color: "#047857", fontSize: 12, marginTop: 4 }}>Total pago: {fmt(currentPayment.grandTotal)} • Valores congelados como referência</div>
+          <div style={{ color: "#047857", fontSize: 12, marginTop: 4 }}>Total pago: {fmt(currentPayment.grandTotal)}</div>
         </div>
       )}
 
-      {/* Previous month info */}
       {prevPayment && (
         <div style={{ ...S.card, background: "#3b82f618", borderColor: "#3b82f633", marginBottom: 16, padding: "12px 20px" }}>
-          <div style={{ color: "#2563eb", fontWeight: 600, fontSize: 13 }}>ℹ️ Ajustes automáticos calculados a partir do pagamento de {new Date(prevPayment.paidAt).toLocaleDateString("pt-BR")}</div>
+          <div style={{ color: "#2563eb", fontWeight: 600, fontSize: 13 }}>ℹ️ Ajustes calculados a partir do pagamento de {new Date(prevPayment.paidAt).toLocaleDateString("pt-BR")}</div>
         </div>
       )}
-      {!prevPayment && month > 0 && (
+      {!prevPayment && (
         <div style={{ ...S.card, background: "#f59e0b18", borderColor: "#f59e0b33", marginBottom: 16, padding: "12px 20px" }}>
-          <div style={{ color: "#b45309", fontWeight: 600, fontSize: 13 }}>⚠️ Mês anterior não marcado como pago — ajustes automáticos indisponíveis</div>
+          <div style={{ color: "#b45309", fontWeight: 600, fontSize: 13 }}>⚠️ Mês anterior sem pagamento registrado — ajustes automáticos indisponíveis</div>
         </div>
       )}
 
-      {/* Table */}
-      {mobileOnly ? (
-        /* ── MOBILE: card-based layout ── */
-        <div>
-          {rows.map(r => {
-            const adjustColor = r.autoAdjust > 0 ? "#047857" : r.autoAdjust < 0 ? "#b45309" : "var(--text3)";
-            return (
-              <div key={r.emp.id} style={{ ...S.card, marginBottom: 8, padding: "12px 14px" }}>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
-                  <div>
-                    <div style={{ color: "var(--text)", fontWeight: 700, fontSize: 14 }}>{r.emp.name}</div>
-                    <div style={{ color: "var(--text3)", fontSize: 11 }}>{r.role?.name ?? "—"}</div>
-                  </div>
-                  <div style={{ textAlign: "right" }}>
-                    <div style={{ color: "var(--text)", fontWeight: 700, fontSize: 16, fontFamily: "'DM Mono',monospace" }}>{fmt(Math.max(0, r.totalPaid))}</div>
-                    <div style={{ color: "var(--text3)", fontSize: 10 }}>{r.plannedDays} dias</div>
-                  </div>
-                </div>
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8 }}>
-                  <div>
-                    <div style={{ color: "var(--text3)", fontSize: 10, marginBottom: 4 }}>VT Diário</div>
-                    <input type="number" step="0.01" min="0" value={localRates[r.emp.id] ?? ""} onChange={e => { setLocalRates(prev => ({ ...prev, [r.emp.id]: e.target.value })); setDirty(true); }} style={{ ...S.input, width: "100%", textAlign: "right", padding: "6px 8px", fontSize: 13 }} />
-                  </div>
-                  <div>
-                    <div style={{ color: "var(--text3)", fontSize: 10, marginBottom: 4 }}>Ajuste Ant. <span style={{ color: adjustColor }}>{r.suggestedAdjust !== 0 ? `(${r.suggestedAdjust > 0 ? "+" : ""}${fmtBR(r.suggestedAdjust)})` : ""}</span></div>
-                    <input type="number" step="0.01" value={r.autoAdjust || ""} onChange={e => { const v = e.target.value === "" ? null : parseFloat(e.target.value); setLocalOverrides(prev => ({ ...prev, [r.emp.id]: { ...(prev[r.emp.id] ?? {}), adjustOverride: v } })); setDirty(true); }} style={{ ...S.input, width: "100%", textAlign: "right", padding: "6px 8px", fontSize: 13 }} />
-                  </div>
-                  <div>
-                    <div style={{ color: "var(--text3)", fontSize: 10, marginBottom: 4 }}>Desconto</div>
-                    <input type="number" step="0.01" min="0" value={localOverrides[r.emp.id]?.manualDiscount || ""} onChange={e => { setLocalOverrides(prev => ({ ...prev, [r.emp.id]: { ...(prev[r.emp.id] ?? {}), manualDiscount: parseFloat(e.target.value) || 0 } })); setDirty(true); }} style={{ ...S.input, width: "100%", textAlign: "right", padding: "6px 8px", fontSize: 13 }} />
-                  </div>
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      ) : (
-        /* ── DESKTOP: full table ── */
-        <div style={{ ...S.card, padding: 0, overflow: "auto", marginBottom: 16 }}>
-          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 14 }}>
-            <thead>
-              <tr style={{ background: "var(--bg1)" }}>
-                <th style={{ padding: cellPad, textAlign: "left", color: "var(--text)", fontWeight: 700, borderBottom: "2px solid var(--border)" }}>Empregado</th>
-                <th style={{ padding: cellPad, textAlign: "left", color: "var(--text3)", fontWeight: 600, borderBottom: "2px solid var(--border)" }}>Cargo</th>
-                <th style={{ padding: cellPad, textAlign: "right", color: "var(--text3)", fontWeight: 600, borderBottom: "2px solid var(--border)", width: 110 }}>VT Diário</th>
-                <th style={{ padding: cellPad, textAlign: "center", color: "var(--text3)", fontWeight: 600, borderBottom: "2px solid var(--border)", width: 70 }}>Dias</th>
-                <th style={{ padding: cellPad, textAlign: "right", color: "var(--text3)", fontWeight: 600, borderBottom: "2px solid var(--border)", width: 110 }}>VT Bruto</th>
-                <th style={{ padding: cellPad, textAlign: "right", color: "var(--text3)", fontWeight: 600, borderBottom: "2px solid var(--border)", width: 130 }}>Ajuste Mês Ant.</th>
-                <th style={{ padding: cellPad, textAlign: "right", color: "var(--text3)", fontWeight: 600, borderBottom: "2px solid var(--border)", width: 120 }}>Desconto</th>
-                <th style={{ padding: cellPad, textAlign: "right", color: "var(--text)", fontWeight: 700, borderBottom: "2px solid var(--border)", width: 120 }}>Total</th>
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((r, i) => {
-                const adjustColor = r.autoAdjust > 0 ? "#047857" : r.autoAdjust < 0 ? "#b45309" : "var(--text3)";
-                return (
-                  <tr key={r.emp.id} style={{ borderBottom: i < rows.length - 1 ? "1px solid var(--border)" : "none" }}>
-                    <td style={{ padding: cellPad, color: "var(--text)", fontWeight: 600 }}>{r.emp.name}</td>
-                    <td style={{ padding: cellPad, color: "var(--text3)" }}>{r.role?.name ?? "—"}</td>
-                    <td style={{ padding: cellPad, textAlign: "right" }}>
-                      <input type="number" step="0.01" min="0" value={localRates[r.emp.id] ?? ""} placeholder="0,00" onChange={e => { setLocalRates(prev => ({ ...prev, [r.emp.id]: e.target.value })); setDirty(true); }} style={inputStyle} />
-                    </td>
-                    <td style={{ padding: cellPad, textAlign: "center", color: "var(--text)", fontWeight: 600, fontFamily: "'DM Mono',monospace" }}>{r.plannedDays}</td>
-                    <td style={{ padding: cellPad, textAlign: "right", color: "var(--text)", fontFamily: "'DM Mono',monospace" }}>{fmt(r.grossVT)}</td>
-                    <td style={{ padding: cellPad, textAlign: "right" }}>
-                      <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 6 }}>
-                        {r.suggestedAdjust !== 0 && <span style={{ fontSize: 10, color: "var(--text3)" }} title="Valor sugerido pelo sistema">({r.suggestedAdjust > 0 ? "+" : ""}{fmtBR(r.suggestedAdjust)})</span>}
-                        <input type="number" step="0.01" value={r.autoAdjust || ""} placeholder="0,00" onChange={e => { const v = e.target.value === "" ? null : parseFloat(e.target.value); setLocalOverrides(prev => ({ ...prev, [r.emp.id]: { ...(prev[r.emp.id] ?? {}), adjustOverride: v } })); setDirty(true); }} style={{ ...inputStyle, color: adjustColor }} />
-                      </div>
-                    </td>
-                    <td style={{ padding: cellPad, textAlign: "right" }}>
-                      <input type="number" step="0.01" min="0" value={localOverrides[r.emp.id]?.manualDiscount || ""} placeholder="0,00" onChange={e => { setLocalOverrides(prev => ({ ...prev, [r.emp.id]: { ...(prev[r.emp.id] ?? {}), manualDiscount: parseFloat(e.target.value) || 0 } })); setDirty(true); }} style={inputStyle} />
-                    </td>
-                    <td style={{ padding: cellPad, textAlign: "right", fontWeight: 700, fontSize: 15, fontFamily: "'DM Mono',monospace", color: r.totalPaid < 0 ? "var(--red)" : "var(--text)" }}>{fmt(Math.max(0, r.totalPaid))}</td>
-                  </tr>
-                );
-              })}
-            </tbody>
-            <tfoot>
-              <tr style={{ background: "var(--bg1)", borderTop: "2px solid var(--border)" }}>
-                <td colSpan={7} style={{ padding: cellPad, textAlign: "right", color: "var(--text)", fontWeight: 700, fontSize: 15 }}>TOTAL GERAL</td>
-                <td style={{ padding: cellPad, textAlign: "right", fontWeight: 700, fontSize: 18, fontFamily: "'DM Mono',monospace", color: ac }}>{fmt(grandTotal)}</td>
-              </tr>
-            </tfoot>
-          </table>
-        </div>
-      )}
+      {/* Area sections */}
+      {activeAreas.map(area => renderAreaSection(area, byArea[area]))}
 
-      {/* Mobile total */}
-      {mobileOnly && (
-        <div style={{ ...S.card, background: "var(--bg1)", padding: "14px 16px", marginBottom: 12 }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-            <span style={{ color: "var(--text)", fontWeight: 700, fontSize: 14 }}>TOTAL GERAL</span>
-            <span style={{ color: ac, fontWeight: 700, fontSize: 20, fontFamily: "'DM Mono',monospace" }}>{fmt(grandTotal)}</span>
-          </div>
+      {/* Grand total */}
+      <div style={{ ...S.card, background: "var(--bg1)", padding: mobileOnly ? "14px 16px" : "16px 24px", marginBottom: 12 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <span style={{ color: "var(--text)", fontWeight: 700, fontSize: mobileOnly ? 14 : 16 }}>TOTAL GERAL</span>
+          <span style={{ color: ac, fontWeight: 700, fontSize: mobileOnly ? 20 : 24, fontFamily: "'DM Mono',monospace" }}>{fmt(grandTotal)}</span>
         </div>
-      )}
+      </div>
 
       {/* Action buttons */}
       <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 8 }}>
-        <button onClick={saveChanges} disabled={!dirty} style={{ ...S.btn, background: dirty ? ac : "var(--bg2)", color: dirty ? "#1a1510" : "var(--text3)", fontWeight: 700, padding: "12px 24px", fontSize: 14, opacity: dirty ? 1 : 0.5, cursor: dirty ? "pointer" : "default" }}>
-          💾 Salvar Alterações
-        </button>
         <button onClick={markAsPaid} style={{ ...S.btn, background: currentPayment ? "#10b981" : "#2563eb", color: "#fff", fontWeight: 700, padding: "12px 24px", fontSize: 14 }}>
           {currentPayment ? "🔄 Remarcar como Pago" : "💰 Marcar como Pago"}
         </button>
       </div>
 
-      {/* Empty state */}
       {restEmps.length === 0 && (
         <div style={{ textAlign: "center", padding: 40, color: "var(--text3)" }}>
           <div style={{ fontSize: 40, marginBottom: 12 }}>🚌</div>
-          <div style={{ fontSize: 15 }}>Nenhum empregado cadastrado (freelancers não aparecem)</div>
+          <div style={{ fontSize: 15 }}>Nenhum empregado cadastrado</div>
         </div>
       )}
     </div>
