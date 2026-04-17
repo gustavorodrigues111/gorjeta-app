@@ -3,7 +3,7 @@ import { useState, useEffect, Component } from "react";
 import { db } from "./firebase";
 import { doc, getDoc, setDoc } from "firebase/firestore";
 
-const APP_VERSION = "5.15.2";
+const APP_VERSION = "5.15.3";
 
 const DEFAULT_ADMISSION = () => `${new Date().getFullYear()}-01-01`;
 const round2 = (v) => Math.round(v * 100) / 100;
@@ -4021,7 +4021,7 @@ Inclua apenas as ações solicitadas. Arrays vazios se não houver ação daquel
     const demitidoEm = `${yyyy}-${mm.padStart(2,"0")}-${dd.padStart(2,"0")}`;
     if (isNaN(new Date(demitidoEm+"T12:00:00").getTime())) { window.alert("Data inválida."); return; }
     if (!window.confirm(`Confirmar demissão de "${emp.name}" em ${dataStr}?\n\nA partir desta data:\n• Sai do cálculo de gorjeta\n• Consta como "DEM" na escala\n• No próximo mês será movido para inativo`)) return;
-    onUpdate("employees", employees.map(x => x.id===emp.id ? {...x, demitidoEm, demitidoPor: isOwner ? "Admin AppTip" : "Gestor"} : x));
+    onUpdate("employees", employees.map(x => x.id===emp.id ? {...x, demitidoEm, demitidoPor: isOwner ? "Admin AppTip" : "Gestor", inactive: true, inactiveFrom: demitidoEm} : x));
     onUpdate("_toast", `📋 ${emp.name} demitido em ${dataStr}`);
   }
 
@@ -4627,10 +4627,18 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
   const managerAreas = perms.managerAreas ?? [];
   const isLider = managerAreas.length > 0;
   const allRestEmps = employees.filter(e => e.restaurantId === rid && !(e.inactive && e.inactiveFrom && e.inactiveFrom <= today()));
+  // For schedule: include dismissed employees whose dismissal month matches the viewed month
+  const allSchedEmps = employees.filter(e => e.restaurantId === rid && (
+    !(e.inactive && e.inactiveFrom && e.inactiveFrom <= today()) ||
+    (e.demitidoEm && e.demitidoEm.slice(0,7) === mk)
+  ));
   const restRoles = roles.filter(r => r.restaurantId === rid);
   const restEmps  = isLider
     ? allRestEmps.filter(e => { const role = restRoles.find(r => r.id === e.roleId); return role && managerAreas.includes(role.area); })
     : allRestEmps;
+  const schedEmps = isLider
+    ? allSchedEmps.filter(e => { const role = restRoles.find(r => r.id === e.roleId); return role && managerAreas.includes(role.area); })
+    : allSchedEmps;
 
   // forms
   const [tipRows, setTipRows]   = useState([{date:today(),total:"",note:""}]);
@@ -4941,12 +4949,12 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
   }
 
   const areaEmps = schedArea === "Todos"
-    ? restEmps.slice().sort((a,b) => {
+    ? schedEmps.slice().sort((a,b) => {
         const aA = restRoles.find(r=>r.id===a.roleId)?.area ?? "z";
         const bA = restRoles.find(r=>r.id===b.roleId)?.area ?? "z";
         return aA.localeCompare(bA) || a.name.localeCompare(b.name);
       })
-    : restEmps.filter(e => restRoles.find(r => r.id === e.roleId)?.area === schedArea);
+    : schedEmps.filter(e => restRoles.find(r => r.id === e.roleId)?.area === schedArea);
   const dim = new Date(year, month + 1, 0).getDate();
 
   const ac = "var(--ac)";
