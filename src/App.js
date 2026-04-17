@@ -3,7 +3,7 @@ import { useState, useEffect, Component } from "react";
 import { db } from "./firebase";
 import { doc, getDoc, setDoc } from "firebase/firestore";
 
-const APP_VERSION = "5.17.1";
+const APP_VERSION = "5.18.0";
 
 const DEFAULT_ADMISSION = () => `${new Date().getFullYear()}-01-01`;
 const round2 = (v) => Math.round(v * 100) / 100;
@@ -4317,6 +4317,149 @@ Inclua apenas as ações solicitadas. Arrays vazios se não houver ação daquel
                   <button onClick={()=>{setShowFbForm(!showFbForm);setShowIncForm(false);}} style={{padding:"8px 16px",borderRadius:10,border:`1px solid ${showFbForm?"#f59e0b":"var(--border)"}`,background:showFbForm?"#f59e0b11":"transparent",color:showFbForm?"#f59e0b":"var(--text3)",cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:12}}>
                     ⭐ Feedback
                   </button>
+                  <button onClick={async()=>{
+                    // ── Export trail as PDF ──
+                    const dateFrom = window.prompt("Data início (DD/MM/AAAA):", emp.admission ? new Date(emp.admission+"T12:00:00").toLocaleDateString("pt-BR") : "01/01/2026");
+                    if (!dateFrom) return;
+                    const dateTo = window.prompt("Data fim (DD/MM/AAAA):", new Date().toLocaleDateString("pt-BR"));
+                    if (!dateTo) return;
+                    const parseDate = (s) => { const p=s.split("/"); return p.length===3?`${p[2]}-${p[1].padStart(2,"0")}-${p[0].padStart(2,"0")}`:null; };
+                    const fromISO = parseDate(dateFrom);
+                    const toISO = parseDate(dateTo);
+                    if (!fromISO || !toISO) { window.alert("Data inválida. Use DD/MM/AAAA."); return; }
+
+                    try {
+                      await loadScript("https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js");
+                      await loadScript("https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js");
+                      const { jsPDF } = window.jspdf;
+                      const doc = new jsPDF({ orientation:"portrait", unit:"mm", format:"a4" });
+                      const W = doc.internal.pageSize.getWidth();
+                      let y = 15;
+
+                      // Header
+                      doc.setFontSize(16);
+                      doc.setTextColor(30,30,30);
+                      doc.text("RELATÓRIO DA TRILHA DO EMPREGADO", W/2, y, {align:"center"});
+                      y += 7;
+                      doc.setFontSize(10);
+                      doc.setTextColor(100,100,100);
+                      doc.text(`Período: ${dateFrom} a ${dateTo} — Gerado em ${new Date().toLocaleDateString("pt-BR")}`, W/2, y, {align:"center"});
+                      y += 10;
+
+                      // Employee info
+                      doc.setFontSize(12);
+                      doc.setTextColor(30,30,30);
+                      doc.text("DADOS DO EMPREGADO", 14, y);
+                      y += 2;
+                      doc.autoTable({
+                        startY:y, head:[], body:[
+                          ["Nome", emp.name],
+                          ["Cargo", role?.name ?? "—"],
+                          ["Área", role?.area ?? "—"],
+                          ["Código", emp.empCode ?? "—"],
+                          ["Admissão", emp.admission ? new Date(emp.admission+"T12:00:00").toLocaleDateString("pt-BR") : "—"],
+                          ["Status", emp.demitidoEm ? `Demitido em ${new Date(emp.demitidoEm+"T12:00:00").toLocaleDateString("pt-BR")}` : emp.inactive ? "Inativo" : "Ativo"],
+                        ],
+                        theme:"grid", styles:{fontSize:10,cellPadding:3}, columnStyles:{0:{fontStyle:"bold",cellWidth:45}}, margin:{left:14,right:14}
+                      });
+                      y = doc.lastAutoTable.finalY + 8;
+
+                      // Incidents in period
+                      const empIncs = (incidents??[]).filter(i => i.restaurantId===rid && (i.employeeIds??[]).includes(emp.id) && i.date>=fromISO && i.date<=toISO);
+                      if (empIncs.length > 0) {
+                        if (y > 240) { doc.addPage(); y = 15; }
+                        doc.setFontSize(12); doc.text("OCORRÊNCIAS", 14, y); y += 2;
+                        doc.autoTable({
+                          startY:y,
+                          head:[["Data","Tipo","Gravidade","Descrição"]],
+                          body:empIncs.sort((a,b)=>a.date.localeCompare(b.date)).map(inc => {
+                            const t = INCIDENT_TYPES.find(x=>x.id===inc.type);
+                            const sev = SEVERITY_OPTIONS.find(s=>s.id===inc.severity);
+                            return [
+                              new Date(inc.date+"T12:00:00").toLocaleDateString("pt-BR"),
+                              t?.label ?? inc.type,
+                              sev?.label ?? inc.severity ?? "—",
+                              (inc.description??"").slice(0,80)
+                            ];
+                          }),
+                          theme:"striped", styles:{fontSize:9,cellPadding:2}, headStyles:{fillColor:[59,130,246]},
+                          columnStyles:{3:{cellWidth:70}}, margin:{left:14,right:14}
+                        });
+                        y = doc.lastAutoTable.finalY + 8;
+                      }
+
+                      // Feedbacks in period
+                      const empFbs = (feedbacks??[]).filter(f => f.restaurantId===rid && f.employeeId===emp.id && (f.createdAt??"").slice(0,10)>=fromISO && (f.createdAt??"").slice(0,10)<=toISO);
+                      if (empFbs.length > 0) {
+                        if (y > 240) { doc.addPage(); y = 15; }
+                        doc.setFontSize(12); doc.text("FEEDBACKS", 14, y); y += 2;
+                        doc.autoTable({
+                          startY:y,
+                          head:[["Período","Nota","Pontos Fortes","Melhorar","Meta"]],
+                          body:empFbs.sort((a,b)=>(a.createdAt??"").localeCompare(b.createdAt??"")).map(fb => [
+                            `Q${fb.quarter}/${fb.year}`,
+                            "★".repeat(fb.rating) + "☆".repeat(5-fb.rating),
+                            (fb.strengths??"").slice(0,50),
+                            (fb.improvements??"").slice(0,50),
+                            (fb.goal??"").slice(0,50)
+                          ]),
+                          theme:"striped", styles:{fontSize:9,cellPadding:2}, headStyles:{fillColor:[245,158,11]}, margin:{left:14,right:14}
+                        });
+                        y = doc.lastAutoTable.finalY + 8;
+                      }
+
+                      // Role history
+                      const roleHist = (emp.roleHistory??[]).filter(rh=>rh.date>=fromISO && rh.date<=toISO);
+                      if (roleHist.length > 0) {
+                        if (y > 250) { doc.addPage(); y = 15; }
+                        doc.setFontSize(12); doc.text("MUDANÇAS DE CARGO", 14, y); y += 2;
+                        doc.autoTable({
+                          startY:y,
+                          head:[["Data","De","Para","Motivo"]],
+                          body:roleHist.map(rh => [
+                            new Date(rh.date+"T12:00:00").toLocaleDateString("pt-BR"),
+                            (roles??restRoles).find(r=>r.id===rh.fromRoleId)?.name ?? "—",
+                            (roles??restRoles).find(r=>r.id===rh.toRoleId)?.name ?? "—",
+                            rh.reason || "—"
+                          ]),
+                          theme:"striped", styles:{fontSize:9,cellPadding:2}, headStyles:{fillColor:[139,92,246]}, margin:{left:14,right:14}
+                        });
+                        y = doc.lastAutoTable.finalY + 8;
+                      }
+
+                      // Summary stats
+                      if (y > 250) { doc.addPage(); y = 15; }
+                      doc.setFontSize(12); doc.text("RESUMO", 14, y); y += 2;
+                      const negIncs = empIncs.filter(i => { const t=INCIDENT_TYPES.find(x=>x.id===i.type); return t?.negative; });
+                      const posIncs = empIncs.filter(i => { const t=INCIDENT_TYPES.find(x=>x.id===i.type); return !t?.negative; });
+                      doc.autoTable({
+                        startY:y, head:[], body:[
+                          ["Ocorrências negativas", String(negIncs.length)],
+                          ["Ocorrências positivas", String(posIncs.length)],
+                          ["Feedbacks realizados", String(empFbs.length)],
+                          ["Mudanças de cargo", String(roleHist.length)],
+                          ["Avaliação média", empFbs.length>0?(empFbs.reduce((a,f)=>a+f.rating,0)/empFbs.length).toFixed(1):"—"],
+                        ],
+                        theme:"grid", styles:{fontSize:10,cellPadding:3}, columnStyles:{0:{fontStyle:"bold",cellWidth:60}}, margin:{left:14,right:14}
+                      });
+
+                      // Footer
+                      const pages = doc.internal.getNumberOfPages();
+                      for (let i=1;i<=pages;i++) {
+                        doc.setPage(i); doc.setFontSize(8); doc.setTextColor(150,150,150);
+                        doc.text(`AppTip · Trilha de ${emp.name} · ${dateFrom} a ${dateTo} · Página ${i}/${pages}`, W/2, doc.internal.pageSize.getHeight()-8, {align:"center"});
+                      }
+
+                      const safeName = emp.name.replace(/[^a-zA-Z0-9]/g,"_").toLowerCase();
+                      doc.save(`trilha_${safeName}_${fromISO}_${toISO}.pdf`);
+                      onUpdate("_toast", `📄 Trilha de ${emp.name} exportada!`);
+                    } catch(err) {
+                      console.error("Erro ao exportar trilha:", err);
+                      onUpdate("_toast", "⚠️ Erro ao exportar: " + (err.message || "desconhecido"));
+                    }
+                  }} style={{padding:"8px 16px",borderRadius:10,border:"1px solid #3b82f644",background:"transparent",color:"#3b82f6",cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:12}}>
+                    📄 Exportar PDF
+                  </button>
                 </div>
                 {showIncForm && <div style={{marginBottom:16}}><IncidentForm restaurantId={rid} employees={restEmps.filter(e=>!e.inactive)} onUpdate={onUpdate} incidents={incidents??[]} currentUser={currentUser} isOwner={isOwner} preSelectedEmpId={emp.id}/></div>}
                 {showFbForm && <div style={{marginBottom:16}}><FeedbackForm restaurantId={rid} employees={restEmps.filter(e=>!e.inactive)} roles={restRoles} onUpdate={onUpdate} feedbacks={feedbacks??[]} currentUser={currentUser} isOwner={isOwner} preSelectedEmpId={emp.id}/></div>}
@@ -5499,6 +5642,11 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
   const [schedArea, setSchedArea]           = useState("Todos");
   const [showVacForm, setShowVacForm]       = useState(false);
   const [showSchedHistory, setShowSchedHistory] = useState(false);
+  // Ponto import
+  const [showPontoImport, setShowPontoImport] = useState(false);
+  const [pontoLoading, setPontoLoading] = useState(false);
+  const [pontoError, setPontoError] = useState("");
+  const [pontoPreview, setPontoPreview] = useState(null); // { scheduleChanges:{empId:{date:status}}, incidents:[{empId,type,date,desc}] }
   // Local schedule edits — accumulated before saving as new version
   const [schedLocalEdits, setSchedLocalEdits] = useState(null); // null = no pending edits, object = pending edits overlay
   const schedDirty = schedLocalEdits !== null;
@@ -6983,6 +7131,12 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                   {mobileOnly?"🏖️ Férias":"🏖️ Marcar férias"}
                 </button>
 
+                {/* Importar folha de ponto */}
+                <button onClick={()=>{setShowPontoImport(!showPontoImport);setPontoError("");setPontoPreview(null);}}
+                  style={{...S.btnSecondary,fontSize:mobileOnly?11:12,border:`1px solid ${showPontoImport?"var(--ac)":"var(--ac)44"}`,background:showPontoImport?"var(--ac)22":"transparent",color:"var(--ac)",whiteSpace:"nowrap"}}>
+                  {mobileOnly?"📄 Ponto":"📄 Importar ponto"}
+                </button>
+
                 {/* Histórico — só Admin e DP */}
                 {(isOwner || isDP) && (() => {
                   const vCount = (data?.scheduleVersions?.[rid]?.[mk] ?? []).length;
@@ -7151,6 +7305,234 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                 </div>
               ))}
             </div>
+
+            {/* ═══ Importar folha de ponto ═══ */}
+            {showPontoImport && (
+              <div style={{...S.card,marginBottom:14,border:"1px solid var(--ac)44",background:"var(--ac)06"}}>
+                <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:8}}>
+                  <span style={{fontSize:18}}>📄</span>
+                  <div>
+                    <div style={{color:"var(--ac)",fontWeight:700,fontSize:14}}>Importar folha de ponto</div>
+                    <div style={{color:"var(--text3)",fontSize:11}}>Upload do PDF da folha de ponto — a IA analisa e sugere atualizações na escala e ocorrências</div>
+                  </div>
+                </div>
+
+                {!pontoPreview && (
+                  <div>
+                    <input type="file" accept=".pdf" id="ponto-upload" style={{display:"none"}} onChange={async(e)=>{
+                      const file = e.target.files?.[0];
+                      if (!file) return;
+                      setPontoLoading(true); setPontoError(""); setPontoPreview(null);
+                      try {
+                        // 1. Extract text from PDF using pdf.js
+                        await loadScript("https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js");
+                        window.pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+                        const arrayBuf = await file.arrayBuffer();
+                        const pdfDoc = await window.pdfjsLib.getDocument({data:arrayBuf}).promise;
+                        let fullText = "";
+                        for (let p = 1; p <= pdfDoc.numPages; p++) {
+                          const page = await pdfDoc.getPage(p);
+                          const content = await page.getTextContent();
+                          fullText += content.items.map(it=>it.str).join(" ") + "\n";
+                        }
+                        if (!fullText.trim() || fullText.trim().length < 20) {
+                          setPontoError("PDF parece ser uma imagem escaneada (sem texto selecionável). Use PDFs com texto digital.");
+                          setPontoLoading(false);
+                          return;
+                        }
+
+                        // 2. Build context
+                        const empList = schedEmps.map(emp => {
+                          const r = restRoles.find(rl=>rl.id===emp.roleId);
+                          return `- nome:"${emp.name}" id:"${emp.id}" cargo:"${r?.name??"—"}" area:"${r?.area??"—"}"`;
+                        }).join("\n");
+
+                        const currentSchedule = {};
+                        schedEmps.forEach(emp => {
+                          const days = effectiveMonth[emp.id] ?? {};
+                          const entries = Object.entries(days).filter(([d])=>d.startsWith(mk));
+                          if (entries.length) currentSchedule[emp.name] = Object.fromEntries(entries.map(([d,s])=>[d,s||"trabalho"]));
+                        });
+
+                        // 3. Send to Groq
+                        const result = await groqGenerate(
+                          `Você é um assistente de análise de folha de ponto para restaurante. Receba o texto extraído de um PDF de folha de ponto e compare com a escala prevista.
+
+Empregados do restaurante:
+${empList}
+
+Escala prevista para ${monthLabel(year,month)}:
+${JSON.stringify(currentSchedule, null, 1)}
+
+Status possíveis na escala: "off" (folga), "faultu" (falta injustificada), "faultj" (falta justificada), "vac" (férias), "comp" (folga compensação), "comptrab" (trabalho compensação), "freela" (freela), null ou "" = trabalho normal.
+
+Analise o texto do PDF e retorne um JSON com:
+{
+  "scheduleChanges": {
+    "<empId>": { "<YYYY-MM-DD>": "<novo_status>" }
+  },
+  "incidents": [
+    { "empId":"<id>", "type":"<tipo>", "date":"<YYYY-MM-DD>", "description":"<descrição>", "severity":"<leve|media|grave>" }
+  ],
+  "summary": "<resumo em português do que foi encontrado>"
+}
+
+Regras:
+- Em scheduleChanges inclua APENAS os dias que MUDARAM comparado com a escala prevista (ex: previsto trabalho mas faltou → "faultu" ou "faultj")
+- Atrasos >15 min devem virar um incident com type "atraso" e a descrição incluindo os minutos. Atraso NÃO muda o status na escala (empregado trabalhou).
+- Faltas viram mudança de status na escala (faultu ou faultj) E um incident
+- Horas extras podem virar incident tipo "hora_extra" para registro
+- Se não conseguir identificar um empregado do PDF, ignore
+- Tente fazer o match pelo nome (completo ou parcial)
+- severity: "leve" para atrasos <30min, "media" para atrasos 30-60min ou 1 falta, "grave" para múltiplas faltas ou atrasos >60min
+- Os types de incident válidos são: "atraso", "faultu", "faultj", "hora_extra", "advertencia_verbal", "advertencia_escrita"
+- Retorne arrays vazios se não houver mudanças`,
+                          `Texto da folha de ponto:\n\n${fullText.slice(0, 8000)}`
+                        );
+
+                        // 4. Build preview with employee name resolution
+                        const preview = {
+                          scheduleChanges: result.scheduleChanges ?? {},
+                          incidents: (result.incidents ?? []).map(inc => ({
+                            ...inc,
+                            empName: schedEmps.find(e=>e.id===inc.empId)?.name ?? "Desconhecido"
+                          })),
+                          summary: result.summary ?? "Análise concluída."
+                        };
+                        // Count changes
+                        let totalSchedChanges = 0;
+                        Object.values(preview.scheduleChanges).forEach(days => { totalSchedChanges += Object.keys(days).length; });
+                        preview.totalSchedChanges = totalSchedChanges;
+                        setPontoPreview(preview);
+                      } catch(err) {
+                        console.error("[Ponto Import]", err);
+                        setPontoError(err.message || "Erro ao processar PDF.");
+                      } finally {
+                        setPontoLoading(false);
+                        e.target.value = "";
+                      }
+                    }}/>
+                    <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
+                      <button onClick={()=>document.getElementById("ponto-upload").click()} disabled={pontoLoading}
+                        style={{...S.btnPrimary,fontSize:13,opacity:pontoLoading?0.6:1}}>
+                        {pontoLoading ? "⏳ Analisando..." : "📎 Selecionar PDF da folha de ponto"}
+                      </button>
+                      <button onClick={()=>{setShowPontoImport(false);setPontoError("");setPontoPreview(null);}} style={S.btnSecondary}>Cancelar</button>
+                    </div>
+                    {pontoError && <p style={{color:"var(--red)",fontSize:12,margin:"8px 0 0"}}>{pontoError}</p>}
+                    <p style={{color:"var(--text3)",fontSize:11,margin:"8px 0 0"}}>O PDF precisa ter texto selecionável (não escaneado). A IA vai cruzar com a escala prevista de {monthLabel(year,month)}.</p>
+                  </div>
+                )}
+
+                {pontoPreview && (
+                  <div>
+                    {/* Summary */}
+                    <div style={{background:"var(--bg1)",borderRadius:8,padding:"10px 14px",marginBottom:12}}>
+                      <p style={{color:"var(--text)",fontSize:13,margin:0,lineHeight:1.5}}>{pontoPreview.summary}</p>
+                    </div>
+
+                    {/* Schedule changes */}
+                    {pontoPreview.totalSchedChanges > 0 && (
+                      <div style={{marginBottom:12}}>
+                        <div style={{color:"#3b82f6",fontSize:12,fontWeight:700,marginBottom:6}}>📅 Alterações na escala ({pontoPreview.totalSchedChanges})</div>
+                        {Object.entries(pontoPreview.scheduleChanges).map(([empId, days]) => {
+                          const emp = schedEmps.find(e=>e.id===empId);
+                          if (!emp) return null;
+                          const STATUS_LABELS = {off:"Folga",faultu:"Falta Injust.",faultj:"Falta Just.",vac:"Férias",comp:"Folga Comp.",comptrab:"Trab. Comp.",freela:"Freela","":"Trabalho"};
+                          return (
+                            <div key={empId} style={{padding:"8px 12px",borderRadius:8,background:"#3b82f609",border:"1px solid #3b82f622",marginBottom:4}}>
+                              <div style={{fontWeight:700,fontSize:12,color:"var(--text)",marginBottom:4}}>{emp.name}</div>
+                              <div style={{display:"flex",flexWrap:"wrap",gap:4}}>
+                                {Object.entries(days).map(([date, newStatus]) => {
+                                  const oldStatus = effectiveMonth[empId]?.[date] ?? "";
+                                  return (
+                                    <div key={date} style={{fontSize:10,padding:"3px 8px",borderRadius:4,background:"var(--bg2)",border:"1px solid var(--border)"}}>
+                                      <span style={{color:"var(--text3)"}}>{new Date(date+"T12:00:00").toLocaleDateString("pt-BR",{day:"2-digit",month:"2-digit"})}</span>
+                                      <span style={{color:"var(--red)",marginLeft:4}}>{STATUS_LABELS[oldStatus]??"Trabalho"}</span>
+                                      <span style={{color:"var(--text3)",margin:"0 3px"}}>→</span>
+                                      <span style={{color:"#3b82f6",fontWeight:700}}>{STATUS_LABELS[newStatus]??newStatus}</span>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+
+                    {/* Incidents */}
+                    {pontoPreview.incidents.length > 0 && (
+                      <div style={{marginBottom:12}}>
+                        <div style={{color:"var(--red)",fontSize:12,fontWeight:700,marginBottom:6}}>🚨 Ocorrências detectadas ({pontoPreview.incidents.length})</div>
+                        {pontoPreview.incidents.map((inc, i) => {
+                          const sevColor = {leve:"#f59e0b",media:"#f97316",grave:"#e74c3c"}[inc.severity] ?? "#888";
+                          return (
+                            <div key={i} style={{padding:"8px 12px",borderRadius:8,background:"#e74c3c09",border:"1px solid #e74c3c22",marginBottom:4,display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:8}}>
+                              <div>
+                                <span style={{fontWeight:700,fontSize:12,color:"var(--text)"}}>{inc.empName}</span>
+                                <span style={{color:"var(--text3)",fontSize:11,marginLeft:6}}>{new Date(inc.date+"T12:00:00").toLocaleDateString("pt-BR")}</span>
+                                <div style={{color:"var(--text2)",fontSize:12,marginTop:2}}>{inc.description}</div>
+                              </div>
+                              <span style={{fontSize:9,padding:"2px 6px",borderRadius:4,background:sevColor+"22",color:sevColor,fontWeight:700,whiteSpace:"nowrap",flexShrink:0}}>{inc.severity}</span>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+
+                    {pontoPreview.totalSchedChanges === 0 && pontoPreview.incidents.length === 0 && (
+                      <p style={{color:"var(--green)",fontSize:13,textAlign:"center",padding:16}}>✅ Nenhuma diferença encontrada entre o ponto e a escala prevista.</p>
+                    )}
+
+                    {/* Actions */}
+                    <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+                      {(pontoPreview.totalSchedChanges > 0 || pontoPreview.incidents.length > 0) && (
+                        <button onClick={()=>{
+                          // 1. Apply schedule changes as local edits
+                          if (pontoPreview.totalSchedChanges > 0) {
+                            setSchedLocalEdits(prev => {
+                              const edits = prev ? {...prev} : {};
+                              Object.entries(pontoPreview.scheduleChanges).forEach(([eid, dayMap]) => {
+                                edits[eid] = { ...(edits[eid]??{}), ...dayMap };
+                              });
+                              return edits;
+                            });
+                          }
+                          // 2. Create incidents
+                          if (pontoPreview.incidents.length > 0) {
+                            const newIncs = pontoPreview.incidents.map(inc => ({
+                              id: `${Date.now()}-${Math.random().toString(36).slice(2,6)}`,
+                              restaurantId: rid,
+                              employeeIds: [inc.empId],
+                              type: inc.type === "atraso" ? "outro" : inc.type === "hora_extra" ? "destaque_positivo" : inc.type === "faultu" ? "indisciplina" : inc.type === "faultj" ? "outro" : inc.type,
+                              severity: inc.severity || "leve",
+                              description: `[Importado do ponto] ${inc.description}`,
+                              date: inc.date,
+                              createdAt: new Date().toISOString(),
+                              createdBy: isOwner ? "Admin AppTip" : (currentUser?.name ?? "Gestor"),
+                              createdById: currentUser?.id ?? null,
+                              visibility: "internal",
+                            }));
+                            onUpdate("incidents", [...(data?.incidents??[]), ...newIncs]);
+                          }
+                          const parts = [];
+                          if (pontoPreview.totalSchedChanges > 0) parts.push(`${pontoPreview.totalSchedChanges} dia(s) atualizados na escala`);
+                          if (pontoPreview.incidents.length > 0) parts.push(`${pontoPreview.incidents.length} ocorrência(s) registrada(s)`);
+                          onUpdate("_toast", `✅ Ponto importado — ${parts.join(" · ")}${pontoPreview.totalSchedChanges > 0 ? " — salve a escala para confirmar" : ""}`);
+                          setPontoPreview(null);
+                          setShowPontoImport(false);
+                        }} style={{...S.btnPrimary,fontSize:13}}>
+                          ✅ Aplicar alterações
+                        </button>
+                      )}
+                      <button onClick={()=>setPontoPreview(null)} style={S.btnSecondary}>Reprocessar</button>
+                      <button onClick={()=>{setPontoPreview(null);setShowPontoImport(false);}} style={{...S.btnSecondary,color:"var(--red)",borderColor:"var(--red)44"}}>Cancelar</button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
 
             {/* Formulário de férias */}
             {showVacForm && (
@@ -9846,6 +10228,10 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }
 
         {tab === "changelog" && (() => {
           const CHANGELOG = [
+            { version:"5.18.0", date:"2026-04-17", items:[
+              "Novo: importação de folha de ponto via PDF — análise automática com IA identifica atrasos, faltas e horas extras, atualiza escala e cria ocorrências",
+              "Novo: exportação da trilha do empregado em PDF — relatório completo com ocorrências, feedbacks, histórico de cargos e resumo do período selecionado",
+            ]},
             { version:"5.17.1", date:"2026-04-17", items:[
               "Segurança: ocorrências (positivas e negativas) agora são 100% internas — empregado não vê nenhuma",
               "Melhoria: métricas do empregado mostram mês anterior (fechado) em vez do mês corrente",
