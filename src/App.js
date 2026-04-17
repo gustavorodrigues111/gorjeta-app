@@ -9645,6 +9645,31 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }
 
         {tab === "changelog" && (() => {
           const CHANGELOG = [
+            { version:"5.16.0", date:"2026-04-17", items:[
+              "Novo: Aba 📈 Trilha do Empregado — linha do tempo completa com eventos automáticos (escala, promoções, demissão) e manuais (ocorrências, feedbacks)",
+              "Novo: Registro de ocorrências/incidentes — seletor múltiplo de envolvidos, 8 tipos (advertências, desentendimento, elogio, destaque), 3 gravidades",
+              "Novo: Registro de feedback trimestral — avaliação 1-5 estrelas, pontos fortes/melhorar, observações internas, meta e cargo-alvo",
+              "Novo: Botão ⬆️ Promover na aba Equipe — mudança de cargo com data efetiva, imediata ou agendada, com histórico (roleHistory)",
+              "Novo: Promoções agendadas auto-aplicadas no carregamento do app quando a data chega",
+              "Novo: Visão gamificada 'Minha Trilha' no portal do empregado — nível/progresso, badges, métricas vs área, metas, checklist de desenvolvimento",
+              "Novo: Badges automáticos (tempo de casa, promoção, avaliação 5★, elogios recebidos)",
+              "Novo: Métricas anônimas comparando faltas do empregado com média da área",
+              "Novo: Checklist de desenvolvimento por cargo com links para materiais de estudo",
+              "Segurança: ocorrências negativas, gravidade, nomes de envolvidos e observações internas NÃO visíveis ao empregado",
+              "Acesso: Admin, Gestor e Líder de Área (líder só vê empregados da sua área)",
+            ]},
+            { version:"5.15.4", date:"2026-04-17", items:[
+              "Correção: tela de primeiro acesso do empregado (cadastro de PIN) agora tem botão '← Voltar ao login'",
+            ]},
+            { version:"5.15.3", date:"2026-04-17", items:[
+              "Correção: demissão agora marca empregado como inativo imediatamente (antes só no mês seguinte)",
+              "Correção: empregado demitido sai do dashboard (equipe de hoje) e do cálculo de gorjeta na hora",
+              "Correção: na escala do mês da demissão, demitido continua aparecendo como 'DEM'; no mês seguinte não aparece mais",
+            ]},
+            { version:"5.15.2", date:"2026-04-17", items:[
+              "Melhoria: ações bulk da escala (Folgas do contrato, Reiniciar escala, Marcar férias) agora acumulam edições locais",
+              "Melhoria: todas as edições exigem clique em 'Salvar nova versão' para confirmar — gera snapshot automático no histórico",
+            ]},
             { version:"5.15.1", date:"2026-04-16", items:[
               "Melhoria: design unificado em todas as abas do painel do gestor — mesma linguagem visual em cabeçalhos, botões, cards e espaçamentos",
               "Melhoria: todas as abas agora têm título H3 consistente (fontSize 16/20) com botões de ação à direita",
