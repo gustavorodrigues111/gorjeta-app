@@ -4991,33 +4991,48 @@ function TrilhaTab({ restaurantId, employees, roles, schedules, incidents, feedb
         </div>
       )}
 
-      {/* Employees table / quick view when no emp selected */}
-      {!selectedEmp && (
-        <div style={{...S.card}}>
-          <h4 style={{color:"var(--text)",margin:"0 0 12px",fontSize:14}}>Selecione um empregado para ver a trilha completa</h4>
-          <div style={{display:"flex",flexDirection:"column",gap:4}}>
-            {restEmps.map(emp => {
-              const role = roles.find(r => r.id === emp.roleId);
-              const empIncidents = (incidents??[]).filter(i => i.restaurantId === restaurantId && (i.employeeIds??[]).includes(emp.id));
-              const empFeedbacks = (feedbacks??[]).filter(f => f.restaurantId === restaurantId && f.employeeId === emp.id);
-              const lastFb = empFeedbacks.sort((a,b)=>(b.createdAt??"").localeCompare(a.createdAt??""))[0];
-              return (
-                <button key={emp.id} onClick={()=>setSelectedEmp(emp.id)} style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:8,padding:"10px 14px",borderRadius:10,border:"1px solid var(--border)",background:"var(--card-bg)",cursor:"pointer",textAlign:"left",fontFamily:"'DM Sans',sans-serif"}}>
-                  <div style={{flex:1,minWidth:0}}>
-                    <div style={{color:"var(--text)",fontWeight:600,fontSize:13,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{emp.name}</div>
-                    <div style={{color:"var(--text3)",fontSize:11}}>{role?.name ?? "—"} · {role?.area ?? "—"}</div>
-                  </div>
-                  <div style={{display:"flex",gap:6,alignItems:"center",flexShrink:0}}>
-                    {empIncidents.length > 0 && <span style={{fontSize:10,color:"#f59e0b",background:"#f59e0b22",padding:"2px 6px",borderRadius:4,fontWeight:700}}>{empIncidents.length} oc.</span>}
-                    {lastFb && <span style={{fontSize:10,color:"#f59e0b"}}>{"★".repeat(lastFb.rating)}</span>}
-                    <span style={{color:"var(--text3)",fontSize:14}}>→</span>
-                  </div>
-                </button>
-              );
-            })}
+      {/* Employees grouped by area */}
+      {!selectedEmp && (() => {
+        const areaColors = { Bar:"#8b5cf6", Cozinha:"#e74c3c", "Salão":"#3b82f6", Limpeza:"#10b981" };
+        const empsByArea = {};
+        restEmps.forEach(emp => {
+          const role = roles.find(r => r.id === emp.roleId);
+          const area = role?.area ?? "Sem área";
+          if (!empsByArea[area]) empsByArea[area] = [];
+          empsByArea[area].push({ emp, role });
+        });
+        const areas = AREAS.filter(a => empsByArea[a]?.length > 0);
+        const other = Object.keys(empsByArea).filter(a => !AREAS.includes(a));
+        return [...areas, ...other].map(area => (
+          <div key={area} style={{marginBottom:16}}>
+            <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:8}}>
+              <div style={{width:4,height:20,borderRadius:2,background:areaColors[area]??"var(--text3)"}}/>
+              <h4 style={{color:"var(--text)",margin:0,fontSize:14}}>{area}</h4>
+              <span style={{color:"var(--text3)",fontSize:11}}>({empsByArea[area].length})</span>
+            </div>
+            <div style={{display:"flex",flexDirection:"column",gap:4}}>
+              {empsByArea[area].sort((a,b)=>a.emp.name.localeCompare(b.emp.name)).map(({emp, role}) => {
+                const empIncidents = (incidents??[]).filter(i => i.restaurantId === restaurantId && (i.employeeIds??[]).includes(emp.id));
+                const empFeedbacks = (feedbacks??[]).filter(f => f.restaurantId === restaurantId && f.employeeId === emp.id);
+                const lastFb = empFeedbacks.sort((a,b)=>(b.createdAt??"").localeCompare(a.createdAt??""))[0];
+                return (
+                  <button key={emp.id} onClick={()=>setSelectedEmp(emp.id)} style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:8,padding:"10px 14px",borderRadius:10,border:"1px solid var(--border)",background:"var(--card-bg)",cursor:"pointer",textAlign:"left",fontFamily:"'DM Sans',sans-serif",borderLeft:`3px solid ${areaColors[area]??"var(--border)"}`}}>
+                    <div style={{flex:1,minWidth:0}}>
+                      <div style={{color:"var(--text)",fontWeight:600,fontSize:13,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{emp.name}</div>
+                      <div style={{color:"var(--text3)",fontSize:11}}>{role?.name ?? "—"}</div>
+                    </div>
+                    <div style={{display:"flex",gap:6,alignItems:"center",flexShrink:0}}>
+                      {empIncidents.length > 0 && <span style={{fontSize:10,color:"#f59e0b",background:"#f59e0b22",padding:"2px 6px",borderRadius:4,fontWeight:700}}>{empIncidents.length} oc.</span>}
+                      {lastFb && <span style={{fontSize:10,color:"#f59e0b"}}>{"★".repeat(lastFb.rating)}</span>}
+                      <span style={{color:"var(--text3)",fontSize:14}}>→</span>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
           </div>
-        </div>
-      )}
+        ));
+      })()}
 
       {/* Selected emp timeline */}
       {selectedEmp && (
