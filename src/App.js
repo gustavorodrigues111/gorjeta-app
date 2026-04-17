@@ -3,7 +3,7 @@ import { useState, useEffect, Component } from "react";
 import { db } from "./firebase";
 import { doc, getDoc, setDoc } from "firebase/firestore";
 
-const APP_VERSION = "5.15.4";
+const APP_VERSION = "5.16.0";
 
 const DEFAULT_ADMISSION = () => `${new Date().getFullYear()}-01-01`;
 const round2 = (v) => Math.round(v * 100) / 100;
@@ -166,6 +166,9 @@ const K = {
   vtConfig:         "v4:vtConfig",          // {[restaurantId]: {[employeeId]: {dailyRate: number}}}
   vtMonthly:        "v4:vtMonthly",         // {[restaurantId]: {[monthKey]: {[employeeId]: {adjustOverride: number|null, manualDiscount: number}}}}
   vtPayments:       "v4:vtPayments",        // {[restaurantId]: {[monthKey]: {paidAt: ISO, paidBy: string, snapshot: [{empId,name,role,dailyRate,plannedDays,grossVT,autoAdjust,manualDiscount,totalPaid}]}}}
+  incidents:        "v4:incidents",         // [{id, restaurantId, employeeIds:[], type, severity, description, date, createdAt, createdBy, createdById, visibility:"internal"}]
+  feedbacks:        "v4:feedbacks",         // [{id, restaurantId, employeeId, quarter, year, rating, strengths, improvements, internalNotes, goal, targetRoleId, devChecklist:[{title,link,type,done}], createdAt, createdBy}]
+  devChecklists:    "v4:devChecklists",     // {[roleId]: [{title, link, type:"livro"|"video"|"curso"|"pratica"}]}
 };
 
 // ── Version retention ──
@@ -2967,7 +2970,7 @@ function DpManagerTab({ restaurantId, dpMessages, onUpdate, isOwner }) {
   );
 }
 
-function EmployeePortal({ employees, roles, tips, schedules, splits, restaurants, communications, commAcks, faq, dpMessages, workSchedules, onBack, onUpdateEmployee, onUpdate, toggleTheme, theme, onSwitchToManager }) {
+function EmployeePortal({ employees, roles, tips, schedules, splits, restaurants, communications, commAcks, faq, dpMessages, workSchedules, incidents, feedbacks, devChecklists, onBack, onUpdateEmployee, onUpdate, toggleTheme, theme, onSwitchToManager }) {
   const [empId, setEmpId] = useState(() => localStorage.getItem("apptip_empid") || null);
 
   useEffect(() => {
@@ -3102,6 +3105,7 @@ function EmployeePortal({ employees, roles, tips, schedules, splits, restaurants
     ["comunicados","📢","Avisos"],
     ["escala","📅","Escala"],
     ["extrato","💸","Gorjeta"],
+    ["trilha","📈","Trilha"],
     empTabVisible("horarios") && ["horarios","🕐","Horários"],
     empTabVisible("faq")      && ["faq","❓","FAQ"],
     empTabVisible("dp")       && ["dp","💬","Fale DP"],
@@ -3347,6 +3351,10 @@ function EmployeePortal({ employees, roles, tips, schedules, splits, restaurants
 
         {tab === "faq" && (
           <FaqTab restaurantId={emp?.restaurantId} faq={faq} emp={emp} roles={roles} restaurants={restaurants} splits={splits} />
+        )}
+
+        {tab === "trilha" && emp && (
+          <EmpTrilhaView empId={empId} employees={employees} roles={roles} schedules={schedules} incidents={incidents??[]} feedbacks={feedbacks??[]} devChecklists={devChecklists??{}} restaurantId={emp.restaurantId} onUpdate={onUpdate}/>
         )}
 
         {tab === "dp" && (
@@ -3724,7 +3732,7 @@ const EMP_COLS        = "80px 2fr 1.2fr 100px auto 1.5fr auto";
 const EMP_COLS_HEADER = "80px 2fr 1.2fr 100px auto 1.5fr auto";
 const empInS2 = { background:"var(--bg1)", border:"1px solid var(--border)", borderRadius:6, color:"var(--text)", fontFamily:"'DM Mono',monospace", fontSize:12, padding:"6px 8px", outline:"none", width:"100%", boxSizing:"border-box" };
 
-function EmpRowLine({ emp, isNew, row, restRoles, isSaved, isOwner, onChange, onSave, onToggleInactive, onDelete, onAdd, onResetPin, onToggleProd, onToggleFreela, onDismiss, onUndoDismiss, onGenerateReport, employees, privacyMask }) {
+function EmpRowLine({ emp, isNew, row, restRoles, isSaved, isOwner, onChange, onSave, onToggleInactive, onDelete, onAdd, onResetPin, onToggleProd, onToggleFreela, onDismiss, onUndoDismiss, onGenerateReport, onPromote, employees, privacyMask }) {
   const ac = "var(--ac)";
   const isInactive = !isNew && emp?.inactive && emp?.inactiveFrom <= today();
   const isDemitido = !isNew && emp?.demitidoEm && emp.demitidoEm <= today();
@@ -3801,11 +3809,20 @@ function EmpRowLine({ emp, isNew, row, restRoles, isSaved, isOwner, onChange, on
                     style={{padding:"4px 8px",borderRadius:6,border:`1px solid ${isInactive?"#10b98144":"#f59e0b44"}`,background:"transparent",color:isInactive?"var(--green)":"#f59e0b",cursor:"pointer",fontSize:11,fontFamily:"'DM Mono',monospace"}}>
                     {isInactive?"↑":"↓"}
                   </button>
+                  {!isInactive && onPromote && (
+                    <button onClick={()=>onPromote(emp)} title="Promover / Mudar cargo"
+                      style={{padding:"4px 8px",borderRadius:6,border:"1px solid #3b82f644",background:"transparent",color:"#3b82f6",cursor:"pointer",fontSize:10,fontFamily:"'DM Mono',monospace"}}>⬆️</button>
+                  )}
                   {!isInactive && onDismiss && (
                     <button onClick={onDismiss} title="Demitir"
                       style={{padding:"4px 8px",borderRadius:6,border:"1px solid #e74c3c44",background:"transparent",color:"var(--red)",cursor:"pointer",fontSize:10,fontFamily:"'DM Mono',monospace"}}>Demitir</button>
                   )}
                 </>
+              )}
+              {emp.pendingRoleChange && (
+                <span style={{fontSize:9,color:"#3b82f6",fontWeight:700,padding:"2px 6px",background:"#3b82f622",borderRadius:4}}>
+                  ⬆️ {new Date(emp.pendingRoleChange.effectiveDate+"T12:00:00").toLocaleDateString("pt-BR")}
+                </span>
               )}
               {isOwner && isInactive && (
                 <button onClick={onDelete} title="Excluir permanentemente"
@@ -4038,6 +4055,40 @@ Inclua apenas as ações solicitadas. Arrays vazios se não houver ação daquel
     onUpdate("_toast", `↩️ Demissão de ${emp.name} revertida`);
   }
 
+  function promoteEmp(emp) {
+    const available = restRoles.filter(r => !r.inactive && r.id !== emp.roleId);
+    if (!available.length) { onUpdate("_toast", "Não há outros cargos ativos disponíveis."); return; }
+    const options = available.map((r, i) => `${i+1}. ${r.name} (${r.area}, ${r.points}pt)`).join("\n");
+    const choice = window.prompt(`Promover "${emp.name}"\n\nEscolha o novo cargo (digite o número):\n${options}`);
+    if (!choice) return;
+    const idx = parseInt(choice) - 1;
+    if (isNaN(idx) || idx < 0 || idx >= available.length) { window.alert("Opção inválida."); return; }
+    const newRole = available[idx];
+    const dataStr = window.prompt(`Data efetiva da mudança para "${newRole.name}" (DD/MM/AAAA):`, new Date().toLocaleDateString("pt-BR"));
+    if (!dataStr) return;
+    const parts = dataStr.split("/");
+    if (parts.length !== 3) { window.alert("Data inválida."); return; }
+    const [dd,mm,yyyy] = parts;
+    const effectiveDate = `${yyyy}-${mm.padStart(2,"0")}-${dd.padStart(2,"0")}`;
+    if (isNaN(new Date(effectiveDate+"T12:00:00").getTime())) { window.alert("Data inválida."); return; }
+    const reason = window.prompt("Motivo (opcional):") || "";
+    const changedBy = isOwner ? "Admin AppTip" : "Gestor";
+    const oldRole = restRoles.find(r => r.id === emp.roleId);
+
+    if (effectiveDate <= today()) {
+      const historyEntry = { fromRoleId: emp.roleId, toRoleId: newRole.id, date: effectiveDate, reason, changedBy };
+      const history = [...(emp.roleHistory ?? []), historyEntry];
+      if (!window.confirm(`Confirmar mudança de cargo de "${emp.name}"?\n\n${oldRole?.name ?? "—"} → ${newRole.name}\nData: ${dataStr}\n${reason ? "Motivo: " + reason : ""}`)) return;
+      onUpdate("employees", employees.map(e => e.id === emp.id ? { ...e, roleId: newRole.id, roleHistory: history } : e));
+      onUpdate("_toast", `⬆️ ${emp.name}: ${oldRole?.name ?? "—"} → ${newRole.name}`);
+    } else {
+      if (!window.confirm(`Agendar mudança de cargo de "${emp.name}"?\n\n${oldRole?.name ?? "—"} → ${newRole.name}\nData efetiva: ${dataStr}\n${reason ? "Motivo: " + reason : ""}\n\nA troca será aplicada automaticamente na data.`)) return;
+      const pending = { newRoleId: newRole.id, effectiveDate, reason, changedBy };
+      onUpdate("employees", employees.map(e => e.id === emp.id ? { ...e, pendingRoleChange: pending } : e));
+      onUpdate("_toast", `📅 Promoção de ${emp.name} agendada para ${dataStr}`);
+    }
+  }
+
   function deleteEmp(emp) {
     if (!window.confirm(`Excluir permanentemente "${emp.name}"? Esta ação não pode ser desfeita.`)) return;
     onUpdate("employees", employees.filter(x => x.id !== emp.id));
@@ -4232,6 +4283,7 @@ Inclua apenas as ações solicitadas. Arrays vazios se não houver ação daquel
                   onDismiss={()=>dismissEmp(emp)}
                   onUndoDismiss={()=>undoDismiss(emp)}
                   onGenerateReport={onGenerateDismissalReport}
+                  onPromote={promoteEmp}
                   onResetPin={resetPin}
                   onToggleProd={()=>{
                     onUpdate("employees", employees.map(x => x.id===emp.id ? {...x, isProducao:!x.isProducao} : x));
@@ -4598,6 +4650,603 @@ function ValeTransporteTab({ restaurantId, employees, roles, workSchedules, sche
         <div style={{ textAlign: "center", padding: 40, color: "var(--text3)" }}>
           <div style={{ fontSize: 40, marginBottom: 12 }}>🚌</div>
           <div style={{ fontSize: 15 }}>Nenhum empregado cadastrado</div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// TRILHA DO EMPREGADO — Components
+// ═══════════════════════════════════════════════════════════════════
+
+const INCIDENT_TYPES = [
+  { id:"advertencia_verbal", label:"Advertência verbal", negative:true },
+  { id:"advertencia_escrita", label:"Advertência escrita", negative:true },
+  { id:"desentendimento", label:"Desentendimento", negative:true },
+  { id:"dano_material", label:"Dano material", negative:true },
+  { id:"indisciplina", label:"Indisciplina", negative:true },
+  { id:"elogio_formal", label:"Elogio formal", negative:false },
+  { id:"destaque_positivo", label:"Destaque positivo", negative:false },
+  { id:"outro", label:"Outro", negative:true },
+];
+const SEVERITY_OPTIONS = [
+  { id:"leve", label:"Leve", color:"#f59e0b" },
+  { id:"media", label:"Média", color:"#f97316" },
+  { id:"grave", label:"Grave", color:"#e74c3c" },
+];
+
+function EmpTimeline({ empId, employees, roles, schedules, incidents, feedbacks, restaurantId }) {
+  const [filter, setFilter] = useState("Todos");
+  const emp = employees.find(e => e.id === empId);
+  if (!emp) return null;
+
+  const events = [];
+
+  // Admission event
+  if (emp.admission) {
+    events.push({ date: emp.admission, type: "admission", cat: "Promoções", icon: "🎉", label: "Admissão", desc: `Início na empresa` });
+  }
+
+  // Dismissal event
+  if (emp.demitidoEm) {
+    events.push({ date: emp.demitidoEm, type: "dismissal", cat: "Promoções", icon: "📋", label: "Desligamento", desc: `Demitido em ${new Date(emp.demitidoEm+"T12:00:00").toLocaleDateString("pt-BR")}` });
+  }
+
+  // Role history
+  (emp.roleHistory ?? []).forEach(rh => {
+    const fromRole = roles.find(r => r.id === rh.fromRoleId);
+    const toRole = roles.find(r => r.id === rh.toRoleId);
+    events.push({ date: rh.date, type: "promotion", cat: "Promoções", icon: "⬆️", label: "Mudança de cargo", desc: `${fromRole?.name ?? "—"} → ${toRole?.name ?? "—"}${rh.reason ? " · " + rh.reason : ""}` });
+  });
+
+  // Incidents
+  (incidents ?? []).filter(inc => inc.restaurantId === restaurantId && (inc.employeeIds ?? []).includes(empId)).forEach(inc => {
+    const t = INCIDENT_TYPES.find(it => it.id === inc.type);
+    events.push({ date: inc.date, type: "incident", cat: "Ocorrências", icon: t && !t.negative ? "⭐" : "⚠️", label: t?.label ?? inc.type, desc: inc.description || "", severity: inc.severity });
+  });
+
+  // Feedbacks
+  (feedbacks ?? []).filter(fb => fb.restaurantId === restaurantId && fb.employeeId === empId).forEach(fb => {
+    events.push({ date: fb.createdAt?.slice(0,10) ?? "2026-01-01", type: "feedback", cat: "Feedbacks", icon: "💬", label: `Feedback Q${fb.quarter}/${fb.year}`, desc: `Nota: ${"★".repeat(fb.rating)}${"☆".repeat(5 - fb.rating)}${fb.goal ? " · Meta: " + fb.goal : ""}` });
+  });
+
+  // Schedule events — aggregate per month
+  const ridSchedules = schedules?.[restaurantId] ?? {};
+  Object.entries(ridSchedules).forEach(([mk, monthData]) => {
+    const empDays = monthData?.[empId];
+    if (!empDays || typeof empDays !== "object") return;
+    const counts = {};
+    Object.values(empDays).forEach(status => {
+      if (status && typeof status === "string" && status !== "") {
+        counts[status] = (counts[status] || 0) + 1;
+      }
+    });
+    if (Object.keys(counts).length === 0) return;
+    const parts = [];
+    if (counts[DAY_FAULT_U]) parts.push(`${counts[DAY_FAULT_U]} falta${counts[DAY_FAULT_U]>1?"s":""} injustificada${counts[DAY_FAULT_U]>1?"s":""}`);
+    if (counts[DAY_FAULT_J]) parts.push(`${counts[DAY_FAULT_J]} falta${counts[DAY_FAULT_J]>1?"s":""} justificada${counts[DAY_FAULT_J]>1?"s":""}`);
+    if (counts[DAY_VACATION]) parts.push(`${counts[DAY_VACATION]} dia${counts[DAY_VACATION]>1?"s":""} de férias`);
+    if (counts[DAY_COMP]) parts.push(`${counts[DAY_COMP]} folga${counts[DAY_COMP]>1?"s":""} por compensação`);
+    if (counts[DAY_COMP_TRAB]) parts.push(`${counts[DAY_COMP_TRAB]} dia${counts[DAY_COMP_TRAB]>1?"s":""} trab. compensação`);
+    if (parts.length > 0) {
+      const [y, m] = mk.split("-");
+      const monthName = new Date(parseInt(y), parseInt(m)-1, 15).toLocaleDateString("pt-BR", {month:"long", year:"numeric"});
+      events.push({ date: `${mk}-15`, type: "schedule", cat: "Escala", icon: "📅", label: monthName.charAt(0).toUpperCase() + monthName.slice(1), desc: parts.join(", ") });
+    }
+  });
+
+  events.sort((a, b) => b.date.localeCompare(a.date));
+
+  const filters = ["Todos", "Escala", "Ocorrências", "Promoções", "Feedbacks"];
+  const filtered = filter === "Todos" ? events : events.filter(e => e.cat === filter);
+
+  return (
+    <div>
+      <div style={{display:"flex",gap:6,marginBottom:16,flexWrap:"wrap"}}>
+        {filters.map(f => (
+          <button key={f} onClick={()=>setFilter(f)} style={{padding:"5px 12px",borderRadius:20,border:`1px solid ${filter===f?"var(--ac)":"var(--border)"}`,background:filter===f?"var(--ac-bg,#d4a01722)":"transparent",color:filter===f?"var(--ac)":"var(--text3)",cursor:"pointer",fontSize:12,fontFamily:"'DM Sans',sans-serif",fontWeight:filter===f?700:500}}>{f}</button>
+        ))}
+      </div>
+      {filtered.length === 0 && <p style={{color:"var(--text3)",textAlign:"center",fontSize:13,padding:20}}>Nenhum evento encontrado.</p>}
+      <div style={{position:"relative",paddingLeft:28}}>
+        {filtered.length > 0 && <div style={{position:"absolute",left:10,top:0,bottom:0,width:2,background:"var(--border)"}}/>}
+        {filtered.map((ev, i) => (
+          <div key={i} style={{position:"relative",marginBottom:16,paddingBottom:4}}>
+            <div style={{position:"absolute",left:-24,top:2,width:24,height:24,borderRadius:12,background:"var(--card-bg)",border:"2px solid var(--border)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:12}}>{ev.icon}</div>
+            <div style={{...S.card,padding:"12px 16px",marginLeft:8}}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:8,flexWrap:"wrap",marginBottom:4}}>
+                <span style={{fontSize:11,fontWeight:700,color:"var(--text)",fontFamily:"'DM Sans',sans-serif"}}>{ev.label}</span>
+                <span style={{fontSize:10,color:"var(--text3)",fontFamily:"'DM Mono',monospace"}}>{new Date(ev.date+"T12:00:00").toLocaleDateString("pt-BR")}</span>
+              </div>
+              {ev.severity && <span style={{fontSize:9,fontWeight:700,padding:"2px 6px",borderRadius:4,background:(SEVERITY_OPTIONS.find(s=>s.id===ev.severity)?.color??"#888")+"22",color:SEVERITY_OPTIONS.find(s=>s.id===ev.severity)?.color??"#888",marginRight:6}}>{SEVERITY_OPTIONS.find(s=>s.id===ev.severity)?.label??ev.severity}</span>}
+              {ev.desc && <p style={{color:"var(--text2)",fontSize:12,margin:0,lineHeight:1.5}}>{ev.desc}</p>}
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function IncidentForm({ restaurantId, employees, onUpdate, incidents, currentUser, isOwner }) {
+  const restEmps = employees.filter(e => e.restaurantId === restaurantId && !(e.inactive && e.inactiveFrom && e.inactiveFrom <= today()));
+  const [selectedEmps, setSelectedEmps] = useState([]);
+  const [type, setType] = useState("");
+  const [severity, setSeverity] = useState("");
+  const [description, setDescription] = useState("");
+  const [date, setDate] = useState(today());
+
+  const typeObj = INCIDENT_TYPES.find(t => t.id === type);
+  const needsSeverity = typeObj?.negative ?? true;
+
+  function handleSubmit() {
+    if (selectedEmps.length === 0) { window.alert("Selecione ao menos um empregado."); return; }
+    if (!type) { window.alert("Selecione o tipo de ocorrência."); return; }
+    if (needsSeverity && !severity) { window.alert("Selecione a gravidade."); return; }
+    if (!description.trim()) { window.alert("Descreva a ocorrência."); return; }
+    const inc = {
+      id: `${Date.now()}-${Math.random().toString(36).slice(2,6)}`,
+      restaurantId,
+      employeeIds: selectedEmps,
+      type,
+      severity: needsSeverity ? severity : null,
+      description: description.trim(),
+      date,
+      createdAt: new Date().toISOString(),
+      createdBy: isOwner ? "Admin AppTip" : (currentUser?.name ?? "Gestor"),
+      createdById: currentUser?.id ?? null,
+      visibility: "internal",
+    };
+    onUpdate("incidents", [...(incidents ?? []), inc]);
+    setSelectedEmps([]); setType(""); setSeverity(""); setDescription(""); setDate(today());
+  }
+
+  return (
+    <div style={{...S.card, padding:"18px 20px"}}>
+      <h4 style={{color:"var(--text)",margin:"0 0 14px",fontSize:15,fontWeight:700}}>Registrar ocorrência</h4>
+      <div style={{marginBottom:12}}>
+        <label style={S.label}>Empregados envolvidos</label>
+        <div style={{display:"flex",flexWrap:"wrap",gap:6,maxHeight:120,overflowY:"auto",padding:4}}>
+          {restEmps.map(emp => (
+            <label key={emp.id} style={{display:"flex",alignItems:"center",gap:4,fontSize:12,color:"var(--text2)",cursor:"pointer",padding:"4px 8px",borderRadius:6,border:`1px solid ${selectedEmps.includes(emp.id)?"var(--ac)":"var(--border)"}`,background:selectedEmps.includes(emp.id)?"var(--ac-bg,#d4a01711)":"transparent"}}>
+              <input type="checkbox" checked={selectedEmps.includes(emp.id)} onChange={()=>setSelectedEmps(prev=>prev.includes(emp.id)?prev.filter(x=>x!==emp.id):[...prev,emp.id])} style={{accentColor:"var(--ac)"}}/>
+              {emp.name}
+            </label>
+          ))}
+        </div>
+      </div>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:12}}>
+        <div>
+          <label style={S.label}>Tipo</label>
+          <select value={type} onChange={e=>setType(e.target.value)} style={S.input}>
+            <option value="">Selecionar...</option>
+            {INCIDENT_TYPES.map(t => <option key={t.id} value={t.id}>{t.label}</option>)}
+          </select>
+        </div>
+        <div>
+          <label style={S.label}>Data</label>
+          <input type="date" value={date} onChange={e=>setDate(e.target.value)} style={S.input}/>
+        </div>
+      </div>
+      {needsSeverity && type && (
+        <div style={{marginBottom:12}}>
+          <label style={S.label}>Gravidade</label>
+          <div style={{display:"flex",gap:8}}>
+            {SEVERITY_OPTIONS.map(s => (
+              <button key={s.id} onClick={()=>setSeverity(s.id)} style={{flex:1,padding:"8px",borderRadius:8,border:`1px solid ${severity===s.id?s.color:s.color+"44"}`,background:severity===s.id?s.color+"22":"transparent",color:s.color,cursor:"pointer",fontWeight:severity===s.id?700:500,fontSize:13,fontFamily:"'DM Sans',sans-serif"}}>{s.label}</button>
+            ))}
+          </div>
+        </div>
+      )}
+      <div style={{marginBottom:14}}>
+        <label style={S.label}>Descrição</label>
+        <textarea value={description} onChange={e=>setDescription(e.target.value)} rows={3} placeholder="Descreva a ocorrência em detalhes..." style={{...S.input,resize:"vertical"}}/>
+      </div>
+      <button onClick={handleSubmit} style={{...S.btnPrimary,width:"auto",padding:"10px 24px"}}>Registrar ocorrência</button>
+    </div>
+  );
+}
+
+function FeedbackForm({ restaurantId, employees, roles, onUpdate, feedbacks, currentUser, isOwner }) {
+  const restEmps = employees.filter(e => e.restaurantId === restaurantId && !(e.inactive && e.inactiveFrom && e.inactiveFrom <= today()));
+  const restRoles = roles.filter(r => r.restaurantId === restaurantId && !r.inactive);
+  const now = new Date();
+  const [empId, setEmpId] = useState("");
+  const [rating, setRating] = useState(0);
+  const [strengths, setStrengths] = useState("");
+  const [improvements, setImprovements] = useState("");
+  const [internalNotes, setInternalNotes] = useState("");
+  const [goal, setGoal] = useState("");
+  const [targetRoleId, setTargetRoleId] = useState("");
+  const quarter = Math.ceil((now.getMonth()+1)/3);
+
+  function handleSubmit() {
+    if (!empId) { window.alert("Selecione um empregado."); return; }
+    if (rating < 1) { window.alert("Defina a avaliação (1-5 estrelas)."); return; }
+    const fb = {
+      id: `${Date.now()}-${Math.random().toString(36).slice(2,6)}`,
+      restaurantId,
+      employeeId: empId,
+      quarter,
+      year: now.getFullYear(),
+      rating,
+      strengths: strengths.trim(),
+      improvements: improvements.trim(),
+      internalNotes: internalNotes.trim(),
+      goal: goal.trim(),
+      targetRoleId: targetRoleId || null,
+      devChecklist: [],
+      createdAt: new Date().toISOString(),
+      createdBy: isOwner ? "Admin AppTip" : (currentUser?.name ?? "Gestor"),
+    };
+    onUpdate("feedbacks", [...(feedbacks ?? []), fb]);
+    setEmpId(""); setRating(0); setStrengths(""); setImprovements(""); setInternalNotes(""); setGoal(""); setTargetRoleId("");
+  }
+
+  return (
+    <div style={{...S.card, padding:"18px 20px"}}>
+      <h4 style={{color:"var(--text)",margin:"0 0 14px",fontSize:15,fontWeight:700}}>Registrar feedback trimestral</h4>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:12}}>
+        <div>
+          <label style={S.label}>Empregado</label>
+          <select value={empId} onChange={e=>setEmpId(e.target.value)} style={S.input}>
+            <option value="">Selecionar...</option>
+            {restEmps.map(emp => <option key={emp.id} value={emp.id}>{emp.name}</option>)}
+          </select>
+        </div>
+        <div>
+          <label style={S.label}>Trimestre</label>
+          <div style={{...S.input,background:"var(--bg1)",display:"flex",alignItems:"center"}}>Q{quarter}/{now.getFullYear()}</div>
+        </div>
+      </div>
+      <div style={{marginBottom:12}}>
+        <label style={S.label}>Avaliação</label>
+        <div style={{display:"flex",gap:4}}>
+          {[1,2,3,4,5].map(n => (
+            <button key={n} onClick={()=>setRating(n)} style={{background:"none",border:"none",fontSize:28,cursor:"pointer",color:n<=rating?"#f59e0b":"var(--border)",padding:2,lineHeight:1}}>★</button>
+          ))}
+        </div>
+      </div>
+      <div style={{marginBottom:12}}>
+        <label style={S.label}>Pontos fortes</label>
+        <textarea value={strengths} onChange={e=>setStrengths(e.target.value)} rows={2} placeholder="O que o empregado faz bem..." style={{...S.input,resize:"vertical"}}/>
+      </div>
+      <div style={{marginBottom:12}}>
+        <label style={S.label}>Pontos a melhorar</label>
+        <textarea value={improvements} onChange={e=>setImprovements(e.target.value)} rows={2} placeholder="Onde pode evoluir..." style={{...S.input,resize:"vertical"}}/>
+      </div>
+      <div style={{marginBottom:12}}>
+        <label style={S.label}>Notas internas <span style={{fontSize:10,color:"var(--text3)",fontWeight:400}}>(não visível ao empregado)</span></label>
+        <textarea value={internalNotes} onChange={e=>setInternalNotes(e.target.value)} rows={2} placeholder="Observações confidenciais..." style={{...S.input,resize:"vertical",borderColor:"#e74c3c33"}}/>
+      </div>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:14}}>
+        <div>
+          <label style={S.label}>Meta para o próximo trimestre</label>
+          <input value={goal} onChange={e=>setGoal(e.target.value)} placeholder="Ex: Liderar a abertura do salão" style={S.input}/>
+        </div>
+        <div>
+          <label style={S.label}>Cargo-alvo (desenvolvimento)</label>
+          <select value={targetRoleId} onChange={e=>setTargetRoleId(e.target.value)} style={S.input}>
+            <option value="">Manter atual</option>
+            {restRoles.map(r => <option key={r.id} value={r.id}>{r.name} ({r.area})</option>)}
+          </select>
+        </div>
+      </div>
+      <button onClick={handleSubmit} style={{...S.btnPrimary,width:"auto",padding:"10px 24px"}}>Registrar feedback</button>
+    </div>
+  );
+}
+
+function TrilhaTab({ restaurantId, employees, roles, schedules, incidents, feedbacks, devChecklists, onUpdate, currentUser, isOwner, isLider, mobileOnly }) {
+  const [selectedEmp, setSelectedEmp] = useState("");
+  const [showIncidentForm, setShowIncidentForm] = useState(false);
+  const [showFeedbackForm, setShowFeedbackForm] = useState(false);
+  const restEmps = employees.filter(e => e.restaurantId === restaurantId && !(e.inactive && e.inactiveFrom && e.inactiveFrom <= today()));
+
+  return (
+    <div>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:12,marginBottom:16}}>
+        <h3 style={{color:"var(--text)",margin:0,fontSize:mobileOnly?16:20}}>📈 Trilha do Empregado</h3>
+      </div>
+
+      {/* Emp selector + action buttons */}
+      <div style={{display:"flex",gap:10,marginBottom:16,flexWrap:"wrap",alignItems:"center"}}>
+        <select value={selectedEmp} onChange={e=>setSelectedEmp(e.target.value)} style={{...S.input,flex:1,minWidth:200,maxWidth:350}}>
+          <option value="">Selecionar empregado...</option>
+          {restEmps.map(emp => <option key={emp.id} value={emp.id}>{emp.name}</option>)}
+        </select>
+        <button onClick={()=>{setShowIncidentForm(!showIncidentForm);setShowFeedbackForm(false);}} style={{...S.btnSecondary,fontSize:12,padding:"8px 14px",color:showIncidentForm?"var(--ac)":"var(--text2)",borderColor:showIncidentForm?"var(--ac)":"var(--border)"}}>⚠️ Registrar ocorrência</button>
+        <button onClick={()=>{setShowFeedbackForm(!showFeedbackForm);setShowIncidentForm(false);}} style={{...S.btnSecondary,fontSize:12,padding:"8px 14px",color:showFeedbackForm?"var(--ac)":"var(--text2)",borderColor:showFeedbackForm?"var(--ac)":"var(--border)"}}>💬 Registrar feedback</button>
+      </div>
+
+      {/* Incident form */}
+      {showIncidentForm && (
+        <div style={{marginBottom:16}}>
+          <IncidentForm restaurantId={restaurantId} employees={employees} onUpdate={onUpdate} incidents={incidents} currentUser={currentUser} isOwner={isOwner}/>
+        </div>
+      )}
+
+      {/* Feedback form */}
+      {showFeedbackForm && (
+        <div style={{marginBottom:16}}>
+          <FeedbackForm restaurantId={restaurantId} employees={employees} roles={roles} onUpdate={onUpdate} feedbacks={feedbacks} currentUser={currentUser} isOwner={isOwner}/>
+        </div>
+      )}
+
+      {/* Summary cards */}
+      {!selectedEmp && (
+        <div style={{display:"grid",gridTemplateColumns:mobileOnly?"1fr":"1fr 1fr 1fr",gap:12,marginBottom:20}}>
+          <div style={{...S.card,textAlign:"center"}}>
+            <div style={{fontSize:28,marginBottom:6}}>👥</div>
+            <div style={{color:"var(--text)",fontWeight:700,fontSize:20}}>{restEmps.length}</div>
+            <div style={{color:"var(--text3)",fontSize:11}}>Empregados ativos</div>
+          </div>
+          <div style={{...S.card,textAlign:"center"}}>
+            <div style={{fontSize:28,marginBottom:6}}>⚠️</div>
+            <div style={{color:"var(--text)",fontWeight:700,fontSize:20}}>{(incidents??[]).filter(i=>i.restaurantId===restaurantId).length}</div>
+            <div style={{color:"var(--text3)",fontSize:11}}>Ocorrências registradas</div>
+          </div>
+          <div style={{...S.card,textAlign:"center"}}>
+            <div style={{fontSize:28,marginBottom:6}}>💬</div>
+            <div style={{color:"var(--text)",fontWeight:700,fontSize:20}}>{(feedbacks??[]).filter(f=>f.restaurantId===restaurantId).length}</div>
+            <div style={{color:"var(--text3)",fontSize:11}}>Feedbacks registrados</div>
+          </div>
+        </div>
+      )}
+
+      {/* Employees table / quick view when no emp selected */}
+      {!selectedEmp && (
+        <div style={{...S.card}}>
+          <h4 style={{color:"var(--text)",margin:"0 0 12px",fontSize:14}}>Selecione um empregado para ver a trilha completa</h4>
+          <div style={{display:"flex",flexDirection:"column",gap:4}}>
+            {restEmps.map(emp => {
+              const role = roles.find(r => r.id === emp.roleId);
+              const empIncidents = (incidents??[]).filter(i => i.restaurantId === restaurantId && (i.employeeIds??[]).includes(emp.id));
+              const empFeedbacks = (feedbacks??[]).filter(f => f.restaurantId === restaurantId && f.employeeId === emp.id);
+              const lastFb = empFeedbacks.sort((a,b)=>(b.createdAt??"").localeCompare(a.createdAt??""))[0];
+              return (
+                <button key={emp.id} onClick={()=>setSelectedEmp(emp.id)} style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:8,padding:"10px 14px",borderRadius:10,border:"1px solid var(--border)",background:"var(--card-bg)",cursor:"pointer",textAlign:"left",fontFamily:"'DM Sans',sans-serif"}}>
+                  <div style={{flex:1,minWidth:0}}>
+                    <div style={{color:"var(--text)",fontWeight:600,fontSize:13,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{emp.name}</div>
+                    <div style={{color:"var(--text3)",fontSize:11}}>{role?.name ?? "—"} · {role?.area ?? "—"}</div>
+                  </div>
+                  <div style={{display:"flex",gap:6,alignItems:"center",flexShrink:0}}>
+                    {empIncidents.length > 0 && <span style={{fontSize:10,color:"#f59e0b",background:"#f59e0b22",padding:"2px 6px",borderRadius:4,fontWeight:700}}>{empIncidents.length} oc.</span>}
+                    {lastFb && <span style={{fontSize:10,color:"#f59e0b"}}>{"★".repeat(lastFb.rating)}</span>}
+                    <span style={{color:"var(--text3)",fontSize:14}}>→</span>
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* Selected emp timeline */}
+      {selectedEmp && (
+        <div>
+          <button onClick={()=>setSelectedEmp("")} style={{...S.btnSecondary,fontSize:12,marginBottom:16}}>← Voltar à lista</button>
+          <div style={{marginBottom:16}}>
+            {(() => {
+              const emp = employees.find(e => e.id === selectedEmp);
+              const role = roles.find(r => r.id === emp?.roleId);
+              const admDate = emp?.admission ? new Date(emp.admission+"T12:00:00") : null;
+              const days = admDate ? Math.floor((new Date() - admDate) / 86400000) : 0;
+              return (
+                <div style={{...S.card,display:"flex",gap:16,alignItems:"center",flexWrap:"wrap"}}>
+                  <div style={{width:48,height:48,borderRadius:24,background:"var(--ac-bg,#d4a01722)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:22,fontWeight:700,color:"var(--ac)",flexShrink:0}}>{(emp?.name??"?").charAt(0)}</div>
+                  <div style={{flex:1,minWidth:0}}>
+                    <div style={{color:"var(--text)",fontWeight:700,fontSize:16}}>{emp?.name}</div>
+                    <div style={{color:"var(--text3)",fontSize:12}}>{role?.name ?? "—"} · {role?.area ?? "—"} · {days} dias na empresa</div>
+                  </div>
+                  {emp?.pendingRoleChange && (
+                    <span style={{fontSize:11,color:"#3b82f6",fontWeight:700,padding:"4px 10px",background:"#3b82f622",borderRadius:6}}>⬆️ Promoção agendada: {new Date(emp.pendingRoleChange.effectiveDate+"T12:00:00").toLocaleDateString("pt-BR")}</span>
+                  )}
+                </div>
+              );
+            })()}
+          </div>
+          <EmpTimeline empId={selectedEmp} employees={employees} roles={roles} schedules={schedules} incidents={incidents} feedbacks={feedbacks} restaurantId={restaurantId}/>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Gamified Employee Trail View ──
+function EmpTrilhaView({ empId, employees, roles, schedules, incidents, feedbacks, devChecklists, restaurantId, onUpdate }) {
+  const emp = employees.find(e => e.id === empId);
+  const role = emp ? roles.find(r => r.id === emp.roleId) : null;
+  const restEmps = employees.filter(e => e.restaurantId === restaurantId && !(e.inactive && e.inactiveFrom && e.inactiveFrom <= today()));
+  const admDate = emp?.admission ? new Date(emp.admission+"T12:00:00") : null;
+  const daysInCompany = admDate ? Math.floor((new Date() - admDate) / 86400000) : 0;
+
+  // Latest feedback
+  const myFeedbacks = (feedbacks ?? []).filter(f => f.restaurantId === restaurantId && f.employeeId === empId).sort((a,b)=>(b.createdAt??"").localeCompare(a.createdAt??""));
+  const latestFb = myFeedbacks[0];
+  const targetRole = latestFb?.targetRoleId ? roles.find(r => r.id === latestFb.targetRoleId) : null;
+
+  // Positive incidents only (employee sees only elogios)
+  const positiveIncidents = (incidents ?? []).filter(i => i.restaurantId === restaurantId && (i.employeeIds ?? []).includes(empId) && !INCIDENT_TYPES.find(t => t.id === i.type)?.negative);
+
+  // Badges calculation
+  const badges = [];
+  if (daysInCompany >= 365) badges.push({ icon:"🏆", label:"1 Ano", desc:"Completou 1 ano na empresa" });
+  if (daysInCompany >= 180) badges.push({ icon:"⭐", label:"6 Meses", desc:"6 meses de dedicação" });
+  if (daysInCompany >= 90) badges.push({ icon:"🌟", label:"3 Meses", desc:"Primeiros 90 dias concluídos" });
+  if ((emp?.roleHistory ?? []).length > 0) badges.push({ icon:"⬆️", label:"Promovido", desc:"Já recebeu uma promoção" });
+  if (latestFb?.rating === 5) badges.push({ icon:"💎", label:"Excelência", desc:"Recebeu avaliação 5 estrelas" });
+  if (positiveIncidents.length > 0) badges.push({ icon:"🌟", label:"Destaque", desc:"Recebeu elogio formal" });
+
+  // Schedule metrics — compare with area
+  const now = new Date();
+  const mk = monthKey(now.getFullYear(), now.getMonth());
+  const ridSchedules = schedules?.[restaurantId] ?? {};
+  const myDays = ridSchedules[mk]?.[empId] ?? {};
+  const myFaults = Object.values(myDays).filter(s => s === DAY_FAULT_U).length;
+  const myFaultsJ = Object.values(myDays).filter(s => s === DAY_FAULT_J).length;
+  const sameAreaEmps = restEmps.filter(e => { const r = roles.find(rl=>rl.id===e.roleId); return r?.area === role?.area; });
+  const areaFaultsAvg = sameAreaEmps.length > 0 ? sameAreaEmps.reduce((sum, e2) => {
+    const d = ridSchedules[mk]?.[e2.id] ?? {};
+    return sum + Object.values(d).filter(s => s === DAY_FAULT_U).length;
+  }, 0) / sameAreaEmps.length : 0;
+
+  // Progress bar (simple: based on rating + time)
+  const ratingPct = latestFb ? (latestFb.rating / 5) * 50 : 25;
+  const timePct = Math.min(daysInCompany / 365 * 50, 50);
+  const progressPct = Math.min(Math.round(ratingPct + timePct), 100);
+
+  // Dev checklist for current role
+  const roleChecklist = devChecklists?.[emp?.roleId] ?? [];
+  // Checklist progress stored in latest feedback
+  const doneItems = latestFb?.devChecklist?.filter(d => d.done).map(d => d.title) ?? [];
+
+  if (!emp) return <p style={{color:"var(--text3)",textAlign:"center"}}>Empregado não encontrado.</p>;
+
+  return (
+    <div>
+      {/* Meu Nível card */}
+      <div style={{...S.card,marginBottom:16,padding:"20px"}}>
+        <div style={{display:"flex",gap:16,alignItems:"center",flexWrap:"wrap",marginBottom:16}}>
+          <div style={{width:56,height:56,borderRadius:28,background:"linear-gradient(135deg,#d4a017,#f59e0b)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:26,fontWeight:700,color:"#fff",flexShrink:0}}>{(emp.name??"?").charAt(0)}</div>
+          <div style={{flex:1,minWidth:0}}>
+            <div style={{color:"var(--text)",fontWeight:700,fontSize:18}}>{emp.name}</div>
+            <div style={{color:"var(--ac)",fontSize:13,fontWeight:600}}>{role?.name ?? "—"}</div>
+            <div style={{color:"var(--text3)",fontSize:11}}>{role?.area ?? "—"} · {daysInCompany} dias na empresa</div>
+          </div>
+          {targetRole && (
+            <div style={{textAlign:"right"}}>
+              <div style={{color:"var(--text3)",fontSize:10}}>Cargo-alvo</div>
+              <div style={{color:"#3b82f6",fontSize:13,fontWeight:700}}>{targetRole.name}</div>
+            </div>
+          )}
+        </div>
+
+        {/* Progress bar */}
+        <div style={{marginBottom:4}}>
+          <div style={{display:"flex",justifyContent:"space-between",marginBottom:4}}>
+            <span style={{color:"var(--text3)",fontSize:11}}>Progresso geral</span>
+            <span style={{color:"var(--ac)",fontSize:12,fontWeight:700}}>{progressPct}%</span>
+          </div>
+          <div style={{height:8,borderRadius:4,background:"var(--border)",overflow:"hidden"}}>
+            <div style={{height:"100%",borderRadius:4,background:"linear-gradient(90deg,#d4a017,#f59e0b)",width:`${progressPct}%`,transition:"width 0.5s"}}/>
+          </div>
+        </div>
+      </div>
+
+      {/* Badges */}
+      {badges.length > 0 && (
+        <div style={{marginBottom:16}}>
+          <h4 style={{color:"var(--text)",margin:"0 0 10px",fontSize:14}}>🏅 Conquistas</h4>
+          <div style={{display:"flex",gap:10,flexWrap:"wrap"}}>
+            {badges.map((b,i) => (
+              <div key={i} style={{...S.card,padding:"12px 16px",textAlign:"center",minWidth:90}}>
+                <div style={{fontSize:28,marginBottom:4}}>{b.icon}</div>
+                <div style={{color:"var(--text)",fontWeight:700,fontSize:12}}>{b.label}</div>
+                <div style={{color:"var(--text3)",fontSize:10}}>{b.desc}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Métricas vs Área */}
+      <div style={{...S.card,marginBottom:16}}>
+        <h4 style={{color:"var(--text)",margin:"0 0 12px",fontSize:14}}>📊 Métricas do Mês</h4>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
+          <div style={{textAlign:"center",padding:10,borderRadius:10,background:"var(--bg1)"}}>
+            <div style={{color:myFaults===0?"var(--green)":"#f59e0b",fontWeight:700,fontSize:22}}>{myFaults}</div>
+            <div style={{color:"var(--text3)",fontSize:11}}>Faltas injust. (você)</div>
+          </div>
+          <div style={{textAlign:"center",padding:10,borderRadius:10,background:"var(--bg1)"}}>
+            <div style={{color:"var(--text2)",fontWeight:700,fontSize:22}}>{areaFaultsAvg.toFixed(1)}</div>
+            <div style={{color:"var(--text3)",fontSize:11}}>Média da área</div>
+          </div>
+          <div style={{textAlign:"center",padding:10,borderRadius:10,background:"var(--bg1)"}}>
+            <div style={{color:myFaultsJ===0?"var(--green)":"var(--text2)",fontWeight:700,fontSize:22}}>{myFaultsJ}</div>
+            <div style={{color:"var(--text3)",fontSize:11}}>Faltas justif. (você)</div>
+          </div>
+          <div style={{textAlign:"center",padding:10,borderRadius:10,background:"var(--bg1)"}}>
+            <div style={{color:"var(--text2)",fontWeight:700,fontSize:22}}>
+              {sameAreaEmps.length > 0 ? (sameAreaEmps.reduce((sum, e2) => {
+                const d = ridSchedules[mk]?.[e2.id] ?? {};
+                return sum + Object.values(d).filter(s => s === DAY_FAULT_J).length;
+              }, 0) / sameAreaEmps.length).toFixed(1) : "0"}
+            </div>
+            <div style={{color:"var(--text3)",fontSize:11}}>Média da área</div>
+          </div>
+        </div>
+      </div>
+
+      {/* Metas do último feedback */}
+      {latestFb && (
+        <div style={{...S.card,marginBottom:16}}>
+          <h4 style={{color:"var(--text)",margin:"0 0 12px",fontSize:14}}>🎯 Feedback Q{latestFb.quarter}/{latestFb.year}</h4>
+          <div style={{display:"flex",gap:4,marginBottom:10}}>
+            {[1,2,3,4,5].map(n => (
+              <span key={n} style={{fontSize:20,color:n<=latestFb.rating?"#f59e0b":"var(--border)"}}>★</span>
+            ))}
+          </div>
+          {latestFb.strengths && (
+            <div style={{marginBottom:8}}>
+              <div style={{color:"var(--green)",fontSize:11,fontWeight:700,marginBottom:2}}>Pontos fortes</div>
+              <p style={{color:"var(--text2)",fontSize:13,margin:0,lineHeight:1.5}}>{latestFb.strengths}</p>
+            </div>
+          )}
+          {latestFb.improvements && (
+            <div style={{marginBottom:8}}>
+              <div style={{color:"#f59e0b",fontSize:11,fontWeight:700,marginBottom:2}}>Pontos a melhorar</div>
+              <p style={{color:"var(--text2)",fontSize:13,margin:0,lineHeight:1.5}}>{latestFb.improvements}</p>
+            </div>
+          )}
+          {latestFb.goal && (
+            <div style={{background:"var(--bg1)",borderRadius:8,padding:"10px 14px",marginTop:8}}>
+              <div style={{color:"var(--ac)",fontSize:11,fontWeight:700,marginBottom:2}}>Meta</div>
+              <p style={{color:"var(--text)",fontSize:13,margin:0,fontWeight:600}}>{latestFb.goal}</p>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Dev Checklist */}
+      {roleChecklist.length > 0 && (
+        <div style={{...S.card,marginBottom:16}}>
+          <h4 style={{color:"var(--text)",margin:"0 0 12px",fontSize:14}}>📚 Checklist de Desenvolvimento</h4>
+          <div style={{display:"flex",flexDirection:"column",gap:6}}>
+            {roleChecklist.map((item, i) => {
+              const isDone = doneItems.includes(item.title);
+              const typeIcon = {livro:"📖",video:"🎬",curso:"🎓",pratica:"🔧"}[item.type] ?? "📋";
+              return (
+                <div key={i} style={{display:"flex",alignItems:"center",gap:10,padding:"8px 12px",borderRadius:8,border:"1px solid var(--border)",background:isDone?"#10b98111":"transparent",opacity:isDone?0.7:1}}>
+                  <span style={{fontSize:16}}>{typeIcon}</span>
+                  <div style={{flex:1,minWidth:0}}>
+                    <div style={{color:isDone?"var(--green)":"var(--text)",fontSize:13,fontWeight:isDone?600:400,textDecoration:isDone?"line-through":"none"}}>{item.title}</div>
+                    {item.link && <a href={item.link} target="_blank" rel="noreferrer" style={{color:"#3b82f6",fontSize:11}}>Acessar →</a>}
+                  </div>
+                  <span style={{fontSize:10,color:"var(--text3)",padding:"2px 6px",borderRadius:4,background:"var(--bg1)"}}>{item.type}</span>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* Elogios */}
+      {positiveIncidents.length > 0 && (
+        <div style={{...S.card,marginBottom:16}}>
+          <h4 style={{color:"var(--text)",margin:"0 0 12px",fontSize:14}}>🌟 Elogios Recebidos</h4>
+          <div style={{display:"flex",flexDirection:"column",gap:8}}>
+            {positiveIncidents.map(inc => (
+              <div key={inc.id} style={{padding:"10px 14px",borderRadius:8,background:"#f59e0b11",border:"1px solid #f59e0b33"}}>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:4}}>
+                  <span style={{color:"#f59e0b",fontSize:12,fontWeight:700}}>{INCIDENT_TYPES.find(t=>t.id===inc.type)?.label ?? "Elogio"}</span>
+                  <span style={{color:"var(--text3)",fontSize:10}}>{new Date(inc.date+"T12:00:00").toLocaleDateString("pt-BR")}</span>
+                </div>
+                <p style={{color:"var(--text2)",fontSize:13,margin:0,lineHeight:1.5}}>{inc.description}</p>
+              </div>
+            ))}
+          </div>
         </div>
       )}
     </div>
@@ -4975,6 +5624,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
     ["dashboard",   "📊 Dashboard"],
     canSched && ["schedule",    "📅 Escala"],
     ["horarios",    "🕐 Horários"],
+    ["trilha",      "📈 Trilha"],
   ].filter(Boolean) : [
     canTips                                           && ["dashboard",   "📊 Dashboard"],
     canTips                                           && ["tips",        "💸 Gorjetas"],
@@ -4983,13 +5633,14 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
     (isOwner || canTips || tabVisible("employees")) && ["employees","👥 Equipe"],
     (isOwner || tabVisible("horarios"))          && ["horarios",    "🕐 Horários"],
     (isOwner || (perms.vt !== false && tabVisible("vt"))) && ["vt",          "🚌 Vale Transporte"],
+    ["trilha",      "📈 Trilha"],
     (isOwner || tabVisible("faq"))               && ["faq",         "❓ FAQ"],
     (isOwner || tabVisible("comunicados"))        && ["comunicados", "📢 Comunicados"],
     (isOwner || tabVisible("dp"))                && ["dp",          "💬 Fale com DP"],
     isDP                                       && ["notificacoes",`📬 Caixa${inboxUnread>0?` (${inboxUnread})`:""}`],
     isDP                                       && ["dp_gestores", "👔 Gestores"],
     (canTips || isOwner)                       && ["config",       "⚙️ Configurações"],
-  ].filter(Boolean).filter(([id]) => !mobileOnly || ["dashboard","schedule","horarios","vt","notificacoes"].includes(id));
+  ].filter(Boolean).filter(([id]) => !mobileOnly || ["dashboard","schedule","horarios","vt","notificacoes","trilha"].includes(id));
 
   const [tab, setTab] = useState("dashboard");
 
@@ -6771,6 +7422,11 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
         {/* VALE TRANSPORTE */}
         {tab === "vt" && (
           <ValeTransporteTab restaurantId={rid} employees={employees} roles={roles} workSchedules={data?.workSchedules??{}} schedules={data?.schedules??{}} vtConfig={data?.vtConfig??{}} vtMonthly={data?.vtMonthly??{}} vtPayments={data?.vtPayments??{}} onUpdate={onUpdate} currentUser={currentUser} isOwner={isOwner} mobileOnly={mobileOnly} />
+        )}
+
+        {/* TRILHA DO EMPREGADO */}
+        {tab === "trilha" && (
+          <TrilhaTab restaurantId={rid} employees={employees} roles={roles} schedules={data?.schedules??{}} incidents={data?.incidents??[]} feedbacks={data?.feedbacks??[]} devChecklists={data?.devChecklists??{}} onUpdate={onUpdate} currentUser={currentUser} isOwner={isOwner} isLider={isLider} mobileOnly={mobileOnly}/>
         )}
 
         {/* NOTIFICAÇÕES */}
@@ -11018,6 +11674,9 @@ export default function App() {
   const [vtConfig,         setVtConfig]         = useState({});
   const [vtMonthly,        setVtMonthly]        = useState({});
   const [vtPayments,       setVtPayments]       = useState({});
+  const [incidents,        setIncidents]        = useState([]);
+  const [feedbacks,        setFeedbacks]        = useState([]);
+  const [devChecklists,    setDevChecklists]    = useState({});
 
   useEffect(() => {
     const savedId = currentUserId;
@@ -11045,7 +11704,7 @@ export default function App() {
       setLoadProgress("Preparando o sistema...");
 
       const keys = keyNames;
-      const map = { owners:setOwners, managers:setManagers, restaurants:setRestaurants, employees:setEmployees, roles:setRoles, tips:setTips, splits:setSplits, schedules:setSchedules, communications:setCommunications, commAcks:setCommAcks, faq:setFaq, dpMessages:setDpMessages, workSchedules:setWorkSchedules, notifications:setNotifications, noTipDays:setNoTipDays, trash:setTrash, schedTemplates:setSchedTemplates, schedDrafts:setSchedDrafts, scheduleVersions:setScheduleVersions, tipVersions:setTipVersions, vtConfig:setVtConfig, vtMonthly:setVtMonthly, vtPayments:setVtPayments };
+      const map = { owners:setOwners, managers:setManagers, restaurants:setRestaurants, employees:setEmployees, roles:setRoles, tips:setTips, splits:setSplits, schedules:setSchedules, communications:setCommunications, commAcks:setCommAcks, faq:setFaq, dpMessages:setDpMessages, workSchedules:setWorkSchedules, notifications:setNotifications, noTipDays:setNoTipDays, trash:setTrash, schedTemplates:setSchedTemplates, schedDrafts:setSchedDrafts, scheduleVersions:setScheduleVersions, tipVersions:setTipVersions, vtConfig:setVtConfig, vtMonthly:setVtMonthly, vtPayments:setVtPayments, incidents:setIncidents, feedbacks:setFeedbacks, devChecklists:setDevChecklists };
       const loaded_data = {};
       let successCount = 0;
       keys.forEach((k, i) => {
@@ -11167,18 +11826,38 @@ export default function App() {
         }
       }
 
+      // Auto-aplicar promoções agendadas cuja data efetiva chegou
+      {
+        const allEmps = loaded_data.employees ?? [];
+        const promos = allEmps.filter(e => e.pendingRoleChange && e.pendingRoleChange.effectiveDate <= today());
+        if (promos.length > 0) {
+          const updated = allEmps.map(e => {
+            if (!e.pendingRoleChange || e.pendingRoleChange.effectiveDate > today()) return e;
+            const prc = e.pendingRoleChange;
+            const history = [...(e.roleHistory ?? []), { fromRoleId: e.roleId, toRoleId: prc.newRoleId, date: prc.effectiveDate, reason: prc.reason || "Promoção programada", changedBy: prc.changedBy }];
+            const copy = { ...e, roleId: prc.newRoleId, roleHistory: history };
+            delete copy.pendingRoleChange;
+            return copy;
+          });
+          await save(K.employees, updated);
+          setEmployees(updated);
+          loaded_data.employees = updated;
+          console.log(`Auto-aplicadas ${promos.length} promoção(ões) agendada(s)`);
+        }
+      }
+
       setLoadProgress("");
       setLoaded(true);
     })();
     return () => { clearTimeout(slowTimer); clearTimeout(verySlowTimer); };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const data = { owners, managers, restaurants, employees, roles, tips, splits, schedules, communications, commAcks, faq, dpMessages, workSchedules, notifications, noTipDays, trash, schedTemplates, schedDrafts, scheduleVersions, tipVersions, vtConfig, vtMonthly, vtPayments };
+  const data = { owners, managers, restaurants, employees, roles, tips, splits, schedules, communications, commAcks, faq, dpMessages, workSchedules, notifications, noTipDays, trash, schedTemplates, schedDrafts, scheduleVersions, tipVersions, vtConfig, vtMonthly, vtPayments, incidents, feedbacks, devChecklists };
 
   async function handleUpdate(field, value) {
     if (field === "_toast") { setToast(value); return; }
-    const setters = { owners:setOwners, managers:setManagers, restaurants:setRestaurants, employees:setEmployees, roles:setRoles, tips:setTips, splits:setSplits, schedules:setSchedules, communications:setCommunications, commAcks:setCommAcks, faq:setFaq, dpMessages:setDpMessages, workSchedules:setWorkSchedules, notifications:setNotifications, noTipDays:setNoTipDays, trash:setTrash, schedTemplates:setSchedTemplates, schedDrafts:setSchedDrafts, scheduleVersions:setScheduleVersions, tipVersions:setTipVersions, vtConfig:setVtConfig, vtMonthly:setVtMonthly, vtPayments:setVtPayments };
-    const keys    = { owners:K.owners, managers:K.managers, restaurants:K.restaurants, employees:K.employees, roles:K.roles, tips:K.tips, splits:K.splits, schedules:K.schedules, communications:K.communications, commAcks:K.commAcks, faq:K.faq, dpMessages:K.dpMessages, workSchedules:K.workSchedules, notifications:K.notifications, noTipDays:K.noTipDays, trash:K.trash, schedTemplates:K.schedTemplates, schedDrafts:K.schedDrafts, scheduleVersions:K.scheduleVersions, tipVersions:K.tipVersions, vtConfig:K.vtConfig, vtMonthly:K.vtMonthly, vtPayments:K.vtPayments };
+    const setters = { owners:setOwners, managers:setManagers, restaurants:setRestaurants, employees:setEmployees, roles:setRoles, tips:setTips, splits:setSplits, schedules:setSchedules, communications:setCommunications, commAcks:setCommAcks, faq:setFaq, dpMessages:setDpMessages, workSchedules:setWorkSchedules, notifications:setNotifications, noTipDays:setNoTipDays, trash:setTrash, schedTemplates:setSchedTemplates, schedDrafts:setSchedDrafts, scheduleVersions:setScheduleVersions, tipVersions:setTipVersions, vtConfig:setVtConfig, vtMonthly:setVtMonthly, vtPayments:setVtPayments, incidents:setIncidents, feedbacks:setFeedbacks, devChecklists:setDevChecklists };
+    const keys    = { owners:K.owners, managers:K.managers, restaurants:K.restaurants, employees:K.employees, roles:K.roles, tips:K.tips, splits:K.splits, schedules:K.schedules, communications:K.communications, commAcks:K.commAcks, faq:K.faq, dpMessages:K.dpMessages, workSchedules:K.workSchedules, notifications:K.notifications, noTipDays:K.noTipDays, trash:K.trash, schedTemplates:K.schedTemplates, schedDrafts:K.schedDrafts, scheduleVersions:K.scheduleVersions, tipVersions:K.tipVersions, vtConfig:K.vtConfig, vtMonthly:K.vtMonthly, vtPayments:K.vtPayments, incidents:K.incidents, feedbacks:K.feedbacks, devChecklists:K.devChecklists };
     // Support functional updates to prevent stale-state race conditions:
     // When value is a function, it receives the latest state (like setState(prev => ...))
     let resolvedValue;
@@ -11198,7 +11877,7 @@ export default function App() {
         return;
       }
     }
-    const labels = { owners:"Admins atualizados", managers:"Gestores atualizados", restaurants:"Restaurantes atualizados", employees:"Empregados atualizados", roles:"Cargos atualizados", tips:"Gorjetas atualizadas", splits:"Percentuais salvos", schedules:"Escala atualizada", communications:"Comunicados atualizados", commAcks:"Ciências atualizadas", faq:"FAQ atualizado", dpMessages:"Mensagem enviada", workSchedules:"Horários salvos", notifications:"Notificações atualizadas", schedTemplates:"Template salvo", schedDrafts:"Rascunho salvo", trash:"Lixeira atualizada", noTipDays:"Dias sem gorjeta atualizados", scheduleVersions:null, tipVersions:null, vtConfig:null, vtMonthly:null, vtPayments:"VT registrado" };
+    const labels = { owners:"Admins atualizados", managers:"Gestores atualizados", restaurants:"Restaurantes atualizados", employees:"Empregados atualizados", roles:"Cargos atualizados", tips:"Gorjetas atualizadas", splits:"Percentuais salvos", schedules:"Escala atualizada", communications:"Comunicados atualizados", commAcks:"Ciências atualizadas", faq:"FAQ atualizado", dpMessages:"Mensagem enviada", workSchedules:"Horários salvos", notifications:"Notificações atualizadas", schedTemplates:"Template salvo", schedDrafts:"Rascunho salvo", trash:"Lixeira atualizada", noTipDays:"Dias sem gorjeta atualizados", scheduleVersions:null, tipVersions:null, vtConfig:null, vtMonthly:null, vtPayments:"VT registrado", incidents:"Ocorrência registrada", feedbacks:"Feedback registrado", devChecklists:"Checklist atualizado" };
     if (labels[field] === null) return; // silent save (e.g. version snapshots)
     setToast(labels[field] ?? (typeof value === "string" ? value : "Salvo!"));
   }
@@ -11294,7 +11973,7 @@ export default function App() {
             return () => { setCurrentUser(emp); setUserRole("employee"); localStorage.setItem("apptip_role","employee"); localStorage.setItem("apptip_userid",emp.id); localStorage.setItem("apptip_empid",emp.id); setView("employee"); };
           })()} />
       ))}
-      {view === "employee" && <EmployeePortal employees={employees} roles={roles} tips={tips} schedules={schedules} splits={splits} restaurants={restaurants} communications={communications} commAcks={commAcks} faq={faq} dpMessages={dpMessages} workSchedules={workSchedules} onBack={doLogout} onUpdateEmployee={emp=>{const next=employees.map(e=>e.id===emp.id?emp:e);handleUpdate("employees",next);}} onUpdate={handleUpdate} toggleTheme={toggleTheme} theme={theme}
+      {view === "employee" && <EmployeePortal employees={employees} roles={roles} tips={tips} schedules={schedules} splits={splits} restaurants={restaurants} communications={communications} commAcks={commAcks} faq={faq} dpMessages={dpMessages} workSchedules={workSchedules} incidents={incidents} feedbacks={feedbacks} devChecklists={devChecklists} onBack={doLogout} onUpdateEmployee={emp=>{const next=employees.map(e=>e.id===emp.id?emp:e);handleUpdate("employees",next);}} onUpdate={handleUpdate} toggleTheme={toggleTheme} theme={theme}
         onSwitchToManager={(() => {
           const cpf = currentUser?.cpf?.replace(/\D/g,"");
           let mgr = cpf ? managers.find(m => m.cpf?.replace(/\D/g,"") === cpf) : null;
