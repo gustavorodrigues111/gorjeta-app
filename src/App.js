@@ -3,7 +3,7 @@ import { useState, useEffect, Component } from "react";
 import { db } from "./firebase";
 import { doc, getDoc, setDoc } from "firebase/firestore";
 
-const APP_VERSION = "5.15.3";
+const APP_VERSION = "5.15.4";
 
 const DEFAULT_ADMISSION = () => `${new Date().getFullYear()}-01-01`;
 const round2 = (v) => Math.round(v * 100) / 100;
@@ -3091,6 +3091,7 @@ function EmployeePortal({ employees, roles, tips, schedules, splits, restaurants
           </div>
           {firstErr && <div style={{background:"var(--red-bg)",border:"1px solid var(--red)33",borderRadius:8,padding:"10px 12px",color:"var(--red)",fontSize:13}}>{firstErr}</div>}
           <button onClick={completeFirstAccess} style={{...S.btnPrimary,marginTop:4}}>Confirmar e Entrar →</button>
+          <button onClick={()=>{ setEmpId(null); onBack(); }} style={{background:"none",border:"none",color:"var(--text3)",cursor:"pointer",fontSize:13,marginTop:4,padding:8,fontFamily:"'DM Sans',sans-serif"}}>← Voltar ao login</button>
         </div>
       </div>
     </div>
