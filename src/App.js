@@ -3,7 +3,7 @@ import { useState, useEffect, Component } from "react";
 import { db } from "./firebase";
 import { doc, getDoc, setDoc } from "firebase/firestore";
 
-const APP_VERSION = "5.16.1";
+const APP_VERSION = "5.17.0";
 
 const DEFAULT_ADMISSION = () => `${new Date().getFullYear()}-01-01`;
 const round2 = (v) => Math.round(v * 100) / 100;
@@ -3732,7 +3732,7 @@ const EMP_COLS        = "80px 2fr 1.2fr 100px auto 1.5fr auto";
 const EMP_COLS_HEADER = "80px 2fr 1.2fr 100px auto 1.5fr auto";
 const empInS2 = { background:"var(--bg1)", border:"1px solid var(--border)", borderRadius:6, color:"var(--text)", fontFamily:"'DM Mono',monospace", fontSize:12, padding:"6px 8px", outline:"none", width:"100%", boxSizing:"border-box" };
 
-function EmpRowLine({ emp, isNew, row, restRoles, isSaved, isOwner, onChange, onSave, onToggleInactive, onDelete, onAdd, onResetPin, onToggleProd, onToggleFreela, onDismiss, onUndoDismiss, onGenerateReport, onPromote, employees, privacyMask }) {
+function EmpRowLine({ emp, isNew, row, restRoles, isSaved, isOwner, onChange, onSave, onToggleInactive, onDelete, onAdd, onResetPin, onToggleProd, onToggleFreela, onDismiss, onUndoDismiss, onGenerateReport, onPromote, employees, privacyMask }) { // eslint-disable-line no-unused-vars
   const ac = "var(--ac)";
   const isInactive = !isNew && emp?.inactive && emp?.inactiveFrom <= today();
   const isDemitido = !isNew && emp?.demitidoEm && emp.demitidoEm <= today();
@@ -3857,8 +3857,10 @@ function EmployeeSpreadsheet({ restEmps, restRoles, rid, employees, onUpdate, re
   const [aiEmpError, setAiEmpError] = useState("");
   const [aiEmpPreview, setAiEmpPreview] = useState(null);
   const [detailEmp, setDetailEmp] = useState(null); // empId for detail view
+  const [detailTab, setDetailTab] = useState("cadastro"); // cadastro | acoes | trilha
   const [showIncForm, setShowIncForm] = useState(false);
   const [showFbForm, setShowFbForm] = useState(false);
+  const [showNewForm, setShowNewForm] = useState(false);
 
   async function handleAiEmpregados() {
     if (!aiEmpInput.trim()) return;
@@ -4108,9 +4110,28 @@ Inclua apenas as ações solicitadas. Arrays vazios se não houver ação daquel
   const detailEmpObj = detailEmp ? restEmps.find(e => e.id === detailEmp) : null;
   const detailRole = detailEmpObj ? restRoles.find(r => r.id === detailEmpObj.roleId) : null;
 
+  // ── Status badge helper ──
+  const statusBadge = (emp) => {
+    const isDem = emp.demitidoEm && emp.demitidoEm <= today();
+    const isInact = emp.inactive && emp.inactiveFrom && emp.inactiveFrom <= today();
+    const hasPending = !!emp.pendingRoleChange;
+    if (isDem) return { label:"Demitido", bg:"#e74c3c22", color:"var(--red)" };
+    if (isInact) return { label:"Inativo", bg:"#8b5cf622", color:"#8b5cf6" };
+    if (hasPending) return { label:"Promoção agendada", bg:"#3b82f622", color:"#3b82f6" };
+    return { label:"Ativo", bg:"#10b98122", color:"var(--green)" };
+  };
+
+  // ── Detail tab pill style ──
+  const dtPill = (tab, active) => ({
+    padding:"7px 16px", borderRadius:10, border:`1px solid ${active?"var(--accent)":"var(--border)"}`,
+    background:active?"var(--accent)11":"transparent", color:active?"var(--accent)":"var(--text3)",
+    cursor:"pointer", fontFamily:"'DM Mono',monospace", fontSize:12, fontWeight:active?700:400
+  });
+
   return (
     <div style={{fontFamily:"'DM Mono',monospace"}}>
-      {/* ═══ DETAIL VIEW ═══ */}
+
+      {/* ═══════════════════════ DETAIL VIEW ═══════════════════════ */}
       {detailEmp && detailEmpObj && (() => {
         const emp = detailEmpObj;
         const role = detailRole;
@@ -4119,216 +4140,291 @@ Inclua apenas as ações solicitadas. Arrays vazios se não houver ação daquel
         const negCount = empIncidents.filter(i => { const t = INCIDENT_TYPES.find(x=>x.id===i.type); return t?.negative; }).length;
         const posCount = empIncidents.filter(i => { const t = INCIDENT_TYPES.find(x=>x.id===i.type); return !t?.negative; }).length;
         const avgStars = empFeedbacks.length > 0 ? (empFeedbacks.reduce((a,f)=>a+(f.stars??0),0)/empFeedbacks.length).toFixed(1) : "—";
+        const badge = statusBadge(emp);
+        const isDemitido = emp.demitidoEm && emp.demitidoEm <= today();
+        const isInactive = emp.inactive && emp.inactiveFrom && emp.inactiveFrom <= today();
+        const row = getRow(emp);
         return (
           <div>
-            {/* Back button */}
-            <button onClick={()=>{setDetailEmp(null);setShowIncForm(false);setShowFbForm(false);}} style={{background:"none",border:"none",color:"var(--accent)",cursor:"pointer",fontSize:13,fontFamily:"'DM Mono',monospace",padding:"4px 0",marginBottom:12,display:"flex",alignItems:"center",gap:4}}>
+            {/* Back */}
+            <button onClick={()=>{setDetailEmp(null);setDetailTab("cadastro");setShowIncForm(false);setShowFbForm(false);}} style={{background:"none",border:"none",color:"var(--accent)",cursor:"pointer",fontSize:13,fontFamily:"'DM Mono',monospace",padding:"4px 0",marginBottom:12,display:"flex",alignItems:"center",gap:4}}>
               ← Voltar para equipe
             </button>
 
-            {/* Employee header card */}
+            {/* Header card */}
             <div style={{background:"var(--bg2)",border:"1px solid var(--border)",borderRadius:14,padding:16,marginBottom:16}}>
               <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",flexWrap:"wrap",gap:12}}>
                 <div>
-                  <div style={{fontSize:18,fontWeight:700,color:"var(--text)"}}>{emp.name}</div>
-                  <div style={{fontSize:12,color:"var(--text3)",marginTop:2}}>{role?.name ?? "Sem cargo"} · {role?.area ?? "Sem área"}</div>
-                  {emp.admission && <div style={{fontSize:11,color:"var(--text3)",marginTop:2}}>Admissão: {new Date(emp.admission+"T12:00:00").toLocaleDateString("pt-BR")}</div>}
-                  {emp.demitidoEm && <div style={{fontSize:11,color:"var(--red)",marginTop:2}}>Demitido em: {new Date(emp.demitidoEm+"T12:00:00").toLocaleDateString("pt-BR")}</div>}
-                  {emp.pendingRoleChange && <div style={{fontSize:11,color:"#f59e0b",marginTop:4}}>📅 Promoção agendada → {restRoles.find(r=>r.id===emp.pendingRoleChange.newRoleId)?.name} em {new Date(emp.pendingRoleChange.effectiveDate+"T12:00:00").toLocaleDateString("pt-BR")}</div>}
+                  <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
+                    <span style={{fontSize:18,fontWeight:700,color:"var(--text)"}}>{emp.name}</span>
+                    <span style={{fontSize:10,padding:"2px 8px",borderRadius:6,background:badge.bg,color:badge.color,fontWeight:700}}>{badge.label}</span>
+                    {emp.isProducao && <span style={{fontSize:10,padding:"2px 8px",borderRadius:6,background:"#ec489922",color:"#ec4899",fontWeight:700}}>Produção</span>}
+                    {emp.isFreela && <span style={{fontSize:10,padding:"2px 8px",borderRadius:6,background:"#06b6d422",color:"#06b6d4",fontWeight:700}}>Freela</span>}
+                  </div>
+                  <div style={{fontSize:12,color:"var(--text3)",marginTop:4}}>{role?.name ?? "Sem cargo"} · {role?.area ?? "Sem área"} · {emp.empCode ?? "—"}</div>
                 </div>
-                <div style={{display:"flex",gap:12,flexWrap:"wrap"}}>
-                  <div style={{textAlign:"center",padding:"8px 14px",background:"var(--bg3)",borderRadius:10}}>
-                    <div style={{fontSize:18,fontWeight:700,color:"var(--red)"}}>{negCount}</div>
-                    <div style={{fontSize:10,color:"var(--text3)"}}>Ocorrências</div>
+                <div style={{display:"flex",gap:10,flexWrap:"wrap"}}>
+                  <div style={{textAlign:"center",padding:"6px 12px",background:"var(--bg3)",borderRadius:10}}>
+                    <div style={{fontSize:16,fontWeight:700,color:"var(--red)"}}>{negCount}</div>
+                    <div style={{fontSize:9,color:"var(--text3)"}}>Ocorrências</div>
                   </div>
-                  <div style={{textAlign:"center",padding:"8px 14px",background:"var(--bg3)",borderRadius:10}}>
-                    <div style={{fontSize:18,fontWeight:700,color:"var(--green)"}}>{posCount}</div>
-                    <div style={{fontSize:10,color:"var(--text3)"}}>Elogios</div>
+                  <div style={{textAlign:"center",padding:"6px 12px",background:"var(--bg3)",borderRadius:10}}>
+                    <div style={{fontSize:16,fontWeight:700,color:"var(--green)"}}>{posCount}</div>
+                    <div style={{fontSize:9,color:"var(--text3)"}}>Elogios</div>
                   </div>
-                  <div style={{textAlign:"center",padding:"8px 14px",background:"var(--bg3)",borderRadius:10}}>
-                    <div style={{fontSize:18,fontWeight:700,color:"#f59e0b"}}>{avgStars}</div>
-                    <div style={{fontSize:10,color:"var(--text3)"}}>Avaliação</div>
+                  <div style={{textAlign:"center",padding:"6px 12px",background:"var(--bg3)",borderRadius:10}}>
+                    <div style={{fontSize:16,fontWeight:700,color:"#f59e0b"}}>{avgStars}</div>
+                    <div style={{fontSize:9,color:"var(--text3)"}}>Avaliação</div>
                   </div>
                 </div>
               </div>
             </div>
 
-            {/* Action buttons */}
-            <div style={{display:"flex",gap:8,marginBottom:16,flexWrap:"wrap"}}>
-              <button onClick={()=>{setShowIncForm(!showIncForm);setShowFbForm(false);}} style={{padding:"8px 16px",borderRadius:10,border:`1px solid ${showIncForm?"var(--accent)":"var(--border)"}`,background:showIncForm?"var(--accent)11":"transparent",color:showIncForm?"var(--accent)":"var(--text3)",cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:12}}>
-                📋 Registrar ocorrência
-              </button>
-              <button onClick={()=>{setShowFbForm(!showFbForm);setShowIncForm(false);}} style={{padding:"8px 16px",borderRadius:10,border:`1px solid ${showFbForm?"#f59e0b":"var(--border)"}`,background:showFbForm?"#f59e0b11":"transparent",color:showFbForm?"#f59e0b":"var(--text3)",cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:12}}>
-                ⭐ Feedback
-              </button>
+            {/* Tab pills */}
+            <div style={{display:"flex",gap:6,marginBottom:16,flexWrap:"wrap"}}>
+              <button onClick={()=>setDetailTab("cadastro")} style={dtPill("cadastro",detailTab==="cadastro")}>Cadastro</button>
+              <button onClick={()=>setDetailTab("acoes")} style={dtPill("acoes",detailTab==="acoes")}>Ações</button>
+              <button onClick={()=>setDetailTab("trilha")} style={dtPill("trilha",detailTab==="trilha")}>Trilha</button>
             </div>
 
-            {/* Incident form */}
-            {showIncForm && (
-              <div style={{marginBottom:16}}>
-                <IncidentForm restaurantId={rid} employees={restEmps.filter(e=>!e.inactive)} onUpdate={onUpdate} incidents={incidents??[]} currentUser={currentUser} isOwner={isOwner} preSelectedEmpId={emp.id}/>
+            {/* ── TAB: Cadastro ── */}
+            {detailTab === "cadastro" && (
+              <div style={{background:"var(--card-bg)",border:"1px solid var(--border)",borderRadius:12,padding:16}}>
+                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
+                  <div>
+                    <label style={{fontSize:10,color:"var(--text3)",fontWeight:700,display:"block",marginBottom:4}}>Nome completo</label>
+                    <input value={row.name} onChange={ev=>setField(emp.id,"name",ev.target.value)} style={{...S.input,fontSize:13}}/>
+                  </div>
+                  <div>
+                    <label style={{fontSize:10,color:"var(--text3)",fontWeight:700,display:"block",marginBottom:4}}>CPF</label>
+                    {privacyMask
+                      ? <div style={{...S.input,fontSize:13,display:"flex",alignItems:"center",color:"var(--text3)"}}>•••.•••.•••-••</div>
+                      : <input value={row.cpf||""} onChange={ev=>setField(emp.id,"cpf",maskCpf(ev.target.value))} placeholder="000.000.000-00" style={{...S.input,fontSize:13}} inputMode="numeric"/>
+                    }
+                  </div>
+                  <div>
+                    <label style={{fontSize:10,color:"var(--text3)",fontWeight:700,display:"block",marginBottom:4}}>Data de admissão</label>
+                    <input type="date" value={row.admission||""} onChange={ev=>setField(emp.id,"admission",ev.target.value)} style={{...S.input,fontSize:13}}/>
+                  </div>
+                  <div>
+                    <label style={{fontSize:10,color:"var(--text3)",fontWeight:700,display:"block",marginBottom:4}}>Cargo</label>
+                    <select value={row.roleId||""} onChange={ev=>setField(emp.id,"roleId",ev.target.value)} style={{...S.input,fontSize:13,cursor:"pointer"}}>
+                      <option value="">Selecionar…</option>
+                      {AREAS.map(a=>(
+                        <optgroup key={a} label={a}>
+                          {restRoles.filter(r=>r.area===a&&!r.inactive).map(r=><option key={r.id} value={r.id}>{r.name} ({r.points}pt)</option>)}
+                        </optgroup>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label style={{fontSize:10,color:"var(--text3)",fontWeight:700,display:"block",marginBottom:4}}>Código</label>
+                    <div style={{...S.input,fontSize:13,background:"var(--bg3)",color:"var(--accent)",fontWeight:700}}>{emp.empCode ?? "—"}</div>
+                  </div>
+                  <div>
+                    <label style={{fontSize:10,color:"var(--text3)",fontWeight:700,display:"block",marginBottom:4}}>Flags</label>
+                    <div style={{display:"flex",gap:8}}>
+                      <button onClick={()=>onUpdate("employees",employees.map(x=>x.id===emp.id?{...x,isProducao:!x.isProducao}:x))} style={{padding:"6px 12px",borderRadius:8,border:`1px solid ${emp.isProducao?"#ec4899":"var(--border)"}`,background:emp.isProducao?"#ec489922":"transparent",color:emp.isProducao?"#ec4899":"var(--text3)",cursor:"pointer",fontSize:11,fontFamily:"'DM Mono',monospace"}}>
+                        {emp.isProducao ? "🏭 Produção ✓" : "🏭 Produção"}
+                      </button>
+                      <button onClick={()=>onUpdate("employees",employees.map(x=>x.id===emp.id?{...x,isFreela:!x.isFreela}:x))} style={{padding:"6px 12px",borderRadius:8,border:`1px solid ${emp.isFreela?"#06b6d4":"var(--border)"}`,background:emp.isFreela?"#06b6d422":"transparent",color:emp.isFreela?"#06b6d4":"var(--text3)",cursor:"pointer",fontSize:11,fontFamily:"'DM Mono',monospace"}}>
+                        {emp.isFreela ? "🎯 Freela ✓" : "🎯 Freela"}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+                <div style={{marginTop:14,display:"flex",gap:8}}>
+                  <button onClick={()=>saveEmp(emp)} style={{...S.btnPrimary,fontSize:13}}>
+                    {saved[emp.id] ? "✓ Salvo" : "Salvar alterações"}
+                  </button>
+                </div>
               </div>
             )}
 
-            {/* Feedback form */}
-            {showFbForm && (
-              <div style={{marginBottom:16}}>
-                <FeedbackForm restaurantId={rid} employees={restEmps.filter(e=>!e.inactive)} roles={restRoles} onUpdate={onUpdate} feedbacks={feedbacks??[]} currentUser={currentUser} isOwner={isOwner} preSelectedEmpId={emp.id}/>
+            {/* ── TAB: Ações ── */}
+            {detailTab === "acoes" && (
+              <div style={{background:"var(--card-bg)",border:"1px solid var(--border)",borderRadius:12,padding:16}}>
+                <div style={{display:"flex",flexDirection:"column",gap:10}}>
+                  {/* Promoção */}
+                  {!isDemitido && !isInactive && (
+                    <button onClick={()=>promoteEmp(emp)} style={{display:"flex",alignItems:"center",gap:8,padding:"12px 16px",borderRadius:10,border:"1px solid #3b82f633",background:"#3b82f609",color:"var(--text)",cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:13,textAlign:"left"}}>
+                      <span style={{fontSize:18}}>⬆️</span>
+                      <div><div style={{fontWeight:700,color:"#3b82f6"}}>Promover / Mudar cargo</div><div style={{fontSize:11,color:"var(--text3)",marginTop:2}}>Alterar cargo com data efetiva imediata ou agendada</div></div>
+                    </button>
+                  )}
+                  {emp.pendingRoleChange && (
+                    <div style={{padding:"10px 16px",borderRadius:10,background:"#3b82f611",border:"1px solid #3b82f633",fontSize:12,color:"#3b82f6"}}>
+                      📅 Promoção agendada → <strong>{restRoles.find(r=>r.id===emp.pendingRoleChange.newRoleId)?.name}</strong> em {new Date(emp.pendingRoleChange.effectiveDate+"T12:00:00").toLocaleDateString("pt-BR")}
+                      {emp.pendingRoleChange.reason && <span style={{color:"var(--text3)",marginLeft:8}}>({emp.pendingRoleChange.reason})</span>}
+                    </div>
+                  )}
+                  {/* Demitir */}
+                  {!isDemitido && !isInactive && (
+                    <button onClick={()=>dismissEmp(emp)} style={{display:"flex",alignItems:"center",gap:8,padding:"12px 16px",borderRadius:10,border:"1px solid #e74c3c33",background:"#e74c3c09",color:"var(--text)",cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:13,textAlign:"left"}}>
+                      <span style={{fontSize:18}}>📋</span>
+                      <div><div style={{fontWeight:700,color:"var(--red)"}}>Demitir</div><div style={{fontSize:11,color:"var(--text3)",marginTop:2}}>Registrar desligamento com data</div></div>
+                    </button>
+                  )}
+                  {/* Reverter demissão */}
+                  {isDemitido && (
+                    <>
+                      <div style={{padding:"10px 16px",borderRadius:10,background:"#e74c3c11",border:"1px solid #e74c3c33",fontSize:12,color:"var(--red)"}}>
+                        Demitido em {new Date(emp.demitidoEm+"T12:00:00").toLocaleDateString("pt-BR")} por {emp.demitidoPor ?? "—"}
+                      </div>
+                      <button onClick={()=>undoDismiss(emp)} style={{display:"flex",alignItems:"center",gap:8,padding:"12px 16px",borderRadius:10,border:"1px solid #10b98133",background:"#10b98109",color:"var(--text)",cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:13,textAlign:"left"}}>
+                        <span style={{fontSize:18}}>↩️</span>
+                        <div><div style={{fontWeight:700,color:"var(--green)"}}>Reverter demissão</div><div style={{fontSize:11,color:"var(--text3)",marginTop:2}}>Retornar empregado ao status anterior</div></div>
+                      </button>
+                      {onGenerateDismissalReport && (
+                        <button onClick={()=>onGenerateDismissalReport(emp)} style={{display:"flex",alignItems:"center",gap:8,padding:"12px 16px",borderRadius:10,border:"1px solid #3b82f633",background:"#3b82f609",color:"var(--text)",cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:13,textAlign:"left"}}>
+                          <span style={{fontSize:18}}>📄</span>
+                          <div><div style={{fontWeight:700,color:"#3b82f6"}}>Relatório de desligamento</div><div style={{fontSize:11,color:"var(--text3)",marginTop:2}}>Exportar PDF com dados e gorjetas</div></div>
+                        </button>
+                      )}
+                    </>
+                  )}
+                  {/* Inativar/Reativar */}
+                  {!isDemitido && (
+                    <button onClick={()=>toggleInactive(emp)} style={{display:"flex",alignItems:"center",gap:8,padding:"12px 16px",borderRadius:10,border:`1px solid ${isInactive?"#10b98133":"#f59e0b33"}`,background:isInactive?"#10b98109":"#f59e0b09",color:"var(--text)",cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:13,textAlign:"left"}}>
+                      <span style={{fontSize:18}}>{isInactive ? "↑" : "↓"}</span>
+                      <div><div style={{fontWeight:700,color:isInactive?"var(--green)":"#f59e0b"}}>{isInactive ? "Reativar empregado" : "Inativar empregado"}</div><div style={{fontSize:11,color:"var(--text3)",marginTop:2}}>{isInactive ? "Mover de volta para ativos" : "Mover para inativos temporariamente"}</div></div>
+                    </button>
+                  )}
+                  {/* Reset PIN */}
+                  <button onClick={()=>resetPin(emp)} style={{display:"flex",alignItems:"center",gap:8,padding:"12px 16px",borderRadius:10,border:"1px solid #f59e0b33",background:"#f59e0b09",color:"var(--text)",cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:13,textAlign:"left"}}>
+                    <span style={{fontSize:18}}>🔑</span>
+                    <div><div style={{fontWeight:700,color:"#f59e0b"}}>Resetar PIN</div><div style={{fontSize:11,color:"var(--text3)",marginTop:2}}>PIN volta para código do empregado, troca obrigatória no próximo acesso</div></div>
+                  </button>
+                  {/* Excluir */}
+                  {isOwner && isInactive && (
+                    <button onClick={()=>deleteEmp(emp)} style={{display:"flex",alignItems:"center",gap:8,padding:"12px 16px",borderRadius:10,border:"1px solid #e74c3c33",background:"#e74c3c09",color:"var(--text)",cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:13,textAlign:"left"}}>
+                      <span style={{fontSize:18}}>🗑️</span>
+                      <div><div style={{fontWeight:700,color:"var(--red)"}}>Excluir permanentemente</div><div style={{fontSize:11,color:"var(--text3)",marginTop:2}}>Remove o empregado do sistema (irreversível)</div></div>
+                    </button>
+                  )}
+                </div>
               </div>
             )}
 
-            {/* Timeline */}
-            <div style={{marginTop:8}}>
-              <h4 style={{color:"var(--text)",fontSize:14,marginBottom:12}}>Linha do tempo</h4>
-              <EmpTimeline empId={emp.id} employees={employees} roles={roles??restRoles} schedules={schedules??{}} incidents={incidents??[]} feedbacks={feedbacks??[]} restaurantId={rid}/>
-            </div>
+            {/* ── TAB: Trilha ── */}
+            {detailTab === "trilha" && (
+              <div>
+                {/* Action buttons */}
+                <div style={{display:"flex",gap:8,marginBottom:16,flexWrap:"wrap"}}>
+                  <button onClick={()=>{setShowIncForm(!showIncForm);setShowFbForm(false);}} style={{padding:"8px 16px",borderRadius:10,border:`1px solid ${showIncForm?"var(--accent)":"var(--border)"}`,background:showIncForm?"var(--accent)11":"transparent",color:showIncForm?"var(--accent)":"var(--text3)",cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:12}}>
+                    📋 Registrar ocorrência
+                  </button>
+                  <button onClick={()=>{setShowFbForm(!showFbForm);setShowIncForm(false);}} style={{padding:"8px 16px",borderRadius:10,border:`1px solid ${showFbForm?"#f59e0b":"var(--border)"}`,background:showFbForm?"#f59e0b11":"transparent",color:showFbForm?"#f59e0b":"var(--text3)",cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:12}}>
+                    ⭐ Feedback
+                  </button>
+                </div>
+                {showIncForm && <div style={{marginBottom:16}}><IncidentForm restaurantId={rid} employees={restEmps.filter(e=>!e.inactive)} onUpdate={onUpdate} incidents={incidents??[]} currentUser={currentUser} isOwner={isOwner} preSelectedEmpId={emp.id}/></div>}
+                {showFbForm && <div style={{marginBottom:16}}><FeedbackForm restaurantId={rid} employees={restEmps.filter(e=>!e.inactive)} roles={restRoles} onUpdate={onUpdate} feedbacks={feedbacks??[]} currentUser={currentUser} isOwner={isOwner} preSelectedEmpId={emp.id}/></div>}
+                <EmpTimeline empId={emp.id} employees={employees} roles={roles??restRoles} schedules={schedules??{}} incidents={incidents??[]} feedbacks={feedbacks??[]} restaurantId={rid}/>
+              </div>
+            )}
           </div>
         );
       })()}
 
-      {/* ═══ LIST VIEW ═══ */}
+      {/* ═══════════════════════ LIST VIEW ═══════════════════════ */}
       {!detailEmp && <>
-      <div style={{display:"flex",gap:8,marginBottom:16}}>
+
+      {/* Toggle Ativos / Inativos + Novo */}
+      <div style={{display:"flex",gap:8,marginBottom:12,alignItems:"center",flexWrap:"wrap"}}>
         <button onClick={()=>setShowInactive(false)} style={{flex:1,padding:"8px",borderRadius:10,border:`1px solid ${!showInactive?"var(--green)":"var(--border)"}`,background:!showInactive?"#10b98122":"transparent",color:!showInactive?"var(--green)":"var(--text3)",cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:13}}>
           Ativos ({activeEmps.length})
         </button>
         <button onClick={()=>setShowInactive(true)} style={{flex:1,padding:"8px",borderRadius:10,border:`1px solid ${showInactive?"#8b5cf6":"var(--border)"}`,background:showInactive?"#8b5cf622":"transparent",color:showInactive?"#8b5cf6":"var(--text3)",cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:13}}>
-          Inativos ({inactiveEmps.length}){isOwner && inactiveEmps.length>0 && " · clique ✕ p/ excluir"}
+          Inativos ({inactiveEmps.length})
         </button>
+        {!showInactive && (
+          <button onClick={()=>setShowNewForm(!showNewForm)} style={{padding:"8px 14px",borderRadius:10,border:`1px solid ${showNewForm?"var(--accent)":"var(--green)"}`,background:showNewForm?"var(--accent)11":"#10b98122",color:showNewForm?"var(--accent)":"var(--green)",cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:13,fontWeight:700,whiteSpace:"nowrap"}}>
+            {showNewForm ? "✕ Fechar" : "+ Novo"}
+          </button>
+        )}
       </div>
 
-      {/* Assistente IA para empregados */}
+      {/* ── New employee form ── */}
+      {showNewForm && !showInactive && (
+        <div style={{background:"var(--card-bg)",border:"1px solid var(--green)33",borderRadius:12,padding:16,marginBottom:14}}>
+          <div style={{fontSize:13,fontWeight:700,color:"var(--green)",marginBottom:10}}>Novo empregado</div>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+            <div>
+              <label style={{fontSize:10,color:"var(--text3)",fontWeight:700,display:"block",marginBottom:3}}>Nome</label>
+              <input value={newRow.name||""} onChange={ev=>setNewRow(p=>({...p,name:ev.target.value}))} placeholder="Nome completo" style={{...S.input,fontSize:13}}/>
+            </div>
+            <div>
+              <label style={{fontSize:10,color:"var(--text3)",fontWeight:700,display:"block",marginBottom:3}}>CPF</label>
+              <input value={newRow.cpf||""} onChange={ev=>setNewRow(p=>({...p,cpf:maskCpf(ev.target.value)}))} placeholder="000.000.000-00" style={{...S.input,fontSize:13}} inputMode="numeric"/>
+            </div>
+            <div>
+              <label style={{fontSize:10,color:"var(--text3)",fontWeight:700,display:"block",marginBottom:3}}>Admissão</label>
+              <input type="date" value={newRow.admission||""} onChange={ev=>setNewRow(p=>({...p,admission:ev.target.value}))} style={{...S.input,fontSize:13}}/>
+            </div>
+            <div>
+              <label style={{fontSize:10,color:"var(--text3)",fontWeight:700,display:"block",marginBottom:3}}>Cargo</label>
+              <select value={newRow.roleId||""} onChange={ev=>setNewRow(p=>({...p,roleId:ev.target.value}))} style={{...S.input,fontSize:13,cursor:"pointer"}}>
+                <option value="">Selecionar…</option>
+                {AREAS.map(a=>(<optgroup key={a} label={a}>{restRoles.filter(r=>r.area===a&&!r.inactive).map(r=><option key={r.id} value={r.id}>{r.name} ({r.points}pt)</option>)}</optgroup>))}
+              </select>
+            </div>
+          </div>
+          <div style={{display:"flex",gap:8,marginTop:12}}>
+            <button onClick={()=>{saveNew();setShowNewForm(false);}} disabled={!newRow.name.trim()} style={{...S.btnPrimary,fontSize:13,opacity:newRow.name.trim()?1:0.5}}>Adicionar</button>
+            <button onClick={()=>{setShowNewForm(false);setNewRow(blank());}} style={S.btnSecondary}>Cancelar</button>
+          </div>
+        </div>
+      )}
+
+      {/* IA assistant */}
       {!showInactive && (
         <div style={{marginBottom:14}}>
           <button onClick={()=>{setShowAiEmp(!showAiEmp);setAiEmpError("");setAiEmpPreview(null);}}
             style={{...S.btnSecondary,fontSize:12,display:"inline-flex",alignItems:"center",gap:6,padding:"7px 14px",
               background:showAiEmp?"var(--ac-bg)":undefined,borderColor:showAiEmp?"var(--ac)":undefined,color:showAiEmp?"var(--ac-text)":undefined}}>
-            ✨ Gerenciar empregados com IA
+            ✨ Gerenciar com IA
           </button>
           {showAiEmp && (
             <div style={{marginTop:10,padding:"14px",borderRadius:12,background:"var(--ac-bg)",border:"1px solid var(--ac)33"}}>
               <p style={{color:"var(--text2)",fontSize:13,margin:"0 0 6px",fontWeight:600}}>✨ Assistente de empregados</p>
-              <p style={{color:"var(--text3)",fontSize:12,margin:"0 0 6px",lineHeight:1.5}}>Crie, modifique ou inative empregados com linguagem natural. A IA identifica nome, cargo, CPF, admissão e produção. Revise antes de confirmar.</p>
+              <p style={{color:"var(--text3)",fontSize:12,margin:"0 0 6px",lineHeight:1.5}}>Crie, modifique ou inative empregados com linguagem natural.</p>
               <p style={{color:"var(--text3)",fontSize:11,margin:"0 0 10px",fontStyle:"italic"}}>Ex: "Adicionar João Silva como garçom; trocar Maria para barman; inativar Pedro Lima"</p>
-              <textarea value={aiEmpInput} onChange={e=>setAiEmpInput(e.target.value)}
-                placeholder="Descreva as alterações aqui..." rows={4}
-                style={{...S.input,resize:"vertical",marginBottom:8,fontSize:13}}/>
+              <textarea value={aiEmpInput} onChange={e=>setAiEmpInput(e.target.value)} placeholder="Descreva as alterações aqui..." rows={4} style={{...S.input,resize:"vertical",marginBottom:8,fontSize:13}}/>
               {aiEmpError && <p style={{color:"var(--red)",fontSize:12,margin:"0 0 8px"}}>{aiEmpError}</p>}
-
               {aiEmpPreview && (
                 <div style={{marginBottom:10,padding:"12px",borderRadius:10,background:"var(--card-bg)",border:"1px solid var(--border)"}}>
-                  <p style={{color:"var(--text)",fontSize:13,fontWeight:700,margin:"0 0 8px"}}>Pré-visualização — revise antes de confirmar:</p>
-                  {aiEmpPreview.criar.length > 0 && (
-                    <div style={{marginBottom:8}}>
-                      <span style={{color:"var(--green)",fontSize:11,fontWeight:700}}>+ CRIAR ({aiEmpPreview.criar.length})</span>
-                      {aiEmpPreview.criar.map(e => (
-                        <div key={e.id} style={{padding:"6px 8px",marginTop:4,borderRadius:6,background:"#10b98111",fontSize:12,color:"var(--text2)",display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:4}}>
-                          <div>
-                            <strong>{e.name}</strong>
-                            <span style={{color:"var(--text3)",marginLeft:6}}>→ {e.roleMatched ? <span style={{color:"var(--green)"}}>{e.roleName}</span> : <span style={{color:"var(--red)"}}>{e.roleName} ⚠️</span>}</span>
-                            {e.cpf && <span style={{color:"var(--text3)",marginLeft:6,fontSize:11}}>CPF: {e.cpf}</span>}
-                            {e.isProducao && <span style={{color:"#ec4899",marginLeft:6,fontSize:11}}>🏭 Produção</span>}
-                          </div>
-                          <span style={{color:"var(--text3)",fontSize:10,fontFamily:"'DM Mono',monospace"}}>{e.empCode} · PIN:{e.pin}</span>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                  {aiEmpPreview.modificar.length > 0 && (
-                    <div style={{marginBottom:8}}>
-                      <span style={{color:"#3b82f6",fontSize:11,fontWeight:700}}>✏️ MODIFICAR ({aiEmpPreview.modificar.length})</span>
-                      {aiEmpPreview.modificar.map(m => (
-                        <div key={m.id} style={{padding:"6px 8px",marginTop:4,borderRadius:6,background:"#3b82f611",fontSize:12,color:"var(--text2)"}}>
-                          <strong>{m.name}</strong>
-                          {m.newRoleName && <span style={{marginLeft:6}}>{m.oldRoleName} → {m.roleMatched ? <span style={{color:"#3b82f6"}}>{m.newRoleName}</span> : <span style={{color:"var(--red)"}}>{m.newRoleName} ⚠️</span>}</span>}
-                          {m.cpf !== null && <span style={{color:"var(--text3)",marginLeft:6,fontSize:11}}>CPF: {m.cpf}</span>}
-                          {m.producao !== null && <span style={{color:"#ec4899",marginLeft:6,fontSize:11}}>{m.producao?"🏭 Marcar produção":"🏭 Remover produção"}</span>}
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                  {aiEmpPreview.inativar.length > 0 && (
-                    <div style={{marginBottom:8}}>
-                      <span style={{color:"#f59e0b",fontSize:11,fontWeight:700}}>⏸ INATIVAR ({aiEmpPreview.inativar.length})</span>
-                      {aiEmpPreview.inativar.map(e => (
-                        <div key={e.id} style={{padding:"4px 8px",marginTop:4,borderRadius:6,background:"#f59e0b11",fontSize:12,color:"var(--text2)"}}>
-                          {e.name} {e.empCode && <span style={{color:"var(--text3)",fontSize:10}}>({e.empCode})</span>}
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                  {aiEmpPreview.criar.some(e=>!e.roleMatched) || aiEmpPreview.modificar.some(m=>!m.roleMatched) ? (
-                    <p style={{color:"var(--red)",fontSize:11,margin:"0 0 8px"}}>⚠️ Itens com cargo não encontrado ficarão sem cargo atribuído. Ajuste manualmente após confirmar.</p>
-                  ) : null}
-                  <div style={{display:"flex",gap:8,marginTop:10}}>
-                    <button onClick={confirmAiEmpChanges} style={{...S.btnPrimary,flex:1,fontSize:13}}>✅ Confirmar e aplicar</button>
-                    <button onClick={()=>setAiEmpPreview(null)} style={S.btnSecondary}>Cancelar</button>
-                  </div>
+                  <p style={{color:"var(--text)",fontSize:13,fontWeight:700,margin:"0 0 8px"}}>Pré-visualização:</p>
+                  {aiEmpPreview.criar.length > 0 && (<div style={{marginBottom:8}}><span style={{color:"var(--green)",fontSize:11,fontWeight:700}}>+ CRIAR ({aiEmpPreview.criar.length})</span>{aiEmpPreview.criar.map(e=>(<div key={e.id} style={{padding:"6px 8px",marginTop:4,borderRadius:6,background:"#10b98111",fontSize:12,color:"var(--text2)",display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:4}}><div><strong>{e.name}</strong><span style={{color:"var(--text3)",marginLeft:6}}>→ {e.roleMatched?<span style={{color:"var(--green)"}}>{e.roleName}</span>:<span style={{color:"var(--red)"}}>{e.roleName} ⚠️</span>}</span>{e.cpf&&<span style={{color:"var(--text3)",marginLeft:6,fontSize:11}}>CPF: {e.cpf}</span>}{e.isProducao&&<span style={{color:"#ec4899",marginLeft:6,fontSize:11}}>🏭</span>}</div><span style={{color:"var(--text3)",fontSize:10,fontFamily:"'DM Mono',monospace"}}>{e.empCode}·PIN:{e.pin}</span></div>))}</div>)}
+                  {aiEmpPreview.modificar.length > 0 && (<div style={{marginBottom:8}}><span style={{color:"#3b82f6",fontSize:11,fontWeight:700}}>✏️ MODIFICAR ({aiEmpPreview.modificar.length})</span>{aiEmpPreview.modificar.map(m=>(<div key={m.id} style={{padding:"6px 8px",marginTop:4,borderRadius:6,background:"#3b82f611",fontSize:12,color:"var(--text2)"}}><strong>{m.name}</strong>{m.newRoleName&&<span style={{marginLeft:6}}>{m.oldRoleName}→{m.roleMatched?<span style={{color:"#3b82f6"}}>{m.newRoleName}</span>:<span style={{color:"var(--red)"}}>{m.newRoleName}⚠️</span>}</span>}{m.cpf!==null&&<span style={{color:"var(--text3)",marginLeft:6,fontSize:11}}>CPF:{m.cpf}</span>}{m.producao!==null&&<span style={{color:"#ec4899",marginLeft:6,fontSize:11}}>{m.producao?"🏭+":"🏭−"}</span>}</div>))}</div>)}
+                  {aiEmpPreview.inativar.length > 0 && (<div style={{marginBottom:8}}><span style={{color:"#f59e0b",fontSize:11,fontWeight:700}}>⏸ INATIVAR ({aiEmpPreview.inativar.length})</span>{aiEmpPreview.inativar.map(e=>(<div key={e.id} style={{padding:"4px 8px",marginTop:4,borderRadius:6,background:"#f59e0b11",fontSize:12,color:"var(--text2)"}}>{e.name} {e.empCode&&<span style={{color:"var(--text3)",fontSize:10}}>({e.empCode})</span>}</div>))}</div>)}
+                  {(aiEmpPreview.criar.some(e=>!e.roleMatched)||aiEmpPreview.modificar.some(m=>!m.roleMatched)) && <p style={{color:"var(--red)",fontSize:11,margin:"0 0 8px"}}>⚠️ Itens com cargo não encontrado ficarão sem cargo.</p>}
+                  <div style={{display:"flex",gap:8,marginTop:10}}><button onClick={confirmAiEmpChanges} style={{...S.btnPrimary,flex:1,fontSize:13}}>✅ Confirmar</button><button onClick={()=>setAiEmpPreview(null)} style={S.btnSecondary}>Cancelar</button></div>
                 </div>
               )}
-
-              {!aiEmpPreview && (
-                <div style={{display:"flex",gap:8}}>
-                  <button onClick={handleAiEmpregados} disabled={!aiEmpInput.trim()||aiEmpLoading}
-                    style={{...S.btnPrimary,flex:1,fontSize:13,opacity:(!aiEmpInput.trim()||aiEmpLoading)?0.6:1}}>
-                    {aiEmpLoading?"✨ Processando...":"✨ Processar com IA"}
-                  </button>
-                  <button onClick={()=>{setShowAiEmp(false);setAiEmpInput("");setAiEmpError("");setAiEmpPreview(null);}} style={S.btnSecondary}>Cancelar</button>
-                </div>
-              )}
-              <p style={{color:"var(--text3)",fontSize:11,margin:"10px 0 0",fontStyle:"italic"}}>⚠️ PIN inicial = sequência numérica. Empregado deve trocar no 1º acesso.</p>
+              {!aiEmpPreview && (<div style={{display:"flex",gap:8}}><button onClick={handleAiEmpregados} disabled={!aiEmpInput.trim()||aiEmpLoading} style={{...S.btnPrimary,flex:1,fontSize:13,opacity:(!aiEmpInput.trim()||aiEmpLoading)?0.6:1}}>{aiEmpLoading?"✨ Processando...":"✨ Processar"}</button><button onClick={()=>{setShowAiEmp(false);setAiEmpInput("");setAiEmpError("");setAiEmpPreview(null);}} style={S.btnSecondary}>Cancelar</button></div>)}
             </div>
           )}
         </div>
       )}
 
-      {/* Cabeçalho */}
-      <div style={{display:"grid",gridTemplateColumns:EMP_COLS,gap:6,padding:"4px 8px",marginBottom:4}}>
-        {["ID","Nome","CPF","Admissão","🔑","Cargo",""].map(h=>(
-          <div key={h} style={{color:"var(--text3)",fontSize:10,fontWeight:700}}>{h}</div>
-        ))}
-      </div>
-
-      {/* Linha de novo empregado */}
-      {!showInactive && (
-        <EmpRowLine isNew emp={null} row={newRow} restRoles={restRoles}
-          isSaved={false} isOwner={isOwner}
-          onChange={(f,v)=>setNewRow(p=>({...p,[f]:v}))}
-          onAdd={saveNew} onSave={null} onToggleInactive={null} onDelete={null} onResetPin={null} onToggleProd={null} onToggleFreela={null} employees={employees} privacyMask={privacyMask}/>
-      )}
-
+      {/* Plan limits */}
       {activeCount >= plano.empMax && (
         <div style={{background:"var(--red-bg)",border:"1px solid var(--red)33",borderRadius:12,padding:"14px 16px",marginBottom:12}}>
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:10}}>
             <div>
-              <div style={{color:"var(--red)",fontSize:13,fontWeight:700,marginBottom:2}}>⚠️ Limite do plano atingido — {activeCount}/{plano.empMax} empregados</div>
-              <div style={{color:"var(--text3)",fontSize:12}}>Para adicionar mais empregados, solicite upgrade do plano.</div>
+              <div style={{color:"var(--red)",fontSize:13,fontWeight:700,marginBottom:2}}>⚠️ Limite do plano atingido — {activeCount}/{plano.empMax}</div>
+              <div style={{color:"var(--text3)",fontSize:12}}>Solicite upgrade para adicionar mais.</div>
             </div>
             <button onClick={()=>{
-              const PLANOS_LABEL = { p10:"Starter (10 emp.)", p20:"Básico (20 emp.)", p50:"Profissional (50 emp.)", p999:"Enterprise (51-100 emp.)", pOrc:"On Demand (+100 emp.)" };
+              const PLANOS_LABEL = { p10:"Starter (10)", p20:"Básico (20)", p50:"Profissional (50)", p999:"Enterprise (51-100)", pOrc:"On Demand (+100)" };
               const PROXIMO = { p10:"p20", p20:"p50", p50:"p999", p999:"pOrc" };
               const planoAtual = PLANOS_LABEL[restaurant?.planoId??"p10"] ?? "Starter";
               const planoProx = PLANOS_LABEL[PROXIMO[restaurant?.planoId??"p10"]] ?? "Enterprise";
               const restNome = restaurant?.name ?? "Restaurante";
-
-              // 1. Notificação na caixa do Admin
-              if (onUpdate) {
-                const notif = {
-                  id: Date.now().toString(),
-                  restaurantId: rid,
-                  type: "upgrade_request",
-                  body: `📦 Solicitação de upgrade — ${restNome}: plano atual ${planoAtual} → solicitado ${planoProx}. Empregados ativos: ${activeCount}/${plano.empMax}.`,
-                  date: new Date().toISOString(),
-                  read: false,
-                  targetRole: "admin",
-                };
-                onUpdate("notifications", [...(notifications ?? []), notif]);
-              }
-
-              // 2. WhatsApp
-              const msg = encodeURIComponent(`Olá! Sou gestor do restaurante *${restNome}*.\n\nGostaria de solicitar upgrade do plano:\n• Plano atual: *${planoAtual}*\n• Plano desejado: *${planoProx}*\n• Empregados ativos: ${activeCount}/${plano.empMax}\n\nAguardo retorno. Obrigado!`);
+              if (onUpdate) { onUpdate("notifications", [...(notifications ?? []), { id:Date.now().toString(), restaurantId:rid, type:"upgrade_request", body:`📦 Upgrade — ${restNome}: ${planoAtual} → ${planoProx}. Ativos: ${activeCount}/${plano.empMax}.`, date:new Date().toISOString(), read:false, targetRole:"admin" }]); }
+              const msg = encodeURIComponent(`Olá! Sou gestor do restaurante *${restNome}*.\nGostaria de solicitar upgrade do plano:\n• Atual: *${planoAtual}*\n• Desejado: *${planoProx}*\n• Empregados: ${activeCount}/${plano.empMax}\nObrigado!`);
               window.open(`https://wa.me/5511985499821?text=${msg}`, "_blank");
-
               onUpdate("_toast", "✅ Solicitação enviada!");
             }} style={{padding:"10px 18px",borderRadius:10,border:"none",background:"var(--red)",color:"#fff",fontWeight:700,cursor:"pointer",fontFamily:"'DM Sans',sans-serif",fontSize:13,whiteSpace:"nowrap"}}>
               📲 Solicitar upgrade
@@ -4338,11 +4434,11 @@ Inclua apenas as ações solicitadas. Arrays vazios se não houver ação daquel
       )}
       {activeCount > 0 && activeCount < plano.empMax && activeCount >= plano.empMax * 0.8 && (
         <div style={{background:"#f59e0b11",border:"1px solid #f59e0b33",borderRadius:10,padding:"8px 14px",marginBottom:12}}>
-          <span style={{color:"#f59e0b",fontSize:12}}>⚡ {activeCount}/{plano.empMax} empregados — próximo do limite do plano</span>
+          <span style={{color:"#f59e0b",fontSize:12}}>⚡ {activeCount}/{plano.empMax} — próximo do limite</span>
         </div>
       )}
 
-      {/* Agrupado por área */}
+      {/* ── Employee cards by area ── */}
       {(() => {
         const groups = {};
         list.forEach(emp => {
@@ -4352,34 +4448,37 @@ Inclua apenas as ações solicitadas. Arrays vazios se não houver ação daquel
           groups[area].push(emp);
         });
         return Object.entries(groups).map(([area, emps]) => (
-          <div key={area} style={{marginBottom:12}}>
-            <div style={{color:AREA_COLORS[area]??"#888",fontSize:11,fontWeight:700,padding:"8px 8px 4px",borderBottom:`1px solid ${AREA_COLORS[area]??"var(--bg4)"}33`,marginBottom:4,letterSpacing:1}}>
-              {area.toUpperCase()} · {emps.length} empregado{emps.length!==1?"s":""}
+          <div key={area} style={{marginBottom:14}}>
+            <div style={{color:AREA_COLORS[area]??"#888",fontSize:11,fontWeight:700,padding:"8px 8px 4px",borderBottom:`1px solid ${AREA_COLORS[area]??"var(--bg4)"}33`,marginBottom:6,letterSpacing:1}}>
+              {area.toUpperCase()} · {emps.length}
             </div>
             {emps.map(emp => {
-              const row = getRow(emp);
+              const role = restRoles.find(r=>r.id===emp.roleId);
+              const badge = statusBadge(emp);
               return (
-                <div key={emp.id} style={{position:"relative"}}>
-                  <EmpRowLine isNew={false} emp={emp} row={row} restRoles={restRoles}
-                    isSaved={saved[emp.id]} isOwner={isOwner}
-                    onChange={(f,v)=>setField(emp.id,f,v)}
-                    onSave={()=>saveEmp(emp)}
-                    onToggleInactive={()=>toggleInactive(emp)}
-                    onDelete={()=>deleteEmp(emp)}
-                    onDismiss={()=>dismissEmp(emp)}
-                    onUndoDismiss={()=>undoDismiss(emp)}
-                    onGenerateReport={onGenerateDismissalReport}
-                    onPromote={promoteEmp}
-                    onResetPin={resetPin}
-                    onToggleProd={()=>{
-                      onUpdate("employees", employees.map(x => x.id===emp.id ? {...x, isProducao:!x.isProducao} : x));
-                    }}
-                    onToggleFreela={()=>{
-                      onUpdate("employees", employees.map(x => x.id===emp.id ? {...x, isFreela:!x.isFreela} : x));
-                    }}
-                    employees={employees} privacyMask={privacyMask}/>
-                  {/* Trilha detail button */}
-                  <button onClick={()=>setDetailEmp(emp.id)} title="Ver trilha" style={{position:"absolute",right:4,top:"50%",transform:"translateY(-50%)",background:"var(--accent)11",border:"1px solid var(--accent)33",borderRadius:8,padding:"4px 8px",cursor:"pointer",fontSize:11,color:"var(--accent)",fontFamily:"'DM Mono',monospace"}}>📈</button>
+                <div key={emp.id} onClick={()=>{setDetailEmp(emp.id);setDetailTab("cadastro");}} style={{
+                  display:"flex", alignItems:"center", gap:10, padding:"10px 14px", marginBottom:4,
+                  background:"var(--card-bg)", borderRadius:10, border:"1px solid var(--border)",
+                  cursor:"pointer", transition:"background 0.15s"
+                }}
+                onMouseEnter={e=>e.currentTarget.style.background="var(--bg2)"}
+                onMouseLeave={e=>e.currentTarget.style.background="var(--card-bg)"}>
+                  {/* Avatar circle */}
+                  <div style={{width:36,height:36,borderRadius:"50%",background:AREA_COLORS[role?.area]??"var(--bg3)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:14,fontWeight:700,color:"#fff",flexShrink:0}}>
+                    {(emp.name||"?").charAt(0).toUpperCase()}
+                  </div>
+                  {/* Info */}
+                  <div style={{flex:1,minWidth:0}}>
+                    <div style={{display:"flex",alignItems:"center",gap:6,flexWrap:"wrap"}}>
+                      <span style={{fontSize:13,fontWeight:700,color:"var(--text)",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{emp.name}</span>
+                      <span style={{fontSize:9,padding:"1px 6px",borderRadius:4,background:badge.bg,color:badge.color,fontWeight:700}}>{badge.label}</span>
+                      {emp.isProducao && <span style={{fontSize:9,padding:"1px 5px",borderRadius:4,background:"#ec489922",color:"#ec4899"}}>Prod</span>}
+                      {emp.isFreela && <span style={{fontSize:9,padding:"1px 5px",borderRadius:4,background:"#06b6d422",color:"#06b6d4"}}>Freela</span>}
+                    </div>
+                    <div style={{fontSize:11,color:"var(--text3)",marginTop:1}}>{role?.name ?? "Sem cargo"}</div>
+                  </div>
+                  {/* Arrow */}
+                  <span style={{color:"var(--text3)",fontSize:16,flexShrink:0}}>›</span>
                 </div>
               );
             })}
@@ -9745,11 +9844,17 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }
 
         {tab === "changelog" && (() => {
           const CHANGELOG = [
+            { version:"5.17.0", date:"2026-04-17", items:[
+              "Redesign: aba Equipe totalmente refeita — listagem com cards compactos (nome, cargo, área, status) em vez de planilha",
+              "Novo: detalhe do empregado com 3 abas internas: Cadastro (dados editáveis), Ações (promover, demitir, PIN, etc.) e Trilha (timeline + ocorrências + feedback)",
+              "Novo: botão '+ Novo' no topo abre formulário dedicado para adicionar empregado",
+              "Melhoria: card de cada empregado mostra avatar com inicial, cargo, badges de status (Ativo/Inativo/Demitido/Promoção), flags (Produção/Freela)",
+              "Melhoria: aba Ações com botões descritivos — cada ação com título e explicação clara",
+            ]},
             { version:"5.16.1", date:"2026-04-17", items:[
-              "Unificação: abas Equipe e Trilha integradas em uma única aba 👥 Equipe",
-              "Novo: botão 📈 em cada empregado para abrir a visão detalhada (timeline, ocorrências, feedback) sem sair da aba Equipe",
-              "Novo: ao clicar em 📈, exibe card do empregado com contadores (ocorrências, elogios, avaliação média), botões de ação e linha do tempo completa",
-              "Melhoria: formulários de ocorrência e feedback abrem pré-selecionados para o empregado em contexto",
+              "Unificação: abas Equipe e Trilha integradas em uma única aba Equipe",
+              "Novo: visão detalhada do empregado com timeline, ocorrências e feedback integrados",
+              "Melhoria: formulários de ocorrência e feedback pré-selecionados para o empregado em contexto",
             ]},
             { version:"5.16.0", date:"2026-04-17", items:[
               "Novo: Aba 📈 Trilha do Empregado — linha do tempo completa com eventos automáticos (escala, promoções, demissão) e manuais (ocorrências, feedbacks)",
