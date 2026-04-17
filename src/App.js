@@ -3,7 +3,7 @@ import { useState, useEffect, Component } from "react";
 import { db } from "./firebase";
 import { doc, getDoc, setDoc } from "firebase/firestore";
 
-const APP_VERSION = "5.16.0";
+const APP_VERSION = "5.16.1";
 
 const DEFAULT_ADMISSION = () => `${new Date().getFullYear()}-01-01`;
 const round2 = (v) => Math.round(v * 100) / 100;
@@ -3835,7 +3835,8 @@ function EmpRowLine({ emp, isNew, row, restRoles, isSaved, isOwner, onChange, on
   );
 }
 
-function EmployeeSpreadsheet({ restEmps, restRoles, rid, employees, onUpdate, restCode: restCode_, isOwner, restaurant, notifications, privacyMask, onGenerateDismissalReport }) {
+function EmployeeSpreadsheet({ restEmps, restRoles, rid, employees, onUpdate, restCode: restCode_, isOwner, restaurant, notifications, privacyMask, onGenerateDismissalReport, incidents, feedbacks, devChecklists, schedules, currentUser, isLider, mobileOnly: mobileOnlyProp, roles }) {
+  const mobileOnly = mobileOnlyProp ?? false; // eslint-disable-line no-unused-vars
   const PLANOS = [
     { id:"p10",  empMax:10  },
     { id:"p20",  empMax:20  },
@@ -3855,6 +3856,9 @@ function EmployeeSpreadsheet({ restEmps, restRoles, rid, employees, onUpdate, re
   const [aiEmpLoading, setAiEmpLoading] = useState(false);
   const [aiEmpError, setAiEmpError] = useState("");
   const [aiEmpPreview, setAiEmpPreview] = useState(null);
+  const [detailEmp, setDetailEmp] = useState(null); // empId for detail view
+  const [showIncForm, setShowIncForm] = useState(false);
+  const [showFbForm, setShowFbForm] = useState(false);
 
   async function handleAiEmpregados() {
     if (!aiEmpInput.trim()) return;
@@ -4101,8 +4105,89 @@ Inclua apenas as ações solicitadas. Arrays vazios se não houver ação daquel
     onUpdate("_toast", `🔑 PIN de ${emp.name} resetado para ${numericPin}`);
   }
 
+  const detailEmpObj = detailEmp ? restEmps.find(e => e.id === detailEmp) : null;
+  const detailRole = detailEmpObj ? restRoles.find(r => r.id === detailEmpObj.roleId) : null;
+
   return (
     <div style={{fontFamily:"'DM Mono',monospace"}}>
+      {/* ═══ DETAIL VIEW ═══ */}
+      {detailEmp && detailEmpObj && (() => {
+        const emp = detailEmpObj;
+        const role = detailRole;
+        const empIncidents = (incidents??[]).filter(i => i.restaurantId === rid && (i.employeeIds??[]).includes(emp.id));
+        const empFeedbacks = (feedbacks??[]).filter(f => f.restaurantId === rid && f.employeeId === emp.id);
+        const negCount = empIncidents.filter(i => { const t = INCIDENT_TYPES.find(x=>x.id===i.type); return t?.negative; }).length;
+        const posCount = empIncidents.filter(i => { const t = INCIDENT_TYPES.find(x=>x.id===i.type); return !t?.negative; }).length;
+        const avgStars = empFeedbacks.length > 0 ? (empFeedbacks.reduce((a,f)=>a+(f.stars??0),0)/empFeedbacks.length).toFixed(1) : "—";
+        return (
+          <div>
+            {/* Back button */}
+            <button onClick={()=>{setDetailEmp(null);setShowIncForm(false);setShowFbForm(false);}} style={{background:"none",border:"none",color:"var(--accent)",cursor:"pointer",fontSize:13,fontFamily:"'DM Mono',monospace",padding:"4px 0",marginBottom:12,display:"flex",alignItems:"center",gap:4}}>
+              ← Voltar para equipe
+            </button>
+
+            {/* Employee header card */}
+            <div style={{background:"var(--bg2)",border:"1px solid var(--border)",borderRadius:14,padding:16,marginBottom:16}}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",flexWrap:"wrap",gap:12}}>
+                <div>
+                  <div style={{fontSize:18,fontWeight:700,color:"var(--text)"}}>{emp.name}</div>
+                  <div style={{fontSize:12,color:"var(--text3)",marginTop:2}}>{role?.name ?? "Sem cargo"} · {role?.area ?? "Sem área"}</div>
+                  {emp.admission && <div style={{fontSize:11,color:"var(--text3)",marginTop:2}}>Admissão: {new Date(emp.admission+"T12:00:00").toLocaleDateString("pt-BR")}</div>}
+                  {emp.demitidoEm && <div style={{fontSize:11,color:"var(--red)",marginTop:2}}>Demitido em: {new Date(emp.demitidoEm+"T12:00:00").toLocaleDateString("pt-BR")}</div>}
+                  {emp.pendingRoleChange && <div style={{fontSize:11,color:"#f59e0b",marginTop:4}}>📅 Promoção agendada → {restRoles.find(r=>r.id===emp.pendingRoleChange.newRoleId)?.name} em {new Date(emp.pendingRoleChange.effectiveDate+"T12:00:00").toLocaleDateString("pt-BR")}</div>}
+                </div>
+                <div style={{display:"flex",gap:12,flexWrap:"wrap"}}>
+                  <div style={{textAlign:"center",padding:"8px 14px",background:"var(--bg3)",borderRadius:10}}>
+                    <div style={{fontSize:18,fontWeight:700,color:"var(--red)"}}>{negCount}</div>
+                    <div style={{fontSize:10,color:"var(--text3)"}}>Ocorrências</div>
+                  </div>
+                  <div style={{textAlign:"center",padding:"8px 14px",background:"var(--bg3)",borderRadius:10}}>
+                    <div style={{fontSize:18,fontWeight:700,color:"var(--green)"}}>{posCount}</div>
+                    <div style={{fontSize:10,color:"var(--text3)"}}>Elogios</div>
+                  </div>
+                  <div style={{textAlign:"center",padding:"8px 14px",background:"var(--bg3)",borderRadius:10}}>
+                    <div style={{fontSize:18,fontWeight:700,color:"#f59e0b"}}>{avgStars}</div>
+                    <div style={{fontSize:10,color:"var(--text3)"}}>Avaliação</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Action buttons */}
+            <div style={{display:"flex",gap:8,marginBottom:16,flexWrap:"wrap"}}>
+              <button onClick={()=>{setShowIncForm(!showIncForm);setShowFbForm(false);}} style={{padding:"8px 16px",borderRadius:10,border:`1px solid ${showIncForm?"var(--accent)":"var(--border)"}`,background:showIncForm?"var(--accent)11":"transparent",color:showIncForm?"var(--accent)":"var(--text3)",cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:12}}>
+                📋 Registrar ocorrência
+              </button>
+              <button onClick={()=>{setShowFbForm(!showFbForm);setShowIncForm(false);}} style={{padding:"8px 16px",borderRadius:10,border:`1px solid ${showFbForm?"#f59e0b":"var(--border)"}`,background:showFbForm?"#f59e0b11":"transparent",color:showFbForm?"#f59e0b":"var(--text3)",cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:12}}>
+                ⭐ Feedback
+              </button>
+            </div>
+
+            {/* Incident form */}
+            {showIncForm && (
+              <div style={{marginBottom:16}}>
+                <IncidentForm restaurantId={rid} employees={restEmps.filter(e=>!e.inactive)} onUpdate={onUpdate} incidents={incidents??[]} currentUser={currentUser} isOwner={isOwner} preSelectedEmpId={emp.id}/>
+              </div>
+            )}
+
+            {/* Feedback form */}
+            {showFbForm && (
+              <div style={{marginBottom:16}}>
+                <FeedbackForm restaurantId={rid} employees={restEmps.filter(e=>!e.inactive)} roles={restRoles} onUpdate={onUpdate} feedbacks={feedbacks??[]} currentUser={currentUser} isOwner={isOwner} preSelectedEmpId={emp.id}/>
+              </div>
+            )}
+
+            {/* Timeline */}
+            <div style={{marginTop:8}}>
+              <h4 style={{color:"var(--text)",fontSize:14,marginBottom:12}}>Linha do tempo</h4>
+              <EmpTimeline empId={emp.id} employees={employees} roles={roles??restRoles} schedules={schedules??{}} incidents={incidents??[]} feedbacks={feedbacks??[]} restaurantId={rid}/>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* ═══ LIST VIEW ═══ */}
+      {!detailEmp && <>
       <div style={{display:"flex",gap:8,marginBottom:16}}>
         <button onClick={()=>setShowInactive(false)} style={{flex:1,padding:"8px",borderRadius:10,border:`1px solid ${!showInactive?"var(--green)":"var(--border)"}`,background:!showInactive?"#10b98122":"transparent",color:!showInactive?"var(--green)":"var(--text3)",cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:13}}>
           Ativos ({activeEmps.length})
@@ -4274,29 +4359,34 @@ Inclua apenas as ações solicitadas. Arrays vazios se não houver ação daquel
             {emps.map(emp => {
               const row = getRow(emp);
               return (
-                <EmpRowLine key={emp.id} isNew={false} emp={emp} row={row} restRoles={restRoles}
-                  isSaved={saved[emp.id]} isOwner={isOwner}
-                  onChange={(f,v)=>setField(emp.id,f,v)}
-                  onSave={()=>saveEmp(emp)}
-                  onToggleInactive={()=>toggleInactive(emp)}
-                  onDelete={()=>deleteEmp(emp)}
-                  onDismiss={()=>dismissEmp(emp)}
-                  onUndoDismiss={()=>undoDismiss(emp)}
-                  onGenerateReport={onGenerateDismissalReport}
-                  onPromote={promoteEmp}
-                  onResetPin={resetPin}
-                  onToggleProd={()=>{
-                    onUpdate("employees", employees.map(x => x.id===emp.id ? {...x, isProducao:!x.isProducao} : x));
-                  }}
-                  onToggleFreela={()=>{
-                    onUpdate("employees", employees.map(x => x.id===emp.id ? {...x, isFreela:!x.isFreela} : x));
-                  }}
-                  employees={employees} privacyMask={privacyMask}/>
+                <div key={emp.id} style={{position:"relative"}}>
+                  <EmpRowLine isNew={false} emp={emp} row={row} restRoles={restRoles}
+                    isSaved={saved[emp.id]} isOwner={isOwner}
+                    onChange={(f,v)=>setField(emp.id,f,v)}
+                    onSave={()=>saveEmp(emp)}
+                    onToggleInactive={()=>toggleInactive(emp)}
+                    onDelete={()=>deleteEmp(emp)}
+                    onDismiss={()=>dismissEmp(emp)}
+                    onUndoDismiss={()=>undoDismiss(emp)}
+                    onGenerateReport={onGenerateDismissalReport}
+                    onPromote={promoteEmp}
+                    onResetPin={resetPin}
+                    onToggleProd={()=>{
+                      onUpdate("employees", employees.map(x => x.id===emp.id ? {...x, isProducao:!x.isProducao} : x));
+                    }}
+                    onToggleFreela={()=>{
+                      onUpdate("employees", employees.map(x => x.id===emp.id ? {...x, isFreela:!x.isFreela} : x));
+                    }}
+                    employees={employees} privacyMask={privacyMask}/>
+                  {/* Trilha detail button */}
+                  <button onClick={()=>setDetailEmp(emp.id)} title="Ver trilha" style={{position:"absolute",right:4,top:"50%",transform:"translateY(-50%)",background:"var(--accent)11",border:"1px solid var(--accent)33",borderRadius:8,padding:"4px 8px",cursor:"pointer",fontSize:11,color:"var(--accent)",fontFamily:"'DM Mono',monospace"}}>📈</button>
+                </div>
               );
             })}
           </div>
         ));
       })()}
+      </>}
     </div>
   );
 }
@@ -4769,9 +4859,9 @@ function EmpTimeline({ empId, employees, roles, schedules, incidents, feedbacks,
   );
 }
 
-function IncidentForm({ restaurantId, employees, onUpdate, incidents, currentUser, isOwner }) {
+function IncidentForm({ restaurantId, employees, onUpdate, incidents, currentUser, isOwner, preSelectedEmpId }) {
   const restEmps = employees.filter(e => e.restaurantId === restaurantId && !(e.inactive && e.inactiveFrom && e.inactiveFrom <= today()));
-  const [selectedEmps, setSelectedEmps] = useState([]);
+  const [selectedEmps, setSelectedEmps] = useState(preSelectedEmpId ? [preSelectedEmpId] : []);
   const [type, setType] = useState("");
   const [severity, setSeverity] = useState("");
   const [description, setDescription] = useState("");
@@ -4848,11 +4938,11 @@ function IncidentForm({ restaurantId, employees, onUpdate, incidents, currentUse
   );
 }
 
-function FeedbackForm({ restaurantId, employees, roles, onUpdate, feedbacks, currentUser, isOwner }) {
+function FeedbackForm({ restaurantId, employees, roles, onUpdate, feedbacks, currentUser, isOwner, preSelectedEmpId }) {
   const restEmps = employees.filter(e => e.restaurantId === restaurantId && !(e.inactive && e.inactiveFrom && e.inactiveFrom <= today()));
   const restRoles = roles.filter(r => r.restaurantId === restaurantId && !r.inactive);
   const now = new Date();
-  const [empId, setEmpId] = useState("");
+  const [empId, setEmpId] = useState(preSelectedEmpId ?? "");
   const [rating, setRating] = useState(0);
   const [strengths, setStrengths] = useState("");
   const [improvements, setImprovements] = useState("");
@@ -4938,7 +5028,7 @@ function FeedbackForm({ restaurantId, employees, roles, onUpdate, feedbacks, cur
   );
 }
 
-function TrilhaTab({ restaurantId, employees, roles, schedules, incidents, feedbacks, devChecklists, onUpdate, currentUser, isOwner, isLider, mobileOnly }) {
+function TrilhaTab({ restaurantId, employees, roles, schedules, incidents, feedbacks, devChecklists, onUpdate, currentUser, isOwner, isLider, mobileOnly }) { // eslint-disable-line no-unused-vars
   const [selectedEmp, setSelectedEmp] = useState("");
   const [showIncidentForm, setShowIncidentForm] = useState(false);
   const [showFeedbackForm, setShowFeedbackForm] = useState(false);
@@ -5630,12 +5720,12 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
 
   const inboxUnread = ((data?.notifications??[]).filter(n=>n.restaurantId===rid&&!n.read&&!n.deleted&&n.targetRole!=="admin"&&n.type!=="upgrade_request").length + (data?.dpMessages??[]).filter(m=>m.restaurantId===rid&&!m.read&&!m.deleted).length);
 
-  // Líder de área: acesso restrito a Dashboard + Escala + Horários apenas
+  // Líder de área: acesso restrito a Dashboard + Escala + Horários + Equipe
   const TABS = isLider ? [
     ["dashboard",   "📊 Dashboard"],
     canSched && ["schedule",    "📅 Escala"],
     ["horarios",    "🕐 Horários"],
-    ["trilha",      "📈 Trilha"],
+    ["employees",   "👥 Equipe"],
   ].filter(Boolean) : [
     canTips                                           && ["dashboard",   "📊 Dashboard"],
     canTips                                           && ["tips",        "💸 Gorjetas"],
@@ -5644,14 +5734,13 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
     (isOwner || canTips || tabVisible("employees")) && ["employees","👥 Equipe"],
     (isOwner || tabVisible("horarios"))          && ["horarios",    "🕐 Horários"],
     (isOwner || (perms.vt !== false && tabVisible("vt"))) && ["vt",          "🚌 Vale Transporte"],
-    ["trilha",      "📈 Trilha"],
     (isOwner || tabVisible("faq"))               && ["faq",         "❓ FAQ"],
     (isOwner || tabVisible("comunicados"))        && ["comunicados", "📢 Comunicados"],
     (isOwner || tabVisible("dp"))                && ["dp",          "💬 Fale com DP"],
     isDP                                       && ["notificacoes",`📬 Caixa${inboxUnread>0?` (${inboxUnread})`:""}`],
     isDP                                       && ["dp_gestores", "👔 Gestores"],
     (canTips || isOwner)                       && ["config",       "⚙️ Configurações"],
-  ].filter(Boolean).filter(([id]) => !mobileOnly || ["dashboard","schedule","horarios","vt","notificacoes","trilha"].includes(id));
+  ].filter(Boolean).filter(([id]) => !mobileOnly || ["dashboard","schedule","horarios","vt","notificacoes","employees"].includes(id));
 
   const [tab, setTab] = useState("dashboard");
 
@@ -6447,6 +6536,9 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
               isOwner={isOwner} restaurant={restaurant}
               notifications={data?.notifications??[]}
               privacyMask={privacyMask}
+              incidents={data?.incidents??[]} feedbacks={data?.feedbacks??[]}
+              devChecklists={data?.devChecklists??{}} schedules={data?.schedules??{}}
+              currentUser={currentUser} isLider={isLider} mobileOnly={mobileOnly} roles={roles}
               onGenerateDismissalReport={async (emp) => {
                 try {
                   await loadScript("https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js");
@@ -7435,10 +7527,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
           <ValeTransporteTab restaurantId={rid} employees={employees} roles={roles} workSchedules={data?.workSchedules??{}} schedules={data?.schedules??{}} vtConfig={data?.vtConfig??{}} vtMonthly={data?.vtMonthly??{}} vtPayments={data?.vtPayments??{}} onUpdate={onUpdate} currentUser={currentUser} isOwner={isOwner} mobileOnly={mobileOnly} />
         )}
 
-        {/* TRILHA DO EMPREGADO */}
-        {tab === "trilha" && (
-          <TrilhaTab restaurantId={rid} employees={employees} roles={roles} schedules={data?.schedules??{}} incidents={data?.incidents??[]} feedbacks={data?.feedbacks??[]} devChecklists={data?.devChecklists??{}} onUpdate={onUpdate} currentUser={currentUser} isOwner={isOwner} isLider={isLider} mobileOnly={mobileOnly}/>
-        )}
+        {/* TRILHA — integrada na aba Equipe */}
 
         {/* NOTIFICAÇÕES */}
         {tab === "notificacoes" && (
@@ -9656,6 +9745,12 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }
 
         {tab === "changelog" && (() => {
           const CHANGELOG = [
+            { version:"5.16.1", date:"2026-04-17", items:[
+              "Unificação: abas Equipe e Trilha integradas em uma única aba 👥 Equipe",
+              "Novo: botão 📈 em cada empregado para abrir a visão detalhada (timeline, ocorrências, feedback) sem sair da aba Equipe",
+              "Novo: ao clicar em 📈, exibe card do empregado com contadores (ocorrências, elogios, avaliação média), botões de ação e linha do tempo completa",
+              "Melhoria: formulários de ocorrência e feedback abrem pré-selecionados para o empregado em contexto",
+            ]},
             { version:"5.16.0", date:"2026-04-17", items:[
               "Novo: Aba 📈 Trilha do Empregado — linha do tempo completa com eventos automáticos (escala, promoções, demissão) e manuais (ocorrências, feedbacks)",
               "Novo: Registro de ocorrências/incidentes — seletor múltiplo de envolvidos, 8 tipos (advertências, desentendimento, elogio, destaque), 3 gravidades",
