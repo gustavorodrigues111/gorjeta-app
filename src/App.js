@@ -4950,12 +4950,8 @@ function TrilhaTab({ restaurantId, employees, roles, schedules, incidents, feedb
         <h3 style={{color:"var(--text)",margin:0,fontSize:mobileOnly?16:20}}>📈 Trilha do Empregado</h3>
       </div>
 
-      {/* Emp selector + action buttons */}
+      {/* Action buttons */}
       <div style={{display:"flex",gap:10,marginBottom:16,flexWrap:"wrap",alignItems:"center"}}>
-        <select value={selectedEmp} onChange={e=>setSelectedEmp(e.target.value)} style={{...S.input,flex:1,minWidth:200,maxWidth:350}}>
-          <option value="">Selecionar empregado...</option>
-          {restEmps.map(emp => <option key={emp.id} value={emp.id}>{emp.name}</option>)}
-        </select>
         <button onClick={()=>{setShowIncidentForm(!showIncidentForm);setShowFeedbackForm(false);}} style={{...S.btnSecondary,fontSize:12,padding:"8px 14px",color:showIncidentForm?"var(--ac)":"var(--text2)",borderColor:showIncidentForm?"var(--ac)":"var(--border)"}}>⚠️ Registrar ocorrência</button>
         <button onClick={()=>{setShowFeedbackForm(!showFeedbackForm);setShowIncidentForm(false);}} style={{...S.btnSecondary,fontSize:12,padding:"8px 14px",color:showFeedbackForm?"var(--ac)":"var(--text2)",borderColor:showFeedbackForm?"var(--ac)":"var(--border)"}}>💬 Registrar feedback</button>
       </div>
