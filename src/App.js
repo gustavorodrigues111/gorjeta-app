@@ -3,7 +3,7 @@ import { useState, useEffect, Component } from "react";
 import { db } from "./firebase";
 import { doc, getDoc, setDoc } from "firebase/firestore";
 
-const APP_VERSION = "5.17.0";
+const APP_VERSION = "5.17.1";
 
 const DEFAULT_ADMISSION = () => `${new Date().getFullYear()}-01-01`;
 const round2 = (v) => Math.round(v * 100) / 100;
@@ -4889,10 +4889,11 @@ function EmpTimeline({ empId, employees, roles, schedules, incidents, feedbacks,
     events.push({ date: rh.date, type: "promotion", cat: "Promoções", icon: "⬆️", label: "Mudança de cargo", desc: `${fromRole?.name ?? "—"} → ${toRole?.name ?? "—"}${rh.reason ? " · " + rh.reason : ""}` });
   });
 
-  // Incidents
+  // Incidents — differentiate positive (green) vs negative (red)
   (incidents ?? []).filter(inc => inc.restaurantId === restaurantId && (inc.employeeIds ?? []).includes(empId)).forEach(inc => {
     const t = INCIDENT_TYPES.find(it => it.id === inc.type);
-    events.push({ date: inc.date, type: "incident", cat: "Ocorrências", icon: t && !t.negative ? "⭐" : "⚠️", label: t?.label ?? inc.type, desc: inc.description || "", severity: inc.severity });
+    const isPositive = t && !t.negative;
+    events.push({ date: inc.date, type: "incident", cat: "Ocorrências", icon: isPositive ? "🌟" : "🚨", label: t?.label ?? inc.type, desc: inc.description || "", severity: inc.severity, positive: isPositive });
   });
 
   // Feedbacks
@@ -4940,19 +4941,30 @@ function EmpTimeline({ empId, employees, roles, schedules, incidents, feedbacks,
       {filtered.length === 0 && <p style={{color:"var(--text3)",textAlign:"center",fontSize:13,padding:20}}>Nenhum evento encontrado.</p>}
       <div style={{position:"relative",paddingLeft:28}}>
         {filtered.length > 0 && <div style={{position:"absolute",left:10,top:0,bottom:0,width:2,background:"var(--border)"}}/>}
-        {filtered.map((ev, i) => (
-          <div key={i} style={{position:"relative",marginBottom:16,paddingBottom:4}}>
-            <div style={{position:"absolute",left:-24,top:2,width:24,height:24,borderRadius:12,background:"var(--card-bg)",border:"2px solid var(--border)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:12}}>{ev.icon}</div>
-            <div style={{...S.card,padding:"12px 16px",marginLeft:8}}>
-              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:8,flexWrap:"wrap",marginBottom:4}}>
-                <span style={{fontSize:11,fontWeight:700,color:"var(--text)",fontFamily:"'DM Sans',sans-serif"}}>{ev.label}</span>
-                <span style={{fontSize:10,color:"var(--text3)",fontFamily:"'DM Mono',monospace"}}>{new Date(ev.date+"T12:00:00").toLocaleDateString("pt-BR")}</span>
+        {filtered.map((ev, i) => {
+          const isNeg = ev.type === "incident" && !ev.positive;
+          const isPos = ev.type === "incident" && ev.positive;
+          const borderColor = isNeg ? "#e74c3c44" : isPos ? "#10b98144" : "var(--border)";
+          const bgColor = isNeg ? "#e74c3c08" : isPos ? "#10b98108" : undefined;
+          const dotBorder = isNeg ? "#e74c3c" : isPos ? "#10b981" : "var(--border)";
+          return (
+            <div key={i} style={{position:"relative",marginBottom:16,paddingBottom:4}}>
+              <div style={{position:"absolute",left:-24,top:2,width:24,height:24,borderRadius:12,background:"var(--card-bg)",border:`2px solid ${dotBorder}`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:12}}>{ev.icon}</div>
+              <div style={{...S.card,padding:"12px 16px",marginLeft:8,border:`1px solid ${borderColor}`,background:bgColor}}>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:8,flexWrap:"wrap",marginBottom:4}}>
+                  <div style={{display:"flex",alignItems:"center",gap:6}}>
+                    <span style={{fontSize:11,fontWeight:700,color:isNeg?"var(--red)":isPos?"var(--green)":"var(--text)",fontFamily:"'DM Sans',sans-serif"}}>{ev.label}</span>
+                    {isPos && <span style={{fontSize:9,padding:"1px 6px",borderRadius:4,background:"#10b98122",color:"var(--green)",fontWeight:700}}>Positivo</span>}
+                    {isNeg && <span style={{fontSize:9,padding:"1px 6px",borderRadius:4,background:"#e74c3c22",color:"var(--red)",fontWeight:700}}>Negativo</span>}
+                  </div>
+                  <span style={{fontSize:10,color:"var(--text3)",fontFamily:"'DM Mono',monospace"}}>{new Date(ev.date+"T12:00:00").toLocaleDateString("pt-BR")}</span>
+                </div>
+                {ev.severity && <span style={{fontSize:9,fontWeight:700,padding:"2px 6px",borderRadius:4,background:(SEVERITY_OPTIONS.find(s=>s.id===ev.severity)?.color??"#888")+"22",color:SEVERITY_OPTIONS.find(s=>s.id===ev.severity)?.color??"#888",marginRight:6}}>{SEVERITY_OPTIONS.find(s=>s.id===ev.severity)?.label??ev.severity}</span>}
+                {ev.desc && <p style={{color:"var(--text2)",fontSize:12,margin:ev.severity?"4px 0 0":0,lineHeight:1.5}}>{ev.desc}</p>}
               </div>
-              {ev.severity && <span style={{fontSize:9,fontWeight:700,padding:"2px 6px",borderRadius:4,background:(SEVERITY_OPTIONS.find(s=>s.id===ev.severity)?.color??"#888")+"22",color:SEVERITY_OPTIONS.find(s=>s.id===ev.severity)?.color??"#888",marginRight:6}}>{SEVERITY_OPTIONS.find(s=>s.id===ev.severity)?.label??ev.severity}</span>}
-              {ev.desc && <p style={{color:"var(--text2)",fontSize:12,margin:0,lineHeight:1.5}}>{ev.desc}</p>}
             </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
     </div>
   );
@@ -4991,9 +5003,14 @@ function IncidentForm({ restaurantId, employees, onUpdate, incidents, currentUse
     setSelectedEmps([]); setType(""); setSeverity(""); setDescription(""); setDate(today());
   }
 
+  const formBorderColor = typeObj ? (typeObj.negative ? "#e74c3c33" : "#10b98133") : "var(--border)";
+  const formBgColor = typeObj ? (typeObj.negative ? "#e74c3c06" : "#10b98106") : undefined;
+  const formHeaderColor = typeObj ? (typeObj.negative ? "var(--red)" : "var(--green)") : "var(--text)";
+  const formTitle = typeObj ? (typeObj.negative ? "🚨 Registrar ocorrência negativa" : "🌟 Registrar ocorrência positiva") : "Registrar ocorrência";
+
   return (
-    <div style={{...S.card, padding:"18px 20px"}}>
-      <h4 style={{color:"var(--text)",margin:"0 0 14px",fontSize:15,fontWeight:700}}>Registrar ocorrência</h4>
+    <div style={{...S.card, padding:"18px 20px", border:`1px solid ${formBorderColor}`, background:formBgColor, transition:"all 0.2s"}}>
+      <h4 style={{color:formHeaderColor,margin:"0 0 14px",fontSize:15,fontWeight:700}}>{formTitle}</h4>
       <div style={{marginBottom:12}}>
         <label style={S.label}>Empregados envolvidos</label>
         <div style={{display:"flex",flexWrap:"wrap",gap:6,maxHeight:120,overflowY:"auto",padding:4}}>
@@ -5010,7 +5027,12 @@ function IncidentForm({ restaurantId, employees, onUpdate, incidents, currentUse
           <label style={S.label}>Tipo</label>
           <select value={type} onChange={e=>setType(e.target.value)} style={S.input}>
             <option value="">Selecionar...</option>
-            {INCIDENT_TYPES.map(t => <option key={t.id} value={t.id}>{t.label}</option>)}
+            <optgroup label="⚠️ Negativas">
+              {INCIDENT_TYPES.filter(t=>t.negative).map(t => <option key={t.id} value={t.id}>{t.label}</option>)}
+            </optgroup>
+            <optgroup label="🌟 Positivas">
+              {INCIDENT_TYPES.filter(t=>!t.negative).map(t => <option key={t.id} value={t.id}>{t.label}</option>)}
+            </optgroup>
           </select>
         </div>
         <div>
@@ -5032,7 +5054,9 @@ function IncidentForm({ restaurantId, employees, onUpdate, incidents, currentUse
         <label style={S.label}>Descrição</label>
         <textarea value={description} onChange={e=>setDescription(e.target.value)} rows={3} placeholder="Descreva a ocorrência em detalhes..." style={{...S.input,resize:"vertical"}}/>
       </div>
-      <button onClick={handleSubmit} style={{...S.btnPrimary,width:"auto",padding:"10px 24px"}}>Registrar ocorrência</button>
+      <button onClick={handleSubmit} style={{...S.btnPrimary,width:"auto",padding:"10px 24px",background:typeObj?(typeObj.negative?"var(--red)":"var(--green)"):undefined}}>
+        {typeObj ? (typeObj.negative ? "🚨 Registrar ocorrência" : "🌟 Registrar elogio") : "Registrar ocorrência"}
+      </button>
     </div>
   );
 }
@@ -5267,8 +5291,8 @@ function EmpTrilhaView({ empId, employees, roles, schedules, incidents, feedback
   const latestFb = myFeedbacks[0];
   const targetRole = latestFb?.targetRoleId ? roles.find(r => r.id === latestFb.targetRoleId) : null;
 
-  // Positive incidents only (employee sees only elogios)
-  const positiveIncidents = (incidents ?? []).filter(i => i.restaurantId === restaurantId && (i.employeeIds ?? []).includes(empId) && !INCIDENT_TYPES.find(t => t.id === i.type)?.negative);
+  // Incidents are fully internal — employee sees nothing
+  // const positiveIncidents = []; // removed: ocorrências são internas
 
   // Badges calculation
   const badges = [];
@@ -5277,11 +5301,11 @@ function EmpTrilhaView({ empId, employees, roles, schedules, incidents, feedback
   if (daysInCompany >= 90) badges.push({ icon:"🌟", label:"3 Meses", desc:"Primeiros 90 dias concluídos" });
   if ((emp?.roleHistory ?? []).length > 0) badges.push({ icon:"⬆️", label:"Promovido", desc:"Já recebeu uma promoção" });
   if (latestFb?.rating === 5) badges.push({ icon:"💎", label:"Excelência", desc:"Recebeu avaliação 5 estrelas" });
-  if (positiveIncidents.length > 0) badges.push({ icon:"🌟", label:"Destaque", desc:"Recebeu elogio formal" });
 
-  // Schedule metrics — compare with area
+  // Schedule metrics — mês anterior (fechado) para comparação justa
   const now = new Date();
-  const mk = monthKey(now.getFullYear(), now.getMonth());
+  const prevMonthDate = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+  const mk = monthKey(prevMonthDate.getFullYear(), prevMonthDate.getMonth());
   const ridSchedules = schedules?.[restaurantId] ?? {};
   const myDays = ridSchedules[mk]?.[empId] ?? {};
   const myFaults = Object.values(myDays).filter(s => s === DAY_FAULT_U).length;
@@ -5291,6 +5315,7 @@ function EmpTrilhaView({ empId, employees, roles, schedules, incidents, feedback
     const d = ridSchedules[mk]?.[e2.id] ?? {};
     return sum + Object.values(d).filter(s => s === DAY_FAULT_U).length;
   }, 0) / sameAreaEmps.length : 0;
+  const prevMonthLabel = prevMonthDate.toLocaleDateString("pt-BR", { month:"long", year:"numeric" });
 
   // Progress bar (simple: based on rating + time)
   const ratingPct = latestFb ? (latestFb.rating / 5) * 50 : 25;
@@ -5353,7 +5378,8 @@ function EmpTrilhaView({ empId, employees, roles, schedules, incidents, feedback
 
       {/* Métricas vs Área */}
       <div style={{...S.card,marginBottom:16}}>
-        <h4 style={{color:"var(--text)",margin:"0 0 12px",fontSize:14}}>📊 Métricas do Mês</h4>
+        <h4 style={{color:"var(--text)",margin:"0 0 4px",fontSize:14}}>📊 Métricas</h4>
+        <div style={{color:"var(--text3)",fontSize:11,marginBottom:10,textTransform:"capitalize"}}>{prevMonthLabel}</div>
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
           <div style={{textAlign:"center",padding:10,borderRadius:10,background:"var(--bg1)"}}>
             <div style={{color:myFaults===0?"var(--green)":"#f59e0b",fontWeight:700,fontSize:22}}>{myFaults}</div>
@@ -5379,31 +5405,23 @@ function EmpTrilhaView({ empId, employees, roles, schedules, incidents, feedback
         </div>
       </div>
 
-      {/* Metas do último feedback */}
-      {latestFb && (
+      {/* Meta e cargo-alvo do último feedback */}
+      {latestFb && (latestFb.goal || targetRole) && (
         <div style={{...S.card,marginBottom:16}}>
-          <h4 style={{color:"var(--text)",margin:"0 0 12px",fontSize:14}}>🎯 Feedback Q{latestFb.quarter}/{latestFb.year}</h4>
-          <div style={{display:"flex",gap:4,marginBottom:10}}>
-            {[1,2,3,4,5].map(n => (
-              <span key={n} style={{fontSize:20,color:n<=latestFb.rating?"#f59e0b":"var(--border)"}}>★</span>
-            ))}
-          </div>
-          {latestFb.strengths && (
-            <div style={{marginBottom:8}}>
-              <div style={{color:"var(--green)",fontSize:11,fontWeight:700,marginBottom:2}}>Pontos fortes</div>
-              <p style={{color:"var(--text2)",fontSize:13,margin:0,lineHeight:1.5}}>{latestFb.strengths}</p>
-            </div>
-          )}
-          {latestFb.improvements && (
-            <div style={{marginBottom:8}}>
-              <div style={{color:"#f59e0b",fontSize:11,fontWeight:700,marginBottom:2}}>Pontos a melhorar</div>
-              <p style={{color:"var(--text2)",fontSize:13,margin:0,lineHeight:1.5}}>{latestFb.improvements}</p>
-            </div>
-          )}
+          <h4 style={{color:"var(--text)",margin:"0 0 12px",fontSize:14}}>🎯 Minha Meta</h4>
           {latestFb.goal && (
-            <div style={{background:"var(--bg1)",borderRadius:8,padding:"10px 14px",marginTop:8}}>
-              <div style={{color:"var(--ac)",fontSize:11,fontWeight:700,marginBottom:2}}>Meta</div>
-              <p style={{color:"var(--text)",fontSize:13,margin:0,fontWeight:600}}>{latestFb.goal}</p>
+            <div style={{background:"var(--bg1)",borderRadius:8,padding:"12px 14px",marginBottom:targetRole?10:0}}>
+              <p style={{color:"var(--text)",fontSize:13,margin:0,fontWeight:600,lineHeight:1.5}}>{latestFb.goal}</p>
+              <div style={{color:"var(--text3)",fontSize:10,marginTop:4}}>Definida em Q{latestFb.quarter}/{latestFb.year}</div>
+            </div>
+          )}
+          {targetRole && (
+            <div style={{display:"flex",alignItems:"center",gap:8,padding:"10px 14px",borderRadius:8,background:"#3b82f611",border:"1px solid #3b82f633"}}>
+              <span style={{fontSize:16}}>⬆️</span>
+              <div>
+                <div style={{color:"#3b82f6",fontSize:13,fontWeight:700}}>Cargo-alvo: {targetRole.name}</div>
+                <div style={{color:"var(--text3)",fontSize:11}}>{targetRole.area}</div>
+              </div>
             </div>
           )}
         </div>
@@ -5432,23 +5450,7 @@ function EmpTrilhaView({ empId, employees, roles, schedules, incidents, feedback
         </div>
       )}
 
-      {/* Elogios */}
-      {positiveIncidents.length > 0 && (
-        <div style={{...S.card,marginBottom:16}}>
-          <h4 style={{color:"var(--text)",margin:"0 0 12px",fontSize:14}}>🌟 Elogios Recebidos</h4>
-          <div style={{display:"flex",flexDirection:"column",gap:8}}>
-            {positiveIncidents.map(inc => (
-              <div key={inc.id} style={{padding:"10px 14px",borderRadius:8,background:"#f59e0b11",border:"1px solid #f59e0b33"}}>
-                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:4}}>
-                  <span style={{color:"#f59e0b",fontSize:12,fontWeight:700}}>{INCIDENT_TYPES.find(t=>t.id===inc.type)?.label ?? "Elogio"}</span>
-                  <span style={{color:"var(--text3)",fontSize:10}}>{new Date(inc.date+"T12:00:00").toLocaleDateString("pt-BR")}</span>
-                </div>
-                <p style={{color:"var(--text2)",fontSize:13,margin:0,lineHeight:1.5}}>{inc.description}</p>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
+      {/* Ocorrências removidas — 100% internas */}
     </div>
   );
 }
@@ -9844,6 +9846,14 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }
 
         {tab === "changelog" && (() => {
           const CHANGELOG = [
+            { version:"5.17.1", date:"2026-04-17", items:[
+              "Segurança: ocorrências (positivas e negativas) agora são 100% internas — empregado não vê nenhuma",
+              "Melhoria: métricas do empregado mostram mês anterior (fechado) em vez do mês corrente",
+              "Melhoria: feedback do empregado simplificado — exibe apenas meta e cargo-alvo, sem estrelas ou detalhes internos",
+              "Melhoria: formulário de ocorrência do gestor diferencia visualmente positivas (verde) e negativas (vermelho)",
+              "Melhoria: timeline do gestor com cores e badges distintos por tipo de ocorrência",
+              "Removido: badge 'Destaque' e seção 'Elogios Recebidos' da visão do empregado",
+            ]},
             { version:"5.17.0", date:"2026-04-17", items:[
               "Redesign: aba Equipe totalmente refeita — listagem com cards compactos (nome, cargo, área, status) em vez de planilha",
               "Novo: detalhe do empregado com 3 abas internas: Cadastro (dados editáveis), Ações (promover, demitir, PIN, etc.) e Trilha (timeline + ocorrências + feedback)",
