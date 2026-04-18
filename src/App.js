@@ -3,7 +3,7 @@ import { useState, useEffect, Component } from "react";
 import { db } from "./firebase";
 import { doc, getDoc, setDoc } from "firebase/firestore";
 
-const APP_VERSION = "5.19.0";
+const APP_VERSION = "5.20.0";
 
 const DEFAULT_ADMISSION = () => `${new Date().getFullYear()}-01-01`;
 const round2 = (v) => Math.round(v * 100) / 100;
@@ -545,6 +545,12 @@ function comparePontoVsSchedule(parsedEmps, schedEmps, effectiveMonth, mk, restR
     }
   }
 
+  // Detect system employees NOT found in PDF
+  const matchedEmpIds = new Set(matchedSummary.map(m => m.empId));
+  const missingFromPonto = schedEmps
+    .filter(e => !matchedEmpIds.has(e.id))
+    .map(e => ({ empId: e.id, empName: e.name, roleId: e.roleId }));
+
   // Count schedule changes
   let totalSchedChanges = 0;
   Object.values(scheduleChanges).forEach(days => { totalSchedChanges += Object.keys(days).length; });
@@ -554,6 +560,7 @@ function comparePontoVsSchedule(parsedEmps, schedEmps, effectiveMonth, mk, restR
   parts.push(`${parsedEmps.length} empregado(s) no PDF`);
   parts.push(`${matchedSummary.length} identificado(s) no sistema`);
   if (unmatchedNames.length > 0) parts.push(`${unmatchedNames.length} não identificado(s)`);
+  if (missingFromPonto.length > 0) parts.push(`${missingFromPonto.length} do sistema ausente(s) no PDF`);
   if (totalSchedChanges > 0) parts.push(`${totalSchedChanges} alteração(ões) na escala`);
   if (incidents.length > 0) parts.push(`${incidents.length} ocorrência(s)`);
   if (noScheduleEmps.length > 0) parts.push(`${noScheduleEmps.length} sem escala no sistema (atrasos não verificados): ${noScheduleEmps.join(", ")}`);
@@ -562,6 +569,7 @@ function comparePontoVsSchedule(parsedEmps, schedEmps, effectiveMonth, mk, restR
     scheduleChanges,
     incidents,
     unmatchedNames: unmatchedNames.map((u, i) => ({ ...u, _key: `unm-${i}` })),
+    missingFromPonto,
     totalSchedChanges,
     matchedSummary,
     summary: parts.join(". ") + "."
@@ -596,6 +604,8 @@ const K = {
   incidents:        "v4:incidents",         // [{id, restaurantId, employeeIds:[], type, severity, description, date, createdAt, createdBy, createdById, visibility:"internal"}]
   feedbacks:        "v4:feedbacks",         // [{id, restaurantId, employeeId, quarter, year, rating, strengths, improvements, internalNotes, goal, targetRoleId, devChecklist:[{title,link,type,done}], createdAt, createdBy}]
   devChecklists:    "v4:devChecklists",     // {[roleId]: [{title, link, type:"livro"|"video"|"curso"|"pratica"}]}
+  scheduleAdjustments: "v4:scheduleAdjustments", // {[rid]: {[mk]: [{id, empId, date, from, to, author, timestamp}]}}
+  scheduleStatus:      "v4:scheduleStatus",      // {[rid]: {[mk]: {status:"open"|"review"|"closed", closedAt, closedBy, lastPontoImport, pontoSystem, missingFromPonto:[], importHistory:[], lastImportSummary}}}
 };
 
 // ── Version retention ──
@@ -5800,7 +5810,15 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
   const [pontoError, setPontoError] = useState("");
   const [pontoPreview, setPontoPreview] = useState(null); // { scheduleChanges, incidents, unmatchedNames, totalSchedChanges, summary, matchedSummary }
   const [pontoResolutions, setPontoResolutions] = useState({}); // { _key: { action:"ignore"|"link"|"create", linkedEmpId, newRoleId } }
+  const [pontoMissingReasons, setPontoMissingReasons] = useState({}); // { empId: "ferias_licenca"|"demitido"|"erro_ponto"|"outro_sistema"|"ignorar" }
   const [pontoSystem, setPontoSystem] = useState("solides");
+  // Schedule view mode: "vigente" shows effective (with local edits), "prevista" shows saved only
+  const [schedViewMode, setSchedViewMode] = useState("vigente");
+  // Month close confirmation
+  const [showCloseConfirm, setShowCloseConfirm] = useState(false);
+  const [closeDelta, setCloseDelta] = useState(null);
+  // Ponto summary for post-import dashboard
+  const [pontoSummary, setPontoSummary] = useState(null);
   // Local schedule edits — accumulated before saving as new version
   const [schedLocalEdits, setSchedLocalEdits] = useState(null); // null = no pending edits, object = pending edits overlay
   const schedDirty = schedLocalEdits !== null;
@@ -5815,6 +5833,13 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
     }
     return base;
   })();
+  // The "prevista" view is the saved schedule without local edits
+  const previstaMonth = schedules?.[rid]?.[mk] ?? {};
+  // Displayed schedule depends on view mode
+  const displayedMonth = schedViewMode === "prevista" ? previstaMonth : effectiveMonth;
+  // Month status from scheduleStatus
+  const monthStatus = data?.scheduleStatus?.[rid]?.[mk]?.status ?? "open";
+  const monthClosed = monthStatus === "closed";
   const [showTipHistory, setShowTipHistory]     = useState(false);
   const [vacEmpId, setVacEmpId]             = useState("");
   const [vacFrom, setVacFrom]               = useState("");
@@ -7093,7 +7118,18 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
           <div>
             {/* Header */}
             <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:12,marginBottom:schedDirty?8:16}}>
-              <h3 style={{color:"var(--text)",margin:0,fontSize:mobileOnly?16:20}}>📅 Escala — {monthLabel(year,month)}</h3>
+              <div style={{display:"flex",alignItems:"center",gap:10,flexWrap:"wrap"}}>
+                <h3 style={{color:"var(--text)",margin:0,fontSize:mobileOnly?16:20}}>📅 Escala — {monthLabel(year,month)}</h3>
+                {monthClosed && <span style={{fontSize:11,padding:"3px 10px",borderRadius:6,background:"var(--red)22",color:"var(--red)",fontWeight:700}}>Mes fechado</span>}
+                <div style={{display:"flex",borderRadius:6,overflow:"hidden",border:"1px solid var(--border)"}}>
+                  {["vigente","prevista"].map(mode => (
+                    <button key={mode} onClick={()=>setSchedViewMode(mode)}
+                      style={{padding:"4px 12px",fontSize:11,fontWeight:schedViewMode===mode?700:500,border:"none",background:schedViewMode===mode?"var(--ac)22":"transparent",color:schedViewMode===mode?"var(--ac)":"var(--text3)",cursor:"pointer",fontFamily:"'DM Sans',sans-serif"}}>
+                      {mode === "vigente" ? "Vigente" : "Prevista"}
+                    </button>
+                  ))}
+                </div>
+              </div>
               {isOwner && !mobileOnly && <button onClick={()=>{
                 if (schedDirty && !window.confirm("Você tem edições não salvas. Deseja descartar e resetar?")) return;
                 const ok = resetTab("schedule","Escala",()=>({schedules:schedules?.[rid]}));
@@ -7113,6 +7149,22 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                     // Save as new version
                     const preSnap = snapshotSchedulesMonth(schedules, rid, mk);
                     saveVersion("schedules", rid, mk, data?.scheduleVersions, preSnap, currentUser?.name || (isOwner?"Admin AppTip":"Gestor"), "Edição manual", onUpdate, true);
+                    // Record adjustments for Phase 2
+                    const adjAuthor = currentUser?.name || (isOwner?"Admin AppTip":"Gestor");
+                    const adjTimestamp = new Date().toISOString();
+                    const newAdjs = [];
+                    Object.entries(schedLocalEdits).forEach(([eid, dayEdits]) => {
+                      Object.entries(dayEdits).forEach(([dt, val]) => {
+                        const fromVal = schedules?.[rid]?.[mk]?.[eid]?.[dt] ?? "";
+                        newAdjs.push({ id: `${Date.now()}-${Math.random().toString(36).slice(2,6)}`, empId: eid, date: dt, from: fromVal, to: val ?? "", author: adjAuthor, timestamp: adjTimestamp });
+                      });
+                    });
+                    if (newAdjs.length > 0) {
+                      const curAdjs = { ...(data?.scheduleAdjustments ?? {}) };
+                      if (!curAdjs[rid]) curAdjs[rid] = {};
+                      curAdjs[rid][mk] = [...(curAdjs[rid][mk] ?? []), ...newAdjs];
+                      onUpdate("scheduleAdjustments", curAdjs);
+                    }
                     // Apply local edits to schedules
                     let newMonth = { ...(schedules?.[rid]?.[mk] ?? {}) };
                     Object.entries(schedLocalEdits).forEach(([eid, dayEdits]) => {
@@ -7225,8 +7277,9 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                 </button>
 
                 {/* Importar folha de ponto */}
-                <button onClick={()=>{setShowPontoImport(!showPontoImport);setPontoError("");setPontoPreview(null);setPontoResolutions({});}}
-                  style={{...S.btnSecondary,fontSize:mobileOnly?11:12,border:`1px solid ${showPontoImport?"var(--ac)":"var(--ac)"}`,background:showPontoImport?"var(--ac)22":"transparent",color:"var(--ac)",whiteSpace:"nowrap"}}>
+                <button onClick={()=>{if(monthClosed)return;setShowPontoImport(!showPontoImport);setPontoError("");setPontoPreview(null);setPontoResolutions({});setPontoMissingReasons({});}}
+                  disabled={monthClosed}
+                  style={{...S.btnSecondary,fontSize:mobileOnly?11:12,border:`1px solid ${showPontoImport?"var(--ac)":"var(--ac)"}`,background:showPontoImport?"var(--ac)22":"transparent",color:"var(--ac)",whiteSpace:"nowrap",opacity:monthClosed?0.4:1}}>
                   {mobileOnly?"📄 Ponto":"📄 Importar ponto"}
                 </button>
 
@@ -7241,7 +7294,104 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                     </button>
                   );
                 })()}
+
+                {/* Fechar / Reabrir mês */}
+                {(isOwner || isDP) && !monthClosed && (
+                  <button onClick={()=>{
+                    const hasPonto = !!(data?.scheduleStatus?.[rid]?.[mk]?.lastPontoImport);
+                    if (!hasPonto && !window.confirm("Nenhum ponto importado para este mes. Deseja fechar mesmo assim?")) return;
+                    // Phase 4: compute delta and show confirm modal
+                    const curSched = effectiveMonth;
+                    const prevSched = schedules?.[rid]?.[mk] ?? {};
+                    const daysInM = new Date(year, month + 1, 0).getDate();
+                    const delta = {};
+                    schedEmps.forEach(emp => {
+                      let prevWork = 0, curWork = 0;
+                      for (let d = 1; d <= daysInM; d++) {
+                        const dt = `${year}-${String(month+1).padStart(2,"0")}-${String(d).padStart(2,"0")}`;
+                        const isDem = emp.demitidoEm && dt >= emp.demitidoEm;
+                        if (isDem) continue;
+                        const ps = prevSched[emp.id]?.[dt];
+                        const cs = curSched[emp.id]?.[dt];
+                        if (!ps || ps === "comptrab") prevWork++;
+                        if (!cs || cs === "comptrab") curWork++;
+                      }
+                      if (prevWork !== curWork) {
+                        delta[emp.id] = { name: emp.name, prevWork, curWork, diff: curWork - prevWork };
+                      }
+                    });
+                    if (Object.keys(delta).length > 0) {
+                      setCloseDelta(delta);
+                      setShowCloseConfirm(true);
+                    } else {
+                      // No delta, close directly
+                      const newStatus = { ...(data?.scheduleStatus ?? {}) };
+                      if (!newStatus[rid]) newStatus[rid] = {};
+                      newStatus[rid][mk] = { ...(newStatus[rid][mk] ?? {}), status: "closed", closedAt: new Date().toISOString(), closedBy: currentUser?.name || "Admin AppTip" };
+                      onUpdate("scheduleStatus", newStatus);
+                      onUpdate("_toast", "Mes fechado com sucesso");
+                    }
+                  }}
+                    style={{...S.btnSecondary,fontSize:mobileOnly?11:12,color:"var(--green)",borderColor:"var(--green)44",whiteSpace:"nowrap"}}>
+                    {mobileOnly ? "Fechar" : "Fechar Mes"}
+                  </button>
+                )}
+                {monthClosed && isOwner && (
+                  <button onClick={()=>{
+                    if (!window.confirm("Reabrir este mes? As edicoes voltarao a ser permitidas.")) return;
+                    const newStatus = { ...(data?.scheduleStatus ?? {}) };
+                    if (!newStatus[rid]) newStatus[rid] = {};
+                    newStatus[rid][mk] = { ...(newStatus[rid][mk] ?? {}), status: "open", closedAt: null, closedBy: null };
+                    onUpdate("scheduleStatus", newStatus);
+                    onUpdate("_toast", "Mes reaberto");
+                  }}
+                    style={{...S.btnSecondary,fontSize:mobileOnly?11:12,color:"#f59e0b",borderColor:"#f59e0b44",whiteSpace:"nowrap"}}>
+                    Reabrir
+                  </button>
+                )}
               </div>
+
+              {/* Month close confirmation modal — Phase 4 */}
+              {showCloseConfirm && (
+                <div style={{position:"fixed",top:0,left:0,right:0,bottom:0,background:"rgba(0,0,0,0.6)",zIndex:9999,display:"flex",alignItems:"center",justifyContent:"center",padding:16}} onClick={()=>setShowCloseConfirm(false)}>
+                  <div onClick={e=>e.stopPropagation()} style={{background:"var(--bg2)",borderRadius:16,padding:24,maxWidth:520,width:"100%",maxHeight:"80vh",overflowY:"auto",border:"1px solid var(--border)"}}>
+                    <h3 style={{color:"var(--text)",margin:"0 0 12px",fontSize:16}}>Confirmar fechamento do mes</h3>
+                    <p style={{color:"var(--text2)",fontSize:13,margin:"0 0 12px"}}>Foram detectadas diferencas entre a escala prevista e a vigente:</p>
+                    <div style={{maxHeight:300,overflowY:"auto",marginBottom:16}}>
+                      {closeDelta && Object.entries(closeDelta).map(([empId, d]) => (
+                        <div key={empId} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"8px 12px",borderRadius:8,background:"var(--bg1)",marginBottom:4,border:"1px solid var(--border)"}}>
+                          <span style={{color:"var(--text)",fontSize:13,fontWeight:600}}>{d.name}</span>
+                          <div style={{display:"flex",gap:12,alignItems:"center"}}>
+                            <span style={{color:"var(--text3)",fontSize:12}}>Antes: {d.prevWork}d</span>
+                            <span style={{color:"var(--text3)",fontSize:10}}>-&gt;</span>
+                            <span style={{color:d.diff>0?"var(--green)":"var(--red)",fontSize:12,fontWeight:700}}>Depois: {d.curWork}d ({d.diff>0?"+":""}{d.diff})</span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                    <p style={{color:"#f59e0b",fontSize:12,margin:"0 0 16px"}}>As gorjetas serao recalculadas com base na escala vigente.</p>
+                    <div style={{display:"flex",gap:8,justifyContent:"flex-end"}}>
+                      <button onClick={()=>setShowCloseConfirm(false)} style={S.btnSecondary}>Cancelar</button>
+                      <button onClick={()=>{
+                        // Close the month and persist
+                        const newStatus = { ...(data?.scheduleStatus ?? {}) };
+                        if (!newStatus[rid]) newStatus[rid] = {};
+                        newStatus[rid][mk] = { ...(newStatus[rid][mk] ?? {}), status: "closed", closedAt: new Date().toISOString(), closedBy: currentUser?.name || "Admin AppTip" };
+                        onUpdate("scheduleStatus", newStatus);
+                        // Save effective schedule as the final schedule
+                        const finalMonth = { ...effectiveMonth };
+                        onUpdate("schedules", { ...schedules, [rid]: { ...(schedules?.[rid] ?? {}), [mk]: finalMonth } });
+                        setSchedLocalEdits(null);
+                        setShowCloseConfirm(false);
+                        setCloseDelta(null);
+                        onUpdate("_toast", "Mes fechado e gorjetas ajustadas");
+                      }} style={{...S.btnPrimary,fontSize:13}}>
+                        Confirmar e fechar
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
 
               {/* Modal de histórico da escala */}
               {showSchedHistory && (
@@ -7638,7 +7788,35 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                       </div>
                     )}
 
-                    {pontoPreview.totalSchedChanges === 0 && pontoPreview.incidents.length === 0 && (pontoPreview.unmatchedNames?.length??0) === 0 && (
+                    {/* Missing from ponto — system employees not found in PDF */}
+                    {pontoPreview.missingFromPonto?.length > 0 && (
+                      <div style={{marginBottom:12}}>
+                        <div style={{color:"#6366f1",fontSize:12,fontWeight:700,marginBottom:6}}>📋 Empregados do sistema ausentes no PDF ({pontoPreview.missingFromPonto.length})</div>
+                        <p style={{color:"var(--text3)",fontSize:11,margin:"0 0 8px"}}>Estes empregados estão ativos no sistema mas não apareceram na folha de ponto. Justifique cada um:</p>
+                        {pontoPreview.missingFromPonto.map(m => {
+                          const role = restRoles.find(r=>r.id===m.roleId);
+                          const reason = pontoMissingReasons[m.empId] ?? "ignorar";
+                          return (
+                            <div key={m.empId} style={{padding:"10px 14px",borderRadius:8,background:"#6366f109",border:"1px solid #6366f122",marginBottom:6,display:"flex",alignItems:"center",justifyContent:"space-between",gap:8,flexWrap:"wrap"}}>
+                              <div>
+                                <span style={{fontWeight:700,fontSize:13,color:"var(--text)"}}>{m.empName}</span>
+                                {role && <span style={{color:"var(--text3)",fontSize:11,marginLeft:6}}>{role.name}</span>}
+                              </div>
+                              <select value={reason} onChange={e=>setPontoMissingReasons(prev=>({...prev,[m.empId]:e.target.value}))}
+                                style={{...S.input,fontSize:11,padding:"4px 8px",maxWidth:200,cursor:"pointer"}}>
+                                <option value="ignorar">Ignorar</option>
+                                <option value="ferias_licenca">Ferias/Licenca</option>
+                                <option value="demitido">Demitido no periodo</option>
+                                <option value="erro_ponto">Erro no ponto</option>
+                                <option value="outro_sistema">Outro sistema</option>
+                              </select>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+
+                    {pontoPreview.totalSchedChanges === 0 && pontoPreview.incidents.length === 0 && (pontoPreview.unmatchedNames?.length??0) === 0 && (pontoPreview.missingFromPonto?.length??0) === 0 && (
                       <p style={{color:"var(--green)",fontSize:13,textAlign:"center",padding:16}}>✅ Nenhuma diferença encontrada entre o ponto e a escala prevista.</p>
                     )}
 
@@ -7753,9 +7931,52 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                           if (allNewIncidents.length > 0) parts.push(`${allNewIncidents.length} ocorrência(s) registrada(s)`);
                           if (createdCount > 0) parts.push(`${createdCount} empregado(s) criado(s)`);
                           if (linkedCount > 0) parts.push(`${linkedCount} empregado(s) vinculado(s)`);
+                          // Phase 5: Build and persist import summary
+                          const faltaCount = allNewIncidents.filter(i=>i.type==="faultu"||i.type==="faultj").length;
+                          const atrasoCount = allNewIncidents.filter(i=>i.type==="atraso").length;
+                          const heCount = allNewIncidents.filter(i=>i.type==="hora_extra").length;
+                          const saidaCount = allNewIncidents.filter(i=>i.type==="saida_antecipada").length;
+                          const importSummary = {
+                            matchedCount: pontoPreview.matchedSummary?.length ?? 0,
+                            totalPdf: (pontoPreview.matchedSummary?.length ?? 0) + (pontoPreview.unmatchedNames?.length ?? 0),
+                            totalSystem: schedEmps.length,
+                            faltas: faltaCount,
+                            atrasos: atrasoCount,
+                            horasExtras: heCount,
+                            saidasAntecipadas: saidaCount,
+                            schedChanges: totalSched,
+                            incidents: allNewIncidents.map(i => ({ empId: i.empId, empName: i.empName, type: i.type, date: i.date, description: i.description, severity: i.severity })),
+                            missingFromPonto: (pontoPreview.missingFromPonto ?? []).map(m => ({ empId: m.empId, empName: m.empName, reason: pontoMissingReasons[m.empId] ?? "ignorar" })),
+                            importedAt: new Date().toISOString(),
+                          };
+                          setPontoSummary(importSummary);
+
+                          // Phase 6: Append to import history + update scheduleStatus
+                          const historyEntry = {
+                            date: new Date().toISOString(),
+                            system: pontoSystem,
+                            matchedCount: importSummary.matchedCount,
+                            totalPdf: importSummary.totalPdf,
+                            user: currentUser?.name || (isOwner ? "Admin AppTip" : "Gestor"),
+                            incidents: allNewIncidents.length,
+                            schedChanges: totalSched,
+                          };
+                          const newSchedStatus = { ...(data?.scheduleStatus ?? {}) };
+                          if (!newSchedStatus[rid]) newSchedStatus[rid] = {};
+                          newSchedStatus[rid][mk] = {
+                            ...(newSchedStatus[rid][mk] ?? {}),
+                            lastPontoImport: new Date().toISOString(),
+                            pontoSystem: pontoSystem,
+                            missingFromPonto: importSummary.missingFromPonto,
+                            lastImportSummary: importSummary,
+                            importHistory: [...(newSchedStatus[rid][mk]?.importHistory ?? []), historyEntry],
+                          };
+                          onUpdate("scheduleStatus", newSchedStatus);
+
                           onUpdate("_toast", `✅ Ponto importado — ${parts.join(" · ")}${totalSched > 0 ? " — salve a escala para confirmar" : ""}`);
                           setPontoPreview(null);
                           setPontoResolutions({});
+                          setPontoMissingReasons({});
                           setShowPontoImport(false);
                         }} style={{...S.btnPrimary,fontSize:13}}>
                           ✅ Aplicar alterações
@@ -7768,6 +7989,79 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                 )}
               </div>
             )}
+
+            {/* Phase 5: Post-import dashboard */}
+            {pontoSummary && !showPontoImport && (
+              <div style={{...S.card,marginBottom:14,border:"1px solid var(--ac)44"}}>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
+                  <span style={{color:"var(--ac)",fontWeight:700,fontSize:14}}>Resumo da importacao do ponto</span>
+                  <button onClick={()=>setPontoSummary(null)} style={{background:"none",border:"none",color:"var(--text3)",cursor:"pointer",fontSize:16,padding:0}}>x</button>
+                </div>
+                <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(100px,1fr))",gap:8,marginBottom:12}}>
+                  {[
+                    {label:"Identificados",value:`${pontoSummary.matchedCount}/${pontoSummary.totalPdf}`,color:"var(--green)"},
+                    {label:"Faltas",value:pontoSummary.faltas,color:"var(--red)"},
+                    {label:"Atrasos",value:pontoSummary.atrasos,color:"#f59e0b"},
+                    {label:"Horas extras",value:pontoSummary.horasExtras,color:"#3b82f6"},
+                    {label:"Saidas antecipadas",value:pontoSummary.saidasAntecipadas,color:"#f97316"},
+                    {label:"Alteracoes escala",value:pontoSummary.schedChanges,color:"var(--ac)"},
+                  ].map((item,i)=>(
+                    <div key={i} style={{background:"var(--bg1)",borderRadius:8,padding:"10px 12px",textAlign:"center"}}>
+                      <div style={{color:item.color,fontSize:18,fontWeight:700}}>{item.value}</div>
+                      <div style={{color:"var(--text3)",fontSize:10,marginTop:2}}>{item.label}</div>
+                    </div>
+                  ))}
+                </div>
+                {pontoSummary.incidents?.length > 0 && (
+                  <details style={{marginBottom:8}}>
+                    <summary style={{color:"var(--text2)",cursor:"pointer",fontSize:12}}>Detalhes por empregado ({[...new Set(pontoSummary.incidents.map(i=>i.empId))].length} empregados)</summary>
+                    <div style={{marginTop:8}}>
+                      {[...new Set(pontoSummary.incidents.map(i=>i.empId))].map(empId => {
+                        const empIncs = pontoSummary.incidents.filter(i=>i.empId===empId);
+                        const empName = empIncs[0]?.empName ?? empId;
+                        return (
+                          <details key={empId} style={{marginBottom:4}}>
+                            <summary style={{color:"var(--text)",fontSize:12,fontWeight:600,cursor:"pointer"}}>{empName} ({empIncs.length} ocorrencia(s))</summary>
+                            <div style={{marginLeft:12,marginTop:4}}>
+                              {empIncs.map((inc,i) => (
+                                <div key={i} style={{fontSize:11,color:"var(--text2)",padding:"2px 0"}}>
+                                  <span style={{color:"var(--text3)"}}>{new Date(inc.date+"T12:00:00").toLocaleDateString("pt-BR",{day:"2-digit",month:"2-digit"})}</span>
+                                  <span style={{marginLeft:6}}>{inc.description}</span>
+                                </div>
+                              ))}
+                            </div>
+                          </details>
+                        );
+                      })}
+                    </div>
+                  </details>
+                )}
+              </div>
+            )}
+
+            {/* Phase 6: Import history link */}
+            {(() => {
+              const history = data?.scheduleStatus?.[rid]?.[mk]?.importHistory;
+              if (!history || history.length === 0) return null;
+              return (
+                <details style={{marginBottom:14}}>
+                  <summary style={{color:"var(--ac)",cursor:"pointer",fontSize:12,fontWeight:600}}>Historico de importacoes ({history.length})</summary>
+                  <div style={{marginTop:8,display:"flex",flexDirection:"column",gap:4}}>
+                    {history.slice().reverse().map((h,i) => (
+                      <div key={i} style={{background:"var(--bg1)",borderRadius:8,padding:"8px 12px",border:"1px solid var(--border)",fontSize:12}}>
+                        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                          <span style={{color:"var(--text)",fontWeight:600}}>{new Date(h.date).toLocaleDateString("pt-BR")} {new Date(h.date).toLocaleTimeString("pt-BR",{hour:"2-digit",minute:"2-digit"})}</span>
+                          <span style={{color:"var(--text3)",fontSize:11}}>{h.system}</span>
+                        </div>
+                        <div style={{color:"var(--text2)",fontSize:11,marginTop:4}}>
+                          {h.matchedCount}/{h.totalPdf} identificados, {h.incidents} ocorrencia(s), {h.schedChanges} alteracao(oes) — por {h.user}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </details>
+              );
+            })()}
 
             {/* Formulário de férias */}
             {showVacForm && (
@@ -7842,6 +8136,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
               const daysInMonth = dim;
 
               function cycleStatus(empId, dateStr) {
+                if (monthClosed) return; // Month is closed, no editing allowed
                 if (restaurant.serviceStartDate && dateStr < restaurant.serviceStartDate) return;
                 const empDayMap = effectiveMonth[empId] ?? {};
                 const cur = empDayMap[dateStr];
@@ -7919,7 +8214,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                     {/* Grid de empregados */}
                     {areaEmps.map((emp, ei) => {
                       const role = restRoles.find(r=>r.id===emp.roleId);
-                      const dayMap = effectiveMonth[emp.id] ?? {};
+                      const dayMap = displayedMonth[emp.id] ?? {};
                       const curArea = role?.area;
                       const prevEmp = areaEmps[ei-1];
                       const prevArea = prevEmp ? restRoles.find(r=>r.id===prevEmp.roleId)?.area : null;
@@ -7945,7 +8240,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                               const status = isDem ? null : dayMap[slot.date];
                               const color = isDem ? "#6b7280" : (STATUS_COLORS[status] ?? "var(--green)");
                               const label = isDem ? "DEM" : (STATUS_SHORT[status] ?? "T");
-                              const locked = isDem || (restaurant.serviceStartDate && slot.date < restaurant.serviceStartDate);
+                              const locked = isDem || monthClosed || (restaurant.serviceStartDate && slot.date < restaurant.serviceStartDate);
                               return (
                                 <div key={di} onClick={()=>!locked && cycleStatus(emp.id, slot.date)}
                                   style={{display:"flex",alignItems:"center",justifyContent:"center",minHeight:36,borderRadius:6,cursor:locked?"not-allowed":"pointer",background:isDem?"#6b728022":(status?color+"22":"transparent"),border:`1px solid ${isDem?"#6b728044":(status?color+"44":"var(--border)")}`,opacity:locked?0.35:1}}>
@@ -7995,7 +8290,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                     <tbody>
                       {areaEmps.map((emp,ei) => {
                         const role = restRoles.find(r=>r.id===emp.roleId);
-                        const dayMap = effectiveMonth[emp.id] ?? {};
+                        const dayMap = displayedMonth[emp.id] ?? {};
                         // Contagem alinhada com o visual: sem status = "•" = trabalho
                         let workC=0, offC=0;
                         for (let dd = 1; dd <= daysInMonth; dd++) {
@@ -8037,7 +8332,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                               const label = isDem ? "D" : (STATUS_SHORT[status] ?? "•");
                               const wd = new Date(date+"T12:00:00").getDay();
                               const isWe = wd===0||wd===6;
-                              const locked = isDem || (restaurant.serviceStartDate && date < restaurant.serviceStartDate);
+                              const locked = isDem || monthClosed || (restaurant.serviceStartDate && date < restaurant.serviceStartDate);
                               return (
                                 <td key={d} onClick={()=>!isDem && cycleStatus(emp.id, date)}
                                   style={{textAlign:"center",padding:"2px 0",cursor:locked?"not-allowed":"pointer",background:isDem?"#6b728022":(locked?"var(--bg3)":(status?color+"22":(isWe?"var(--bg3)":"transparent"))),borderRight:"1px solid var(--border)",opacity:locked?0.35:1}}>
@@ -12540,6 +12835,8 @@ export default function App() {
   const [incidents,        setIncidents]        = useState([]);
   const [feedbacks,        setFeedbacks]        = useState([]);
   const [devChecklists,    setDevChecklists]    = useState({});
+  const [scheduleAdjustments, setScheduleAdjustments] = useState({});
+  const [scheduleStatus,      setScheduleStatus]      = useState({});
 
   useEffect(() => {
     const savedId = currentUserId;
@@ -12567,7 +12864,7 @@ export default function App() {
       setLoadProgress("Preparando o sistema...");
 
       const keys = keyNames;
-      const map = { owners:setOwners, managers:setManagers, restaurants:setRestaurants, employees:setEmployees, roles:setRoles, tips:setTips, splits:setSplits, schedules:setSchedules, communications:setCommunications, commAcks:setCommAcks, faq:setFaq, dpMessages:setDpMessages, workSchedules:setWorkSchedules, notifications:setNotifications, noTipDays:setNoTipDays, trash:setTrash, schedTemplates:setSchedTemplates, schedDrafts:setSchedDrafts, scheduleVersions:setScheduleVersions, tipVersions:setTipVersions, vtConfig:setVtConfig, vtMonthly:setVtMonthly, vtPayments:setVtPayments, incidents:setIncidents, feedbacks:setFeedbacks, devChecklists:setDevChecklists };
+      const map = { owners:setOwners, managers:setManagers, restaurants:setRestaurants, employees:setEmployees, roles:setRoles, tips:setTips, splits:setSplits, schedules:setSchedules, communications:setCommunications, commAcks:setCommAcks, faq:setFaq, dpMessages:setDpMessages, workSchedules:setWorkSchedules, notifications:setNotifications, noTipDays:setNoTipDays, trash:setTrash, schedTemplates:setSchedTemplates, schedDrafts:setSchedDrafts, scheduleVersions:setScheduleVersions, tipVersions:setTipVersions, vtConfig:setVtConfig, vtMonthly:setVtMonthly, vtPayments:setVtPayments, incidents:setIncidents, feedbacks:setFeedbacks, devChecklists:setDevChecklists, scheduleAdjustments:setScheduleAdjustments, scheduleStatus:setScheduleStatus };
       const loaded_data = {};
       let successCount = 0;
       keys.forEach((k, i) => {
@@ -12715,12 +13012,12 @@ export default function App() {
     return () => { clearTimeout(slowTimer); clearTimeout(verySlowTimer); };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const data = { owners, managers, restaurants, employees, roles, tips, splits, schedules, communications, commAcks, faq, dpMessages, workSchedules, notifications, noTipDays, trash, schedTemplates, schedDrafts, scheduleVersions, tipVersions, vtConfig, vtMonthly, vtPayments, incidents, feedbacks, devChecklists };
+  const data = { owners, managers, restaurants, employees, roles, tips, splits, schedules, communications, commAcks, faq, dpMessages, workSchedules, notifications, noTipDays, trash, schedTemplates, schedDrafts, scheduleVersions, tipVersions, vtConfig, vtMonthly, vtPayments, incidents, feedbacks, devChecklists, scheduleAdjustments, scheduleStatus };
 
   async function handleUpdate(field, value) {
     if (field === "_toast") { setToast(value); return; }
-    const setters = { owners:setOwners, managers:setManagers, restaurants:setRestaurants, employees:setEmployees, roles:setRoles, tips:setTips, splits:setSplits, schedules:setSchedules, communications:setCommunications, commAcks:setCommAcks, faq:setFaq, dpMessages:setDpMessages, workSchedules:setWorkSchedules, notifications:setNotifications, noTipDays:setNoTipDays, trash:setTrash, schedTemplates:setSchedTemplates, schedDrafts:setSchedDrafts, scheduleVersions:setScheduleVersions, tipVersions:setTipVersions, vtConfig:setVtConfig, vtMonthly:setVtMonthly, vtPayments:setVtPayments, incidents:setIncidents, feedbacks:setFeedbacks, devChecklists:setDevChecklists };
-    const keys    = { owners:K.owners, managers:K.managers, restaurants:K.restaurants, employees:K.employees, roles:K.roles, tips:K.tips, splits:K.splits, schedules:K.schedules, communications:K.communications, commAcks:K.commAcks, faq:K.faq, dpMessages:K.dpMessages, workSchedules:K.workSchedules, notifications:K.notifications, noTipDays:K.noTipDays, trash:K.trash, schedTemplates:K.schedTemplates, schedDrafts:K.schedDrafts, scheduleVersions:K.scheduleVersions, tipVersions:K.tipVersions, vtConfig:K.vtConfig, vtMonthly:K.vtMonthly, vtPayments:K.vtPayments, incidents:K.incidents, feedbacks:K.feedbacks, devChecklists:K.devChecklists };
+    const setters = { owners:setOwners, managers:setManagers, restaurants:setRestaurants, employees:setEmployees, roles:setRoles, tips:setTips, splits:setSplits, schedules:setSchedules, communications:setCommunications, commAcks:setCommAcks, faq:setFaq, dpMessages:setDpMessages, workSchedules:setWorkSchedules, notifications:setNotifications, noTipDays:setNoTipDays, trash:setTrash, schedTemplates:setSchedTemplates, schedDrafts:setSchedDrafts, scheduleVersions:setScheduleVersions, tipVersions:setTipVersions, vtConfig:setVtConfig, vtMonthly:setVtMonthly, vtPayments:setVtPayments, incidents:setIncidents, feedbacks:setFeedbacks, devChecklists:setDevChecklists, scheduleAdjustments:setScheduleAdjustments, scheduleStatus:setScheduleStatus };
+    const keys    = { owners:K.owners, managers:K.managers, restaurants:K.restaurants, employees:K.employees, roles:K.roles, tips:K.tips, splits:K.splits, schedules:K.schedules, communications:K.communications, commAcks:K.commAcks, faq:K.faq, dpMessages:K.dpMessages, workSchedules:K.workSchedules, notifications:K.notifications, noTipDays:K.noTipDays, trash:K.trash, schedTemplates:K.schedTemplates, schedDrafts:K.schedDrafts, scheduleVersions:K.scheduleVersions, tipVersions:K.tipVersions, vtConfig:K.vtConfig, vtMonthly:K.vtMonthly, vtPayments:K.vtPayments, incidents:K.incidents, feedbacks:K.feedbacks, devChecklists:K.devChecklists, scheduleAdjustments:K.scheduleAdjustments, scheduleStatus:K.scheduleStatus };
     // Support functional updates to prevent stale-state race conditions:
     // When value is a function, it receives the latest state (like setState(prev => ...))
     let resolvedValue;
@@ -12740,7 +13037,7 @@ export default function App() {
         return;
       }
     }
-    const labels = { owners:"Admins atualizados", managers:"Gestores atualizados", restaurants:"Restaurantes atualizados", employees:"Empregados atualizados", roles:"Cargos atualizados", tips:"Gorjetas atualizadas", splits:"Percentuais salvos", schedules:"Escala atualizada", communications:"Comunicados atualizados", commAcks:"Ciências atualizadas", faq:"FAQ atualizado", dpMessages:"Mensagem enviada", workSchedules:"Horários salvos", notifications:"Notificações atualizadas", schedTemplates:"Template salvo", schedDrafts:"Rascunho salvo", trash:"Lixeira atualizada", noTipDays:"Dias sem gorjeta atualizados", scheduleVersions:null, tipVersions:null, vtConfig:null, vtMonthly:null, vtPayments:"VT registrado", incidents:"Ocorrência registrada", feedbacks:"Feedback registrado", devChecklists:"Checklist atualizado" };
+    const labels = { owners:"Admins atualizados", managers:"Gestores atualizados", restaurants:"Restaurantes atualizados", employees:"Empregados atualizados", roles:"Cargos atualizados", tips:"Gorjetas atualizadas", splits:"Percentuais salvos", schedules:"Escala atualizada", communications:"Comunicados atualizados", commAcks:"Ciências atualizadas", faq:"FAQ atualizado", dpMessages:"Mensagem enviada", workSchedules:"Horários salvos", notifications:"Notificações atualizadas", schedTemplates:"Template salvo", schedDrafts:"Rascunho salvo", trash:"Lixeira atualizada", noTipDays:"Dias sem gorjeta atualizados", scheduleVersions:null, tipVersions:null, vtConfig:null, vtMonthly:null, vtPayments:"VT registrado", incidents:"Ocorrência registrada", feedbacks:"Feedback registrado", devChecklists:"Checklist atualizado", scheduleAdjustments:null, scheduleStatus:null };
     if (labels[field] === null) return; // silent save (e.g. version snapshots)
     setToast(labels[field] ?? (typeof value === "string" ? value : "Salvo!"));
   }
