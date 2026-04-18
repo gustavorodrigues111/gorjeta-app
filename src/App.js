@@ -242,11 +242,6 @@ function saveVersion(kind, rid, mk, currentVersions, snapshot, author, reason, o
 
 //
 const ac = "#d4a017";
-// ── Shared color palette ──
-const C = {
-  blue: "#3b82f6", orange: "#f59e0b", green: "#10b981", purple: "#8b5cf6",
-  cyan: "#06b6d4", red: "var(--red)", ac: "var(--ac)",
-};
 // ── Shared styles ──
 const S = {
   input: { width:"100%", boxSizing:"border-box", padding:"11px 14px", borderRadius:10, border:"1px solid var(--border)", background:"var(--input-bg)", color:"var(--text)", fontSize:14, fontFamily:"'DM Sans',sans-serif", outline:"none" },
@@ -1052,10 +1047,6 @@ function ComunicadosManagerTab({ restaurantId, communications, commAcks, employe
           <div style={{ color: "var(--text2)", fontSize: 13, lineHeight: 1.6, whiteSpace: "pre-wrap", marginBottom: 12 }}>{c.body}</div>
         </div>
         {(() => {
-          // Filter to target employees only
-          const targetEmps = !c.target || c.target === "all" ? restEmps
-            : c.target.startsWith("emp:") ? restEmps.filter(e => `emp:${e.id}` === c.target)
-            : restEmps;
           const targetLabel = !c.target || c.target==="all" ? "Todos os empregados"
             : c.target.startsWith("emps:") ? `Empregados: ${c.target.replace("emps:","").split(",").map(id=>employees.find(e=>e.id===id)?.name?.split(" ")[0]??"").join(", ")}`
             : c.target.startsWith("areas:") ? `Áreas: ${c.target.replace("areas:","").replace(/,/g,", ")}`
@@ -1687,7 +1678,7 @@ function WorkScheduleManagerTab({ restaurantId, employees, roles, workSchedules,
   const [showValidFrom, setShowValidFrom]   = useState(false);
   const [validFrom, setValidFrom]           = useState(today());
   const [selectedSchedIds, setSelectedSchedIds] = useState(new Set());
-  const [saveMode, setSaveMode]             = useState(null);
+  const [, setSaveMode]                     = useState(null); // saveMode read elsewhere via effects
   const [validated, setValidated]           = useState(false); // true após validar horários com sucesso
 
   const selEmp = restEmps.find(e => e.id === selEmpId);
@@ -10327,7 +10318,6 @@ function ManagerPortal({ manager, data, onUpdate, onBack, toggleTheme, theme, on
     if (saved && myRestaurants.find(r => r.id === saved)) return saved;
     return null;
   });
-  const ac = "var(--ac)";
   const isMobile = useMobile();
 
   useEffect(() => {
