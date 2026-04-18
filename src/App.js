@@ -3,7 +3,7 @@ import { useState, useEffect, Component } from "react";
 import { db } from "./firebase";
 import { doc, getDoc, setDoc } from "firebase/firestore";
 
-const APP_VERSION = "5.25.0";
+const APP_VERSION = "5.26.0";
 
 const DEFAULT_ADMISSION = () => `${new Date().getFullYear()}-01-01`;
 const round2 = (v) => Math.round(v * 100) / 100;
@@ -5969,6 +5969,7 @@ function GoalsManager({ empId, employeeGoals, roles, restaurantId, onUpdate, cur
     saveGoals(all);
   }
 
+
   function removeMeta(goalId, metaId) {
     const all = [...(employeeGoals?.[empId] ?? [])];
     const idx = all.findIndex(g => g.id === goalId);
@@ -6031,15 +6032,16 @@ function GoalsManager({ empId, employeeGoals, roles, restaurantId, onUpdate, cur
               const autoResult = autoRule ? autoRule.check(empId, schedules, restaurantId, feedbacks, restaurantId, []) : false;
               const isDone = isAuto ? autoResult : meta.done;
               return (
-              <div key={meta.id} style={{display:"flex",alignItems:"center",gap:8,padding:"5px 0",borderBottom:"1px solid var(--border)22"}}>
+              <div key={meta.id} style={{display:"flex",alignItems:"center",gap:8,padding:"5px 0",borderBottom:"1px solid var(--border)22",flexWrap:"wrap"}}>
                 {isAuto ? (
                   <span style={{fontSize:14,padding:0,lineHeight:1}}>{isDone?"✅":"⏳"}</span>
                 ) : (
-                  <button onClick={()=>toggleMeta(goal.id, meta.id)} style={{background:"none",border:"none",cursor:"pointer",fontSize:14,padding:0,lineHeight:1}}>{isDone?"☑️":"⬜"}</button>
+                  <button onClick={()=>toggleMeta(goal.id, meta.id)} title="Confirmação do gestor" style={{background:"none",border:"none",cursor:"pointer",fontSize:14,padding:0,lineHeight:1}}>{isDone?"☑️":"⬜"}</button>
                 )}
                 <span style={{flex:1,color:isDone?"var(--text3)":"var(--text)",fontSize:12,textDecoration:isDone?"line-through":"none"}}>{meta.title}</span>
                 {isAuto && <span style={{fontSize:9,color:"#8b5cf6",background:"#8b5cf611",padding:"1px 6px",borderRadius:4}}>auto</span>}
-                {!isAuto && isDone && meta.doneAt && <span style={{color:"var(--text3)",fontSize:9}}>{new Date(meta.doneAt).toLocaleDateString("pt-BR")}</span>}
+                {!isAuto && meta.employeeMarked && !isDone && <span style={{fontSize:9,color:"#f59e0b",background:"#f59e0b11",padding:"1px 6px",borderRadius:4}}>empregado concluiu em {meta.employeeDoneAt ? new Date(meta.employeeDoneAt).toLocaleDateString("pt-BR") : "—"}</span>}
+                {!isAuto && isDone && meta.doneAt && <span style={{color:"var(--text3)",fontSize:9}}>✓ {new Date(meta.doneAt).toLocaleDateString("pt-BR")}</span>}
                 <button onClick={()=>removeMeta(goal.id, meta.id)} style={{background:"none",border:"none",cursor:"pointer",fontSize:10,color:"var(--text3)",padding:0}}>✕</button>
               </div>
               );
@@ -6337,11 +6339,7 @@ function EmpTrilhaView({ empId, employees, roles, schedules, incidents, feedback
         events.push({ date: d, label: lb, icon: ic });
       }
     });
-    // Feedbacks recebidos
-    (feedbacks ?? []).filter(f => f.restaurantId === restaurantId && f.employeeId === empId && f.createdAt).forEach(f => {
-      const label = f.rating ? `Feedback: ${RATING_LABELS[f.rating - 1] ?? ""}` : "Feedback recebido";
-      events.push({ date: new Date(f.createdAt), label, icon: "💬" });
-    });
+    // Feedbacks removidos da jornada do empregado — risco trabalhista
     // Objetivos concluídos
     myGoalsAll.filter(g => g.status === "completed").forEach(g => {
       events.push({ date: new Date(g.createdAt), label: `Objetivo: ${g.title}`, icon: "🎯" });
@@ -6349,6 +6347,18 @@ function EmpTrilhaView({ empId, employees, roles, schedules, incidents, feedback
     events.sort((a,b) => a.date - b.date);
     return events;
   })();
+
+  // Empregado marca meta como concluída (self-assessment)
+  function empToggleMeta(goalId, metaId) {
+    const all = [...(employeeGoals?.[empId] ?? [])];
+    const idx = all.findIndex(g => g.id === goalId);
+    if (idx < 0) return;
+    all[idx] = { ...all[idx], metas: (all[idx].metas ?? []).map(m =>
+      m.id === metaId ? { ...m, employeeMarked: !m.employeeMarked, employeeDoneAt: !m.employeeMarked ? new Date().toISOString() : null } : m
+    )};
+    const updated = { ...(employeeGoals ?? {}), [empId]: all };
+    onUpdate("employeeGoals", updated);
+  }
 
   if (!emp) return <p style={{color:"var(--text3)",textAlign:"center"}}>Empregado não encontrado.</p>;
 
@@ -6404,15 +6414,35 @@ function EmpTrilhaView({ empId, employees, roles, schedules, incidents, feedback
                     <div style={{height:6,borderRadius:3,background:"var(--border)",overflow:"hidden",marginBottom:8}}>
                       <div style={{height:"100%",borderRadius:3,background:typeInfo.color,width:`${pct}%`,transition:"width 0.3s"}}/>
                     </div>
-                    <div style={{display:"flex",flexDirection:"column",gap:4,marginBottom:8}}>
+                    <div style={{display:"flex",flexDirection:"column",gap:2,marginBottom:8}}>
                       {metas.map(meta => {
                         const isAuto = meta.autoCheck && meta.autoCheckRule;
                         const autoRule = isAuto ? AUTO_META_RULES.find(r => r.id === meta.autoCheckRule) : null;
-                        const isDone = isAuto ? (autoRule ? autoRule.check(empId, schedules, restaurantId, feedbacks, restaurantId, employees) : meta.done) : meta.done;
+                        const gestorDone = isAuto ? (autoRule ? autoRule.check(empId, schedules, restaurantId, feedbacks, restaurantId, employees) : meta.done) : meta.done;
+                        const empMarked = meta.employeeMarked;
+                        const fullyDone = gestorDone;
                         return (
-                          <div key={meta.id} style={{display:"flex",alignItems:"center",gap:8,padding:"4px 0"}}>
-                            <span style={{fontSize:13}}>{isDone?"✅":"⬜"}</span>
-                            <span style={{color:isDone?"var(--text3)":"var(--text)",fontSize:12,textDecoration:isDone?"line-through":"none",flex:1}}>{meta.title}</span>
+                          <div key={meta.id} style={{padding:"6px 0",borderBottom:"1px solid var(--border)11"}}>
+                            <div style={{display:"flex",alignItems:"center",gap:8}}>
+                              {isAuto ? (
+                                <span style={{fontSize:13}}>{gestorDone?"✅":"⏳"}</span>
+                              ) : (
+                                <button onClick={()=>!fullyDone && empToggleMeta(goal.id, meta.id)} style={{background:"none",border:"none",cursor:fullyDone?"default":"pointer",fontSize:13,padding:0,lineHeight:1,opacity:fullyDone?1:undefined}}>
+                                  {fullyDone ? "✅" : empMarked ? "🟡" : "⬜"}
+                                </button>
+                              )}
+                              <span style={{color:fullyDone?"var(--text3)":"var(--text)",fontSize:12,textDecoration:fullyDone?"line-through":"none",flex:1}}>{meta.title}</span>
+                            </div>
+                            {!isAuto && empMarked && !fullyDone && (
+                              <div style={{marginLeft:21,marginTop:2,fontSize:10,color:"#f59e0b",fontStyle:"italic"}}>
+                                Concluída por você em {meta.employeeDoneAt ? new Date(meta.employeeDoneAt).toLocaleDateString("pt-BR") : "—"} · aguardando confirmação do gestor
+                              </div>
+                            )}
+                            {fullyDone && meta.doneAt && (
+                              <div style={{marginLeft:21,marginTop:2,fontSize:10,color:"var(--green)"}}>
+                                Confirmada em {new Date(meta.doneAt).toLocaleDateString("pt-BR")}
+                              </div>
+                            )}
                           </div>
                         );
                       })}
@@ -6468,14 +6498,28 @@ function EmpTrilhaView({ empId, employees, roles, schedules, incidents, feedback
       {badgesNew.length > 0 && (
         <div style={{marginBottom:16}}>
           <h4 style={{color:"var(--text)",margin:"0 0 10px",fontSize:14}}>🏅 Conquistas</h4>
-          <div style={{display:"flex",gap:10,flexWrap:"wrap"}}>
-            {badgesNew.map((b,i) => (
-              <div key={i} style={{...S.card,padding:"12px 16px",textAlign:"center",minWidth:90}}>
-                <div style={{fontSize:28,marginBottom:4}}>{b.icon}</div>
-                <div style={{color:"var(--text)",fontWeight:700,fontSize:12}}>{b.label}</div>
-                <div style={{color:"var(--text3)",fontSize:10}}>{b.desc}</div>
-              </div>
-            ))}
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+            {badgesNew.map((b,i) => {
+              const gradients = [
+                "linear-gradient(135deg,#fef3c7,#fde68a)", // gold
+                "linear-gradient(135deg,#dbeafe,#bfdbfe)", // blue
+                "linear-gradient(135deg,#d1fae5,#a7f3d0)", // green
+                "linear-gradient(135deg,#ede9fe,#ddd6fe)", // purple
+                "linear-gradient(135deg,#fee2e2,#fecaca)", // red
+                "linear-gradient(135deg,#ffedd5,#fed7aa)", // orange
+                "linear-gradient(135deg,#f0fdf4,#dcfce7)", // lime
+                "linear-gradient(135deg,#fdf4ff,#f5d0fe)", // pink
+              ];
+              return (
+                <div key={i} style={{borderRadius:12,padding:"14px 12px",background:gradients[i % gradients.length],display:"flex",alignItems:"center",gap:10,boxShadow:"0 1px 3px rgba(0,0,0,0.06)"}}>
+                  <div style={{width:40,height:40,borderRadius:20,background:"rgba(255,255,255,0.7)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:22,flexShrink:0}}>{b.icon}</div>
+                  <div style={{flex:1,minWidth:0}}>
+                    <div style={{color:"#1f2937",fontWeight:700,fontSize:12,lineHeight:1.2}}>{b.label}</div>
+                    <div style={{color:"#6b7280",fontSize:10,lineHeight:1.3,marginTop:1}}>{b.desc}</div>
+                  </div>
+                </div>
+              );
+            })}
           </div>
         </div>
       )}
