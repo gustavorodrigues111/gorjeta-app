@@ -3,7 +3,7 @@ import { useState, useEffect, Component } from "react";
 import { db } from "./firebase";
 import { doc, getDoc, setDoc } from "firebase/firestore";
 
-const APP_VERSION = "5.24.0";
+const APP_VERSION = "5.25.0";
 
 const DEFAULT_ADMISSION = () => `${new Date().getFullYear()}-01-01`;
 const round2 = (v) => Math.round(v * 100) / 100;
@@ -6274,7 +6274,6 @@ function FeedbackForm({ restaurantId, employees, roles, onUpdate, feedbacks, cur
 function EmpTrilhaView({ empId, employees, roles, schedules, incidents, feedbacks, devChecklists, restaurantId, onUpdate, employeeGoals }) {
   const emp = employees.find(e => e.id === empId);
   const role = emp ? roles.find(r => r.id === emp.roleId) : null;
-  const restEmps = employees.filter(e => e.restaurantId === restaurantId && !(e.inactive && e.inactiveFrom && e.inactiveFrom <= today()));
   const admDate = emp?.admission ? new Date(emp.admission+"T12:00:00") : null;
   const daysInCompany = admDate ? Math.floor((new Date() - admDate) / 86400000) : 0;
 
@@ -6286,70 +6285,191 @@ function EmpTrilhaView({ empId, employees, roles, schedules, incidents, feedback
   // Incidents are fully internal — employee sees nothing
   // const positiveIncidents = []; // removed: ocorrências são internas
 
-  // Badges calculation
-  const badges = [];
-  if (daysInCompany >= 365) badges.push({ icon:"🏆", label:"1 Ano", desc:"Completou 1 ano na empresa" });
-  if (daysInCompany >= 180) badges.push({ icon:"⭐", label:"6 Meses", desc:"6 meses de dedicação" });
-  if (daysInCompany >= 90) badges.push({ icon:"🌟", label:"3 Meses", desc:"Primeiros 90 dias concluídos" });
-  if ((emp?.roleHistory ?? []).length > 0) badges.push({ icon:"⬆️", label:"Promovido", desc:"Já recebeu uma promoção" });
-  if (latestFb?.rating === 5) badges.push({ icon:"💎", label:"Excelência", desc:"Avaliação Excepcional" });
+  // (badges calculados mais abaixo como badgesNew)
 
-  // Schedule metrics — mês anterior (fechado) para comparação justa
+  // Schedule metrics — mês anterior para badge "Sem Faltas"
   const now = new Date();
   const prevMonthDate = new Date(now.getFullYear(), now.getMonth() - 1, 1);
   const mk = monthKey(prevMonthDate.getFullYear(), prevMonthDate.getMonth());
   const ridSchedules = schedules?.[restaurantId] ?? {};
   const myDays = ridSchedules[mk]?.[empId] ?? {};
   const myFaults = Object.values(myDays).filter(s => s === DAY_FAULT_U).length;
-  const myFaultsJ = Object.values(myDays).filter(s => s === DAY_FAULT_J).length;
-  const sameAreaEmps = restEmps.filter(e => { const r = roles.find(rl=>rl.id===e.roleId); return r?.area === role?.area; });
-  const areaFaultsAvg = sameAreaEmps.length > 0 ? sameAreaEmps.reduce((sum, e2) => {
-    const d = ridSchedules[mk]?.[e2.id] ?? {};
-    return sum + Object.values(d).filter(s => s === DAY_FAULT_U).length;
-  }, 0) / sameAreaEmps.length : 0;
-  const prevMonthLabel = prevMonthDate.toLocaleDateString("pt-BR", { month:"long", year:"numeric" });
+  const hasPrevMonthData = Object.keys(myDays).length > 0;
 
-  // Progress bar (simple: based on rating + time)
-  const ratingPct = latestFb ? (latestFb.rating / 5) * 50 : 25;
-  const timePct = Math.min(daysInCompany / 365 * 50, 50);
-  const progressPct = Math.min(Math.round(ratingPct + timePct), 100);
+  // Badges — tempo de casa NÃO cumulativo (só o maior)
+  const badgesNew = [];
+  if (daysInCompany >= 365) badgesNew.push({ icon:"🏆", label:"1 Ano", desc:"Completou 1 ano na empresa" });
+  else if (daysInCompany >= 180) badgesNew.push({ icon:"⭐", label:"6 Meses", desc:"6 meses de dedicação" });
+  else if (daysInCompany >= 90) badgesNew.push({ icon:"🌟", label:"3 Meses", desc:"Primeiros 90 dias concluídos" });
+  // Mérito
+  if ((emp?.roleHistory ?? []).length > 0) badgesNew.push({ icon:"⬆️", label:"Promovido", desc:"Já recebeu uma promoção" });
+  if (latestFb?.rating === 5) badgesNew.push({ icon:"💎", label:"Excelência", desc:"Avaliação Excepcional" });
+  const myGoalsAll = (employeeGoals ?? {})[empId] ?? [];
+  const completedGoals = myGoalsAll.filter(g => g.status === "completed");
+  if (completedGoals.length > 0) badgesNew.push({ icon:"🎯", label:"Objetivo Concluído", desc:`${completedGoals.length} objetivo${completedGoals.length>1?"s":""} finalizado${completedGoals.length>1?"s":""}` });
+  if (hasPrevMonthData && myFaults === 0) badgesNew.push({ icon:"🔥", label:"Sem Faltas", desc:"0 faltas injustificadas no mês anterior" });
+  const conhecGoals = completedGoals.filter(g => g.type === "conhecimento" && (g.metas??[]).length > 0 && (g.metas??[]).every(m => m.done));
+  if (conhecGoals.length > 0) badgesNew.push({ icon:"📚", label:"Estudioso", desc:"Completou objetivo de conhecimento" });
 
-  // Dev checklist removed — replaced by goals system
+  // Próximo feedback agendado
+  const nextFbInfo = (() => {
+    const empFbs = (feedbacks ?? []).filter(f => f.restaurantId === restaurantId && f.employeeId === empId && f.nextFeedbackDate).sort((a,b) => (b.createdAt??"").localeCompare(a.createdAt??""));
+    return empFbs[0]?.nextFeedbackDate ?? null;
+  })();
+
+  // Jornada timeline — eventos mês a mês desde admissão
+  const jornadaEvents = (() => {
+    if (!admDate) return [];
+    const events = [];
+    // Admissão
+    events.push({ date: admDate, label: "Admissão", icon: "🚀" });
+    // Promoções
+    (emp.roleHistory ?? []).forEach(rh => {
+      if (rh.date) {
+        const newRole = roles.find(r => r.id === rh.newRoleId);
+        events.push({ date: new Date(rh.date + "T12:00:00"), label: `Promovido a ${newRole?.name ?? "novo cargo"}`, icon: "⬆️" });
+      }
+    });
+    // Marcos de tempo
+    [[90,"🌟","3 Meses"],[180,"⭐","6 Meses"],[365,"🏆","1 Ano"]].forEach(([days,ic,lb]) => {
+      if (daysInCompany >= days) {
+        const d = new Date(admDate.getTime() + days * 86400000);
+        events.push({ date: d, label: lb, icon: ic });
+      }
+    });
+    // Feedbacks recebidos
+    (feedbacks ?? []).filter(f => f.restaurantId === restaurantId && f.employeeId === empId && f.createdAt).forEach(f => {
+      const label = f.rating ? `Feedback: ${RATING_LABELS[f.rating - 1] ?? ""}` : "Feedback recebido";
+      events.push({ date: new Date(f.createdAt), label, icon: "💬" });
+    });
+    // Objetivos concluídos
+    myGoalsAll.filter(g => g.status === "completed").forEach(g => {
+      events.push({ date: new Date(g.createdAt), label: `Objetivo: ${g.title}`, icon: "🎯" });
+    });
+    events.sort((a,b) => a.date - b.date);
+    return events;
+  })();
 
   if (!emp) return <p style={{color:"var(--text3)",textAlign:"center"}}>Empregado não encontrado.</p>;
 
+  const activeGoals = myGoalsAll.filter(g => g.status === "active");
+
   return (
     <div>
-      {/* Meu Nível card */}
+      {/* Card do empregado — sem barra de progresso */}
       <div style={{...S.card,marginBottom:16,padding:"20px"}}>
-        <div style={{display:"flex",gap:16,alignItems:"center",flexWrap:"wrap",marginBottom:16}}>
+        <div style={{display:"flex",gap:16,alignItems:"center",flexWrap:"wrap"}}>
           <div style={{width:56,height:56,borderRadius:28,background:"linear-gradient(135deg,#d4a017,#f59e0b)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:26,fontWeight:700,color:"#fff",flexShrink:0}}>{(emp.name??"?").charAt(0)}</div>
           <div style={{flex:1,minWidth:0}}>
             <div style={{color:"var(--text)",fontWeight:700,fontSize:18}}>{emp.name}</div>
             <div style={{color:"var(--ac)",fontSize:13,fontWeight:600}}>{role?.name ?? "—"}</div>
             <div style={{color:"var(--text3)",fontSize:11}}>{role?.area ?? "—"} · {daysInCompany} dias na empresa</div>
           </div>
-          {/* Cargo-alvo removed — now shown in objectives */}
-        </div>
-
-        {/* Progress bar */}
-        <div style={{marginBottom:4}}>
-          <div style={{display:"flex",justifyContent:"space-between",marginBottom:4}}>
-            <span style={{color:"var(--text3)",fontSize:11}}>Progresso geral</span>
-            <span style={{color:"var(--ac)",fontSize:12,fontWeight:700}}>{progressPct}%</span>
-          </div>
-          <div style={{height:8,borderRadius:4,background:"var(--border)",overflow:"hidden"}}>
-            <div style={{height:"100%",borderRadius:4,background:"linear-gradient(90deg,#d4a017,#f59e0b)",width:`${progressPct}%`,transition:"width 0.5s"}}/>
-          </div>
         </div>
       </div>
 
-      {/* Badges */}
-      {badges.length > 0 && (
+      {/* Seus Objetivos — em destaque */}
+      {activeGoals.length > 0 && (
+        <div style={{marginBottom:16}}>
+          <h4 style={{color:"var(--text)",margin:"0 0 12px",fontSize:14}}>🎯 Seus Objetivos</h4>
+          {activeGoals.map(goal => {
+            const typeInfo = GOAL_TYPES.find(t => t.value === goal.type) ?? GOAL_TYPES[3];
+            const metas = goal.metas ?? [];
+            const doneMetas = metas.filter(m => {
+              if (m.autoCheck && m.autoCheckRule) {
+                const rule = AUTO_META_RULES.find(r => r.id === m.autoCheckRule);
+                return rule ? rule.check(empId, schedules, restaurantId, feedbacks, restaurantId, employees) : m.done;
+              }
+              return m.done;
+            }).length;
+            const pct = metas.length > 0 ? Math.round((doneMetas / metas.length) * 100) : 0;
+            const materials = goal.materials ?? [];
+
+            return (
+              <div key={goal.id} style={{...S.card,marginBottom:10,padding:"14px 16px",borderLeft:`4px solid ${typeInfo.color}`}}>
+                <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:6}}>
+                  <span style={{fontSize:18}}>{typeInfo.icon}</span>
+                  <div style={{flex:1}}>
+                    <div style={{color:"var(--text)",fontWeight:700,fontSize:14}}>{goal.title}</div>
+                    <div style={{color:"var(--text3)",fontSize:11}}>{typeInfo.label}</div>
+                  </div>
+                </div>
+
+                {metas.length > 0 && (
+                  <>
+                    <div style={{display:"flex",justifyContent:"space-between",marginBottom:3}}>
+                      <span style={{color:"var(--text3)",fontSize:11}}>Progresso</span>
+                      <span style={{color:typeInfo.color,fontSize:11,fontWeight:700}}>{pct}%</span>
+                    </div>
+                    <div style={{height:6,borderRadius:3,background:"var(--border)",overflow:"hidden",marginBottom:8}}>
+                      <div style={{height:"100%",borderRadius:3,background:typeInfo.color,width:`${pct}%`,transition:"width 0.3s"}}/>
+                    </div>
+                    <div style={{display:"flex",flexDirection:"column",gap:4,marginBottom:8}}>
+                      {metas.map(meta => {
+                        const isAuto = meta.autoCheck && meta.autoCheckRule;
+                        const autoRule = isAuto ? AUTO_META_RULES.find(r => r.id === meta.autoCheckRule) : null;
+                        const isDone = isAuto ? (autoRule ? autoRule.check(empId, schedules, restaurantId, feedbacks, restaurantId, employees) : meta.done) : meta.done;
+                        return (
+                          <div key={meta.id} style={{display:"flex",alignItems:"center",gap:8,padding:"4px 0"}}>
+                            <span style={{fontSize:13}}>{isDone?"✅":"⬜"}</span>
+                            <span style={{color:isDone?"var(--text3)":"var(--text)",fontSize:12,textDecoration:isDone?"line-through":"none",flex:1}}>{meta.title}</span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </>
+                )}
+
+                {materials.length > 0 && (
+                  <div>
+                    <div style={{color:"var(--text3)",fontSize:10,fontWeight:600,marginBottom:4}}>📎 Material de apoio</div>
+                    {materials.map(mat => {
+                      const mtIcon = MATERIAL_TYPES.find(t=>t.value===mat.type)?.icon ?? "📋";
+                      return (
+                        <div key={mat.id} style={{display:"flex",alignItems:"center",gap:6,padding:"3px 0",fontSize:12}}>
+                          <span>{mtIcon}</span>
+                          {mat.link ? <a href={mat.link} target="_blank" rel="noreferrer" style={{color:"#3b82f6"}}>{mat.title}</a> : <span style={{color:"var(--text)"}}>{mat.title}</span>}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {/* Próximo feedback */}
+      {nextFbInfo && (() => {
+        const nfd = new Date(nextFbInfo + "T00:00:00");
+        const todayD = new Date(); todayD.setHours(0,0,0,0);
+        const diff = Math.round((nfd - todayD) / 86400000);
+        const isOverdue = diff < 0;
+        return (
+          <div style={{...S.card,marginBottom:16,padding:"14px 16px",display:"flex",alignItems:"center",gap:10,borderLeft:`4px solid ${isOverdue?"#f59e0b":"#3b82f6"}`}}>
+            <span style={{fontSize:20}}>{isOverdue ? "📋" : "📅"}</span>
+            <div>
+              <div style={{color:"var(--text)",fontWeight:600,fontSize:13}}>
+                {isOverdue ? "Feedback pendente" : "Próximo feedback"}
+              </div>
+              <div style={{color:"var(--text3)",fontSize:12}}>
+                {isOverdue
+                  ? `Agendado para ${nfd.toLocaleDateString("pt-BR")}`
+                  : diff === 0 ? "Agendado para hoje"
+                  : `Em ${diff} dia${diff!==1?"s":""} · ${nfd.toLocaleDateString("pt-BR")}`}
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* Conquistas */}
+      {badgesNew.length > 0 && (
         <div style={{marginBottom:16}}>
           <h4 style={{color:"var(--text)",margin:"0 0 10px",fontSize:14}}>🏅 Conquistas</h4>
           <div style={{display:"flex",gap:10,flexWrap:"wrap"}}>
-            {badges.map((b,i) => (
+            {badgesNew.map((b,i) => (
               <div key={i} style={{...S.card,padding:"12px 16px",textAlign:"center",minWidth:90}}>
                 <div style={{fontSize:28,marginBottom:4}}>{b.icon}</div>
                 <div style={{color:"var(--text)",fontWeight:700,fontSize:12}}>{b.label}</div>
@@ -6360,112 +6480,31 @@ function EmpTrilhaView({ empId, employees, roles, schedules, incidents, feedback
         </div>
       )}
 
-      {/* Métricas vs Área */}
-      <div style={{...S.card,marginBottom:16}}>
-        <h4 style={{color:"var(--text)",margin:"0 0 4px",fontSize:14}}>📊 Métricas</h4>
-        <div style={{color:"var(--text3)",fontSize:11,marginBottom:10,textTransform:"capitalize"}}>{prevMonthLabel}</div>
-        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
-          <div style={{textAlign:"center",padding:10,borderRadius:10,background:"var(--bg1)"}}>
-            <div style={{color:myFaults===0?"var(--green)":"#f59e0b",fontWeight:700,fontSize:22}}>{myFaults}</div>
-            <div style={{color:"var(--text3)",fontSize:11}}>Faltas injust. (você)</div>
-          </div>
-          <div style={{textAlign:"center",padding:10,borderRadius:10,background:"var(--bg1)"}}>
-            <div style={{color:"var(--text2)",fontWeight:700,fontSize:22}}>{areaFaultsAvg.toFixed(1)}</div>
-            <div style={{color:"var(--text3)",fontSize:11}}>Média da área</div>
-          </div>
-          <div style={{textAlign:"center",padding:10,borderRadius:10,background:"var(--bg1)"}}>
-            <div style={{color:myFaultsJ===0?"var(--green)":"var(--text2)",fontWeight:700,fontSize:22}}>{myFaultsJ}</div>
-            <div style={{color:"var(--text3)",fontSize:11}}>Faltas justif. (você)</div>
-          </div>
-          <div style={{textAlign:"center",padding:10,borderRadius:10,background:"var(--bg1)"}}>
-            <div style={{color:"var(--text2)",fontWeight:700,fontSize:22}}>
-              {sameAreaEmps.length > 0 ? (sameAreaEmps.reduce((sum, e2) => {
-                const d = ridSchedules[mk]?.[e2.id] ?? {};
-                return sum + Object.values(d).filter(s => s === DAY_FAULT_J).length;
-              }, 0) / sameAreaEmps.length).toFixed(1) : "0"}
-            </div>
-            <div style={{color:"var(--text3)",fontSize:11}}>Média da área</div>
+      {/* Sua Jornada — timeline mês a mês */}
+      {jornadaEvents.length > 0 && (
+        <div style={{marginBottom:16}}>
+          <h4 style={{color:"var(--text)",margin:"0 0 12px",fontSize:14}}>🗓️ Sua Jornada</h4>
+          <div style={{position:"relative",paddingLeft:24}}>
+            {/* Linha vertical */}
+            <div style={{position:"absolute",left:7,top:4,bottom:4,width:2,background:"var(--border)",borderRadius:1}}/>
+            {jornadaEvents.map((ev,i) => (
+              <div key={i} style={{position:"relative",marginBottom:i<jornadaEvents.length-1?12:0,display:"flex",alignItems:"flex-start",gap:10}}>
+                {/* Dot */}
+                <div style={{position:"absolute",left:-20,top:3,width:12,height:12,borderRadius:6,background:i===jornadaEvents.length-1?"var(--ac)":"var(--border)",border:"2px solid var(--bg)",flexShrink:0,zIndex:1}}/>
+                <div style={{flex:1,minWidth:0}}>
+                  <div style={{display:"flex",alignItems:"center",gap:6}}>
+                    <span style={{fontSize:13}}>{ev.icon}</span>
+                    <span style={{color:"var(--text)",fontSize:12,fontWeight:600}}>{ev.label}</span>
+                  </div>
+                  <div style={{color:"var(--text3)",fontSize:10,marginTop:1}}>
+                    {ev.date.toLocaleDateString("pt-BR",{month:"short",year:"numeric"})}
+                  </div>
+                </div>
+              </div>
+            ))}
           </div>
         </div>
-      </div>
-
-      {/* Objetivos do empregado */}
-      {(() => {
-        const myGoals = ((employeeGoals ?? {})[empId] ?? []).filter(g => g.status === "active");
-        if (myGoals.length === 0) return null;
-        return (
-          <div style={{marginBottom:16}}>
-            <h4 style={{color:"var(--text)",margin:"0 0 12px",fontSize:14}}>🎯 Seus Objetivos</h4>
-            {myGoals.map(goal => {
-              const typeInfo = GOAL_TYPES.find(t => t.value === goal.type) ?? GOAL_TYPES[3];
-              const metas = goal.metas ?? [];
-              const doneMetas = metas.filter(m => {
-                if (m.autoCheck && m.autoCheckRule) {
-                  const rule = AUTO_META_RULES.find(r => r.id === m.autoCheckRule);
-                  return rule ? rule.check(empId, schedules, restaurantId, feedbacks, restaurantId, employees) : m.done;
-                }
-                return m.done;
-              }).length;
-              const pct = metas.length > 0 ? Math.round((doneMetas / metas.length) * 100) : 0;
-              const materials = goal.materials ?? [];
-
-              return (
-                <div key={goal.id} style={{...S.card,marginBottom:10,padding:"14px 16px",borderLeft:`4px solid ${typeInfo.color}`}}>
-                  <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:6}}>
-                    <span style={{fontSize:18}}>{typeInfo.icon}</span>
-                    <div style={{flex:1}}>
-                      <div style={{color:"var(--text)",fontWeight:700,fontSize:14}}>{goal.title}</div>
-                      <div style={{color:"var(--text3)",fontSize:11}}>{typeInfo.label}</div>
-                    </div>
-                  </div>
-
-                  {metas.length > 0 && (
-                    <>
-                      <div style={{display:"flex",justifyContent:"space-between",marginBottom:3}}>
-                        <span style={{color:"var(--text3)",fontSize:11}}>Progresso</span>
-                        <span style={{color:typeInfo.color,fontSize:11,fontWeight:700}}>{pct}%</span>
-                      </div>
-                      <div style={{height:6,borderRadius:3,background:"var(--border)",overflow:"hidden",marginBottom:8}}>
-                        <div style={{height:"100%",borderRadius:3,background:typeInfo.color,width:`${pct}%`,transition:"width 0.3s"}}/>
-                      </div>
-                      <div style={{display:"flex",flexDirection:"column",gap:4,marginBottom:8}}>
-                        {metas.map(meta => {
-                          const isAuto = meta.autoCheck && meta.autoCheckRule;
-                          const autoRule = isAuto ? AUTO_META_RULES.find(r => r.id === meta.autoCheckRule) : null;
-                          const isDone = isAuto ? (autoRule ? autoRule.check(empId, schedules, restaurantId, feedbacks, restaurantId, employees) : meta.done) : meta.done;
-                          return (
-                            <div key={meta.id} style={{display:"flex",alignItems:"center",gap:8,padding:"4px 0"}}>
-                              <span style={{fontSize:13}}>{isDone?"✅":"⬜"}</span>
-                              <span style={{color:isDone?"var(--text3)":"var(--text)",fontSize:12,textDecoration:isDone?"line-through":"none",flex:1}}>{meta.title}</span>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    </>
-                  )}
-
-                  {materials.length > 0 && (
-                    <div>
-                      <div style={{color:"var(--text3)",fontSize:10,fontWeight:600,marginBottom:4}}>📎 Material de apoio</div>
-                      {materials.map(mat => {
-                        const mtIcon = MATERIAL_TYPES.find(t=>t.value===mat.type)?.icon ?? "📋";
-                        return (
-                          <div key={mat.id} style={{display:"flex",alignItems:"center",gap:6,padding:"3px 0",fontSize:12}}>
-                            <span>{mtIcon}</span>
-                            {mat.link ? <a href={mat.link} target="_blank" rel="noreferrer" style={{color:"#3b82f6"}}>{mat.title}</a> : <span style={{color:"var(--text)"}}>{mat.title}</span>}
-                          </div>
-                        );
-                      })}
-                    </div>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-        );
-      })()}
-
-      {/* Ocorrências removidas — 100% internas */}
+      )}
     </div>
   );
 }
