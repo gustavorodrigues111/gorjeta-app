@@ -3,7 +3,7 @@ import { useState, useEffect, Component } from "react";
 import { db } from "./firebase";
 import { doc, getDoc, setDoc } from "firebase/firestore";
 
-const APP_VERSION = "5.26.0";
+const APP_VERSION = "5.27.0";
 
 const DEFAULT_ADMISSION = () => `${new Date().getFullYear()}-01-01`;
 const round2 = (v) => Math.round(v * 100) / 100;
@@ -608,6 +608,7 @@ const K = {
   scheduleStatus:      "v4:scheduleStatus",      // {[rid]: {[mk]: {status:"open"|"review"|"closed", closedAt, closedBy, lastPontoImport, pontoSystem, missingFromPonto:[], importHistory:[], lastImportSummary}}}
   schedulePrevista:    "v4:schedulePrevista",     // {[rid]: {[mk]: frozen snapshot of schedules at first edit/VT payment}}
   employeeGoals:       "v4:employeeGoals",        // {[empId]: [{id, type, title, targetRoleId?, topic?, materials:[], metas:[], createdAt, createdBy, status:"active"|"completed"|"cancelled"}]}
+  delays:              "v4:delays",               // {[rid]: {[mk]: {[empId]: {[day]: minutes}}}}
 };
 
 // ── Version retention ──
@@ -862,7 +863,7 @@ function MonthNav({ year, month, onChange }) {
 
 
 //
-function CalendarGrid({ year, month, dayMap, onDayClick, readOnly }) {
+function CalendarGrid({ year, month, dayMap, onDayClick, readOnly, delayMap }) {
   const firstDay = new Date(year, month, 1).getDay();
   const daysInMonth = new Date(year, month + 1, 0).getDate();
   const cells = [];
@@ -904,10 +905,13 @@ function CalendarGrid({ year, month, dayMap, onDayClick, readOnly }) {
           if (!dateStr) return <div key={`e-${idx}`} />;
           const d = parseInt(dateStr.slice(-2));
           const col = colorOf(dateStr);
+          const hasDelay = delayMap && (delayMap[String(d)] > 0);
           return (
             <button key={dateStr} onClick={() => !readOnly && onDayClick && onDayClick(dateStr)}
-              style={{ aspectRatio: "1", borderRadius: 8, border: `1px solid ${col.border}`, background: col.bg, color: col.text, cursor: readOnly ? "default" : "pointer", fontFamily: "'DM Mono',monospace", fontSize: 12, fontWeight: 600, padding: 0 }}>
+              title={hasDelay ? `Atraso: ${delayMap[String(d)]} min` : undefined}
+              style={{ aspectRatio: "1", borderRadius: 8, border: `1px solid ${col.border}`, background: col.bg, color: col.text, cursor: readOnly ? "default" : "pointer", fontFamily: "'DM Mono',monospace", fontSize: 12, fontWeight: 600, padding: 0, position:"relative" }}>
               {d}
+              {hasDelay && <span style={{position:"absolute",top:1,right:2,fontSize:7,color:"#f59e0b",fontWeight:800,lineHeight:1}}>⏰</span>}
             </button>
           );
         })}
@@ -4173,7 +4177,7 @@ Inclua apenas as ações solicitadas. Arrays vazios se não houver ação daquel
 
 
 
-function EmployeeSpreadsheet({ restEmps, restRoles, rid, employees, onUpdate, restCode: restCode_, isOwner, restaurant, notifications, privacyMask, onGenerateDismissalReport, incidents, feedbacks, devChecklists, schedules, currentUser, isLider, mobileOnly: mobileOnlyProp, roles, vtPayments, vtConfig, scheduleStatus, employeeGoals }) {
+function EmployeeSpreadsheet({ restEmps, restRoles, rid, employees, onUpdate, restCode: restCode_, isOwner, restaurant, notifications, privacyMask, onGenerateDismissalReport, incidents, feedbacks, devChecklists, schedules, currentUser, isLider, mobileOnly: mobileOnlyProp, roles, vtPayments, vtConfig, scheduleStatus, employeeGoals, delays }) {
   const mobileOnly = mobileOnlyProp ?? false; // eslint-disable-line no-unused-vars
   const PLANOS = [
     { id:"p10",  empMax:10  },
@@ -4883,6 +4887,39 @@ Inclua apenas as ações solicitadas. Arrays vazios se não houver ação daquel
                     <span style={{fontSize:16}}>{icon}</span>
                     <span>{label}</span>
                   </div>;
+                })()}
+                {/* Resumo de atrasos — só gestor */}
+                {(() => {
+                  const now2 = new Date();
+                  const curMk = monthKey(now2.getFullYear(), now2.getMonth());
+                  const prevMk = monthKey(now2.getFullYear(), now2.getMonth() - 1);
+                  const curDelays = delays?.[rid]?.[curMk]?.[emp.id] ?? {};
+                  const prevDelays = delays?.[rid]?.[prevMk]?.[emp.id] ?? {};
+                  const curEntries = Object.values(curDelays).filter(v => v > 0);
+                  const prevEntries = Object.values(prevDelays).filter(v => v > 0);
+                  const curTotal = curEntries.reduce((s,v) => s+v, 0);
+                  const prevTotal = prevEntries.reduce((s,v) => s+v, 0);
+                  if (curEntries.length === 0 && prevEntries.length === 0) return null;
+                  return (
+                    <div style={{...S.card,marginBottom:12,padding:"12px 14px",borderLeft:"4px solid #f59e0b"}}>
+                      <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:6}}>
+                        <span style={{fontSize:16}}>⏰</span>
+                        <span style={{color:"var(--text)",fontWeight:700,fontSize:13}}>Atrasos</span>
+                      </div>
+                      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+                        <div style={{padding:"8px 10px",borderRadius:8,background:"#f59e0b11",textAlign:"center"}}>
+                          <div style={{color:"#f59e0b",fontWeight:700,fontSize:18}}>{curEntries.length}</div>
+                          <div style={{color:"var(--text3)",fontSize:10}}>dias este mês</div>
+                          <div style={{color:"var(--text3)",fontSize:10}}>{curTotal} min ({(curTotal/60).toFixed(1)}h)</div>
+                        </div>
+                        <div style={{padding:"8px 10px",borderRadius:8,background:"var(--bg1)",textAlign:"center"}}>
+                          <div style={{color:"var(--text2)",fontWeight:700,fontSize:18}}>{prevEntries.length}</div>
+                          <div style={{color:"var(--text3)",fontSize:10}}>dias mês anterior</div>
+                          <div style={{color:"var(--text3)",fontSize:10}}>{prevTotal} min ({(prevTotal/60).toFixed(1)}h)</div>
+                        </div>
+                      </div>
+                    </div>
+                  );
                 })()}
                 <GoalsManager empId={emp.id} employeeGoals={employeeGoals} roles={roles??restRoles} restaurantId={rid} onUpdate={onUpdate} currentUser={currentUser} isOwner={isOwner} schedules={schedules??{}} feedbacks={feedbacks??[]} employees={employees}/>
                 <EmpTimeline empId={emp.id} employees={employees} roles={roles??restRoles} schedules={schedules??{}} incidents={incidents??[]} feedbacks={feedbacks??[]} restaurantId={rid}/>
@@ -6604,6 +6641,10 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
   const [pontoResolutions, setPontoResolutions] = useState({}); // { _key: { action:"ignore"|"link"|"create", linkedEmpId, newRoleId } }
   const [pontoMissingReasons, setPontoMissingReasons] = useState({}); // { empId: "ferias_licenca"|"demitido"|"erro_ponto"|"outro_sistema"|"ignorar" }
   const [pontoSystem, setPontoSystem] = useState("solides");
+  // Delay (atraso) batch form
+  const [showDelayForm, setShowDelayForm] = useState(false);
+  const [delayEmpId, setDelayEmpId] = useState("");
+  const [delayInputs, setDelayInputs] = useState({}); // { "day": minutes }
   // Schedule view mode: "vigente" shows effective (with local edits), "prevista" shows saved only
   const [schedViewMode, setSchedViewMode] = useState("vigente");
   // Month close confirmation
@@ -7727,6 +7768,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
               currentUser={currentUser} isLider={isLider} mobileOnly={mobileOnly} roles={roles}
               vtPayments={data?.vtPayments??{}} vtConfig={data?.vtConfig??{}} scheduleStatus={data?.scheduleStatus??{}}
               employeeGoals={data?.employeeGoals??{}}
+              delays={data?.delays??{}}
               onGenerateDismissalReport={async (emp) => {
                 try {
                   await loadScript("https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js");
@@ -8296,6 +8338,12 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                   disabled={monthClosed}
                   style={{...S.btnSecondary,fontSize:mobileOnly?11:12,border:`1px solid ${showPontoImport?"var(--ac)":"var(--ac)"}`,background:showPontoImport?"var(--ac)22":"transparent",color:"var(--ac)",whiteSpace:"nowrap",opacity:monthClosed?0.4:1}}>
                   {mobileOnly?"📄 Ponto":"📄 Importar ponto"}
+                </button>
+
+                {/* Registrar atrasos */}
+                <button onClick={()=>{setShowDelayForm(!showDelayForm);setDelayEmpId("");setDelayInputs({});}}
+                  style={{...S.btnSecondary,fontSize:mobileOnly?11:12,border:`1px solid ${showDelayForm?"#f59e0b":"#f59e0b44"}`,background:showDelayForm?"#f59e0b22":"transparent",color:"#f59e0b",whiteSpace:"nowrap"}}>
+                  {mobileOnly?"⏰ Atrasos":"⏰ Registrar atrasos"}
                 </button>
 
                 {/* Histórico — só Admin e DP */}
@@ -9113,6 +9161,83 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
               );
             })()}
 
+            {/* Formulário de atrasos em lote */}
+            {showDelayForm && (
+              <div style={{...S.card,marginBottom:14,border:"1px solid #f59e0b44"}}>
+                <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:12}}>
+                  <span style={{fontSize:16}}>⏰</span>
+                  <span style={{fontWeight:700,color:"var(--text)",fontSize:14}}>Registrar atrasos — {monthLabel(year, month)}</span>
+                </div>
+                <div style={{marginBottom:12}}>
+                  <label style={S.label}>Empregado</label>
+                  <select value={delayEmpId} onChange={e=>{
+                    setDelayEmpId(e.target.value);
+                    // Pre-fill with existing delays for this employee
+                    const existing = data?.delays?.[rid]?.[mk]?.[e.target.value] ?? {};
+                    setDelayInputs({...existing});
+                  }} style={{...S.input,fontSize:13}}>
+                    <option value="">Selecionar...</option>
+                    {schedEmps.filter(e=>!e.inactive).sort((a,b)=>a.name.localeCompare(b.name)).map(e=><option key={e.id} value={e.id}>{e.name}</option>)}
+                  </select>
+                </div>
+                {delayEmpId && (() => {
+                  const dim = new Date(year, month + 1, 0).getDate();
+                  const empSched = schedules?.[rid]?.[mk]?.[delayEmpId] ?? {};
+                  const workDays = [];
+                  for (let d = 1; d <= dim; d++) {
+                    const dk = `${year}-${String(month+1).padStart(2,"0")}-${String(d).padStart(2,"0")}`;
+                    const st = empSched[dk];
+                    // Only show days that are work days (not off, vacation, etc.)
+                    if (!st || st === "T" || st === DAY_COMP_TRAB) workDays.push({ day: d, dk });
+                  }
+                  const totalMin = Object.values(delayInputs).reduce((s,v) => s + (parseInt(v)||0), 0);
+                  const totalCount = Object.values(delayInputs).filter(v => (parseInt(v)||0) > 0).length;
+                  return (
+                    <div>
+                      <div style={{color:"var(--text3)",fontSize:11,marginBottom:8}}>Informe os minutos de atraso em cada dia trabalhado. Dias sem valor serão ignorados.</div>
+                      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill, minmax(120px, 1fr))",gap:6,marginBottom:12}}>
+                        {workDays.map(({day, dk}) => {
+                          const val = delayInputs[String(day)] ?? "";
+                          const dayName = new Date(year, month, day).toLocaleDateString("pt-BR",{weekday:"short"}).replace(".","");
+                          return (
+                            <div key={day} style={{display:"flex",alignItems:"center",gap:6,padding:"4px 8px",borderRadius:8,background:val&&parseInt(val)>0?"#f59e0b11":"var(--bg1)"}}>
+                              <span style={{color:"var(--text2)",fontSize:11,fontWeight:600,minWidth:50}}>{String(day).padStart(2,"0")} {dayName}</span>
+                              <input type="number" min="0" max="480" value={val} placeholder="min"
+                                onChange={e => setDelayInputs(prev => ({...prev, [String(day)]: e.target.value}))}
+                                style={{...S.input,width:55,fontSize:12,padding:"4px 6px",textAlign:"center"}}/>
+                            </div>
+                          );
+                        })}
+                      </div>
+                      {totalCount > 0 && (
+                        <div style={{marginBottom:10,padding:"8px 12px",borderRadius:8,background:"#f59e0b11",color:"#f59e0b",fontSize:12,fontWeight:600}}>
+                          {totalCount} dia{totalCount!==1?"s":""} com atraso · {totalMin} min total ({(totalMin/60).toFixed(1)}h)
+                        </div>
+                      )}
+                      <button onClick={() => {
+                        // Clean inputs — remove zeros and empty
+                        const cleaned = {};
+                        Object.entries(delayInputs).forEach(([d, v]) => {
+                          const mins = parseInt(v) || 0;
+                          if (mins > 0) cleaned[d] = mins;
+                        });
+                        const allDelays = { ...(data?.delays ?? {}) };
+                        if (!allDelays[rid]) allDelays[rid] = {};
+                        if (!allDelays[rid][mk]) allDelays[rid][mk] = {};
+                        allDelays[rid][mk][delayEmpId] = cleaned;
+                        onUpdate("delays", allDelays);
+                        setShowDelayForm(false);
+                        setDelayEmpId("");
+                        setDelayInputs({});
+                      }} style={{...S.btnPrimary,background:"#f59e0b",fontSize:12,padding:"8px 20px"}}>
+                        Salvar atrasos
+                      </button>
+                    </div>
+                  );
+                })()}
+              </div>
+            )}
+
             {/* Formulário de férias */}
             {showVacForm && (
               <div style={{...S.card,marginBottom:14,border:"1px solid #8b5cf644"}}>
@@ -9265,6 +9390,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                     {areaEmps.map((emp, ei) => {
                       const role = restRoles.find(r=>r.id===emp.roleId);
                       const dayMap = displayedMonth[emp.id] ?? {};
+                      const empDelays = data?.delays?.[rid]?.[mk]?.[emp.id] ?? {};
                       const curArea = role?.area;
                       const prevEmp = areaEmps[ei-1];
                       const prevArea = prevEmp ? restRoles.find(r=>r.id===prevEmp.roleId)?.area : null;
@@ -9291,10 +9417,14 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                               const color = isDem ? "#6b7280" : (STATUS_COLORS[status] ?? "var(--green)");
                               const label = isDem ? "DEM" : (STATUS_SHORT[status] ?? "T");
                               const locked = isDem || monthClosed || (restaurant.serviceStartDate && slot.date < restaurant.serviceStartDate);
+                              const dayNum = slot.date ? String(parseInt(slot.date.slice(-2))) : null;
+                              const delayMin = dayNum ? (empDelays[dayNum] || 0) : 0;
                               return (
                                 <div key={di} onClick={()=>!locked && cycleStatus(emp.id, slot.date)}
-                                  style={{display:"flex",alignItems:"center",justifyContent:"center",minHeight:36,borderRadius:6,cursor:locked?"not-allowed":"pointer",background:isDem?"#6b728022":(status?color+"22":"transparent"),border:`1px solid ${isDem?"#6b728044":(status?color+"44":"var(--border)")}`,opacity:locked?0.35:1}}>
+                                  title={delayMin > 0 ? `Atraso: ${delayMin} min` : undefined}
+                                  style={{display:"flex",alignItems:"center",justifyContent:"center",minHeight:36,borderRadius:6,cursor:locked?"not-allowed":"pointer",background:isDem?"#6b728022":(status?color+"22":"transparent"),border:`1px solid ${isDem?"#6b728044":(delayMin>0?"#f59e0b":(status?color+"44":"var(--border)"))}`,opacity:locked?0.35:1,position:"relative"}}>
                                   <span style={{color:locked?"var(--text3)":color,fontSize:isDem?9:11,fontWeight:700}}>{restaurant.serviceStartDate && !isDem && slot.date < restaurant.serviceStartDate?"🔒":label}</span>
+                                  {delayMin > 0 && <span style={{position:"absolute",top:0,right:1,fontSize:6,color:"#f59e0b",fontWeight:800}}>⏰</span>}
                                 </div>
                               );
                             })}
@@ -9341,6 +9471,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                       {areaEmps.map((emp,ei) => {
                         const role = restRoles.find(r=>r.id===emp.roleId);
                         const dayMap = displayedMonth[emp.id] ?? {};
+                        const empDelaysD = data?.delays?.[rid]?.[mk]?.[emp.id] ?? {};
                         // Contagem alinhada com o visual: sem status = "•" = trabalho
                         let workC=0, offC=0;
                         for (let dd = 1; dd <= daysInMonth; dd++) {
@@ -9383,10 +9514,13 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                               const wd = new Date(date+"T12:00:00").getDay();
                               const isWe = wd===0||wd===6;
                               const locked = isDem || monthClosed || (restaurant.serviceStartDate && date < restaurant.serviceStartDate);
+                              const dDelayMin = empDelaysD[String(d)] || 0;
                               return (
                                 <td key={d} onClick={()=>!isDem && cycleStatus(emp.id, date)}
-                                  style={{textAlign:"center",padding:"2px 0",cursor:locked?"not-allowed":"pointer",background:isDem?"#6b728022":(locked?"var(--bg3)":(status?color+"22":(isWe?"var(--bg3)":"transparent"))),borderRight:"1px solid var(--border)",opacity:locked?0.35:1}}>
+                                  title={dDelayMin > 0 ? `Atraso: ${dDelayMin} min` : undefined}
+                                  style={{textAlign:"center",padding:"2px 0",cursor:locked?"not-allowed":"pointer",background:isDem?"#6b728022":(locked?"var(--bg3)":(status?color+"22":(isWe?"var(--bg3)":"transparent"))),borderRight:`1px solid ${dDelayMin>0?"#f59e0b":"var(--border)"}`,opacity:locked?0.35:1,position:"relative"}}>
                                   <span style={{color:locked?"var(--text3)":color,fontSize:isDem?7:(status?8:10),fontWeight:isDem||status?700:400}}>{!isDem&&restaurant.serviceStartDate&&date<restaurant.serviceStartDate?"🔒":label}</span>
+                                  {dDelayMin > 0 && <span style={{position:"absolute",bottom:0,right:0,fontSize:5,color:"#f59e0b",lineHeight:1}}>⏰</span>}
                                 </td>
                               );
                             })}
@@ -13890,6 +14024,7 @@ export default function App() {
   const [scheduleStatus,      setScheduleStatus]      = useState({});
   const [schedulePrevista,    setSchedulePrevista]    = useState({});
   const [employeeGoals,       setEmployeeGoals]       = useState({});
+  const [delays,              setDelays]              = useState({});
 
   useEffect(() => {
     const savedId = currentUserId;
@@ -13917,7 +14052,7 @@ export default function App() {
       setLoadProgress("Preparando o sistema...");
 
       const keys = keyNames;
-      const map = { owners:setOwners, managers:setManagers, restaurants:setRestaurants, employees:setEmployees, roles:setRoles, tips:setTips, splits:setSplits, schedules:setSchedules, communications:setCommunications, commAcks:setCommAcks, faq:setFaq, dpMessages:setDpMessages, workSchedules:setWorkSchedules, notifications:setNotifications, noTipDays:setNoTipDays, trash:setTrash, schedTemplates:setSchedTemplates, schedDrafts:setSchedDrafts, scheduleVersions:setScheduleVersions, tipVersions:setTipVersions, vtConfig:setVtConfig, vtMonthly:setVtMonthly, vtPayments:setVtPayments, incidents:setIncidents, feedbacks:setFeedbacks, devChecklists:setDevChecklists, scheduleAdjustments:setScheduleAdjustments, scheduleStatus:setScheduleStatus, schedulePrevista:setSchedulePrevista, employeeGoals:setEmployeeGoals };
+      const map = { owners:setOwners, managers:setManagers, restaurants:setRestaurants, employees:setEmployees, roles:setRoles, tips:setTips, splits:setSplits, schedules:setSchedules, communications:setCommunications, commAcks:setCommAcks, faq:setFaq, dpMessages:setDpMessages, workSchedules:setWorkSchedules, notifications:setNotifications, noTipDays:setNoTipDays, trash:setTrash, schedTemplates:setSchedTemplates, schedDrafts:setSchedDrafts, scheduleVersions:setScheduleVersions, tipVersions:setTipVersions, vtConfig:setVtConfig, vtMonthly:setVtMonthly, vtPayments:setVtPayments, incidents:setIncidents, feedbacks:setFeedbacks, devChecklists:setDevChecklists, scheduleAdjustments:setScheduleAdjustments, scheduleStatus:setScheduleStatus, schedulePrevista:setSchedulePrevista, employeeGoals:setEmployeeGoals, delays:setDelays };
       const loaded_data = {};
       let successCount = 0;
       keys.forEach((k, i) => {
@@ -14065,12 +14200,12 @@ export default function App() {
     return () => { clearTimeout(slowTimer); clearTimeout(verySlowTimer); };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const data = { owners, managers, restaurants, employees, roles, tips, splits, schedules, communications, commAcks, faq, dpMessages, workSchedules, notifications, noTipDays, trash, schedTemplates, schedDrafts, scheduleVersions, tipVersions, vtConfig, vtMonthly, vtPayments, incidents, feedbacks, devChecklists, scheduleAdjustments, scheduleStatus, schedulePrevista, employeeGoals };
+  const data = { owners, managers, restaurants, employees, roles, tips, splits, schedules, communications, commAcks, faq, dpMessages, workSchedules, notifications, noTipDays, trash, schedTemplates, schedDrafts, scheduleVersions, tipVersions, vtConfig, vtMonthly, vtPayments, incidents, feedbacks, devChecklists, scheduleAdjustments, scheduleStatus, schedulePrevista, employeeGoals, delays };
 
   async function handleUpdate(field, value) {
     if (field === "_toast") { setToast(value); return; }
-    const setters = { owners:setOwners, managers:setManagers, restaurants:setRestaurants, employees:setEmployees, roles:setRoles, tips:setTips, splits:setSplits, schedules:setSchedules, communications:setCommunications, commAcks:setCommAcks, faq:setFaq, dpMessages:setDpMessages, workSchedules:setWorkSchedules, notifications:setNotifications, noTipDays:setNoTipDays, trash:setTrash, schedTemplates:setSchedTemplates, schedDrafts:setSchedDrafts, scheduleVersions:setScheduleVersions, tipVersions:setTipVersions, vtConfig:setVtConfig, vtMonthly:setVtMonthly, vtPayments:setVtPayments, incidents:setIncidents, feedbacks:setFeedbacks, devChecklists:setDevChecklists, scheduleAdjustments:setScheduleAdjustments, scheduleStatus:setScheduleStatus, schedulePrevista:setSchedulePrevista, employeeGoals:setEmployeeGoals };
-    const keys    = { owners:K.owners, managers:K.managers, restaurants:K.restaurants, employees:K.employees, roles:K.roles, tips:K.tips, splits:K.splits, schedules:K.schedules, communications:K.communications, commAcks:K.commAcks, faq:K.faq, dpMessages:K.dpMessages, workSchedules:K.workSchedules, notifications:K.notifications, noTipDays:K.noTipDays, trash:K.trash, schedTemplates:K.schedTemplates, schedDrafts:K.schedDrafts, scheduleVersions:K.scheduleVersions, tipVersions:K.tipVersions, vtConfig:K.vtConfig, vtMonthly:K.vtMonthly, vtPayments:K.vtPayments, incidents:K.incidents, feedbacks:K.feedbacks, devChecklists:K.devChecklists, scheduleAdjustments:K.scheduleAdjustments, scheduleStatus:K.scheduleStatus, schedulePrevista:K.schedulePrevista, employeeGoals:K.employeeGoals };
+    const setters = { owners:setOwners, managers:setManagers, restaurants:setRestaurants, employees:setEmployees, roles:setRoles, tips:setTips, splits:setSplits, schedules:setSchedules, communications:setCommunications, commAcks:setCommAcks, faq:setFaq, dpMessages:setDpMessages, workSchedules:setWorkSchedules, notifications:setNotifications, noTipDays:setNoTipDays, trash:setTrash, schedTemplates:setSchedTemplates, schedDrafts:setSchedDrafts, scheduleVersions:setScheduleVersions, tipVersions:setTipVersions, vtConfig:setVtConfig, vtMonthly:setVtMonthly, vtPayments:setVtPayments, incidents:setIncidents, feedbacks:setFeedbacks, devChecklists:setDevChecklists, scheduleAdjustments:setScheduleAdjustments, scheduleStatus:setScheduleStatus, schedulePrevista:setSchedulePrevista, employeeGoals:setEmployeeGoals, delays:setDelays };
+    const keys    = { owners:K.owners, managers:K.managers, restaurants:K.restaurants, employees:K.employees, roles:K.roles, tips:K.tips, splits:K.splits, schedules:K.schedules, communications:K.communications, commAcks:K.commAcks, faq:K.faq, dpMessages:K.dpMessages, workSchedules:K.workSchedules, notifications:K.notifications, noTipDays:K.noTipDays, trash:K.trash, schedTemplates:K.schedTemplates, schedDrafts:K.schedDrafts, scheduleVersions:K.scheduleVersions, tipVersions:K.tipVersions, vtConfig:K.vtConfig, vtMonthly:K.vtMonthly, vtPayments:K.vtPayments, incidents:K.incidents, feedbacks:K.feedbacks, devChecklists:K.devChecklists, scheduleAdjustments:K.scheduleAdjustments, scheduleStatus:K.scheduleStatus, schedulePrevista:K.schedulePrevista, employeeGoals:K.employeeGoals, delays:K.delays };
     // Support functional updates to prevent stale-state race conditions:
     // When value is a function, it receives the latest state (like setState(prev => ...))
     let resolvedValue;
@@ -14090,7 +14225,7 @@ export default function App() {
         return;
       }
     }
-    const labels = { owners:"Admins atualizados", managers:"Gestores atualizados", restaurants:"Restaurantes atualizados", employees:"Empregados atualizados", roles:"Cargos atualizados", tips:"Gorjetas atualizadas", splits:"Percentuais salvos", schedules:"Escala atualizada", communications:"Comunicados atualizados", commAcks:"Ciências atualizadas", faq:"FAQ atualizado", dpMessages:"Mensagem enviada", workSchedules:"Horários salvos", notifications:"Notificações atualizadas", schedTemplates:"Template salvo", schedDrafts:"Rascunho salvo", trash:"Lixeira atualizada", noTipDays:"Dias sem gorjeta atualizados", scheduleVersions:null, tipVersions:null, vtConfig:null, vtMonthly:null, vtPayments:"VT registrado", incidents:"Ocorrência registrada", feedbacks:"Feedback registrado", devChecklists:"Checklist atualizado", scheduleAdjustments:null, scheduleStatus:null, schedulePrevista:null, employeeGoals:"Objetivo atualizado" };
+    const labels = { owners:"Admins atualizados", managers:"Gestores atualizados", restaurants:"Restaurantes atualizados", employees:"Empregados atualizados", roles:"Cargos atualizados", tips:"Gorjetas atualizadas", splits:"Percentuais salvos", schedules:"Escala atualizada", communications:"Comunicados atualizados", commAcks:"Ciências atualizadas", faq:"FAQ atualizado", dpMessages:"Mensagem enviada", workSchedules:"Horários salvos", notifications:"Notificações atualizadas", schedTemplates:"Template salvo", schedDrafts:"Rascunho salvo", trash:"Lixeira atualizada", noTipDays:"Dias sem gorjeta atualizados", scheduleVersions:null, tipVersions:null, vtConfig:null, vtMonthly:null, vtPayments:"VT registrado", incidents:"Ocorrência registrada", feedbacks:"Feedback registrado", devChecklists:"Checklist atualizado", scheduleAdjustments:null, scheduleStatus:null, schedulePrevista:null, employeeGoals:"Objetivo atualizado", delays:"Atrasos atualizados" };
     if (labels[field] === null) return; // silent save (e.g. version snapshots)
     setToast(labels[field] ?? (typeof value === "string" ? value : "Salvo!"));
   }
