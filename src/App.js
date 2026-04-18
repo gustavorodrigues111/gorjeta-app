@@ -7337,16 +7337,22 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
     ].filter(Boolean) },
   ].filter(g => g.tabs.length > 0);
 
+  // Mobile: restrict to dashboard, schedule, horarios, employees, reunioes, notificacoes
+  const MOBILE_ALLOWED = ["dashboard","schedule","horarios","employees","reunioes","notificacoes"];
+  const TAB_GROUPS_FINAL = mobileOnly
+    ? TAB_GROUPS.map(g => ({ ...g, tabs: g.tabs.filter(([id]) => MOBILE_ALLOWED.includes(id)) })).filter(g => g.tabs.length > 0)
+    : TAB_GROUPS;
+
   // Flat TABS for backward compatibility
-  const TABS = TAB_GROUPS.flatMap(g => g.tabs.map(([id,lbl]) => [id,lbl]));
+  const TABS = TAB_GROUPS_FINAL.flatMap(g => g.tabs.map(([id,lbl]) => [id,lbl]));
 
   const defaultGroup = isLider ? "equipe" : "operacao";
   const [tabGroup, setTabGroup] = useState(defaultGroup);
   const [tab, setTab] = useState(isLider ? "employees" : "dashboard");
-  const activeGroup = TAB_GROUPS.find(g => g.id === tabGroup) ?? TAB_GROUPS[0];
+  const activeGroup = TAB_GROUPS_FINAL.find(g => g.id === tabGroup) ?? TAB_GROUPS_FINAL[0];
 
   function switchGroup(gid) {
-    const g = TAB_GROUPS.find(x => x.id === gid);
+    const g = TAB_GROUPS_FINAL.find(x => x.id === gid);
     if (!g || g.tabs.length === 0) return;
     setTabGroup(gid);
     // If current tab is already in this group, keep it
@@ -7427,7 +7433,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
     <div style={{ fontFamily:"'DM Sans',sans-serif" }}>
       {/* Tab groups — row 1: group pills */}
       <div style={{ display:"flex", gap:4, padding:"8px 12px 0", background:"var(--header-bg)", overflowX:"auto", scrollbarWidth:"none", WebkitOverflowScrolling:"touch" }}>
-        {TAB_GROUPS.map(g => (
+        {TAB_GROUPS_FINAL.map(g => (
           <button key={g.id} onClick={() => switchGroup(g.id)}
             style={{ padding:"7px 14px", background:tabGroup===g.id?ac:"transparent", border:"none", borderRadius:20, color:tabGroup===g.id?"#fff":"var(--text3)", cursor:"pointer", fontSize:13, fontFamily:"'DM Sans',sans-serif", fontWeight:tabGroup===g.id?700:500, whiteSpace:"nowrap", flexShrink:0, transition:"all .15s" }}>
             {g.label}
@@ -13045,7 +13051,7 @@ function ManagerPortal({ manager, data, onUpdate, onBack, toggleTheme, theme, on
                 <span style={{fontSize:22,flexShrink:0}}>🖥️</span>
                 <div>
                   <p style={{color:"#92400e",fontSize:12,fontWeight:700,margin:0}}>Demais funcionalidades no computador</p>
-                  <p style={{color:"#92400e99",fontSize:11,margin:"2px 0 0",lineHeight:1.4}}>Gorjetas, Equipe, Cargos, Comunicados, FAQ, DP e Config.</p>
+                  <p style={{color:"#92400e99",fontSize:11,margin:"2px 0 0",lineHeight:1.4}}>Gorjetas, Cargos, VT, Comunicados, FAQ, DP e Config.</p>
                 </div>
               </div>
               <RestaurantPanel
@@ -14415,9 +14421,11 @@ hr{border:none;border-top:1px solid var(--border);margin:24px 0}
           <tr><td>📊 Dashboard</td><td>Resumo do dia, alertas, widget de gorjetas (somente leitura)</td></tr>
           <tr><td>📅 Escala</td><td>Visão semanal com navegação ◀/▶, toque para alterar status</td></tr>
           <tr><td>🕐 Horários</td><td>Edição completa + assistente de IA para gerar horários</td></tr>
+          <tr><td>👥 Empregados</td><td>Lista de empregados, detalhes e trilha individual</td></tr>
+          <tr><td>📋 Reuniões</td><td>Planejamento e histórico de reuniões com a equipe</td></tr>
           <tr><td>📬 Caixa</td><td>Notificações e mensagens do Fale com DP</td></tr>
         </table>
-        <div class="ib tip"><span class="ico">💡</span><span>As demais funcionalidades (Gorjetas, Equipe, Cargos, Comunicados, FAQ, DP e Configurações) estão disponíveis apenas pelo computador.</span></div>
+        <div class="ib tip"><span class="ico">💡</span><span>As demais funcionalidades (Gorjetas, Cargos, VT, Comunicados, FAQ, DP e Configurações) estão disponíveis apenas pelo computador.</span></div>
       </div>
     </div>
 
