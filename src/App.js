@@ -3,7 +3,7 @@ import { useState, useEffect, Component } from "react";
 import { db } from "./firebase";
 import { doc, getDoc, setDoc } from "firebase/firestore";
 
-const APP_VERSION = "5.28.0";
+const APP_VERSION = "5.29.0";
 
 const DEFAULT_ADMISSION = () => `${new Date().getFullYear()}-01-01`;
 const round2 = (v) => Math.round(v * 100) / 100;
@@ -84,6 +84,8 @@ const today = () => new Date().toISOString().slice(0, 10);
 const maskCpf = (v) => { const d = (v ?? "").replace(/\D/g,"").slice(0,11); if(d.length<=3) return d; if(d.length<=6) return `${d.slice(0,3)}.${d.slice(3)}`; if(d.length<=9) return `${d.slice(0,3)}.${d.slice(3,6)}.${d.slice(6)}`; return `${d.slice(0,3)}.${d.slice(3,6)}.${d.slice(6,9)}-${d.slice(9,11)}`; };
 const monthKey = (y, m) => `${y}-${String(m + 1).padStart(2, "0")}`;
 const monthLabel = (y, m) => new Date(y, m, 1).toLocaleDateString("pt-BR", { month: "long", year: "numeric" });
+const getWeekMonday = (dateStr) => { const d = new Date(dateStr + "T12:00:00"); const day = d.getDay(); const diff = d.getDate() - day + (day === 0 ? -6 : 1); d.setDate(diff); return d.toISOString().slice(0, 10); };
+const getWeeksInMonth = (y, m) => { const daysInM = new Date(y, m + 1, 0).getDate(); const weeks = new Map(); for (let d = 1; d <= daysInM; d++) { const ds = `${y}-${String(m+1).padStart(2,"0")}-${String(d).padStart(2,"0")}`; const mon = getWeekMonday(ds); if (!weeks.has(mon)) { const sunD = new Date(mon + "T12:00:00"); sunD.setDate(sunD.getDate() + 6); weeks.set(mon, { monday: mon, sunday: sunD.toISOString().slice(0,10), daysInMonth: [] }); } weeks.get(mon).daysInMonth.push(d); } return [...weeks.values()]; };
 const WEEKDAYS = ["Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb"];
 const AREAS = ["Bar", "Cozinha", "Salão", "Limpeza"];
 const AREA_COLORS = { Bar: "#3b82f6", Cozinha: "#f59e0b", Salão: "#10b981", Limpeza: "#8b5cf6" };
@@ -609,6 +611,7 @@ const K = {
   schedulePrevista:    "v4:schedulePrevista",     // {[rid]: {[mk]: frozen snapshot of schedules at first edit/VT payment}}
   employeeGoals:       "v4:employeeGoals",        // {[empId]: [{id, type, title, targetRoleId?, topic?, materials:[], metas:[], createdAt, createdBy, status:"active"|"completed"|"cancelled"}]}
   delays:              "v4:delays",               // {[rid]: {[mk]: {[empId]: {[day]: minutes}}}}
+  tipApprovals:        "v4:tipApprovals",         // {[rid]: {[weekMonday]: {approvedAt, approvedBy, approvedByName}}}
 };
 
 // ── Version retention ──
@@ -3434,7 +3437,7 @@ function DpManagerTab({ restaurantId, dpMessages, onUpdate, isOwner }) {
   );
 }
 
-function EmployeePortal({ employees, roles, tips, schedules, splits, restaurants, communications, commAcks, faq, dpMessages, workSchedules, incidents, feedbacks, devChecklists, onBack, onUpdateEmployee, onUpdate, toggleTheme, theme, onSwitchToManager, employeeGoals }) {
+function EmployeePortal({ employees, roles, tips, schedules, splits, restaurants, communications, commAcks, faq, dpMessages, workSchedules, incidents, feedbacks, devChecklists, onBack, onUpdateEmployee, onUpdate, toggleTheme, theme, onSwitchToManager, employeeGoals, tipApprovals }) {
   const [empId, setEmpId] = useState(() => localStorage.getItem("apptip_empid") || null);
 
   useEffect(() => {
@@ -3471,7 +3474,11 @@ function EmployeePortal({ employees, roles, tips, schedules, splits, restaurants
   }, [emp, empId, employees.length]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const mk = monthKey(year, month);
-  const myTips = tips.filter(t => t.employeeId === empId && t.monthKey === mk);
+  const ridApprovals = tipApprovals?.[emp?.restaurantId] ?? {};
+  const myTips = tips.filter(t => t.employeeId === empId && t.monthKey === mk).filter(t => {
+    const monday = getWeekMonday(t.date);
+    return !!ridApprovals[monday];
+  });
   const grossTotal = myTips.reduce((a, t) => a + (t.myShare ?? 0), 0);
   const taxTotal   = myTips.reduce((a, t) => a + (t.myTax   ?? 0), 0);
   const netTotal   = myTips.reduce((a, t) => a + (t.myNet   ?? 0), 0);
@@ -3559,7 +3566,7 @@ function EmployeePortal({ employees, roles, tips, schedules, splits, restaurants
   const NAV = [
     ["comunicados","📢","Avisos"],
     ["escala","📅","Escala"],
-    ["extrato","💸","Gorjeta"],
+    restaurant?.showTipsToEmployee && ["extrato","💸","Gorjeta"],
     ["trilha","📈","Trilha"],
     empTabVisible("horarios") && ["horarios","🕐","Horários"],
     empTabVisible("faq")      && ["faq","❓","FAQ"],
@@ -7620,6 +7627,61 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
               </div>
             )}
 
+            {/* Confirmação semanal de gorjetas — DP */}
+            {(isDP || isOwner) && (() => {
+              const weeks = getWeeksInMonth(year, month);
+              const ridApprovals = data?.tipApprovals?.[rid] ?? {};
+              const monthTips = (tips ?? []).filter(t => t.restaurantId === rid && t.monthKey === mk);
+              const pendingCount = weeks.filter(w => !ridApprovals[w.monday]).length;
+              return (
+                <div style={{...S.card, marginBottom:24, border: pendingCount > 0 ? "2px solid #f59e0b" : "2px solid var(--ac)33"}}>
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
+                    <p style={{color:ac,fontSize:14,fontWeight:700,margin:0}}>✅ Confirmação Semanal</p>
+                    {pendingCount > 0 ? (
+                      <span style={{background:"#f59e0b22",color:"#f59e0b",padding:"3px 10px",borderRadius:8,fontSize:11,fontWeight:700}}>{pendingCount} pendente{pendingCount>1?"s":""}</span>
+                    ) : (
+                      <span style={{background:"var(--ac)11",color:ac,padding:"3px 10px",borderRadius:8,fontSize:11,fontWeight:700}}>Tudo confirmado</span>
+                    )}
+                  </div>
+                  <p style={{color:"var(--text3)",fontSize:12,marginBottom:14}}>Confirme cada semana para liberar os valores no extrato do empregado. Só semanas confirmadas ficam visíveis.</p>
+                  <div style={{display:"flex",flexDirection:"column",gap:10}}>
+                    {weeks.map(w => {
+                      const approval = ridApprovals[w.monday];
+                      const weekTips = monthTips.filter(t => { const day = parseInt(t.date.split("-")[2]); return w.daysInMonth.includes(day); });
+                      const weekTotal = weekTips.reduce((s,t) => s + (t.myNet ?? 0), 0);
+                      const weekEmps = new Set(weekTips.map(t => t.employeeId)).size;
+                      const fmtDay = (ds) => { const [,mm,dd] = ds.split("-"); return `${dd}/${mm}`; };
+                      return (
+                        <div key={w.monday} style={{display:"flex",alignItems:"center",gap:12,padding:"12px 14px",borderRadius:12,background:approval?"var(--ac)08":"var(--bg2)",border:`1px solid ${approval?"var(--ac)33":"var(--border)"}`}}>
+                          <div style={{flex:1}}>
+                            <div style={{fontWeight:700,fontSize:13,color:"var(--text)",marginBottom:2}}>{fmtDay(w.monday)} — {fmtDay(w.sunday)}</div>
+                            <div style={{fontSize:11,color:"var(--text3)"}}>{weekTips.length} lançamento{weekTips.length!==1?"s":""} · {weekEmps} empregado{weekEmps!==1?"s":""} · Líq. R$ {weekTotal.toFixed(2)}</div>
+                            {approval && <div style={{fontSize:10,color:"var(--ac-text)",marginTop:4}}>Confirmado por {approval.approvedByName} em {new Date(approval.approvedAt).toLocaleDateString("pt-BR")} {new Date(approval.approvedAt).toLocaleTimeString("pt-BR",{hour:"2-digit",minute:"2-digit"})}</div>}
+                          </div>
+                          {approval ? (
+                            <button onClick={() => {
+                              if (!window.confirm(`Desconfirmar a semana ${fmtDay(w.monday)} — ${fmtDay(w.sunday)}?\n\nOs valores desta semana serão ocultados do extrato do empregado até nova confirmação.`)) return;
+                              const updated = { ...(data?.tipApprovals ?? {}) };
+                              const ridObj = { ...(updated[rid] ?? {}) };
+                              delete ridObj[w.monday];
+                              updated[rid] = ridObj;
+                              onUpdate("tipApprovals", updated);
+                            }} style={{...S.btnSecondary,fontSize:11,padding:"6px 12px",color:"var(--red)",borderColor:"var(--red)44"}}>Desconfirmar</button>
+                          ) : (
+                            <button onClick={() => {
+                              const updated = { ...(data?.tipApprovals ?? {}) };
+                              updated[rid] = { ...(updated[rid] ?? {}), [w.monday]: { approvedAt: new Date().toISOString(), approvedBy: currentUser?.id || "admin", approvedByName: currentUser?.name || (isOwner ? "Admin AppTip" : "Gestor") } };
+                              onUpdate("tipApprovals", updated);
+                            }} style={{...S.btnPrimary,fontSize:11,padding:"6px 14px"}}>Confirmar ✅</button>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })()}
+
             <div style={{ ...S.card, marginBottom: 24 }}>
               {(() => {
                 const daysInMonth = new Date(year, month+1, 0).getDate();
@@ -10207,6 +10269,17 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                   );
                 })}
               </div>
+            </div>
+            {/* Exibir gorjeta para empregados */}
+            <div style={{...S.card,marginBottom:20}}>
+              <p style={{color:ac,fontSize:14,fontWeight:700,margin:"0 0 8px"}}>👁️ Exibir Gorjeta para Empregados</p>
+              <p style={{color:"var(--text3)",fontSize:12,marginBottom:14}}>Quando ativo, o empregado consegue ver a aba de gorjeta no aplicativo. Os valores só aparecem após confirmação semanal pelo DP. Se desativado, a aba de gorjeta fica completamente oculta para os empregados deste restaurante.</p>
+              <label style={{display:"flex",alignItems:"center",gap:12,cursor:"pointer"}}>
+                <div onClick={()=>patchConfig({ showTipsToEmployee: !localRest.showTipsToEmployee })} style={{width:48,height:26,borderRadius:13,background:localRest.showTipsToEmployee?ac:"var(--border)",position:"relative",cursor:"pointer",transition:"background 0.2s"}}>
+                  <div style={{width:22,height:22,borderRadius:11,background:"#fff",position:"absolute",top:2,left:localRest.showTipsToEmployee?24:2,transition:"left 0.2s",boxShadow:"0 1px 3px rgba(0,0,0,0.2)"}}/>
+                </div>
+                <span style={{color:"var(--text)",fontSize:14,fontWeight:600}}>{localRest.showTipsToEmployee ? "Ativo — empregado vê gorjeta" : "Desativado — gorjeta oculta"}</span>
+              </label>
             </div>
             {/* Privacidade */}
             <div style={{...S.card,marginBottom:20}}>
@@ -14105,6 +14178,7 @@ export default function App() {
   const [schedulePrevista,    setSchedulePrevista]    = useState({});
   const [employeeGoals,       setEmployeeGoals]       = useState({});
   const [delays,              setDelays]              = useState({});
+  const [tipApprovals,        setTipApprovals]        = useState({});
 
   useEffect(() => {
     const savedId = currentUserId;
@@ -14132,7 +14206,7 @@ export default function App() {
       setLoadProgress("Preparando o sistema...");
 
       const keys = keyNames;
-      const map = { owners:setOwners, managers:setManagers, restaurants:setRestaurants, employees:setEmployees, roles:setRoles, tips:setTips, splits:setSplits, schedules:setSchedules, communications:setCommunications, commAcks:setCommAcks, faq:setFaq, dpMessages:setDpMessages, workSchedules:setWorkSchedules, notifications:setNotifications, noTipDays:setNoTipDays, trash:setTrash, schedTemplates:setSchedTemplates, schedDrafts:setSchedDrafts, scheduleVersions:setScheduleVersions, tipVersions:setTipVersions, vtConfig:setVtConfig, vtMonthly:setVtMonthly, vtPayments:setVtPayments, incidents:setIncidents, feedbacks:setFeedbacks, devChecklists:setDevChecklists, scheduleAdjustments:setScheduleAdjustments, scheduleStatus:setScheduleStatus, schedulePrevista:setSchedulePrevista, employeeGoals:setEmployeeGoals, delays:setDelays };
+      const map = { owners:setOwners, managers:setManagers, restaurants:setRestaurants, employees:setEmployees, roles:setRoles, tips:setTips, splits:setSplits, schedules:setSchedules, communications:setCommunications, commAcks:setCommAcks, faq:setFaq, dpMessages:setDpMessages, workSchedules:setWorkSchedules, notifications:setNotifications, noTipDays:setNoTipDays, trash:setTrash, schedTemplates:setSchedTemplates, schedDrafts:setSchedDrafts, scheduleVersions:setScheduleVersions, tipVersions:setTipVersions, vtConfig:setVtConfig, vtMonthly:setVtMonthly, vtPayments:setVtPayments, incidents:setIncidents, feedbacks:setFeedbacks, devChecklists:setDevChecklists, scheduleAdjustments:setScheduleAdjustments, scheduleStatus:setScheduleStatus, schedulePrevista:setSchedulePrevista, employeeGoals:setEmployeeGoals, delays:setDelays, tipApprovals:setTipApprovals };
       const loaded_data = {};
       let successCount = 0;
       keys.forEach((k, i) => {
@@ -14280,12 +14354,12 @@ export default function App() {
     return () => { clearTimeout(slowTimer); clearTimeout(verySlowTimer); };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const data = { owners, managers, restaurants, employees, roles, tips, splits, schedules, communications, commAcks, faq, dpMessages, workSchedules, notifications, noTipDays, trash, schedTemplates, schedDrafts, scheduleVersions, tipVersions, vtConfig, vtMonthly, vtPayments, incidents, feedbacks, devChecklists, scheduleAdjustments, scheduleStatus, schedulePrevista, employeeGoals, delays };
+  const data = { owners, managers, restaurants, employees, roles, tips, splits, schedules, communications, commAcks, faq, dpMessages, workSchedules, notifications, noTipDays, trash, schedTemplates, schedDrafts, scheduleVersions, tipVersions, vtConfig, vtMonthly, vtPayments, incidents, feedbacks, devChecklists, scheduleAdjustments, scheduleStatus, schedulePrevista, employeeGoals, delays, tipApprovals };
 
   async function handleUpdate(field, value) {
     if (field === "_toast") { setToast(value); return; }
-    const setters = { owners:setOwners, managers:setManagers, restaurants:setRestaurants, employees:setEmployees, roles:setRoles, tips:setTips, splits:setSplits, schedules:setSchedules, communications:setCommunications, commAcks:setCommAcks, faq:setFaq, dpMessages:setDpMessages, workSchedules:setWorkSchedules, notifications:setNotifications, noTipDays:setNoTipDays, trash:setTrash, schedTemplates:setSchedTemplates, schedDrafts:setSchedDrafts, scheduleVersions:setScheduleVersions, tipVersions:setTipVersions, vtConfig:setVtConfig, vtMonthly:setVtMonthly, vtPayments:setVtPayments, incidents:setIncidents, feedbacks:setFeedbacks, devChecklists:setDevChecklists, scheduleAdjustments:setScheduleAdjustments, scheduleStatus:setScheduleStatus, schedulePrevista:setSchedulePrevista, employeeGoals:setEmployeeGoals, delays:setDelays };
-    const keys    = { owners:K.owners, managers:K.managers, restaurants:K.restaurants, employees:K.employees, roles:K.roles, tips:K.tips, splits:K.splits, schedules:K.schedules, communications:K.communications, commAcks:K.commAcks, faq:K.faq, dpMessages:K.dpMessages, workSchedules:K.workSchedules, notifications:K.notifications, noTipDays:K.noTipDays, trash:K.trash, schedTemplates:K.schedTemplates, schedDrafts:K.schedDrafts, scheduleVersions:K.scheduleVersions, tipVersions:K.tipVersions, vtConfig:K.vtConfig, vtMonthly:K.vtMonthly, vtPayments:K.vtPayments, incidents:K.incidents, feedbacks:K.feedbacks, devChecklists:K.devChecklists, scheduleAdjustments:K.scheduleAdjustments, scheduleStatus:K.scheduleStatus, schedulePrevista:K.schedulePrevista, employeeGoals:K.employeeGoals, delays:K.delays };
+    const setters = { owners:setOwners, managers:setManagers, restaurants:setRestaurants, employees:setEmployees, roles:setRoles, tips:setTips, splits:setSplits, schedules:setSchedules, communications:setCommunications, commAcks:setCommAcks, faq:setFaq, dpMessages:setDpMessages, workSchedules:setWorkSchedules, notifications:setNotifications, noTipDays:setNoTipDays, trash:setTrash, schedTemplates:setSchedTemplates, schedDrafts:setSchedDrafts, scheduleVersions:setScheduleVersions, tipVersions:setTipVersions, vtConfig:setVtConfig, vtMonthly:setVtMonthly, vtPayments:setVtPayments, incidents:setIncidents, feedbacks:setFeedbacks, devChecklists:setDevChecklists, scheduleAdjustments:setScheduleAdjustments, scheduleStatus:setScheduleStatus, schedulePrevista:setSchedulePrevista, employeeGoals:setEmployeeGoals, delays:setDelays, tipApprovals:setTipApprovals };
+    const keys    = { owners:K.owners, managers:K.managers, restaurants:K.restaurants, employees:K.employees, roles:K.roles, tips:K.tips, splits:K.splits, schedules:K.schedules, communications:K.communications, commAcks:K.commAcks, faq:K.faq, dpMessages:K.dpMessages, workSchedules:K.workSchedules, notifications:K.notifications, noTipDays:K.noTipDays, trash:K.trash, schedTemplates:K.schedTemplates, schedDrafts:K.schedDrafts, scheduleVersions:K.scheduleVersions, tipVersions:K.tipVersions, vtConfig:K.vtConfig, vtMonthly:K.vtMonthly, vtPayments:K.vtPayments, incidents:K.incidents, feedbacks:K.feedbacks, devChecklists:K.devChecklists, scheduleAdjustments:K.scheduleAdjustments, scheduleStatus:K.scheduleStatus, schedulePrevista:K.schedulePrevista, employeeGoals:K.employeeGoals, delays:K.delays, tipApprovals:K.tipApprovals };
     // Support functional updates to prevent stale-state race conditions:
     // When value is a function, it receives the latest state (like setState(prev => ...))
     let resolvedValue;
@@ -14305,7 +14379,7 @@ export default function App() {
         return;
       }
     }
-    const labels = { owners:"Admins atualizados", managers:"Gestores atualizados", restaurants:"Restaurantes atualizados", employees:"Empregados atualizados", roles:"Cargos atualizados", tips:"Gorjetas atualizadas", splits:"Percentuais salvos", schedules:"Escala atualizada", communications:"Comunicados atualizados", commAcks:"Ciências atualizadas", faq:"FAQ atualizado", dpMessages:"Mensagem enviada", workSchedules:"Horários salvos", notifications:"Notificações atualizadas", schedTemplates:"Template salvo", schedDrafts:"Rascunho salvo", trash:"Lixeira atualizada", noTipDays:"Dias sem gorjeta atualizados", scheduleVersions:null, tipVersions:null, vtConfig:null, vtMonthly:null, vtPayments:"VT registrado", incidents:"Ocorrência registrada", feedbacks:"Feedback registrado", devChecklists:"Checklist atualizado", scheduleAdjustments:null, scheduleStatus:null, schedulePrevista:null, employeeGoals:"Objetivo atualizado", delays:"Atrasos atualizados" };
+    const labels = { owners:"Admins atualizados", managers:"Gestores atualizados", restaurants:"Restaurantes atualizados", employees:"Empregados atualizados", roles:"Cargos atualizados", tips:"Gorjetas atualizadas", splits:"Percentuais salvos", schedules:"Escala atualizada", communications:"Comunicados atualizados", commAcks:"Ciências atualizadas", faq:"FAQ atualizado", dpMessages:"Mensagem enviada", workSchedules:"Horários salvos", notifications:"Notificações atualizadas", schedTemplates:"Template salvo", schedDrafts:"Rascunho salvo", trash:"Lixeira atualizada", noTipDays:"Dias sem gorjeta atualizados", scheduleVersions:null, tipVersions:null, vtConfig:null, vtMonthly:null, vtPayments:"VT registrado", incidents:"Ocorrência registrada", feedbacks:"Feedback registrado", devChecklists:"Checklist atualizado", scheduleAdjustments:null, scheduleStatus:null, schedulePrevista:null, employeeGoals:"Objetivo atualizado", delays:"Atrasos atualizados", tipApprovals:null };
     if (labels[field] === null) return; // silent save (e.g. version snapshots)
     setToast(labels[field] ?? (typeof value === "string" ? value : "Salvo!"));
   }
@@ -14401,7 +14475,7 @@ export default function App() {
             return () => { setCurrentUser(emp); setUserRole("employee"); localStorage.setItem("apptip_role","employee"); localStorage.setItem("apptip_userid",emp.id); localStorage.setItem("apptip_empid",emp.id); setView("employee"); };
           })()} />
       ))}
-      {view === "employee" && <EmployeePortal employees={employees} roles={roles} tips={tips} schedules={schedules} splits={splits} restaurants={restaurants} communications={communications} commAcks={commAcks} faq={faq} dpMessages={dpMessages} workSchedules={workSchedules} incidents={incidents} feedbacks={feedbacks} devChecklists={devChecklists} employeeGoals={employeeGoals} onBack={doLogout} onUpdateEmployee={emp=>{const next=employees.map(e=>e.id===emp.id?emp:e);handleUpdate("employees",next);}} onUpdate={handleUpdate} toggleTheme={toggleTheme} theme={theme}
+      {view === "employee" && <EmployeePortal employees={employees} roles={roles} tips={tips} schedules={schedules} splits={splits} restaurants={restaurants} communications={communications} commAcks={commAcks} faq={faq} dpMessages={dpMessages} workSchedules={workSchedules} incidents={incidents} feedbacks={feedbacks} devChecklists={devChecklists} employeeGoals={employeeGoals} tipApprovals={tipApprovals} onBack={doLogout} onUpdateEmployee={emp=>{const next=employees.map(e=>e.id===emp.id?emp:e);handleUpdate("employees",next);}} onUpdate={handleUpdate} toggleTheme={toggleTheme} theme={theme}
         onSwitchToManager={(() => {
           const cpf = currentUser?.cpf?.replace(/\D/g,"");
           let mgr = cpf ? managers.find(m => m.cpf?.replace(/\D/g,"") === cpf) : null;
