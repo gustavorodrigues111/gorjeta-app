@@ -3,7 +3,7 @@ import { useState, useEffect, Component } from "react";
 import { db } from "./firebase";
 import { doc, getDoc, setDoc } from "firebase/firestore";
 
-const APP_VERSION = "5.19.0";
+const APP_VERSION = "5.18.0";
 
 const DEFAULT_ADMISSION = () => `${new Date().getFullYear()}-01-01`;
 const round2 = (v) => Math.round(v * 100) / 100;
@@ -86,7 +86,7 @@ const monthKey = (y, m) => `${y}-${String(m + 1).padStart(2, "0")}`;
 const monthLabel = (y, m) => new Date(y, m, 1).toLocaleDateString("pt-BR", { month: "long", year: "numeric" });
 const WEEKDAYS = ["Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb"];
 const AREAS = ["Bar", "Cozinha", "Salão", "Limpeza"];
-const AREA_COLORS = { Bar: "#3b82f6", Cozinha: "#f59e0b", Salão: "#10b981", Limpeza: "#8b5cf6" };
+const AREA_COLORS = { Bar: "#3b82f6", Cozinha: "#f59e0b", Salão: "var(--green)", Limpeza: "#8b5cf6" };
 const DEFAULT_SPLIT = { Bar: 12, Cozinha: 40, Salão: 40, Limpeza: 8 };
 const TAX = 0.33;
 const DAY_OFF       = "off";      // folga programada
@@ -97,6 +97,21 @@ const DAY_FAULT_J   = "faultj";   // falta justificada
 const DAY_FAULT_U   = "faultu";   // falta injustificada
 const DAY_FREELA    = "freela";   // freela — presente mas sem gorjeta
 
+// eslint-disable-next-line no-unused-vars
+const DAY_LABELS = {
+  [DAY_OFF]:       { label: "Folga",              color: "var(--red)" },
+  [DAY_COMP]:      { label: "Folga p/ Comp.",     color: "#3b82f6" },
+  [DAY_COMP_TRAB]: { label: "Trab. p/ Comp.",     color: "#0ea5e9" },
+  [DAY_VACATION]:  { label: "Férias",             color: "#8b5cf6" },
+  [DAY_FAULT_J]:   { label: "Falta Just.",        color: "#f59e0b" },
+  [DAY_FAULT_U]:   { label: "Falta Injust.",      color: "var(--red)" },
+  [DAY_FREELA]:    { label: "Freela",             color: "#06b6d4" },
+};
+// Days that count for gorjeta (além do dia normal de trabalho)
+// eslint-disable-next-line no-unused-vars
+const DAYS_EARN_TIP = new Set([DAY_COMP, DAY_COMP_TRAB]);
+// eslint-disable-next-line no-unused-vars
+const DAYS_NO_TIP   = new Set([DAY_OFF, DAY_VACATION, DAY_FAULT_J, DAY_FAULT_U, DAY_FREELA]);
 
 const STATUS_SHORT = {
   [DAY_OFF]:"F",[DAY_FREELA]:"FL",[DAY_COMP]:"FC",[DAY_COMP_TRAB]:"TC",
@@ -163,6 +178,7 @@ const VERSION_DEBOUNCE_MS = 30000; // 30s
 const _pendingSnapshots = {};
 
 // Format relative time in pt-BR ("há 5 min", "há 2h", "ontem às 14:30")
+// eslint-disable-next-line no-unused-vars
 function fmtRelTime(iso) {
   const d = new Date(iso);
   const now = new Date();
@@ -179,16 +195,19 @@ function fmtRelTime(iso) {
 }
 
 // Create a snapshot of schedules for a specific month (deep copy)
+// eslint-disable-next-line no-unused-vars
 function snapshotSchedulesMonth(schedules, rid, mk) {
   return JSON.parse(JSON.stringify(schedules?.[rid]?.[mk] ?? {}));
 }
 // Create a snapshot of tips for a specific month (deep copy)
+// eslint-disable-next-line no-unused-vars
 function snapshotTipsMonth(tips, rid, mk) {
   return JSON.parse(JSON.stringify((tips ?? []).filter(t => t.restaurantId === rid && t.monthKey === mk)));
 }
 
 // Enqueue or save a version entry. `kind` = "schedules" | "tips".
 // Bulk = true salva imediatamente (sem debounce). Bulk = false aguarda VERSION_DEBOUNCE_MS.
+// eslint-disable-next-line no-unused-vars
 function saveVersion(kind, rid, mk, currentVersions, snapshot, author, reason, onUpdate, bulk = false) {
   const versionKey = kind === "schedules" ? "scheduleVersions" : "tipVersions";
   const pendKey = `${kind}:${rid}:${mk}`;
@@ -242,18 +261,10 @@ function saveVersion(kind, rid, mk, currentVersions, snapshot, author, reason, o
 
 //
 const ac = "#d4a017";
-// ── Shared color palette ──
-const C = {
-  blue: "#3b82f6", orange: "#f59e0b", green: "#10b981", purple: "#8b5cf6",
-  cyan: "#06b6d4", red: "var(--red)", ac: "var(--ac)",
-};
-// ── Shared styles ──
 const S = {
   input: { width:"100%", boxSizing:"border-box", padding:"11px 14px", borderRadius:10, border:"1px solid var(--border)", background:"var(--input-bg)", color:"var(--text)", fontSize:14, fontFamily:"'DM Sans',sans-serif", outline:"none" },
   btnPrimary: { width:"100%", padding:"12px", borderRadius:12, background:ac, border:"none", color:"var(--text)", fontWeight:700, fontSize:14, cursor:"pointer", fontFamily:"'DM Sans',sans-serif" },
-  btnSecondary: { padding:"8px 18px", borderRadius:10, border:"1px solid var(--border)", background:"transparent", color:"var(--text2)", cursor:"pointer", fontFamily:"'DM Sans',sans-serif", fontSize:13, minHeight:44, display:"inline-flex", alignItems:"center" },
-  // Small action button with minimum touch target (44px)
-  btnSmall: { padding:"8px 14px", borderRadius:8, border:"1px solid var(--border)", background:"transparent", cursor:"pointer", fontFamily:"'DM Sans',sans-serif", fontSize:12, minHeight:44, display:"inline-flex", alignItems:"center", justifyContent:"center" },
+  btnSecondary: { padding:"8px 18px", borderRadius:10, border:"1px solid var(--border)", background:"transparent", color:"var(--text2)", cursor:"pointer", fontFamily:"'DM Sans',sans-serif", fontSize:13 },
   card: { background:"var(--card-bg)", borderRadius:16, padding:"18px 20px", border:"1px solid var(--border)" },
   label: { color:"var(--text3)", fontSize:12, marginBottom:4, display:"block", fontWeight:500 },
   mono: { fontFamily:"'DM Mono',monospace" },
@@ -264,32 +275,6 @@ function Toast({ msg, onClose }) {
   useEffect(() => { if (msg) { const t = setTimeout(onClose, 3200); return () => clearTimeout(t); } }, [msg, onClose]); // eslint-disable-line react-hooks/exhaustive-deps
   if (!msg) return null;
   return <div role="status" aria-live="polite" style={{ position:"fixed", bottom:32, left:"50%", transform:"translateX(-50%)", background:"var(--text)", color:"var(--bg)", padding:"12px 28px", borderRadius:40, fontFamily:"'DM Sans',sans-serif", fontWeight:600, fontSize:14, boxShadow:"0 8px 32px rgba(0,0,0,.15)", zIndex:9999, whiteSpace:"nowrap" }}>{msg}</div>;
-}
-
-function PrivacyModal({ open, onClose }) {
-  if (!open) return null;
-  return (
-    <div role="dialog" aria-modal="true" aria-label="Política de Privacidade" style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.5)",zIndex:9999,display:"flex",alignItems:"center",justifyContent:"center",padding:20}} onClick={e=>{if(e.target===e.currentTarget)onClose();}}>
-      <div style={{background:"var(--card-bg)",borderRadius:16,padding:28,maxWidth:480,width:"100%",maxHeight:"85vh",overflowY:"auto",border:"1px solid var(--border)",fontFamily:"'DM Sans',sans-serif",boxShadow:"0 20px 60px rgba(0,0,0,.2)"}}>
-        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20}}>
-          <h2 style={{color:"var(--text)",margin:0,fontSize:18,fontWeight:700}}>🔒 Política de Privacidade</h2>
-          <button onClick={onClose} style={{background:"none",border:"none",color:"var(--text3)",cursor:"pointer",fontSize:20}}>✕</button>
-        </div>
-        <div style={{color:"var(--text2)",fontSize:13,lineHeight:1.8,display:"flex",flexDirection:"column",gap:12}}>
-          <p style={{color:"var(--text3)",fontSize:11}}>Última atualização: {new Date().toLocaleDateString("pt-BR")}</p>
-          <p><strong style={{color:"var(--text)"}}>1. Quem somos</strong><br/>O AppTip é uma plataforma de gestão de gorjetas para restaurantes, operada pelo estabelecimento ao qual você está vinculado.</p>
-          <p><strong style={{color:"var(--text)"}}>2. Dados coletados</strong><br/>Coletamos: nome completo, CPF, cargo, data de admissão e PIN de acesso. Esses dados são necessários para identificação e distribuição de gorjetas.</p>
-          <p><strong style={{color:"var(--text)"}}>3. Finalidade</strong><br/>Seus dados são usados exclusivamente para: controle de acesso ao sistema, cálculo e distribuição de gorjetas, gestão de escala e comunicados internos.</p>
-          <p><strong style={{color:"var(--text)"}}>4. Armazenamento</strong><br/>Os dados são armazenados no Google Firebase (servidores na América do Sul) com acesso restrito ao seu restaurante. Não compartilhamos seus dados com terceiros.</p>
-          <p><strong style={{color:"var(--text)"}}>5. Seus direitos (LGPD)</strong><br/>Você tem direito a: acessar seus dados, corrigir informações incorretas, solicitar a exclusão dos seus dados e revogar o consentimento a qualquer momento.</p>
-          <p><strong style={{color:"var(--text)"}}>6. Solicitação de exclusão</strong><br/>Para solicitar a exclusão dos seus dados, entre em contato com o gestor do seu restaurante através da função "Fale com DP" no aplicativo.</p>
-          <p><strong style={{color:"var(--text)"}}>7. Contato</strong><br/>Dúvidas sobre privacidade devem ser direcionadas ao gestor responsável pelo restaurante.</p>
-          <p style={{color:"var(--text3)",fontSize:11,borderTop:"1px solid var(--border)",paddingTop:12}}>Esta política está em conformidade com a Lei Geral de Proteção de Dados (LGPD — Lei nº 13.709/2018).</p>
-        </div>
-        <button onClick={onClose} style={{...S.btnPrimary,marginTop:16}}>Entendi</button>
-      </div>
-    </div>
-  );
 }
 
 function Modal({ title, onClose, children, wide }) {
@@ -375,6 +360,11 @@ function MonthNav({ year, month, onChange }) {
   );
 }
 
+// eslint-disable-next-line no-unused-vars
+function PermBadge({ label, on }) {
+  if (!on) return null;
+  return <span style={{ background:"var(--green-bg)", color:"var(--green)", borderRadius:6, padding:"2px 10px", fontSize:11, fontWeight:700 }}>✓ {label}</span>;
+}
 
 //
 function CalendarGrid({ year, month, dayMap, onDayClick, readOnly }) {
@@ -441,6 +431,24 @@ function CalendarGrid({ year, month, dayMap, onDayClick, readOnly }) {
 
 // Cycle order: work > off > freela > comp > faultJ > faultU > work (férias só via formulário)
 const DAY_CYCLE = [DAY_OFF, DAY_FREELA, DAY_COMP, DAY_COMP_TRAB, DAY_FAULT_J, DAY_FAULT_U];
+
+// eslint-disable-next-line no-unused-vars
+function ScheduleCalendar({ empId, restaurantId, year, month, schedules, onUpdate }) {
+  const mk = monthKey(year, month);
+  const dayMap = schedules?.[restaurantId]?.[mk]?.[empId] ?? {};
+  function cycleDay(dateStr) {
+    const cur = dayMap[dateStr];
+    const idx = DAY_CYCLE.indexOf(cur);
+    const next = idx === DAY_CYCLE.length - 1 ? null : DAY_CYCLE[idx + 1];
+    const newMap = { ...dayMap };
+    if (next === null) delete newMap[dateStr]; else newMap[dateStr] = next;
+    onUpdate("schedules", {
+      ...schedules,
+      [restaurantId]: { ...(schedules?.[restaurantId] ?? {}), [mk]: { ...(schedules?.[restaurantId]?.[mk] ?? {}), [empId]: newMap } }
+    });
+  }
+  return <CalendarGrid year={year} month={month} dayMap={dayMap} onDayClick={cycleDay} />;
+}
 
 //
 function loadScript(src) {
@@ -968,7 +976,7 @@ function FaleDpTab({ empId, emp, restaurantId, dpMessages, onUpdate }) {
         }} style={{padding:"8px 16px",borderRadius:8,border:"1px solid #ef444433",background:"transparent",color:"var(--red)",cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:12}}>
           Solicitar exclusão dos meus dados
         </button>
-        <button onClick={()=>window.__showPrivacy?.()} style={{display:"block",marginTop:8,background:"none",border:"none",color:"var(--text3)",cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:11,padding:0,textDecoration:"underline"}}>
+        <button onClick={()=>document.getElementById("apptip-privacy").style.display="flex"} style={{display:"block",marginTop:8,background:"none",border:"none",color:"var(--text3)",cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:11,padding:0,textDecoration:"underline"}}>
           Ver Política de Privacidade completa
         </button>
       </div>
@@ -993,15 +1001,24 @@ function ComunicadosManagerTab({ restaurantId, communications, commAcks, employe
   const [selAreas, setSelAreas] = useState([]);
   const [selEmps, setSelEmps] = useState([]);
   const [aiInput, setAiInput] = useState("");
-  const { generate: aiGenerate, aiLoading, aiError, setAiError } = useAiGenerate();
+  const [aiLoading, setAiLoading] = useState(false);
+  const [aiError, setAiError] = useState("");
+  // eslint-disable-next-line no-unused-vars
+  const ac = "var(--ac)";
 
   async function handleAiSuggest() {
     if (!aiInput.trim()) return;
-    const result = await aiGenerate(
-      `Você é um assistente de comunicação interna de restaurantes. O gestor quer enviar um comunicado para a equipe. Redija de forma profissional, clara e direta. Responda APENAS com JSON: {"titulo": "título objetivo", "corpo": "texto completo do comunicado"}`,
-      aiInput.trim()
-    );
-    if (result) { setTitle(result.titulo); setBody(result.corpo); setAiInput(""); }
+    setAiLoading(true); setAiError("");
+    try {
+      const result = await groqGenerate(
+        `Você é um assistente de comunicação interna de restaurantes. O gestor quer enviar um comunicado para a equipe. Redija de forma profissional, clara e direta. Responda APENAS com JSON: {"titulo": "título objetivo", "corpo": "texto completo do comunicado"}`,
+        aiInput.trim()
+      );
+      setTitle(result.titulo); setBody(result.corpo); setAiInput("");
+    } catch(e) {
+      setAiError(e.message || "Não foi possível gerar sugestão. Tente novamente.");
+    }
+    setAiLoading(false);
   }
 
   // target logic: "all" | "areas:[Bar,Cozinha]" | "emps:[id1,id2]"
@@ -1055,7 +1072,15 @@ function ComunicadosManagerTab({ restaurantId, communications, commAcks, employe
           // Filter to target employees only
           const targetEmps = !c.target || c.target === "all" ? restEmps
             : c.target.startsWith("emp:") ? restEmps.filter(e => `emp:${e.id}` === c.target)
+            : c.target.startsWith("area:") ? restEmps.filter(e => { // eslint-disable-next-line no-unused-vars
+const r = employees.find(x=>x.id===e.id); return true; }) // area filter below
             : restEmps;
+          const areaFilter = c.target?.startsWith("area:") ? c.target.replace("area:","") : null;
+          // eslint-disable-next-line no-unused-vars
+          const finalEmps = areaFilter ? restEmps.filter(e => {
+            // need roles from props - use employees directly
+            return true; // simplified, will show all for area (ack table)
+          }) : targetEmps;
           const targetLabel = !c.target || c.target==="all" ? "Todos os empregados"
             : c.target.startsWith("emps:") ? `Empregados: ${c.target.replace("emps:","").split(",").map(id=>employees.find(e=>e.id===id)?.name?.split(" ")[0]??"").join(", ")}`
             : c.target.startsWith("areas:") ? `Áreas: ${c.target.replace("areas:","").replace(/,/g,", ")}`
@@ -1259,36 +1284,6 @@ async function groqGenerate(systemPrompt, userInput) {
   }
 }
 
-// ── useMobile hook — unified mobile detection ──
-function useMobile(breakpoint = 768) {
-  const [isMobile, setIsMobile] = useState(() => window.innerWidth < breakpoint);
-  useEffect(() => {
-    const handler = () => setIsMobile(window.innerWidth < breakpoint);
-    window.addEventListener("resize", handler);
-    return () => window.removeEventListener("resize", handler);
-  }, [breakpoint]);
-  return isMobile;
-}
-
-// ── useAiGenerate hook — wraps groqGenerate with loading/error state ──
-function useAiGenerate() {
-  const [aiLoading, setAiLoading] = useState(false);
-  const [aiError, setAiError] = useState("");
-  async function generate(systemPrompt, userInput) {
-    setAiLoading(true); setAiError("");
-    try {
-      const result = await groqGenerate(systemPrompt, userInput);
-      return result;
-    } catch (e) {
-      setAiError(e.message || "Não foi possível gerar sugestão. Tente novamente.");
-      return null;
-    } finally {
-      setAiLoading(false);
-    }
-  }
-  return { generate, aiLoading, aiError, setAiError };
-}
-
 // FAQ MANAGER TAB
 //
 
@@ -1297,7 +1292,8 @@ function FaqManagerTab({ restaurantId, faq, onUpdate }) {
   const [editIdx, setEditIdx] = useState(null);
   const [form, setForm] = useState({ q: "", a: "" });
   const [aiInput, setAiInput] = useState("");
-  const { generate: aiGenerate, aiLoading, aiError, setAiError } = useAiGenerate();
+  const [aiLoading, setAiLoading] = useState(false);
+  const [aiError, setAiError] = useState("");
   const ac = "var(--ac)";
 
   function saveItem() {
@@ -1326,11 +1322,18 @@ function FaqManagerTab({ restaurantId, faq, onUpdate }) {
 
   async function handleAiSuggest() {
     if (!aiInput.trim()) return;
-    const result = await aiGenerate(
-      `Você é um assistente especializado em restaurantes. O gestor descreveu informalmente uma pergunta e resposta para o FAQ dos empregados. Reformule de forma clara, profissional e empática. Responda APENAS com JSON: {"q": "pergunta clara", "a": "resposta profissional"}`,
-      aiInput.trim()
-    );
-    if (result) { setForm({ q: result.q, a: result.a }); setAiInput(""); }
+    setAiLoading(true); setAiError("");
+    try {
+      const result = await groqGenerate(
+        `Você é um assistente especializado em restaurantes. O gestor descreveu informalmente uma pergunta e resposta para o FAQ dos empregados. Reformule de forma clara, profissional e empática. Responda APENAS com JSON: {"q": "pergunta clara", "a": "resposta profissional"}`,
+        aiInput.trim()
+      );
+      setForm({ q: result.q, a: result.a });
+      setAiInput("");
+    } catch (e) {
+      setAiError(e.message || "Não foi possível gerar sugestão. Tente novamente.");
+    }
+    setAiLoading(false);
   }
 
   const isEditing = editIdx !== null;
@@ -1547,6 +1550,13 @@ function timeToMin(t) {
   const [h, m] = t.split(":").map(Number);
   return h * 60 + (m || 0);
 }
+// eslint-disable-next-line no-unused-vars
+function minToTime(m) {
+  if (m === null || m === undefined) return "";
+  const h = Math.floor(m / 60) % 24;
+  const mm = m % 60;
+  return `${String(h).padStart(2,"0")}:${String(mm).padStart(2,"0")}`;
+}
 function fmtHHMM(totalMin) {
   if (!totalMin && totalMin !== 0) return "—";
   const sign = totalMin < 0 ? "-" : "";
@@ -1687,7 +1697,7 @@ function WorkScheduleManagerTab({ restaurantId, employees, roles, workSchedules,
   const [showValidFrom, setShowValidFrom]   = useState(false);
   const [validFrom, setValidFrom]           = useState(today());
   const [selectedSchedIds, setSelectedSchedIds] = useState(new Set());
-  const [saveMode, setSaveMode]             = useState(null);
+  const [saveMode, setSaveMode]             = useState(null); // eslint-disable-line no-unused-vars
   const [validated, setValidated]           = useState(false); // true após validar horários com sucesso
 
   const selEmp = restEmps.find(e => e.id === selEmpId);
@@ -1735,6 +1745,11 @@ function WorkScheduleManagerTab({ restaurantId, employees, roles, workSchedules,
     return Object.values(days).every(d => !d.active || (d.in && d.out));
   }
 
+  // ── Check if ANY active day has hours ──
+  // eslint-disable-next-line no-unused-vars
+  function hasAnyHours(days) {
+    return Object.values(days).some(d => d.active && d.in && d.out);
+  }
 
   // ── Load employee ──
   function loadEmp(empId) {
@@ -1776,6 +1791,15 @@ function WorkScheduleManagerTab({ restaurantId, employees, roles, workSchedules,
     setValidated(false);
   }
 
+  // ── "Salvar Dias" (days-only, no hours required) — botão removido na v5.14.1, função preservada ──
+  // eslint-disable-next-line no-unused-vars
+  function trySaveDays() {
+    const activeDays = Object.values(editDays).filter(d => d.active);
+    if (activeDays.length === 0) { setErrors(["Selecione pelo menos um dia de trabalho."]); return; }
+    setErrors([]);
+    setSaveMode("days");
+    setShowValidFrom(true);
+  }
 
   // ── "Validar Horários" (só valida, não salva) ──
   function tryValidateFull() {
@@ -3006,6 +3030,15 @@ function EmployeePortal({ employees, roles, tips, schedules, splits, restaurants
 
   // Abas do empregado — respeita config do admin E escolha do gestor
   const empTabVisible = (key) => restaurant?.tabsConfig?.[key] !== false && restaurant?.tabsGestor?.[key] !== false;
+  // eslint-disable-next-line no-unused-vars
+  const TABS = [
+    ["comunicados", "📢 Comunicados"],
+    ["escala",      "📅 Escala"],
+    ["extrato",     "💸 Gorjeta"],
+    empTabVisible("horarios") && ["horarios", "🕐 Horários"],
+    empTabVisible("faq")      && ["faq",      "❓ FAQ"],
+    empTabVisible("dp")       && ["dp",       "💬 Fale com DP"],
+  ].filter(Boolean);
 
   function handleTabChange(id) {
     if (hasPending && id !== "comunicados") {
@@ -3364,7 +3397,8 @@ function RoleSpreadsheet({ restRoles, rid, roles, employees, onUpdate }) {
   const [newRow, setNewRow] = useState(blank());
   const [editRows, setEditRows] = useState({});
   const [aiInput, setAiInput] = useState("");
-  const { generate: aiGenerate, aiLoading, aiError, setAiError } = useAiGenerate();
+  const [aiLoading, setAiLoading] = useState(false);
+  const [aiError, setAiError] = useState("");
   const [showAi, setShowAi] = useState(false);
   const [pendingNoTip, setPendingNoTip] = useState({}); // track noTip changes locally
 
@@ -3372,9 +3406,10 @@ function RoleSpreadsheet({ restRoles, rid, roles, employees, onUpdate }) {
 
   async function handleAiCargos() {
     if (!aiInput.trim()) return;
-    setAiPreview(null);
-    const existingList = restRoles.map(r => `- id:"${r.id}" nome:"${r.name}" area:"${r.area}" pontos:${r.points} semGorjeta:${!!r.noTip} inativo:${!!r.inactive}`).join("\n");
-    const result = await aiGenerate(
+    setAiLoading(true); setAiError(""); setAiPreview(null);
+    try {
+      const existingList = restRoles.map(r => `- id:"${r.id}" nome:"${r.name}" area:"${r.area}" pontos:${r.points} semGorjeta:${!!r.noTip} inativo:${!!r.inactive}`).join("\n");
+      const result = await groqGenerate(
         `Você é um assistente de gestão de restaurantes. O usuário pode pedir para CRIAR novos cargos, MODIFICAR cargos existentes (renomear, mudar pontos, área, sem gorjeta) ou INATIVAR cargos.
 
 Cargos existentes:
@@ -3394,33 +3429,36 @@ Responda com JSON:
   "inativar": ["id1", "id2"]
 }
 Inclua apenas as ações solicitadas. Arrays vazios se não houver ação daquele tipo.`,
-      aiInput.trim()
-    );
-    if (!result) return;
-    // Prepare preview
-    const preview = {
-      criar: (result.criar ?? []).map(c => ({
-        id: `role-${Date.now()}-${Math.random().toString(36).slice(2,6)}`,
-        name: c.nome, area: c.area, points: c.semGorjeta ? 0 : (c.pontos ?? 1), noTip: c.semGorjeta ?? false,
-      })),
-      modificar: (result.modificar ?? []).map(m => {
-        const existing = restRoles.find(r => r.id === m.id);
-        if (!existing) return null;
-        return {
-          id: m.id, oldName: existing.name,
-          name: m.nome ?? existing.name,
-          area: m.area ?? existing.area,
-          points: m.semGorjeta ? 0 : (m.pontos !== undefined ? m.pontos : existing.points),
-          noTip: m.semGorjeta !== undefined ? m.semGorjeta : !!existing.noTip,
-        };
-      }).filter(Boolean),
-      inativar: (result.inativar ?? []).map(id => restRoles.find(r => r.id === id)).filter(Boolean),
-    };
-    if (!preview.criar.length && !preview.modificar.length && !preview.inativar.length) {
-      setAiError("A IA não identificou nenhuma ação. Tente reformular.");
-    } else {
-      setAiPreview(preview);
+        aiInput.trim()
+      );
+      // Prepare preview
+      const preview = {
+        criar: (result.criar ?? []).map(c => ({
+          id: `role-${Date.now()}-${Math.random().toString(36).slice(2,6)}`,
+          name: c.nome, area: c.area, points: c.semGorjeta ? 0 : (c.pontos ?? 1), noTip: c.semGorjeta ?? false,
+        })),
+        modificar: (result.modificar ?? []).map(m => {
+          const existing = restRoles.find(r => r.id === m.id);
+          if (!existing) return null;
+          return {
+            id: m.id, oldName: existing.name,
+            name: m.nome ?? existing.name,
+            area: m.area ?? existing.area,
+            points: m.semGorjeta ? 0 : (m.pontos !== undefined ? m.pontos : existing.points),
+            noTip: m.semGorjeta !== undefined ? m.semGorjeta : !!existing.noTip,
+          };
+        }).filter(Boolean),
+        inativar: (result.inativar ?? []).map(id => restRoles.find(r => r.id === id)).filter(Boolean),
+      };
+      if (!preview.criar.length && !preview.modificar.length && !preview.inativar.length) {
+        setAiError("A IA não identificou nenhuma ação. Tente reformular.");
+      } else {
+        setAiPreview(preview);
+      }
+    } catch(e) {
+      setAiError(e.message || "Não foi possível processar. Tente reformular.");
     }
+    setAiLoading(false);
   }
 
   function confirmAiChanges() {
@@ -3688,6 +3726,114 @@ Inclua apenas as ações solicitadas. Arrays vazios se não houver ação daquel
 }
 
 
+// ─── EmpRowLine definido FORA do EmployeeSpreadsheet para evitar re-mount ───
+const EMP_COLS        = "80px 2fr 1.2fr 100px auto 1.5fr auto";
+// eslint-disable-next-line no-unused-vars
+const EMP_COLS_HEADER = "80px 2fr 1.2fr 100px auto 1.5fr auto";
+const empInS2 = { background:"var(--bg1)", border:"1px solid var(--border)", borderRadius:6, color:"var(--text)", fontFamily:"'DM Mono',monospace", fontSize:12, padding:"6px 8px", outline:"none", width:"100%", boxSizing:"border-box" };
+
+function EmpRowLine({ emp, isNew, row, restRoles, isSaved, isOwner, onChange, onSave, onToggleInactive, onDelete, onAdd, onResetPin, onToggleProd, onToggleFreela, onDismiss, onUndoDismiss, onGenerateReport, onPromote, employees, privacyMask }) { // eslint-disable-line no-unused-vars
+  const ac = "var(--ac)";
+  const isInactive = !isNew && emp?.inactive && emp?.inactiveFrom <= today();
+  const isDemitido = !isNew && emp?.demitidoEm && emp.demitidoEm <= today();
+  return (
+    <div style={{display:"grid",gridTemplateColumns:EMP_COLS,gap:6,padding:"6px 8px",marginBottom:4,
+      background:isNew?"#f0fdf4":isDemitido?"#2a1a1a":isInactive?"#1a1a2a":"var(--card-bg)",borderRadius:10,
+      border:`1px solid ${isSaved?"#10b98166":isNew?"#10b98144":isDemitido?"#e74c3c44":isInactive?"#8b5cf644":"var(--border)"}`,
+      alignItems:"center",opacity:isDemitido?0.65:isInactive?0.75:1}}>
+
+      {/* ID / código */}
+      <div style={{color:"var(--text3)",fontSize:11,fontFamily:"'DM Mono',monospace",textAlign:"center"}}>
+        {isNew ? <span style={{color:"var(--text3)",fontSize:10}}>Auto</span> : <span style={{color:ac,fontWeight:700}}>{emp?.empCode ?? "—"}</span>}
+      </div>
+
+      <input value={row.name||""} onChange={ev=>onChange("name",ev.target.value)} placeholder="Nome completo" style={empInS2}/>
+      {privacyMask
+        ? <div style={{...empInS2,display:"flex",alignItems:"center",color:"var(--text3)"}}>•••.•••.•••-••</div>
+        : <input value={row.cpf||""} onChange={ev=>onChange("cpf",maskCpf(ev.target.value))} placeholder="000.000.000-00" style={empInS2} inputMode="numeric"/>
+      }
+      <input type="date" value={row.admission||""} onChange={ev=>onChange("admission",ev.target.value)} placeholder="01/01/2026" title={row.admission ? "" : "Sem data → assume 01/01/2026"} style={{...empInS2, ...(row.admission ? {} : {borderColor:"#f59e0b44",background:"#fffbeb"})}}/>
+
+      {/* PIN — botão resetar */}
+      <div style={{display:"flex",gap:4,alignItems:"center",justifyContent:"center"}}>
+        {!isNew ? (
+          <button onClick={()=>onResetPin(emp)} title="Resetar PIN para o código do empregado"
+            style={{padding:"5px 12px",borderRadius:6,border:"1px solid #f59e0b44",background:"#f59e0b11",color:"#f59e0b",cursor:"pointer",fontSize:11,fontFamily:"'DM Mono',monospace",whiteSpace:"nowrap",display:"flex",alignItems:"center",gap:4}}>
+            🔑 Resetar
+          </button>
+        ) : (
+          <span style={{color:"var(--text3)",fontSize:10}}>Auto</span>
+        )}
+      </div>
+
+      <div style={{display:"flex",gap:4,alignItems:"center"}}>
+        <select value={row.roleId||""} onChange={ev=>onChange("roleId",ev.target.value)} style={{...empInS2,cursor:"pointer",flex:1}}>
+          <option value="">Selecionar…</option>
+          {AREAS.map(a=>(
+            <optgroup key={a} label={a}>
+              {restRoles.filter(r=>r.area===a&&!r.inactive).map(r=><option key={r.id} value={r.id}>{r.name} ({r.points}pt)</option>)}
+            </optgroup>
+          ))}
+        </select>
+        {!isNew && (
+          <button onClick={onToggleProd} title={emp?.isProducao?"Remover produção":"Marcar como produção"}
+            style={{padding:"4px 6px",borderRadius:6,border:`1px solid ${emp?.isProducao?"#ec4899":"var(--border)"}`,background:emp?.isProducao?"#ec489922":"transparent",color:emp?.isProducao?"#ec4899":"var(--text3)",cursor:"pointer",fontSize:11,fontFamily:"'DM Mono',monospace",whiteSpace:"nowrap",flexShrink:0}}>
+            🏭
+          </button>
+        )}
+        {!isNew && (
+          <button onClick={onToggleFreela} title={emp?.isFreela?"Remover freela":"Marcar como freela"}
+            style={{padding:"4px 6px",borderRadius:6,border:`1px solid ${emp?.isFreela?"#06b6d4":"var(--border)"}`,background:emp?.isFreela?"#06b6d422":"transparent",color:emp?.isFreela?"#06b6d4":"var(--text3)",cursor:"pointer",fontSize:11,fontFamily:"'DM Mono',monospace",whiteSpace:"nowrap",flexShrink:0}}>
+            🎯
+          </button>
+        )}
+      </div>
+
+      {/* Última coluna: ações */}
+      <div style={{display:"flex",gap:4,alignItems:"center"}}>
+        {isNew
+          ? <button onClick={onAdd} style={{padding:"6px 12px",borderRadius:8,border:"none",background:"var(--green)",color:"var(--text)",fontWeight:700,cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:12,whiteSpace:"nowrap"}}>+ Add</button>
+          : <>
+              <button onClick={onSave} style={{padding:"4px 10px",borderRadius:6,border:"none",background:isSaved?"var(--green)":ac,color:"var(--text)",fontWeight:700,cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:11}}>{isSaved?"✓":"Salvar"}</button>
+              {isDemitido ? (
+                <>
+                  <span style={{fontSize:9,color:"var(--red)",fontWeight:700,padding:"2px 6px",background:"#e74c3c22",borderRadius:4}}>DEM {emp.demitidoEm ? new Date(emp.demitidoEm+"T12:00:00").toLocaleDateString("pt-BR") : ""}</span>
+                  {onGenerateReport && <button onClick={()=>onGenerateReport(emp)} title="Relatório de desligamento"
+                    style={{padding:"4px 8px",borderRadius:6,border:"1px solid #3b82f644",background:"transparent",color:"#3b82f6",cursor:"pointer",fontSize:10,fontFamily:"'DM Mono',monospace"}}>📄</button>}
+                  <button onClick={onUndoDismiss} title="Reverter demissão"
+                    style={{padding:"4px 8px",borderRadius:6,border:"1px solid #10b98144",background:"transparent",color:"var(--green)",cursor:"pointer",fontSize:11,fontFamily:"'DM Mono',monospace"}}>↩️</button>
+                </>
+              ) : (
+                <>
+                  <button onClick={onToggleInactive} title={isInactive?"Reativar":"Inativar"}
+                    style={{padding:"4px 8px",borderRadius:6,border:`1px solid ${isInactive?"#10b98144":"#f59e0b44"}`,background:"transparent",color:isInactive?"var(--green)":"#f59e0b",cursor:"pointer",fontSize:11,fontFamily:"'DM Mono',monospace"}}>
+                    {isInactive?"↑":"↓"}
+                  </button>
+                  {!isInactive && onPromote && (
+                    <button onClick={()=>onPromote(emp)} title="Promover / Mudar cargo"
+                      style={{padding:"4px 8px",borderRadius:6,border:"1px solid #3b82f644",background:"transparent",color:"#3b82f6",cursor:"pointer",fontSize:10,fontFamily:"'DM Mono',monospace"}}>⬆️</button>
+                  )}
+                  {!isInactive && onDismiss && (
+                    <button onClick={onDismiss} title="Demitir"
+                      style={{padding:"4px 8px",borderRadius:6,border:"1px solid #e74c3c44",background:"transparent",color:"var(--red)",cursor:"pointer",fontSize:10,fontFamily:"'DM Mono',monospace"}}>Demitir</button>
+                  )}
+                </>
+              )}
+              {emp.pendingRoleChange && (
+                <span style={{fontSize:9,color:"#3b82f6",fontWeight:700,padding:"2px 6px",background:"#3b82f622",borderRadius:4}}>
+                  ⬆️ {new Date(emp.pendingRoleChange.effectiveDate+"T12:00:00").toLocaleDateString("pt-BR")}
+                </span>
+              )}
+              {isOwner && isInactive && (
+                <button onClick={onDelete} title="Excluir permanentemente"
+                  style={{padding:"4px 8px",borderRadius:6,border:"1px solid #e74c3c44",background:"transparent",color:"var(--red)",cursor:"pointer",fontSize:11,fontFamily:"'DM Mono',monospace"}}>✕</button>
+              )}
+            </>
+        }
+      </div>
+    </div>
+  );
+}
 
 function EmployeeSpreadsheet({ restEmps, restRoles, rid, employees, onUpdate, restCode: restCode_, isOwner, restaurant, notifications, privacyMask, onGenerateDismissalReport, incidents, feedbacks, devChecklists, schedules, currentUser, isLider, mobileOnly: mobileOnlyProp, roles }) {
   const mobileOnly = mobileOnlyProp ?? false; // eslint-disable-line no-unused-vars
@@ -3707,7 +3853,8 @@ function EmployeeSpreadsheet({ restEmps, restRoles, rid, employees, onUpdate, re
   const [showInactive, setShowInactive] = useState(false);
   const [showAiEmp, setShowAiEmp] = useState(false);
   const [aiEmpInput, setAiEmpInput] = useState("");
-  const { generate: aiEmpGenerate, aiLoading: aiEmpLoading, aiError: aiEmpError, setAiError: setAiEmpError } = useAiGenerate();
+  const [aiEmpLoading, setAiEmpLoading] = useState(false);
+  const [aiEmpError, setAiEmpError] = useState("");
   const [aiEmpPreview, setAiEmpPreview] = useState(null);
   const [detailEmp, setDetailEmp] = useState(null); // empId for detail view
   const [detailTab, setDetailTab] = useState("cadastro"); // cadastro | acoes | trilha
@@ -3717,13 +3864,14 @@ function EmployeeSpreadsheet({ restEmps, restRoles, rid, employees, onUpdate, re
 
   async function handleAiEmpregados() {
     if (!aiEmpInput.trim()) return;
-    setAiEmpPreview(null);
+    setAiEmpLoading(true); setAiEmpError(""); setAiEmpPreview(null);
     const cargosDisponiveis = restRoles.filter(r=>!r.inactive).map(r=>`- cargo:"${r.name}" area:"${r.area}" id:"${r.id}"`).join("\n");
     const empregadosExistentes = restEmps.map(e => {
       const r = restRoles.find(r=>r.id===e.roleId);
       return `- id:"${e.id}" nome:"${e.name}" cargo:"${r?.name??"(sem cargo)"}" cpf:"${e.cpf||""}" producao:${!!e.isProducao} inativo:${!!e.inactive}`;
     }).join("\n");
-    const result = await aiEmpGenerate(
+    try {
+      const result = await groqGenerate(
         `Você é um assistente de gestão de restaurantes. O usuário pode pedir para CRIAR novos empregados, MODIFICAR empregados existentes (trocar cargo, CPF, admissão, produção) ou INATIVAR empregados.
 
 Cargos disponíveis:
@@ -3746,11 +3894,10 @@ Responda com JSON:
   "inativar": ["id1", "id2"]
 }
 Inclua apenas as ações solicitadas. Arrays vazios se não houver ação daquele tipo.`,
-      aiEmpInput.trim()
-    );
-    if (!result) return;
+        aiEmpInput.trim()
+      );
 
-    // Build preview
+      // Build preview
       const restCode = restCode_ || "XXX";
       let seq = nextEmpSeq(employees, restCode);
       const matchCargo = (nomeCargo) => {
@@ -3801,13 +3948,17 @@ Inclua apenas as ações solicitadas. Arrays vazios se não houver ação daquel
         inativar: (result.inativar ?? []).map(id => restEmps.find(e => e.id === id)).filter(Boolean),
       };
 
-    if (!preview.criar.length && !preview.modificar.length && !preview.inativar.length) {
-      setAiEmpError("A IA não identificou nenhuma ação. Tente reformular.");
-    } else if (activeCount + preview.criar.length > plano.empMax) {
-      setAiEmpError(`Limite do plano: ${plano.empMax} empregados. Você tem ${activeCount} ativos e está tentando adicionar ${preview.criar.length}.`);
-    } else {
-      setAiEmpPreview(preview);
+      if (!preview.criar.length && !preview.modificar.length && !preview.inativar.length) {
+        setAiEmpError("A IA não identificou nenhuma ação. Tente reformular.");
+      } else if (activeCount + preview.criar.length > plano.empMax) {
+        setAiEmpError(`Limite do plano: ${plano.empMax} empregados. Você tem ${activeCount} ativos e está tentando adicionar ${preview.criar.length}.`);
+      } else {
+        setAiEmpPreview(preview);
+      }
+    } catch(e) {
+      setAiEmpError(e.message || "Não foi possível processar. Tente reformular.");
     }
+    setAiEmpLoading(false);
   }
 
   function confirmAiEmpChanges() {
@@ -5143,6 +5294,132 @@ function FeedbackForm({ restaurantId, employees, roles, onUpdate, feedbacks, cur
   );
 }
 
+function TrilhaTab({ restaurantId, employees, roles, schedules, incidents, feedbacks, devChecklists, onUpdate, currentUser, isOwner, isLider, mobileOnly }) { // eslint-disable-line no-unused-vars
+  const [selectedEmp, setSelectedEmp] = useState("");
+  const [showIncidentForm, setShowIncidentForm] = useState(false);
+  const [showFeedbackForm, setShowFeedbackForm] = useState(false);
+  const restEmps = employees.filter(e => e.restaurantId === restaurantId && !(e.inactive && e.inactiveFrom && e.inactiveFrom <= today()));
+
+  return (
+    <div>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:12,marginBottom:16}}>
+        <h3 style={{color:"var(--text)",margin:0,fontSize:mobileOnly?16:20}}>📈 Trilha do Empregado</h3>
+      </div>
+
+      {/* Action buttons */}
+      <div style={{display:"flex",gap:10,marginBottom:16,flexWrap:"wrap",alignItems:"center"}}>
+        <button onClick={()=>{setShowIncidentForm(!showIncidentForm);setShowFeedbackForm(false);}} style={{...S.btnSecondary,fontSize:12,padding:"8px 14px",color:showIncidentForm?"var(--ac)":"var(--text2)",borderColor:showIncidentForm?"var(--ac)":"var(--border)"}}>⚠️ Registrar ocorrência</button>
+        <button onClick={()=>{setShowFeedbackForm(!showFeedbackForm);setShowIncidentForm(false);}} style={{...S.btnSecondary,fontSize:12,padding:"8px 14px",color:showFeedbackForm?"var(--ac)":"var(--text2)",borderColor:showFeedbackForm?"var(--ac)":"var(--border)"}}>💬 Registrar feedback</button>
+      </div>
+
+      {/* Incident form */}
+      {showIncidentForm && (
+        <div style={{marginBottom:16}}>
+          <IncidentForm restaurantId={restaurantId} employees={employees} onUpdate={onUpdate} incidents={incidents} currentUser={currentUser} isOwner={isOwner}/>
+        </div>
+      )}
+
+      {/* Feedback form */}
+      {showFeedbackForm && (
+        <div style={{marginBottom:16}}>
+          <FeedbackForm restaurantId={restaurantId} employees={employees} roles={roles} onUpdate={onUpdate} feedbacks={feedbacks} currentUser={currentUser} isOwner={isOwner}/>
+        </div>
+      )}
+
+      {/* Summary cards */}
+      {!selectedEmp && (
+        <div style={{display:"grid",gridTemplateColumns:mobileOnly?"1fr":"1fr 1fr 1fr",gap:12,marginBottom:20}}>
+          <div style={{...S.card,textAlign:"center"}}>
+            <div style={{fontSize:28,marginBottom:6}}>👥</div>
+            <div style={{color:"var(--text)",fontWeight:700,fontSize:20}}>{restEmps.length}</div>
+            <div style={{color:"var(--text3)",fontSize:11}}>Empregados ativos</div>
+          </div>
+          <div style={{...S.card,textAlign:"center"}}>
+            <div style={{fontSize:28,marginBottom:6}}>⚠️</div>
+            <div style={{color:"var(--text)",fontWeight:700,fontSize:20}}>{(incidents??[]).filter(i=>i.restaurantId===restaurantId).length}</div>
+            <div style={{color:"var(--text3)",fontSize:11}}>Ocorrências registradas</div>
+          </div>
+          <div style={{...S.card,textAlign:"center"}}>
+            <div style={{fontSize:28,marginBottom:6}}>💬</div>
+            <div style={{color:"var(--text)",fontWeight:700,fontSize:20}}>{(feedbacks??[]).filter(f=>f.restaurantId===restaurantId).length}</div>
+            <div style={{color:"var(--text3)",fontSize:11}}>Feedbacks registrados</div>
+          </div>
+        </div>
+      )}
+
+      {/* Employees grouped by area */}
+      {!selectedEmp && (() => {
+        const areaColors = { Bar:"#8b5cf6", Cozinha:"#e74c3c", "Salão":"#3b82f6", Limpeza:"#10b981" };
+        const empsByArea = {};
+        restEmps.forEach(emp => {
+          const role = roles.find(r => r.id === emp.roleId);
+          const area = role?.area ?? "Sem área";
+          if (!empsByArea[area]) empsByArea[area] = [];
+          empsByArea[area].push({ emp, role });
+        });
+        const areas = AREAS.filter(a => empsByArea[a]?.length > 0);
+        const other = Object.keys(empsByArea).filter(a => !AREAS.includes(a));
+        return [...areas, ...other].map(area => (
+          <div key={area} style={{marginBottom:16}}>
+            <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:8}}>
+              <div style={{width:4,height:20,borderRadius:2,background:areaColors[area]??"var(--text3)"}}/>
+              <h4 style={{color:"var(--text)",margin:0,fontSize:14}}>{area}</h4>
+              <span style={{color:"var(--text3)",fontSize:11}}>({empsByArea[area].length})</span>
+            </div>
+            <div style={{display:"flex",flexDirection:"column",gap:4}}>
+              {empsByArea[area].sort((a,b)=>a.emp.name.localeCompare(b.emp.name)).map(({emp, role}) => {
+                const empIncidents = (incidents??[]).filter(i => i.restaurantId === restaurantId && (i.employeeIds??[]).includes(emp.id));
+                const empFeedbacks = (feedbacks??[]).filter(f => f.restaurantId === restaurantId && f.employeeId === emp.id);
+                const lastFb = empFeedbacks.sort((a,b)=>(b.createdAt??"").localeCompare(a.createdAt??""))[0];
+                return (
+                  <button key={emp.id} onClick={()=>setSelectedEmp(emp.id)} style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:8,padding:"10px 14px",borderRadius:10,border:"1px solid var(--border)",background:"var(--card-bg)",cursor:"pointer",textAlign:"left",fontFamily:"'DM Sans',sans-serif",borderLeft:`3px solid ${areaColors[area]??"var(--border)"}`}}>
+                    <div style={{flex:1,minWidth:0}}>
+                      <div style={{color:"var(--text)",fontWeight:600,fontSize:13,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{emp.name}</div>
+                      <div style={{color:"var(--text3)",fontSize:11}}>{role?.name ?? "—"}</div>
+                    </div>
+                    <div style={{display:"flex",gap:6,alignItems:"center",flexShrink:0}}>
+                      {empIncidents.length > 0 && <span style={{fontSize:10,color:"#f59e0b",background:"#f59e0b22",padding:"2px 6px",borderRadius:4,fontWeight:700}}>{empIncidents.length} oc.</span>}
+                      {lastFb && <span style={{fontSize:10,color:"#f59e0b"}}>{"★".repeat(lastFb.rating)}</span>}
+                      <span style={{color:"var(--text3)",fontSize:14}}>→</span>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        ));
+      })()}
+
+      {/* Selected emp timeline */}
+      {selectedEmp && (
+        <div>
+          <button onClick={()=>setSelectedEmp("")} style={{...S.btnSecondary,fontSize:12,marginBottom:16}}>← Voltar à lista</button>
+          <div style={{marginBottom:16}}>
+            {(() => {
+              const emp = employees.find(e => e.id === selectedEmp);
+              const role = roles.find(r => r.id === emp?.roleId);
+              const admDate = emp?.admission ? new Date(emp.admission+"T12:00:00") : null;
+              const days = admDate ? Math.floor((new Date() - admDate) / 86400000) : 0;
+              return (
+                <div style={{...S.card,display:"flex",gap:16,alignItems:"center",flexWrap:"wrap"}}>
+                  <div style={{width:48,height:48,borderRadius:24,background:"var(--ac-bg,#d4a01722)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:22,fontWeight:700,color:"var(--ac)",flexShrink:0}}>{(emp?.name??"?").charAt(0)}</div>
+                  <div style={{flex:1,minWidth:0}}>
+                    <div style={{color:"var(--text)",fontWeight:700,fontSize:16}}>{emp?.name}</div>
+                    <div style={{color:"var(--text3)",fontSize:12}}>{role?.name ?? "—"} · {role?.area ?? "—"} · {days} dias na empresa</div>
+                  </div>
+                  {emp?.pendingRoleChange && (
+                    <span style={{fontSize:11,color:"#3b82f6",fontWeight:700,padding:"4px 10px",background:"#3b82f622",borderRadius:6}}>⬆️ Promoção agendada: {new Date(emp.pendingRoleChange.effectiveDate+"T12:00:00").toLocaleDateString("pt-BR")}</span>
+                  )}
+                </div>
+              );
+            })()}
+          </div>
+          <EmpTimeline empId={selectedEmp} employees={employees} roles={roles} schedules={schedules} incidents={incidents} feedbacks={feedbacks} restaurantId={restaurantId}/>
+        </div>
+      )}
+    </div>
+  );
+}
 
 // ── Gamified Employee Trail View ──
 function EmpTrilhaView({ empId, employees, roles, schedules, incidents, feedbacks, devChecklists, restaurantId, onUpdate }) {
@@ -5330,11 +5607,15 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
 
   // Privacy: mascarar dados quando ativo (admin vendo restaurante com privacyMode)
   const pFmt = privacyMask ? () => "R$ ••••,••" : fmt;
+  // eslint-disable-next-line no-unused-vars
+  const pCpf = privacyMask ? () => "•••.•••.•••-••" : (v => v || "—");
   const pText = privacyMask ? () => "••••••••••••••••" : (v => v);
 
   const curSplit  = splits?.[rid]?.[mk] ?? DEFAULT_SPLIT;
   const monthTips = tips.filter(t => t.restaurantId === rid && t.monthKey === mk);
   const tipDates  = [...new Set(monthTips.map(t => t.date))].sort();
+  // eslint-disable-next-line no-unused-vars
+  const totalGross = monthTips.reduce((a, t) => a + t.myShare, 0);
   const totalNet   = monthTips.reduce((a, t) => a + t.myNet, 0);
   const totalTax   = monthTips.reduce((a, t) => a + t.myTax, 0);
 
@@ -5453,6 +5734,12 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
   }
   function discardConfig() { setLocalConfig(null); }
 
+  // eslint-disable-next-line no-unused-vars
+  const empSummary = restEmps.map(e => {
+    const eT = monthTips.filter(t => t.employeeId === e.id);
+    const r = restRoles.find(r => r.id === e.roleId);
+    return { ...e, roleName: r?.name, area: r?.area, gross: eT.reduce((a, t) => a + t.myShare, 0), net: eT.reduce((a, t) => a + t.myNet, 0) };
+  }).sort((a, b) => b.net - a.net);
 
   // calcTipForDate agora aceita currentTips para evitar stale closure em batch
   function calcTipForDate(date, totalVal, noteVal, currentTips) {
@@ -5504,6 +5791,61 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
     return { count: newTips.length, updatedTips };
   }
 
+  // eslint-disable-next-line no-unused-vars
+  function applyFaultPenalty(tKey, allTips) {
+    try {
+      const monthSchedule = schedules?.[rid]?.[tKey] ?? {};
+      const prodPenaltyU = restaurant.producaoPenaltyU ?? 6.66;
+      const prodPenaltyJ = restaurant.producaoPenaltyJ ?? 3.33;
+
+      const penaltyEmps = restEmps.filter(emp => {
+        const r = restRoles.find(r => r.id === emp.roleId);
+        if (!r) return false;
+        const empDayMap = monthSchedule[emp.id] ?? {};
+        const statuses = Object.values(empDayMap);
+        if (emp.isProducao) {
+          return statuses.some(s => s === DAY_FAULT_U || s === DAY_FAULT_J);
+        } else {
+          const rate = restaurant.faultPenalty?.[r.area] ?? 0;
+          if (rate <= 0) return false;
+          return statuses.some(s => s === DAY_FAULT_U);
+        }
+      });
+      if (!penaltyEmps.length) return;
+
+      const monthTipsLocal = allTips.filter(t => t.restaurantId === rid && t.monthKey === tKey);
+      const monthPool = [...new Set(monthTipsLocal.map(t => t.date))]
+        .reduce((sum, date) => {
+          const dayTips = monthTipsLocal.filter(t => t.date === date);
+          return sum + (dayTips[0]?.poolTotal ?? 0);
+        }, 0);
+      if (!monthPool) return;
+
+      const updated = allTips.map(t => {
+        if (t.restaurantId !== rid || t.monthKey !== tKey) return t;
+        const emp = penaltyEmps.find(e => e.id === t.employeeId);
+        if (!emp) return t;
+        const r = restRoles.find(r => r.id === emp.roleId);
+        const empDayMap = monthSchedule[emp.id] ?? {};
+        let totalPenalty = 0;
+        if (emp.isProducao) {
+          const faultU = Object.values(empDayMap).filter(s => s === DAY_FAULT_U).length;
+          const faultJ = Object.values(empDayMap).filter(s => s === DAY_FAULT_J).length;
+          totalPenalty = round2(monthPool * ((prodPenaltyU / 100) * faultU + (prodPenaltyJ / 100) * faultJ));
+        } else {
+          const rate = restaurant.faultPenalty?.[r?.area] ?? 0;
+          const faultDays = Object.values(empDayMap).filter(s => s === DAY_FAULT_U).length;
+          totalPenalty = round2(monthPool * (rate / 100) * faultDays);
+        }
+        const empTipsCount = allTips.filter(x => x.restaurantId === rid && x.monthKey === tKey && x.employeeId === emp.id).length;
+        const penaltyPerEntry = empTipsCount > 0 ? round2(totalPenalty / empTipsCount) : 0;
+        return { ...t, myNet: round2(Math.max(0, t.myNet - penaltyPerEntry)), penalty: penaltyPerEntry };
+      });
+      onUpdate("tips", updated);
+    } catch (err) {
+      onUpdate("_toast", "⚠️ Erro ao aplicar penalidade: " + (err.message || "desconhecido"));
+    }
+  }
 
   function recalcTipDay(date, currentTips) {
     const allTips = currentTips ?? tips;
@@ -8191,7 +8533,12 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }
   // eslint-disable-next-line no-unused-vars
   const { owners, managers, restaurants, employees, roles, tips, splits, schedules, noTipDays } = data;
   const [tab, setTab] = useState("financeiro_geral");
-  const isMobile = useMobile();
+  const [isMobile, setIsMobile] = useState(() => window.innerWidth < 768);
+  useEffect(() => {
+    const handler = () => setIsMobile(window.innerWidth < 768);
+    window.addEventListener("resize", handler);
+    return () => window.removeEventListener("resize", handler);
+  }, []);
   const [selRestaurant, setSelRestaurantState] = useState(() => {
     const saved = localStorage.getItem("apptip_selrest");
     if (saved && restaurants.find(r => r.id === saved)) return saved;
@@ -8205,19 +8552,14 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }
   }
 
   // forms
-  // Modal states — grouped to reduce useState count
-  const [modals, setModals] = useState({ rest:false, mgr:false, owner:false });
-  const [editIds, setEditIds] = useState({ rest:null, mgr:null, owner:null });
-  const showRestModal = modals.rest, showMgrModal = modals.mgr, showOwnerModal = modals.owner;
-  const editRestId = editIds.rest, editMgrId = editIds.mgr, editOwnerId = editIds.owner;
-  const setShowRestModal = v => setModals(p=>({...p,rest:v}));
-  const setShowMgrModal = v => setModals(p=>({...p,mgr:v}));
-  const setShowOwnerModal = v => setModals(p=>({...p,owner:v}));
-  const setEditRestId = v => setEditIds(p=>({...p,rest:v}));
-  const setEditMgrId = v => setEditIds(p=>({...p,mgr:v}));
-  const setEditOwnerId = v => setEditIds(p=>({...p,owner:v}));
+  const [showRestModal, setShowRestModal]   = useState(false);
+  const [editRestId, setEditRestId]         = useState(null);
   const [restForm, setRestForm]             = useState({ name:"",shortCode:"",cnpj:"",address:"",whatsappFin:"",whatsappOp:"",serviceStartDate:"" });
+  const [showMgrModal, setShowMgrModal]     = useState(false);
+  const [editMgrId, setEditMgrId]           = useState(null);
   const [mgrForm, setMgrForm]               = useState({ name:"",cpf:"",pin:"",restaurantIds:[],perms:{tips:true,schedule:true},isDP:false,profile:"custom",areas:[] });
+  const [showOwnerModal, setShowOwnerModal] = useState(false);
+  const [editOwnerId, setEditOwnerId]       = useState(null);
   const [ownerForm, setOwnerForm]           = useState({ name:"",cpf:"",pin:"" });
   const [viewOnly, setViewOnly]             = useState(false);
   // View-only guard — shadow onUpdate to block writes when locked
@@ -8280,9 +8622,19 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }
     const r = restaurants.find(x => x.id === restId);
     return r?.privacyMode === true;
   }
+  // eslint-disable-next-line no-unused-vars
+  function maskMoney(val, restId) {
+    if (!isPrivate(restId)) return typeof val === "number" ? val.toLocaleString("pt-BR",{minimumFractionDigits:2}) : val;
+    return "••••,••";
+  }
   function maskCpfPriv(cpf, restId) {
     if (!isPrivate(restId)) return cpf || "—";
     return cpf ? "•••.•••.•••-••" : "—";
+  }
+  // eslint-disable-next-line no-unused-vars
+  function maskText(text, restId) {
+    if (!isPrivate(restId)) return text;
+    return text ? "••••••••••••••••" : "";
   }
   // Check if ANY selected restaurant is private
   function anyPrivate() {
@@ -8299,14 +8651,12 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }
   const [filtroFinanceiro, setFiltroFinanceiro] = useState("todos");
   const PIX_PADRAO = data?.pixChave  || "11985499821";
   const PIX_NOME   = data?.pixNome   || "Gustavo Rodrigues da Silva";
-  const [cob, setCob] = useState({ forma:"pix", chave:PIX_PADRAO, link:"", valor:"", periodo:"", venc:"" });
-  const cobForma = cob.forma, cobChave = cob.chave, cobLink = cob.link, cobValor = cob.valor, cobPeriodo = cob.periodo, cobVenc = cob.venc;
-  const setCobForma = v => setCob(p=>({...p,forma:v}));
-  const setCobChave = v => setCob(p=>({...p,chave:v}));
-  const setCobLink  = v => setCob(p=>({...p,link:v}));
-  const setCobValor = v => setCob(p=>({...p,valor:v}));
-  const setCobPeriodo = v => setCob(p=>({...p,periodo:v}));
-  const setCobVenc  = v => setCob(p=>({...p,venc:v}));
+  const [cobForma, setCobForma]   = useState("pix");
+  const [cobChave, setCobChave]   = useState(PIX_PADRAO);
+  const [cobLink,  setCobLink]    = useState("");
+  const [cobValor, setCobValor]   = useState("");
+  const [cobPeriodo, setCobPeriodo] = useState("");
+  const [cobVenc,  setCobVenc]    = useState("");
 
   // Soft delete helpers
   function softDelete(type, item) {
@@ -9878,15 +10228,6 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }
 
         {tab === "changelog" && (() => {
           const CHANGELOG = [
-            { version:"5.19.0", date:"2026-04-18", items:[
-              "Refatoração: removidas ~400 linhas de código morto (componentes e funções não utilizadas)",
-              "Refatoração: hook useAiGenerate unifica chamadas de IA — reduz duplicação de lógica de loading/erro",
-              "Refatoração: hook useMobile substitui detecções duplicadas de viewport",
-              "Refatoração: modal de privacidade agora usa state React em vez de manipulação DOM direta",
-              "Refatoração: estados de cobrança e modais agrupados — reduz número de useState no OwnerPortal",
-              "Melhoria: paleta de cores C e estilos S.btnSmall padronizados, AREA_COLORS consistente",
-              "Melhoria: botões secundários com minHeight:44px para touch targets adequados em mobile",
-            ]},
             { version:"5.18.0", date:"2026-04-17", items:[
               "Novo: importação de folha de ponto via PDF — análise automática com IA identifica atrasos, faltas e horas extras, atualiza escala e cria ocorrências",
               "Novo: exportação da trilha do empregado em PDF — relatório completo com ocorrências, feedbacks, histórico de cargos e resumo do período selecionado",
@@ -10327,8 +10668,16 @@ function ManagerPortal({ manager, data, onUpdate, onBack, toggleTheme, theme, on
     if (saved && myRestaurants.find(r => r.id === saved)) return saved;
     return null;
   });
+  // eslint-disable-next-line no-unused-vars
   const ac = "var(--ac)";
-  const isMobile = useMobile();
+
+  // Mobile detection
+  const [isMobile, setIsMobile] = useState(() => window.innerWidth < 768);
+  useEffect(() => {
+    const handler = () => setIsMobile(window.innerWidth < 768);
+    window.addEventListener("resize", handler);
+    return () => window.removeEventListener("resize", handler);
+  }, []);
 
   useEffect(() => {
     if (selId) localStorage.setItem("apptip_selrest", selId);
@@ -10771,7 +11120,7 @@ function UnifiedLogin({ owners, managers, employees, restaurants, onLoginOwner, 
                   style={{width:16,height:16,marginTop:2,accentColor:ac,flexShrink:0}}/>
                 <span style={{color:"var(--text3)",fontSize:12,lineHeight:1.5}}>
                   Li e aceito a{" "}
-                  <button onClick={e=>{e.preventDefault();window.__showPrivacy?.();}}
+                  <button onClick={e=>{e.preventDefault();document.getElementById("apptip-privacy").style.display="flex";}}
                     style={{background:"none",border:"none",color:ac,cursor:"pointer",fontFamily:"'DM Sans',sans-serif",fontSize:12,padding:0,textDecoration:"underline"}}>
                     Política de Privacidade
                   </button>
@@ -10803,7 +11152,7 @@ function UnifiedLogin({ owners, managers, employees, restaurants, onLoginOwner, 
 
         <div style={{textAlign:"center",marginTop:20}}>
           {termsAccepted && (
-            <button onClick={()=>window.__showPrivacy?.()}
+            <button onClick={()=>document.getElementById("apptip-privacy").style.display="flex"}
               style={{background:"none",border:"none",color:"var(--text3)",cursor:"pointer",fontFamily:"'DM Sans',sans-serif",fontSize:12,padding:0}}>
               Política de Privacidade
             </button>
@@ -11179,7 +11528,7 @@ function Home({ onLogin }) {
         <div style={{display:"flex",gap:20,justifyContent:"center",flexWrap:"wrap",marginBottom:16}}>
           <button onClick={onLogin} style={{background:"none",border:"none",color:"#8c7a5e",cursor:"pointer",fontFamily:"'DM Sans',sans-serif",fontSize:13}}>Área de acesso</button>
           <a href="mailto:contato@apptip.app" style={{color:"#8c7a5e",fontSize:13,textDecoration:"none"}}>contato@apptip.app</a>
-          <button onClick={()=>window.__showPrivacy?.()} style={{background:"none",border:"none",color:"#8c7a5e",cursor:"pointer",fontFamily:"'DM Sans',sans-serif",fontSize:13}}>Política de Privacidade</button>
+          <button onClick={()=>document.getElementById("apptip-privacy").style.display="flex"} style={{background:"none",border:"none",color:"#8c7a5e",cursor:"pointer",fontFamily:"'DM Sans',sans-serif",fontSize:13}}>Política de Privacidade</button>
         </div>
         <p style={{color:"#4a3a2a",fontSize:12}}>© {new Date().getFullYear()} AppTip. Todos os direitos reservados.</p>
       </footer>
@@ -11889,7 +12238,6 @@ links.forEach(l=>{l.addEventListener('click',e=>{e.preventDefault();const id=l.g
 export { ErrorBoundary as AppErrorBoundary };
 export default function App() {
   const [theme, setTheme] = useState(() => localStorage.getItem("apptip_theme") || "light");
-  const [showPrivacy, setShowPrivacy] = useState(false);
 
   useEffect(() => {
     document.body.classList.toggle("dark-mode", theme === "dark");
@@ -11897,9 +12245,6 @@ export default function App() {
   }, [theme]);
 
   function toggleTheme() { setTheme(t => t === "dark" ? "light" : "dark"); }
-
-  // Global privacy modal toggle — avoids threading props through all portals
-  useEffect(() => { window.__showPrivacy = () => setShowPrivacy(true); return () => { delete window.__showPrivacy; }; }, []);
 
   // Login unificado — uma única tela para todos
   const isSetupUrl = window.location.pathname.startsWith("/setup");
@@ -12280,7 +12625,27 @@ export default function App() {
       {/* Rodapé de versão */}
       <div style={{position:"fixed",bottom:8,left:0,right:0,fontSize:10,color:"var(--text3)",fontFamily:"'DM Mono',monospace",opacity:0.45,pointerEvents:"none",zIndex:100,textAlign:"center"}}>v{APP_VERSION}</div>
 
-      <PrivacyModal open={showPrivacy} onClose={()=>setShowPrivacy(false)} />
+      {/* Modal Política de Privacidade */}
+      <div id="apptip-privacy" role="dialog" aria-modal="true" aria-label="Política de Privacidade" style={{display:"none",position:"fixed",inset:0,background:"rgba(0,0,0,0.5)",zIndex:9999,alignItems:"center",justifyContent:"center",padding:20}} onClick={e=>{if(e.target===e.currentTarget)e.currentTarget.style.display="none";}}>
+        <div style={{background:"var(--card-bg)",borderRadius:16,padding:28,maxWidth:480,width:"100%",maxHeight:"85vh",overflowY:"auto",border:"1px solid var(--border)",fontFamily:"'DM Sans',sans-serif",boxShadow:"0 20px 60px rgba(0,0,0,.2)"}}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20}}>
+            <h2 style={{color:"var(--text)",margin:0,fontSize:18,fontWeight:700}}>🔒 Política de Privacidade</h2>
+            <button onClick={()=>document.getElementById("apptip-privacy").style.display="none"} style={{background:"none",border:"none",color:"var(--text3)",cursor:"pointer",fontSize:20}}>✕</button>
+          </div>
+          <div style={{color:"var(--text2)",fontSize:13,lineHeight:1.8,display:"flex",flexDirection:"column",gap:12}}>
+            <p style={{color:"var(--text3)",fontSize:11}}>Última atualização: {new Date().toLocaleDateString("pt-BR")}</p>
+            <p><strong style={{color:"var(--text)"}}>1. Quem somos</strong><br/>O AppTip é uma plataforma de gestão de gorjetas para restaurantes, operada pelo estabelecimento ao qual você está vinculado.</p>
+            <p><strong style={{color:"var(--text)"}}>2. Dados coletados</strong><br/>Coletamos: nome completo, CPF, cargo, data de admissão e PIN de acesso. Esses dados são necessários para identificação e distribuição de gorjetas.</p>
+            <p><strong style={{color:"var(--text)"}}>3. Finalidade</strong><br/>Seus dados são usados exclusivamente para: controle de acesso ao sistema, cálculo e distribuição de gorjetas, gestão de escala e comunicados internos.</p>
+            <p><strong style={{color:"var(--text)"}}>4. Armazenamento</strong><br/>Os dados são armazenados no Google Firebase (servidores na América do Sul) com acesso restrito ao seu restaurante. Não compartilhamos seus dados com terceiros.</p>
+            <p><strong style={{color:"var(--text)"}}>5. Seus direitos (LGPD)</strong><br/>Você tem direito a: acessar seus dados, corrigir informações incorretas, solicitar a exclusão dos seus dados e revogar o consentimento a qualquer momento.</p>
+            <p><strong style={{color:"var(--text)"}}>6. Solicitação de exclusão</strong><br/>Para solicitar a exclusão dos seus dados, entre em contato com o gestor do seu restaurante através da função "Fale com DP" no aplicativo.</p>
+            <p><strong style={{color:"var(--text)"}}>7. Contato</strong><br/>Dúvidas sobre privacidade devem ser direcionadas ao gestor responsável pelo restaurante.</p>
+            <p style={{color:"var(--text3)",fontSize:11,borderTop:"1px solid var(--border)",paddingTop:12}}>Esta política está em conformidade com a Lei Geral de Proteção de Dados (LGPD — Lei nº 13.709/2018).</p>
+          </div>
+          <button onClick={()=>document.getElementById("apptip-privacy").style.display="none"} style={{...S.btnPrimary,marginTop:16}}>Entendi</button>
+        </div>
+      </div>
     </>
   );
 }
