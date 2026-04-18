@@ -3,7 +3,7 @@ import { useState, useEffect, Component } from "react";
 import { db } from "./firebase";
 import { doc, getDoc, setDoc } from "firebase/firestore";
 
-const APP_VERSION = "5.32.0";
+const APP_VERSION = "5.33.0";
 
 const DEFAULT_ADMISSION = () => `${new Date().getFullYear()}-01-01`;
 const round2 = (v) => Math.round(v * 100) / 100;
@@ -4724,18 +4724,139 @@ Inclua apenas as ações solicitadas. Arrays vazios se não houver ação daquel
             )}
 
             {/* ── TAB: Trilha ── */}
-            {detailTab === "trilha" && (
+            {detailTab === "trilha" && (() => {
+              // ── Compute shared data for trilha sections ──
+              const admDate = emp.admission ? new Date(emp.admission+"T12:00:00") : null;
+              const daysInCompany = admDate ? Math.floor((new Date() - admDate) / 86400000) : 0;
+              const areaColor = AREA_COLORS[role?.area] ?? "var(--ac)";
+              const myFeedbacksAll = (feedbacks??[]).filter(f => f.restaurantId === rid && f.employeeId === emp.id);
+              const myFeedbacks = myFeedbacksAll.filter(f => !f.deletedAt).sort((a,b)=>(b.createdAt??"").localeCompare(a.createdAt??""));
+              const latestFb = myFeedbacks[0];
+              const lastMeetingDate = latestFb?.meetingDate ? new Date(latestFb.meetingDate+"T12:00:00").toLocaleDateString("pt-BR") : (latestFb?.createdAt ? new Date(latestFb.createdAt).toLocaleDateString("pt-BR") : null);
+              const lastRating = latestFb?.rating ? RATING_LABELS[latestFb.rating - 1] : null;
+              const lastRatingColor = latestFb?.rating ? RATING_COLORS[latestFb.rating - 1] : "var(--text3)";
+              // Faltas 6 meses
+              const now2 = new Date();
+              const months6 = [];
+              for (let i = 0; i < 6; i++) {
+                const d = new Date(now2.getFullYear(), now2.getMonth() - i, 1);
+                const mKey = monthKey(d.getFullYear(), d.getMonth());
+                const lab = d.toLocaleDateString("pt-BR", { month:"short" }).replace(".","");
+                const empSched = schedules?.[rid]?.[mKey]?.[emp.id] ?? {};
+                const empDel = delays?.[rid]?.[mKey]?.[emp.id] ?? {};
+                const faltasI = Object.values(empSched).filter(s => s === DAY_FAULT_U).length;
+                const faltasJ = Object.values(empSched).filter(s => s === DAY_FAULT_J).length;
+                const delayDays = Object.values(empDel).filter(v => v > 0).length;
+                const delayMin = Object.values(empDel).filter(v => v > 0).reduce((s,v) => s+v, 0);
+                const hasDays = Object.keys(empSched).length > 0;
+                months6.push({ mKey, label:lab, faltasI, faltasJ, delayDays, delayMin, hasDays });
+              }
+              months6.reverse();
+              const totFI = months6.reduce((s,m) => s+m.faltasI, 0);
+              const totFJ = months6.reduce((s,m) => s+m.faltasJ, 0);
+              const totDelDays = months6.reduce((s,m) => s+m.delayDays, 0);
+              const totDelMin = months6.reduce((s,m) => s+m.delayMin, 0);
+              // Badges
+              const myGoalsAll = (employeeGoals ?? {})[emp.id] ?? [];
+              const completedGoals = myGoalsAll.filter(g => g.status === "completed");
+              const prevMk = monthKey(new Date(now2.getFullYear(), now2.getMonth()-1, 1).getFullYear(), new Date(now2.getFullYear(), now2.getMonth()-1, 1).getMonth());
+              const prevMyDays = schedules?.[rid]?.[prevMk]?.[emp.id] ?? {};
+              const prevFaults = Object.values(prevMyDays).filter(s => s === DAY_FAULT_U).length;
+              const hasPrevData = Object.keys(prevMyDays).length > 0;
+              const badgesNew = [];
+              if (daysInCompany >= 365) badgesNew.push({ icon:"🏆", label:"1 Ano", desc:"Completou 1 ano na empresa" });
+              else if (daysInCompany >= 180) badgesNew.push({ icon:"⭐", label:"6 Meses", desc:"6 meses de dedicação" });
+              else if (daysInCompany >= 90) badgesNew.push({ icon:"🌟", label:"3 Meses", desc:"Primeiros 90 dias concluídos" });
+              if ((emp?.roleHistory ?? []).length > 0) badgesNew.push({ icon:"⬆️", label:"Promovido", desc:"Já recebeu uma promoção" });
+              if (latestFb?.rating === 5) badgesNew.push({ icon:"💎", label:"Excelência", desc:"Avaliação Excepcional" });
+              if (completedGoals.length > 0) badgesNew.push({ icon:"🎯", label:"Objetivo Concluído", desc:`${completedGoals.length} objetivo${completedGoals.length>1?"s":""} finalizado${completedGoals.length>1?"s":""}` });
+              if (hasPrevData && prevFaults === 0) badgesNew.push({ icon:"🔥", label:"Sem Faltas", desc:"0 faltas injustificadas no mês anterior" });
+              const conhecGoals = completedGoals.filter(g => g.type === "conhecimento" && (g.metas??[]).length > 0 && (g.metas??[]).every(m => m.done));
+              if (conhecGoals.length > 0) badgesNew.push({ icon:"📚", label:"Estudioso", desc:"Completou objetivo de conhecimento" });
+              // Meeting plans
+              const empPlans = (meetingPlans??[]).filter(p => p.restaurantId === rid && (p.employeeIds??[]).includes(emp.id)).sort((a,b)=>a.plannedDate.localeCompare(b.plannedDate));
+              const upcomingPlans = empPlans.filter(p => p.plannedDate >= today()).slice(0,3);
+              const overduePlan = empPlans.filter(p => p.plannedDate < today()).pop();
+              const nextPlan = empPlans.find(p => p.plannedDate >= today());
+              // Jornada events
+              const jornadaEvents = (() => {
+                if (!admDate) return [];
+                const events = [];
+                events.push({ date: admDate, label: "Admissão", icon: "🚀" });
+                (emp.roleHistory ?? []).forEach(rh => {
+                  if (rh.date) {
+                    const newRole = (roles??restRoles).find(r => r.id === rh.newRoleId);
+                    events.push({ date: new Date(rh.date + "T12:00:00"), label: `Promovido a ${newRole?.name ?? "novo cargo"}`, icon: "⬆️" });
+                  }
+                });
+                [[90,"🌟","3 Meses"],[180,"⭐","6 Meses"],[365,"🏆","1 Ano"]].forEach(([days,ic,lb]) => {
+                  if (daysInCompany >= days) {
+                    const dEv = new Date(admDate.getTime() + days * 86400000);
+                    events.push({ date: dEv, label: lb, icon: ic });
+                  }
+                });
+                myFeedbacks.forEach(f => {
+                  const isAval = f.meetingType === "avaliação" || (!f.meetingType && f.rating > 0);
+                  events.push({ date: new Date(f.meetingDate ? f.meetingDate+"T12:00:00" : f.createdAt), label: isAval ? "Conversa de avaliação" : "Conversa de alinhamento", icon: isAval ? "📋" : "💬" });
+                });
+                upcomingPlans.forEach(p => {
+                  const isAval = p.type === "avaliação";
+                  events.push({ date: new Date(p.plannedDate+"T12:00:00"), label: isAval ? "Avaliação prevista" : "Alinhamento previsto", icon: "📅", future: true });
+                });
+                completedGoals.forEach(g => {
+                  events.push({ date: new Date(g.createdAt), label: `Objetivo: ${g.title}`, icon: "🎯" });
+                });
+                events.sort((a,b) => a.date - b.date);
+                return events;
+              })();
+              const gradients = [
+                "linear-gradient(135deg,#fef3c7,#fde68a)",
+                "linear-gradient(135deg,#dbeafe,#bfdbfe)",
+                "linear-gradient(135deg,#d1fae5,#a7f3d0)",
+                "linear-gradient(135deg,#ede9fe,#ddd6fe)",
+                "linear-gradient(135deg,#fee2e2,#fecaca)",
+                "linear-gradient(135deg,#ffedd5,#fed7aa)",
+                "linear-gradient(135deg,#f0fdf4,#dcfce7)",
+                "linear-gradient(135deg,#fdf4ff,#f5d0fe)",
+              ];
+              return (
               <div>
-                {/* Action buttons */}
+                {/* ── 1. Card do empregado com métricas ── */}
+                <div style={{...S.card,marginBottom:16,padding:"20px"}}>
+                  <div style={{display:"flex",gap:16,alignItems:"center",flexWrap:"wrap"}}>
+                    <div style={{width:56,height:56,borderRadius:28,background:`linear-gradient(135deg,${areaColor}cc,${areaColor})`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:26,fontWeight:700,color:"#fff",flexShrink:0}}>{(emp.name??"?").charAt(0)}</div>
+                    <div style={{flex:1,minWidth:0}}>
+                      <div style={{color:"var(--text)",fontWeight:700,fontSize:18}}>{emp.name}</div>
+                      <div style={{color:areaColor,fontSize:13,fontWeight:600}}>{role?.name ?? "—"}</div>
+                      <div style={{color:"var(--text3)",fontSize:11}}>{role?.area ?? "—"} · {daysInCompany} dias na empresa{emp.admission ? ` · Admissão ${new Date(emp.admission+"T12:00:00").toLocaleDateString("pt-BR")}` : ""}</div>
+                    </div>
+                  </div>
+                  {/* Mini-métricas */}
+                  <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:8,marginTop:14}}>
+                    <div style={{padding:"8px 6px",borderRadius:10,background:totFI>0?"#ef444409":"#10b98109",textAlign:"center"}}>
+                      <div style={{color:totFI>0?"#ef4444":"#10b981",fontWeight:700,fontSize:18}}>{totFI}</div>
+                      <div style={{color:"var(--text3)",fontSize:9}}>Faltas 6m</div>
+                    </div>
+                    <div style={{padding:"8px 6px",borderRadius:10,background:"var(--border)22",textAlign:"center"}}>
+                      <div style={{color:"var(--text)",fontWeight:700,fontSize:12,lineHeight:1.3}}>{lastMeetingDate ?? "—"}</div>
+                      <div style={{color:"var(--text3)",fontSize:9}}>Última reunião</div>
+                    </div>
+                    <div style={{padding:"8px 6px",borderRadius:10,background:lastRating?lastRatingColor+"09":"var(--border)22",textAlign:"center"}}>
+                      <div style={{color:lastRatingColor,fontWeight:700,fontSize:12,lineHeight:1.3}}>{lastRating ?? "—"}</div>
+                      <div style={{color:"var(--text3)",fontSize:9}}>Última nota</div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* ── Action buttons ── */}
                 <div style={{display:"flex",gap:8,marginBottom:16,flexWrap:"wrap"}}>
                   <button onClick={()=>{setShowIncForm(!showIncForm);setShowFbForm(false);}} style={{padding:"8px 16px",borderRadius:10,border:`1px solid ${showIncForm?"var(--accent)":"var(--border)"}`,background:showIncForm?"var(--accent)11":"transparent",color:showIncForm?"var(--accent)":"var(--text3)",cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:12}}>
-                    📋 Registrar ocorrência
+                    📋 Ocorrência
                   </button>
                   <button onClick={()=>{setShowFbForm(!showFbForm);setShowIncForm(false);}} style={{padding:"8px 16px",borderRadius:10,border:`1px solid ${showFbForm?"#f59e0b":"var(--border)"}`,background:showFbForm?"#f59e0b11":"transparent",color:showFbForm?"#f59e0b":"var(--text3)",cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:12}}>
                     💬 Reunião
                   </button>
                   <button onClick={async()=>{
-                    // ── Export trail as PDF ──
                     const dateFrom = window.prompt("Data início (DD/MM/AAAA):", emp.admission ? new Date(emp.admission+"T12:00:00").toLocaleDateString("pt-BR") : "01/01/2026");
                     if (!dateFrom) return;
                     const dateTo = window.prompt("Data fim (DD/MM/AAAA):", new Date().toLocaleDateString("pt-BR"));
@@ -4744,7 +4865,6 @@ Inclua apenas as ações solicitadas. Arrays vazios se não houver ação daquel
                     const fromISO = parseDate(dateFrom);
                     const toISO = parseDate(dateTo);
                     if (!fromISO || !toISO) { window.alert("Data inválida. Use DD/MM/AAAA."); return; }
-
                     try {
                       await loadScript("https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js");
                       await loadScript("https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js");
@@ -4752,147 +4872,38 @@ Inclua apenas as ações solicitadas. Arrays vazios se não houver ação daquel
                       const doc = new jsPDF({ orientation:"portrait", unit:"mm", format:"a4" });
                       const W = doc.internal.pageSize.getWidth();
                       let y = 15;
-
-                      // Header
-                      doc.setFontSize(16);
-                      doc.setTextColor(30,30,30);
-                      doc.text("RELATÓRIO DA TRILHA DO EMPREGADO", W/2, y, {align:"center"});
-                      y += 7;
-                      doc.setFontSize(10);
-                      doc.setTextColor(100,100,100);
-                      doc.text(`Período: ${dateFrom} a ${dateTo} — Gerado em ${new Date().toLocaleDateString("pt-BR")}`, W/2, y, {align:"center"});
-                      y += 10;
-
-                      // Employee info
-                      doc.setFontSize(12);
-                      doc.setTextColor(30,30,30);
-                      doc.text("DADOS DO EMPREGADO", 14, y);
-                      y += 2;
-                      doc.autoTable({
-                        startY:y, head:[], body:[
-                          ["Nome", emp.name],
-                          ["Cargo", role?.name ?? "—"],
-                          ["Área", role?.area ?? "—"],
-                          ["Código", emp.empCode ?? "—"],
-                          ["Admissão", emp.admission ? new Date(emp.admission+"T12:00:00").toLocaleDateString("pt-BR") : "—"],
-                          ["Status", emp.demitidoEm ? `Demitido em ${new Date(emp.demitidoEm+"T12:00:00").toLocaleDateString("pt-BR")}` : emp.inactive ? "Inativo" : "Ativo"],
-                        ],
-                        theme:"grid", styles:{fontSize:10,cellPadding:3}, columnStyles:{0:{fontStyle:"bold",cellWidth:45}}, margin:{left:14,right:14}
-                      });
+                      doc.setFontSize(16); doc.setTextColor(30,30,30);
+                      doc.text("RELATÓRIO DA TRILHA DO EMPREGADO", W/2, y, {align:"center"}); y += 7;
+                      doc.setFontSize(10); doc.setTextColor(100,100,100);
+                      doc.text(`Período: ${dateFrom} a ${dateTo} — Gerado em ${new Date().toLocaleDateString("pt-BR")}`, W/2, y, {align:"center"}); y += 10;
+                      doc.setFontSize(12); doc.setTextColor(30,30,30); doc.text("DADOS DO EMPREGADO", 14, y); y += 2;
+                      doc.autoTable({ startY:y, head:[], body:[["Nome",emp.name],["Cargo",role?.name??"—"],["Área",role?.area??"—"],["Código",emp.empCode??"—"],["Admissão",emp.admission?new Date(emp.admission+"T12:00:00").toLocaleDateString("pt-BR"):"—"],["Status",emp.demitidoEm?`Demitido em ${new Date(emp.demitidoEm+"T12:00:00").toLocaleDateString("pt-BR")}`:emp.inactive?"Inativo":"Ativo"]], theme:"grid", styles:{fontSize:10,cellPadding:3}, columnStyles:{0:{fontStyle:"bold",cellWidth:45}}, margin:{left:14,right:14} });
                       y = doc.lastAutoTable.finalY + 8;
-
-                      // Incidents in period
                       const empIncs = (incidents??[]).filter(i => i.restaurantId===rid && (i.employeeIds??[]).includes(emp.id) && !i.deletedAt && i.date>=fromISO && i.date<=toISO);
-                      if (empIncs.length > 0) {
-                        if (y > 240) { doc.addPage(); y = 15; }
-                        doc.setFontSize(12); doc.text("OCORRÊNCIAS", 14, y); y += 2;
-                        doc.autoTable({
-                          startY:y,
-                          head:[["Data","Tipo","Gravidade","Descrição"]],
-                          body:empIncs.sort((a,b)=>a.date.localeCompare(b.date)).map(inc => {
-                            const t = INCIDENT_TYPES.find(x=>x.id===inc.type);
-                            const sev = SEVERITY_OPTIONS.find(s=>s.id===inc.severity);
-                            return [
-                              new Date(inc.date+"T12:00:00").toLocaleDateString("pt-BR"),
-                              t?.label ?? inc.type,
-                              sev?.label ?? inc.severity ?? "—",
-                              (inc.description??"").slice(0,80)
-                            ];
-                          }),
-                          theme:"striped", styles:{fontSize:9,cellPadding:2}, headStyles:{fillColor:[59,130,246]},
-                          columnStyles:{3:{cellWidth:70}}, margin:{left:14,right:14}
-                        });
-                        y = doc.lastAutoTable.finalY + 8;
-                      }
-
-                      // Reuniões in period
-                      const empFbs = (feedbacks??[]).filter(f => f.restaurantId===rid && f.employeeId===emp.id && !f.deletedAt && ((f.meetingDate??f.createdAt??"").slice(0,10))>=fromISO && ((f.meetingDate??f.createdAt??"").slice(0,10))<=toISO);
-                      if (empFbs.length > 0) {
-                        if (y > 240) { doc.addPage(); y = 15; }
-                        doc.setFontSize(12); doc.text("REUNIÕES", 14, y); y += 2;
-                        doc.autoTable({
-                          startY:y,
-                          head:[["Data","Tipo","Avaliação","Anotações","Pontos Positivos"]],
-                          body:empFbs.sort((a,b)=>(a.meetingDate??a.createdAt??"").localeCompare(b.meetingDate??b.createdAt??"")).map(fb => {
-                            const isAv = fb.meetingType === "avaliação" || (!fb.meetingType && fb.rating > 0);
-                            return [
-                              fb.meetingDate ? new Date(fb.meetingDate+"T12:00:00").toLocaleDateString("pt-BR") : (fb.createdAt ? new Date(fb.createdAt).toLocaleDateString("pt-BR") : "—"),
-                              isAv ? "Avaliação" : "Alinhamento",
-                              fb.rating ? (RATING_LABELS[fb.rating-1] ?? "—") : "—",
-                              (fb.notes??"").slice(0,50) || (fb.internalNotes??"").slice(0,50),
-                              (fb.strengths??"").slice(0,50)
-                            ];
-                          }),
-                          theme:"striped", styles:{fontSize:9,cellPadding:2}, headStyles:{fillColor:[59,130,246]}, margin:{left:14,right:14}
-                        });
-                        y = doc.lastAutoTable.finalY + 8;
-                      }
-
-                      // Role history
+                      if (empIncs.length > 0) { if (y > 240) { doc.addPage(); y = 15; } doc.setFontSize(12); doc.text("OCORRÊNCIAS", 14, y); y += 2; doc.autoTable({ startY:y, head:[["Data","Tipo","Gravidade","Descrição"]], body:empIncs.sort((a,b)=>a.date.localeCompare(b.date)).map(inc => { const t = INCIDENT_TYPES.find(x=>x.id===inc.type); const sev = SEVERITY_OPTIONS.find(s=>s.id===inc.severity); return [new Date(inc.date+"T12:00:00").toLocaleDateString("pt-BR"),t?.label??inc.type,sev?.label??inc.severity??"—",(inc.description??"").slice(0,80)]; }), theme:"striped", styles:{fontSize:9,cellPadding:2}, headStyles:{fillColor:[59,130,246]}, columnStyles:{3:{cellWidth:70}}, margin:{left:14,right:14} }); y = doc.lastAutoTable.finalY + 8; }
+                      const empFbsPdf = (feedbacks??[]).filter(f => f.restaurantId===rid && f.employeeId===emp.id && !f.deletedAt && ((f.meetingDate??f.createdAt??"").slice(0,10))>=fromISO && ((f.meetingDate??f.createdAt??"").slice(0,10))<=toISO);
+                      if (empFbsPdf.length > 0) { if (y > 240) { doc.addPage(); y = 15; } doc.setFontSize(12); doc.text("REUNIÕES", 14, y); y += 2; doc.autoTable({ startY:y, head:[["Data","Tipo","Avaliação","Anotações","Pontos Positivos"]], body:empFbsPdf.sort((a,b)=>(a.meetingDate??a.createdAt??"").localeCompare(b.meetingDate??b.createdAt??"")).map(fb => { const isAv = fb.meetingType==="avaliação"||(!fb.meetingType&&fb.rating>0); return [fb.meetingDate?new Date(fb.meetingDate+"T12:00:00").toLocaleDateString("pt-BR"):(fb.createdAt?new Date(fb.createdAt).toLocaleDateString("pt-BR"):"—"),isAv?"Avaliação":"Alinhamento",fb.rating?(RATING_LABELS[fb.rating-1]??"—"):"—",(fb.notes??"").slice(0,50)||(fb.internalNotes??"").slice(0,50),(fb.strengths??"").slice(0,50)]; }), theme:"striped", styles:{fontSize:9,cellPadding:2}, headStyles:{fillColor:[59,130,246]}, margin:{left:14,right:14} }); y = doc.lastAutoTable.finalY + 8; }
                       const roleHist = (emp.roleHistory??[]).filter(rh=>rh.date>=fromISO && rh.date<=toISO);
-                      if (roleHist.length > 0) {
-                        if (y > 250) { doc.addPage(); y = 15; }
-                        doc.setFontSize(12); doc.text("MUDANÇAS DE CARGO", 14, y); y += 2;
-                        doc.autoTable({
-                          startY:y,
-                          head:[["Data","De","Para","Motivo"]],
-                          body:roleHist.map(rh => [
-                            new Date(rh.date+"T12:00:00").toLocaleDateString("pt-BR"),
-                            (roles??restRoles).find(r=>r.id===rh.fromRoleId)?.name ?? "—",
-                            (roles??restRoles).find(r=>r.id===rh.toRoleId)?.name ?? "—",
-                            rh.reason || "—"
-                          ]),
-                          theme:"striped", styles:{fontSize:9,cellPadding:2}, headStyles:{fillColor:[139,92,246]}, margin:{left:14,right:14}
-                        });
-                        y = doc.lastAutoTable.finalY + 8;
-                      }
-
-                      // Summary stats
-                      if (y > 250) { doc.addPage(); y = 15; }
-                      doc.setFontSize(12); doc.text("RESUMO", 14, y); y += 2;
-                      const negIncs = empIncs.filter(i => { const t=INCIDENT_TYPES.find(x=>x.id===i.type); return t?.negative; });
-                      const posIncs = empIncs.filter(i => { const t=INCIDENT_TYPES.find(x=>x.id===i.type); return !t?.negative; });
-                      doc.autoTable({
-                        startY:y, head:[], body:[
-                          ["Ocorrências negativas", String(negIncs.length)],
-                          ["Ocorrências positivas", String(posIncs.length)],
-                          ["Feedbacks realizados", String(empFbs.length)],
-                          ["Mudanças de cargo", String(roleHist.length)],
-                          ["Avaliação média", empFbs.length>0?(empFbs.reduce((a,f)=>a+f.rating,0)/empFbs.length).toFixed(1):"—"],
-                        ],
-                        theme:"grid", styles:{fontSize:10,cellPadding:3}, columnStyles:{0:{fontStyle:"bold",cellWidth:60}}, margin:{left:14,right:14}
-                      });
-
-                      // Footer
-                      const pages = doc.internal.getNumberOfPages();
-                      for (let i=1;i<=pages;i++) {
-                        doc.setPage(i); doc.setFontSize(8); doc.setTextColor(150,150,150);
-                        doc.text(`AppTip · Trilha de ${emp.name} · ${dateFrom} a ${dateTo} · Página ${i}/${pages}`, W/2, doc.internal.pageSize.getHeight()-8, {align:"center"});
-                      }
-
+                      if (roleHist.length > 0) { if (y > 250) { doc.addPage(); y = 15; } doc.setFontSize(12); doc.text("MUDANÇAS DE CARGO", 14, y); y += 2; doc.autoTable({ startY:y, head:[["Data","De","Para","Motivo"]], body:roleHist.map(rh => [new Date(rh.date+"T12:00:00").toLocaleDateString("pt-BR"),(roles??restRoles).find(r=>r.id===rh.fromRoleId)?.name??"—",(roles??restRoles).find(r=>r.id===rh.toRoleId)?.name??"—",rh.reason||"—"]), theme:"striped", styles:{fontSize:9,cellPadding:2}, headStyles:{fillColor:[139,92,246]}, margin:{left:14,right:14} }); y = doc.lastAutoTable.finalY + 8; }
+                      if (y > 250) { doc.addPage(); y = 15; } doc.setFontSize(12); doc.text("RESUMO", 14, y); y += 2;
+                      const negIncs = empIncs.filter(i => { const t=INCIDENT_TYPES.find(x=>x.id===i.type); return t?.negative; }); const posIncs = empIncs.filter(i => { const t=INCIDENT_TYPES.find(x=>x.id===i.type); return !t?.negative; });
+                      doc.autoTable({ startY:y, head:[], body:[["Ocorrências negativas",String(negIncs.length)],["Ocorrências positivas",String(posIncs.length)],["Reuniões realizadas",String(empFbsPdf.length)],["Mudanças de cargo",String(roleHist.length)],["Avaliação média",empFbsPdf.length>0?(empFbsPdf.reduce((a,f)=>a+(f.rating||0),0)/empFbsPdf.length).toFixed(1):"—"]], theme:"grid", styles:{fontSize:10,cellPadding:3}, columnStyles:{0:{fontStyle:"bold",cellWidth:60}}, margin:{left:14,right:14} });
+                      const pages = doc.internal.getNumberOfPages(); for (let i=1;i<=pages;i++) { doc.setPage(i); doc.setFontSize(8); doc.setTextColor(150,150,150); doc.text(`AppTip · Trilha de ${emp.name} · ${dateFrom} a ${dateTo} · Página ${i}/${pages}`, W/2, doc.internal.pageSize.getHeight()-8, {align:"center"}); }
                       const safeName = emp.name.replace(/[^a-zA-Z0-9]/g,"_").toLowerCase();
                       setPreviewDoc(doc); setPreviewFileName(`trilha_${safeName}_${fromISO}_${toISO}.pdf`);
                       onUpdate("_toast", `📄 Trilha de ${emp.name} exportada!`);
-                    } catch(err) {
-                      console.error("Erro ao exportar trilha:", err);
-                      onUpdate("_toast", "⚠️ Erro ao exportar: " + (err.message || "desconhecido"));
-                    }
+                    } catch(err) { console.error("Erro ao exportar trilha:", err); onUpdate("_toast", "⚠️ Erro ao exportar: " + (err.message || "desconhecido")); }
                   }} style={{padding:"8px 16px",borderRadius:10,border:"1px solid #3b82f644",background:"transparent",color:"#3b82f6",cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:12}}>
-                    📄 Exportar PDF
+                    📄 PDF
                   </button>
                 </div>
                 {showIncForm && <div style={{marginBottom:16}}><IncidentForm restaurantId={rid} employees={restEmps.filter(e=>!e.inactive)} onUpdate={onUpdate} incidents={incidents??[]} currentUser={currentUser} isOwner={isOwner} preSelectedEmpId={emp.id}/></div>}
                 {showFbForm && <div style={{marginBottom:16}}><FeedbackForm restaurantId={rid} employees={restEmps.filter(e=>!e.inactive)} roles={restRoles} onUpdate={onUpdate} feedbacks={feedbacks??[]} currentUser={currentUser} isOwner={isOwner} preSelectedEmpId={emp.id} allMeetingPlans={meetingPlans??[]}/></div>}
+
+                {/* ── Meeting alert ── */}
                 {(() => {
-                  // Check meeting plans first
-                  const empPlans = (meetingPlans??[]).filter(p => p.restaurantId === rid && (p.employeeIds??[]).includes(emp.id)).sort((a,b)=>a.plannedDate.localeCompare(b.plannedDate));
-                  const nextPlan = empPlans.find(p => p.plannedDate >= today());
-                  const overduePlan = empPlans.filter(p => p.plannedDate < today()).pop();
-                  // Fallback to legacy nextFeedbackDate
-                  const empFbs = (feedbacks??[]).filter(f => f.employeeId === emp.id && !f.deletedAt && f.nextFeedbackDate).sort((a,b) => b.createdAt.localeCompare(a.createdAt));
-                  const lastNfd = empFbs[0]?.nextFeedbackDate;
-                  // Determine what to show
-                  const targetDate = overduePlan?.plannedDate || (nextPlan?.plannedDate) || lastNfd;
+                  const legacyNfd = myFeedbacks.find(f => f.nextFeedbackDate)?.nextFeedbackDate;
+                  const targetDate = overduePlan?.plannedDate || nextPlan?.plannedDate || legacyNfd;
                   if (!targetDate) return null;
                   const nfdDate = new Date(targetDate + "T00:00:00");
                   const todayD = new Date(); todayD.setHours(0,0,0,0);
@@ -4905,104 +4916,64 @@ Inclua apenas as ações solicitadas. Arrays vazios se não houver ação daquel
                   const bgColor = isOverdue ? "#fef2f2" : "#fffbeb";
                   const borderColor = isOverdue ? "#fca5a5" : "#fcd34d";
                   const textColor = isOverdue ? "#dc2626" : "#d97706";
-                  const icon = isOverdue ? "⚠️" : "📅";
-                  const label = isOverdue
+                  const ic = isOverdue ? "⚠️" : "📅";
+                  const lbl = isOverdue
                     ? `Conversa de ${typeLabel} atrasada! Prevista para ${nfdDate.toLocaleDateString("pt-BR")} (${Math.abs(diffDays)} dia${Math.abs(diffDays)!==1?"s":""} atrás)`
                     : `Próxima ${typeLabel} em ${diffDays} dia${diffDays!==1?"s":""} (${nfdDate.toLocaleDateString("pt-BR")})`;
                   return <div style={{padding:"10px 14px",borderRadius:10,border:`1px solid ${borderColor}`,background:bgColor,color:textColor,fontSize:13,fontFamily:"'DM Mono',monospace",marginBottom:12,display:"flex",alignItems:"center",gap:8}}>
-                    <span style={{fontSize:16}}>{icon}</span>
-                    <span>{label}</span>
+                    <span style={{fontSize:16}}>{ic}</span><span>{lbl}</span>
                   </div>;
                 })()}
-                {/* Presença & Pontualidade — últimos 6 meses */}
-                {(() => {
-                  const now2 = new Date();
-                  const months6 = [];
-                  for (let i = 0; i < 6; i++) {
-                    const d = new Date(now2.getFullYear(), now2.getMonth() - i, 1);
-                    const mKey = monthKey(d.getFullYear(), d.getMonth());
-                    const label = d.toLocaleDateString("pt-BR", { month:"short" }).replace(".","");
-                    const empSched = schedules?.[rid]?.[mKey]?.[emp.id] ?? {};
-                    const empDel = delays?.[rid]?.[mKey]?.[emp.id] ?? {};
-                    const faltasI = Object.values(empSched).filter(s => s === DAY_FAULT_U).length;
-                    const faltasJ = Object.values(empSched).filter(s => s === DAY_FAULT_J).length;
-                    const delayDays = Object.values(empDel).filter(v => v > 0).length;
-                    const delayMin = Object.values(empDel).filter(v => v > 0).reduce((s,v) => s+v, 0);
-                    const hasDays = Object.keys(empSched).length > 0;
-                    months6.push({ mKey, label, faltasI, faltasJ, delayDays, delayMin, hasDays });
-                  }
-                  months6.reverse(); // cronológico: mais antigo primeiro
-                  const totFI = months6.reduce((s,m) => s+m.faltasI, 0);
-                  const totFJ = months6.reduce((s,m) => s+m.faltasJ, 0);
-                  const totDelDays = months6.reduce((s,m) => s+m.delayDays, 0);
-                  const totDelMin = months6.reduce((s,m) => s+m.delayMin, 0);
-                  const hasAny = totFI > 0 || totFJ > 0 || totDelDays > 0;
-                  return (
-                    <div style={{...S.card,marginBottom:12,padding:"14px"}}>
-                      <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:10}}>
-                        <span style={{fontSize:16}}>📊</span>
-                        <span style={{color:"var(--text)",fontWeight:700,fontSize:14}}>Presença & Pontualidade</span>
-                        <span style={{color:"var(--text3)",fontSize:11,marginLeft:"auto"}}>últimos 6 meses</span>
-                      </div>
-                      {/* Totais */}
-                      <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:8,marginBottom:12}}>
-                        <div style={{padding:"10px 8px",borderRadius:10,background:totFI>0?"#ef444411":"#10b98111",textAlign:"center"}}>
-                          <div style={{color:totFI>0?"#ef4444":"#10b981",fontWeight:700,fontSize:20}}>{totFI}</div>
-                          <div style={{color:"var(--text3)",fontSize:10}}>Faltas injust.</div>
+
+                {/* ── 2. Conquistas / Badges ── */}
+                {badgesNew.length > 0 && (
+                  <div style={{marginBottom:16}}>
+                    <h4 style={{color:"var(--text)",margin:"0 0 10px",fontSize:14}}>🏅 Conquistas</h4>
+                    <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+                      {badgesNew.map((b,i) => (
+                        <div key={i} style={{borderRadius:12,padding:"14px 12px",background:gradients[i % gradients.length],display:"flex",alignItems:"center",gap:10,boxShadow:"0 1px 3px rgba(0,0,0,0.06)"}}>
+                          <div style={{width:40,height:40,borderRadius:20,background:"rgba(255,255,255,0.7)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:22,flexShrink:0}}>{b.icon}</div>
+                          <div style={{flex:1,minWidth:0}}>
+                            <div style={{color:"#1f2937",fontWeight:700,fontSize:12,lineHeight:1.2}}>{b.label}</div>
+                            <div style={{color:"#6b7280",fontSize:10,lineHeight:1.3,marginTop:1}}>{b.desc}</div>
+                          </div>
                         </div>
-                        <div style={{padding:"10px 8px",borderRadius:10,background:totFJ>0?"#f59e0b11":"#10b98111",textAlign:"center"}}>
-                          <div style={{color:totFJ>0?"#f59e0b":"#10b981",fontWeight:700,fontSize:20}}>{totFJ}</div>
-                          <div style={{color:"var(--text3)",fontSize:10}}>Faltas just.</div>
-                        </div>
-                        <div style={{padding:"10px 8px",borderRadius:10,background:totDelDays>0?"#f59e0b11":"#10b98111",textAlign:"center"}}>
-                          <div style={{color:totDelDays>0?"#f59e0b":"#10b981",fontWeight:700,fontSize:20}}>{totDelDays}</div>
-                          <div style={{color:"var(--text3)",fontSize:10}}>Dias c/ atraso</div>
-                          {totDelMin > 0 && <div style={{color:"var(--text3)",fontSize:9}}>{totDelMin}min ({(totDelMin/60).toFixed(1)}h)</div>}
-                        </div>
-                      </div>
-                      {/* Tabela mês a mês */}
-                      {hasAny && (
-                        <div style={{overflowX:"auto"}}>
-                          <table style={{width:"100%",borderCollapse:"collapse",fontSize:11,fontFamily:"'DM Mono',monospace"}}>
-                            <thead>
-                              <tr>
-                                <th style={{textAlign:"left",padding:"4px 6px",borderBottom:"1px solid var(--border)",color:"var(--text3)",fontSize:10,fontWeight:600}}>Mês</th>
-                                <th style={{textAlign:"center",padding:"4px 4px",borderBottom:"1px solid var(--border)",color:"#ef4444",fontSize:10,fontWeight:600}}>FI</th>
-                                <th style={{textAlign:"center",padding:"4px 4px",borderBottom:"1px solid var(--border)",color:"#f59e0b",fontSize:10,fontWeight:600}}>FJ</th>
-                                <th style={{textAlign:"center",padding:"4px 4px",borderBottom:"1px solid var(--border)",color:"#f59e0b",fontSize:10,fontWeight:600}}>Atrasos</th>
-                                <th style={{textAlign:"center",padding:"4px 4px",borderBottom:"1px solid var(--border)",color:"var(--text3)",fontSize:10,fontWeight:600}}>Min</th>
-                              </tr>
-                            </thead>
-                            <tbody>
-                              {months6.map(m => {
-                                if (!m.hasDays && m.delayDays === 0) return null;
-                                return (
-                                  <tr key={m.mKey}>
-                                    <td style={{padding:"4px 6px",borderBottom:"1px solid var(--border)22",textTransform:"capitalize",color:"var(--text2)",fontWeight:600}}>{m.label}</td>
-                                    <td style={{textAlign:"center",padding:"4px",borderBottom:"1px solid var(--border)22",color:m.faltasI>0?"#ef4444":"var(--text3)",fontWeight:m.faltasI>0?700:400}}>{m.faltasI}</td>
-                                    <td style={{textAlign:"center",padding:"4px",borderBottom:"1px solid var(--border)22",color:m.faltasJ>0?"#f59e0b":"var(--text3)",fontWeight:m.faltasJ>0?700:400}}>{m.faltasJ}</td>
-                                    <td style={{textAlign:"center",padding:"4px",borderBottom:"1px solid var(--border)22",color:m.delayDays>0?"#f59e0b":"var(--text3)",fontWeight:m.delayDays>0?700:400}}>{m.delayDays}</td>
-                                    <td style={{textAlign:"center",padding:"4px",borderBottom:"1px solid var(--border)22",color:"var(--text3)"}}>{m.delayMin>0?m.delayMin:"—"}</td>
-                                  </tr>
-                                );
-                              })}
-                            </tbody>
-                          </table>
-                        </div>
-                      )}
-                      {!hasAny && <div style={{textAlign:"center",color:"#10b981",fontSize:12,padding:"8px 0"}}>✅ Nenhuma falta ou atraso nos últimos 6 meses</div>}
+                      ))}
                     </div>
-                  );
-                })()}
-                {/* Histórico de feedbacks — só gestor */}
+                  </div>
+                )}
+
+                {/* ── 3. Próximas reuniões planejadas ── */}
+                {upcomingPlans.length > 0 && (
+                  <div style={{marginBottom:16}}>
+                    <h4 style={{color:"var(--text)",margin:"0 0 10px",fontSize:14}}>📅 Próximas reuniões</h4>
+                    {upcomingPlans.map(p => {
+                      const pDate = new Date(p.plannedDate+"T12:00:00");
+                      const todayD = new Date(); todayD.setHours(0,0,0,0);
+                      const diff = Math.round((pDate - todayD) / 86400000);
+                      const isAval = p.type === "avaliação";
+                      const pColor = isAval ? "#8b5cf6" : "#3b82f6";
+                      return (
+                        <div key={p.id} style={{...S.card,padding:"14px 16px",marginBottom:8,display:"flex",alignItems:"center",gap:10,borderLeft:`4px solid ${pColor}`}}>
+                          <span style={{fontSize:20}}>📅</span>
+                          <div style={{flex:1}}>
+                            <div style={{color:"var(--text)",fontWeight:600,fontSize:13}}>{isAval ? "Conversa de avaliação" : "Conversa de alinhamento"}</div>
+                            <div style={{color:"var(--text3)",fontSize:12}}>{diff === 0 ? "Hoje" : diff === 1 ? "Amanhã" : `Em ${diff} dia${diff!==1?"s":""}`} · {pDate.toLocaleDateString("pt-BR")}</div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+
+                {/* ── 4. Reuniões anteriores + lixeira ── */}
                 {(() => {
-                  const allEmpFbs = (feedbacks??[]).filter(f => f.restaurantId === rid && f.employeeId === emp.id);
-                  const empFbsHist = allEmpFbs.filter(f => !f.deletedAt).sort((a,b) => (b.createdAt??"").localeCompare(a.createdAt??""));
-                  const deletedFbs = allEmpFbs.filter(f => f.deletedAt && (Date.now() - new Date(f.deletedAt).getTime()) < 90 * 86400000).sort((a,b) => (b.deletedAt??"").localeCompare(a.deletedAt??""));
+                  const empFbsHist = myFeedbacks;
+                  const deletedFbs = myFeedbacksAll.filter(f => f.deletedAt && (Date.now() - new Date(f.deletedAt).getTime()) < 90 * 86400000).sort((a,b) => (b.deletedAt??"").localeCompare(a.deletedAt??""));
                   const canDeleteFb = !isLider;
                   if (empFbsHist.length === 0 && deletedFbs.length === 0) return null;
                   return (
-                    <div style={{...S.card,marginBottom:12,padding:"14px"}}>
+                    <div style={{...S.card,marginBottom:16,padding:"14px"}}>
                       <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:10}}>
                         <span style={{fontSize:16}}>💬</span>
                         <span style={{color:"var(--text)",fontWeight:700,fontSize:14}}>Reuniões anteriores</span>
@@ -5039,7 +5010,6 @@ Inclua apenas as ações solicitadas. Arrays vazios se não houver ação daquel
                           </div>
                         );
                       })}
-                      {/* Lixeira de feedbacks — restaurar em até 7 dias */}
                       {canDeleteFb && deletedFbs.length > 0 && (
                         <div style={{marginTop:10,padding:"10px 12px",borderRadius:8,background:"var(--red)08",border:"1px solid var(--red)22"}}>
                           <div style={{fontSize:11,color:"var(--red)",fontWeight:700,marginBottom:6}}>🗑️ Lixeira ({deletedFbs.length})</div>
@@ -5061,10 +5031,96 @@ Inclua apenas as ações solicitadas. Arrays vazios se não houver ação daquel
                     </div>
                   );
                 })()}
+
+                {/* ── 5. Jornada — timeline visual ── */}
+                {jornadaEvents.length > 0 && (
+                  <div style={{marginBottom:16}}>
+                    <h4 style={{color:"var(--text)",margin:"0 0 12px",fontSize:14}}>🗓️ Jornada</h4>
+                    <div style={{position:"relative",paddingLeft:24}}>
+                      <div style={{position:"absolute",left:7,top:4,bottom:4,width:2,background:"var(--border)",borderRadius:1}}/>
+                      {jornadaEvents.map((ev,i) => (
+                        <div key={i} style={{position:"relative",marginBottom:i<jornadaEvents.length-1?12:0,display:"flex",alignItems:"flex-start",gap:10}}>
+                          <div style={{position:"absolute",left:-20,top:3,width:12,height:12,borderRadius:6,background:ev.future?"#3b82f6":i===jornadaEvents.length-1?"var(--ac)":"var(--border)",border:"2px solid var(--bg)",flexShrink:0,zIndex:1}}/>
+                          <div style={{flex:1,minWidth:0}}>
+                            <div style={{display:"flex",alignItems:"center",gap:6}}>
+                              <span style={{fontSize:13}}>{ev.icon}</span>
+                              <span style={{color:ev.future?"#3b82f6":"var(--text)",fontSize:12,fontWeight:600,fontStyle:ev.future?"italic":"normal"}}>{ev.label}</span>
+                            </div>
+                            <div style={{color:"var(--text3)",fontSize:10,marginTop:1}}>
+                              {ev.date.toLocaleDateString("pt-BR",{day:"2-digit",month:"short",year:"numeric"})}
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* ── 6. Presença & Pontualidade — 6 meses ── */}
+                {(() => {
+                  const hasAny = totFI > 0 || totFJ > 0 || totDelDays > 0;
+                  return (
+                    <div style={{...S.card,marginBottom:16,padding:"14px"}}>
+                      <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:10}}>
+                        <span style={{fontSize:16}}>📊</span>
+                        <span style={{color:"var(--text)",fontWeight:700,fontSize:14}}>Presença & Pontualidade</span>
+                        <span style={{color:"var(--text3)",fontSize:11,marginLeft:"auto"}}>últimos 6 meses</span>
+                      </div>
+                      <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:8,marginBottom:12}}>
+                        <div style={{padding:"10px 8px",borderRadius:10,background:totFI>0?"#ef444411":"#10b98111",textAlign:"center"}}>
+                          <div style={{color:totFI>0?"#ef4444":"#10b981",fontWeight:700,fontSize:20}}>{totFI}</div>
+                          <div style={{color:"var(--text3)",fontSize:10}}>Faltas injust.</div>
+                        </div>
+                        <div style={{padding:"10px 8px",borderRadius:10,background:totFJ>0?"#f59e0b11":"#10b98111",textAlign:"center"}}>
+                          <div style={{color:totFJ>0?"#f59e0b":"#10b981",fontWeight:700,fontSize:20}}>{totFJ}</div>
+                          <div style={{color:"var(--text3)",fontSize:10}}>Faltas just.</div>
+                        </div>
+                        <div style={{padding:"10px 8px",borderRadius:10,background:totDelDays>0?"#f59e0b11":"#10b98111",textAlign:"center"}}>
+                          <div style={{color:totDelDays>0?"#f59e0b":"#10b981",fontWeight:700,fontSize:20}}>{totDelDays}</div>
+                          <div style={{color:"var(--text3)",fontSize:10}}>Dias c/ atraso</div>
+                          {totDelMin > 0 && <div style={{color:"var(--text3)",fontSize:9}}>{totDelMin}min ({(totDelMin/60).toFixed(1)}h)</div>}
+                        </div>
+                      </div>
+                      {hasAny && (
+                        <div style={{overflowX:"auto"}}>
+                          <table style={{width:"100%",borderCollapse:"collapse",fontSize:11,fontFamily:"'DM Mono',monospace"}}>
+                            <thead><tr>
+                              <th style={{textAlign:"left",padding:"4px 6px",borderBottom:"1px solid var(--border)",color:"var(--text3)",fontSize:10,fontWeight:600}}>Mês</th>
+                              <th style={{textAlign:"center",padding:"4px 4px",borderBottom:"1px solid var(--border)",color:"#ef4444",fontSize:10,fontWeight:600}}>FI</th>
+                              <th style={{textAlign:"center",padding:"4px 4px",borderBottom:"1px solid var(--border)",color:"#f59e0b",fontSize:10,fontWeight:600}}>FJ</th>
+                              <th style={{textAlign:"center",padding:"4px 4px",borderBottom:"1px solid var(--border)",color:"#f59e0b",fontSize:10,fontWeight:600}}>Atrasos</th>
+                              <th style={{textAlign:"center",padding:"4px 4px",borderBottom:"1px solid var(--border)",color:"var(--text3)",fontSize:10,fontWeight:600}}>Min</th>
+                            </tr></thead>
+                            <tbody>
+                              {months6.map(m => {
+                                if (!m.hasDays && m.delayDays === 0) return null;
+                                return (
+                                  <tr key={m.mKey}>
+                                    <td style={{padding:"4px 6px",borderBottom:"1px solid var(--border)22",textTransform:"capitalize",color:"var(--text2)",fontWeight:600}}>{m.label}</td>
+                                    <td style={{textAlign:"center",padding:"4px",borderBottom:"1px solid var(--border)22",color:m.faltasI>0?"#ef4444":"var(--text3)",fontWeight:m.faltasI>0?700:400}}>{m.faltasI}</td>
+                                    <td style={{textAlign:"center",padding:"4px",borderBottom:"1px solid var(--border)22",color:m.faltasJ>0?"#f59e0b":"var(--text3)",fontWeight:m.faltasJ>0?700:400}}>{m.faltasJ}</td>
+                                    <td style={{textAlign:"center",padding:"4px",borderBottom:"1px solid var(--border)22",color:m.delayDays>0?"#f59e0b":"var(--text3)",fontWeight:m.delayDays>0?700:400}}>{m.delayDays}</td>
+                                    <td style={{textAlign:"center",padding:"4px",borderBottom:"1px solid var(--border)22",color:"var(--text3)"}}>{m.delayMin>0?m.delayMin:"—"}</td>
+                                  </tr>
+                                );
+                              })}
+                            </tbody>
+                          </table>
+                        </div>
+                      )}
+                      {!hasAny && <div style={{textAlign:"center",color:"#10b981",fontSize:12,padding:"8px 0"}}>✅ Nenhuma falta ou atraso nos últimos 6 meses</div>}
+                    </div>
+                  );
+                })()}
+
+                {/* ── 7. Objetivos ── */}
                 <GoalsManager empId={emp.id} employeeGoals={employeeGoals} roles={roles??restRoles} restaurantId={rid} onUpdate={onUpdate} currentUser={currentUser} isOwner={isOwner} schedules={schedules??{}} feedbacks={feedbacks??[]} employees={employees}/>
+
+                {/* ── 8. Timeline de eventos ── */}
                 <EmpTimeline empId={emp.id} employees={employees} roles={roles??restRoles} schedules={schedules??{}} incidents={incidents??[]} feedbacks={feedbacks??[]} restaurantId={rid} onUpdate={onUpdate} currentUser={currentUser} isOwner={isOwner} canDeleteInc={!isLider}/>
               </div>
-            )}
+              );
+            })()}
           </div>
         );
       })()}
