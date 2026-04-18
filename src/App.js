@@ -4985,7 +4985,7 @@ Inclua apenas as ações solicitadas. Arrays vazios se não houver ação daquel
                 {(() => {
                   const allEmpFbs = (feedbacks??[]).filter(f => f.restaurantId === rid && f.employeeId === emp.id);
                   const empFbsHist = allEmpFbs.filter(f => !f.deletedAt).sort((a,b) => (b.createdAt??"").localeCompare(a.createdAt??""));
-                  const deletedFbs = allEmpFbs.filter(f => f.deletedAt && (Date.now() - new Date(f.deletedAt).getTime()) < 7 * 86400000).sort((a,b) => (b.deletedAt??"").localeCompare(a.deletedAt??""));
+                  const deletedFbs = allEmpFbs.filter(f => f.deletedAt && (Date.now() - new Date(f.deletedAt).getTime()) < 90 * 86400000).sort((a,b) => (b.deletedAt??"").localeCompare(a.deletedAt??""));
                   const canDeleteFb = !isLider;
                   if (empFbsHist.length === 0 && deletedFbs.length === 0) return null;
                   return (
@@ -5009,7 +5009,7 @@ Inclua apenas as ações solicitadas. Arrays vazios se não houver ação daquel
                               <div style={{display:"flex",alignItems:"center",gap:6}}>
                                 <span style={{color:"var(--text3)",fontSize:10}}>{fb.createdAt ? new Date(fb.createdAt).toLocaleDateString("pt-BR") : ""} · {fb.createdBy ?? ""}</span>
                                 {canDeleteFb && <button onClick={()=>{
-                                  if (!window.confirm(`Excluir feedback de ${fb.createdAt ? new Date(fb.createdAt).toLocaleDateString("pt-BR") : "—"}?\n\nO feedback ficará na lixeira por 7 dias e poderá ser restaurado.`)) return;
+                                  if (!window.confirm(`Excluir feedback de ${fb.createdAt ? new Date(fb.createdAt).toLocaleDateString("pt-BR") : "—"}?\n\nO feedback ficará na lixeira por 90 dias e poderá ser restaurado.`)) return;
                                   const updated = (feedbacks??[]).map(f => f.id === fb.id ? {...f, deletedAt: new Date().toISOString(), deletedBy: currentUser?.name || (isOwner ? "Admin AppTip" : "Gestor")} : f);
                                   onUpdate("feedbacks", updated);
                                 }} style={{padding:"2px 6px",borderRadius:6,border:"1px solid var(--red)33",background:"transparent",color:"var(--red)",cursor:"pointer",fontSize:9,fontFamily:"'DM Mono',monospace"}}>✕</button>}
@@ -5026,7 +5026,7 @@ Inclua apenas as ações solicitadas. Arrays vazios se não houver ação daquel
                         <div style={{marginTop:10,padding:"10px 12px",borderRadius:8,background:"var(--red)08",border:"1px solid var(--red)22"}}>
                           <div style={{fontSize:11,color:"var(--red)",fontWeight:700,marginBottom:6}}>🗑️ Lixeira ({deletedFbs.length})</div>
                           {deletedFbs.map(fb => {
-                            const daysLeft = Math.max(0, 7 - Math.floor((Date.now() - new Date(fb.deletedAt).getTime()) / 86400000));
+                            const daysLeft = Math.max(0, 90 - Math.floor((Date.now() - new Date(fb.deletedAt).getTime()) / 86400000));
                             const qLabel = fb.quarter ? `Q${fb.quarter}/${fb.year ?? ""}` : "";
                             return (
                               <div key={fb.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"4px 0",fontSize:10}}>
@@ -5868,7 +5868,7 @@ function EmpTimeline({ empId, employees, roles, schedules, incidents, feedbacks,
                   <div style={{display:"flex",alignItems:"center",gap:6}}>
                     <span style={{fontSize:10,color:"var(--text3)",fontFamily:"'DM Mono',monospace"}}>{new Date(ev.date+"T12:00:00").toLocaleDateString("pt-BR")}</span>
                     {ev.type === "incident" && canDeleteInc && onUpdate && <button onClick={()=>{
-                      if (!window.confirm(`Excluir ocorrência "${ev.label}" de ${new Date(ev.date+"T12:00:00").toLocaleDateString("pt-BR")}?\n\nA ocorrência ficará na lixeira por 7 dias e poderá ser restaurada.`)) return;
+                      if (!window.confirm(`Excluir ocorrência "${ev.label}" de ${new Date(ev.date+"T12:00:00").toLocaleDateString("pt-BR")}?\n\nA ocorrência ficará na lixeira por 90 dias e poderá ser restaurada.`)) return;
                       const updated = (incidents??[]).map(inc => inc.id === ev.incId ? {...inc, deletedAt: new Date().toISOString(), deletedBy: currentUser?.name || (isOwner ? "Admin AppTip" : "Gestor")} : inc);
                       onUpdate("incidents", updated);
                     }} style={{padding:"2px 6px",borderRadius:6,border:"1px solid var(--red)33",background:"transparent",color:"var(--red)",cursor:"pointer",fontSize:9,fontFamily:"'DM Mono',monospace"}}>✕</button>}
@@ -5883,13 +5883,13 @@ function EmpTimeline({ empId, employees, roles, schedules, incidents, feedbacks,
       </div>
       {/* Lixeira de ocorrências — restaurar em até 7 dias */}
       {canDeleteInc && onUpdate && (() => {
-        const deletedIncs = (incidents??[]).filter(inc => inc.restaurantId === restaurantId && (inc.employeeIds??[]).includes(empId) && inc.deletedAt && (Date.now() - new Date(inc.deletedAt).getTime()) < 7 * 86400000).sort((a,b) => (b.deletedAt??"").localeCompare(a.deletedAt??""));
+        const deletedIncs = (incidents??[]).filter(inc => inc.restaurantId === restaurantId && (inc.employeeIds??[]).includes(empId) && inc.deletedAt && (Date.now() - new Date(inc.deletedAt).getTime()) < 90 * 86400000).sort((a,b) => (b.deletedAt??"").localeCompare(a.deletedAt??""));
         if (deletedIncs.length === 0) return null;
         return (
           <div style={{marginTop:10,padding:"10px 12px",borderRadius:8,background:"var(--red)08",border:"1px solid var(--red)22"}}>
             <div style={{fontSize:11,color:"var(--red)",fontWeight:700,marginBottom:6}}>🗑️ Ocorrências excluídas ({deletedIncs.length})</div>
             {deletedIncs.map(inc => {
-              const daysLeft = Math.max(0, 7 - Math.floor((Date.now() - new Date(inc.deletedAt).getTime()) / 86400000));
+              const daysLeft = Math.max(0, 90 - Math.floor((Date.now() - new Date(inc.deletedAt).getTime()) / 86400000));
               const t = INCIDENT_TYPES.find(it => it.id === inc.type);
               return (
                 <div key={inc.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"4px 0",fontSize:10}}>
@@ -7103,7 +7103,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
   // Reset de aba — só Admin AppTip (isOwner)
   function resetTab(tabKey, tabLabel, getSnapshot) {
     if (!isOwner) return;
-    if (!window.confirm(`Resetar "${tabLabel}"?\n\nOs dados ficam na lixeira por 7 dias e podem ser restaurados.`)) return;
+    if (!window.confirm(`Resetar "${tabLabel}"?\n\nOs dados ficam na lixeira por 90 dias e podem ser restaurados.`)) return;
     const snapshot = getSnapshot();
     const entry = {
       id: Date.now().toString(),
