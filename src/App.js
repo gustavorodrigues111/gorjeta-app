@@ -298,54 +298,63 @@ function parseSolidesPDF(fullText, expectedYear, expectedMonth) {
         status = "off_day";
       } else {
         // Work day — extract times
-        // Get entry/exit times (before pipe and including pipe-separated groups)
-        // The format is typically: "11:36 18:02 | 18:36 22:42"  then  "10:32"  then "10:00"  then "+00:32"
-        // Or: "(m)11:30 16:00 | (m)18:30 22:55 |   08:55   10:00   -1:05"
+        // Format: "(m)11:30 16:00 | (m)18:30 22:55 | 08:55 10:00 -1:05"
+        // Pipe-separated sections: entry/exit pairs, then LAST section = summary (TRABALHADAS [ABONO] PREVISTAS SALDO)
 
         // Clean (m), (fh), (p) markers for parsing
         const cleaned = rest.replace(/\([a-z]+\)/gi, "");
 
-        // Split by multiple spaces (3+) to separate columns
-        const columns = cleaned.split(/\s{3,}/).map(c => c.trim()).filter(Boolean);
+        // Split by pipe |
+        const pipeParts = cleaned.split(/\|/).map(p => p.trim()).filter(Boolean);
 
-        // First column(s) before large gap = entry/exit times (PONTOS)
-        // The entry/exit block may contain | separators
-        let entryBlock = columns[0] || "";
-        // Sometimes columns[0] has both pontos and trabalhadas if spacing is inconsistent
-        // Use a heuristic: extract paired times from the beginning
+        if (pipeParts.length >= 2) {
+          // Last pipe section = summary (TRABALHADAS [ABONO] PREVISTAS SALDO)
+          const summaryPart = pipeParts[pipeParts.length - 1];
+          // Entry/exit sections = all except last
+          const entryParts = pipeParts.slice(0, -1);
 
-        // Get ALL times from the entry block
-        const entryTimes = [];
-        const entryParts = entryBlock.split(/\|/);
-        for (const part of entryParts) {
-          const ts = part.match(/\d{1,2}:\d{2}/g) || [];
-          entryTimes.push(...ts.map(parseHHMM).filter(t => t !== null));
-        }
+          // Extract entry/exit times
+          const entryTimes = [];
+          for (const part of entryParts) {
+            const ts = part.match(/\d{1,2}:\d{2}/g) || [];
+            entryTimes.push(...ts.map(parseHHMM).filter(t => t !== null));
+          }
 
-        if (entryTimes.length >= 2) {
-          firstEntry = entryTimes[0]; // first clock-in
-          lastExit = entryTimes[entryTimes.length - 1]; // last clock-out
-        } else if (entryTimes.length === 1) {
-          firstEntry = entryTimes[0];
-        }
+          if (entryTimes.length >= 2) {
+            firstEntry = entryTimes[0]; // first clock-in
+            lastExit = entryTimes[entryTimes.length - 1]; // last clock-out
+          } else if (entryTimes.length === 1) {
+            firstEntry = entryTimes[0];
+          }
 
-        // Extract worked/expected/saldo from remaining columns
-        // These are typically single HH:MM values
-        const summaryTimes = [];
-        for (let ci = 1; ci < columns.length; ci++) {
-          const ts = columns[ci].match(/-?\d{1,2}:\d{2}/g) || [];
-          summaryTimes.push(...ts);
-        }
-        // Order: TRABALHADAS, [ABONO], PREVISTAS, SALDO
-        // SALDO has +/- prefix
-        for (const st of summaryTimes) {
-          const val = parseHHMM(st.replace(/^[+-]/, ""));
-          if (st.startsWith("-") || st.startsWith("+")) {
-            saldo = st.startsWith("-") ? -val : val;
-          } else if (worked === null) {
-            worked = val;
-          } else if (expected === null) {
-            expected = val;
+          // Parse summary: TRABALHADAS [ABONO] PREVISTAS SALDO
+          const summaryTokens = summaryPart.match(/-?\d{1,2}:\d{2}/g) || [];
+          for (const st of summaryTokens) {
+            const val = parseHHMM(st.replace(/^[+-]/, ""));
+            if (st.startsWith("-") || st.startsWith("+")) {
+              saldo = st.startsWith("-") ? -val : val;
+            } else if (worked === null) {
+              worked = val;
+            } else if (expected === null) {
+              expected = val;
+            }
+          }
+          // If saldo wasn't explicitly signed, calculate from worked-expected
+          if (saldo === null && worked !== null && expected !== null) {
+            saldo = worked - expected;
+          }
+        } else if (pipeParts.length === 1) {
+          // No pipe — might be a single entry or just summary
+          const allTimes = pipeParts[0].match(/\d{1,2}:\d{2}/g) || [];
+          if (allTimes.length >= 4) {
+            // Likely: entry exit worked expected [saldo]
+            firstEntry = parseHHMM(allTimes[0]);
+            lastExit = parseHHMM(allTimes[1]);
+            worked = parseHHMM(allTimes[2]);
+            expected = parseHHMM(allTimes[3]);
+          } else if (allTimes.length >= 2) {
+            firstEntry = parseHHMM(allTimes[0]);
+            lastExit = parseHHMM(allTimes[1]);
           }
         }
       }
