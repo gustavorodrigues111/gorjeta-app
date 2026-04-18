@@ -3,7 +3,7 @@ import { useState, useEffect, Component } from "react";
 import { db } from "./firebase";
 import { doc, getDoc, setDoc } from "firebase/firestore";
 
-const APP_VERSION = "5.20.0";
+const APP_VERSION = "5.21.0";
 
 const DEFAULT_ADMISSION = () => `${new Date().getFullYear()}-01-01`;
 const round2 = (v) => Math.round(v * 100) / 100;
@@ -606,6 +606,7 @@ const K = {
   devChecklists:    "v4:devChecklists",     // {[roleId]: [{title, link, type:"livro"|"video"|"curso"|"pratica"}]}
   scheduleAdjustments: "v4:scheduleAdjustments", // {[rid]: {[mk]: [{id, empId, date, from, to, author, timestamp}]}}
   scheduleStatus:      "v4:scheduleStatus",      // {[rid]: {[mk]: {status:"open"|"review"|"closed", closedAt, closedBy, lastPontoImport, pontoSystem, missingFromPonto:[], importHistory:[], lastImportSummary}}}
+  schedulePrevista:    "v4:schedulePrevista",     // {[rid]: {[mk]: frozen snapshot of schedules at first edit/VT payment}}
 };
 
 // ── Version retention ──
@@ -4132,7 +4133,7 @@ Inclua apenas as ações solicitadas. Arrays vazios se não houver ação daquel
 
 
 
-function EmployeeSpreadsheet({ restEmps, restRoles, rid, employees, onUpdate, restCode: restCode_, isOwner, restaurant, notifications, privacyMask, onGenerateDismissalReport, incidents, feedbacks, devChecklists, schedules, currentUser, isLider, mobileOnly: mobileOnlyProp, roles }) {
+function EmployeeSpreadsheet({ restEmps, restRoles, rid, employees, onUpdate, restCode: restCode_, isOwner, restaurant, notifications, privacyMask, onGenerateDismissalReport, incidents, feedbacks, devChecklists, schedules, currentUser, isLider, mobileOnly: mobileOnlyProp, roles, vtPayments, vtConfig, scheduleStatus }) {
   const mobileOnly = mobileOnlyProp ?? false; // eslint-disable-line no-unused-vars
   const PLANOS = [
     { id:"p10",  empMax:10  },
@@ -4152,6 +4153,8 @@ function EmployeeSpreadsheet({ restEmps, restRoles, rid, employees, onUpdate, re
   const [aiEmpInput, setAiEmpInput] = useState("");
   const { generate: aiEmpGenerate, aiLoading: aiEmpLoading, aiError: aiEmpError, setAiError: setAiEmpError } = useAiGenerate();
   const [aiEmpPreview, setAiEmpPreview] = useState(null);
+  const [showDismissalChecklist, setShowDismissalChecklist] = useState(false);
+  const [dismissalCheckEmp, setDismissalCheckEmp] = useState(null);
   const [detailEmp, setDetailEmp] = useState(null); // empId for detail view
   const [detailTab, setDetailTab] = useState("cadastro"); // cadastro | acoes | trilha
   const [showIncForm, setShowIncForm] = useState(false);
@@ -4568,11 +4571,73 @@ Inclua apenas as ações solicitadas. Arrays vazios se não houver ação daquel
                         <div><div style={{fontWeight:700,color:"var(--green)"}}>Reverter demissão</div><div style={{fontSize:11,color:"var(--text3)",marginTop:2}}>Retornar empregado ao status anterior</div></div>
                       </button>
                       {onGenerateDismissalReport && (
-                        <button onClick={()=>onGenerateDismissalReport(emp)} style={{display:"flex",alignItems:"center",gap:8,padding:"12px 16px",borderRadius:10,border:"1px solid #3b82f633",background:"#3b82f609",color:"var(--text)",cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:13,textAlign:"left"}}>
+                        <button onClick={()=>{
+                          // Pre-dismissal checklist (#71)
+                          setDismissalCheckEmp(emp);
+                          setShowDismissalChecklist(true);
+                        }} style={{display:"flex",alignItems:"center",gap:8,padding:"12px 16px",borderRadius:10,border:"1px solid #3b82f633",background:"#3b82f609",color:"var(--text)",cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:13,textAlign:"left"}}>
                           <span style={{fontSize:18}}>📄</span>
                           <div><div style={{fontWeight:700,color:"#3b82f6"}}>Relatório de desligamento</div><div style={{fontSize:11,color:"var(--text3)",marginTop:2}}>Exportar PDF com dados e gorjetas</div></div>
                         </button>
                       )}
+                      {/* VT balance card for dismissed employee (#70) */}
+                      {(() => {
+                        const demMk2 = emp.demitidoEm?.slice(0,7);
+                        if (!demMk2) return null;
+                        const [demY2, demM2] = demMk2.split("-").map(Number);
+                        const demDay2 = parseInt(emp.demitidoEm?.slice(8,10) ?? "0");
+                        const daysInDemMonth2 = new Date(demY2, demM2, 0).getDate();
+                        const vtPay2 = vtPayments?.[rid]?.[demMk2];
+                        const vtSnap2 = vtPay2?.snapshot?.find(s => s.empId === emp.id);
+                        const vtCfg2 = vtConfig?.[rid]?.[emp.id];
+                        const rate2 = vtSnap2?.dailyRate ?? vtCfg2?.dailyRate ?? 0;
+                        if (rate2 === 0) return null;
+                        const schedMap2 = schedules?.[rid]?.[demMk2]?.[emp.id] ?? {};
+                        let planned2 = vtSnap2?.plannedDays ?? 0;
+                        let worked2 = 0;
+                        if (!vtSnap2) {
+                          for (let dd = 1; dd <= daysInDemMonth2; dd++) {
+                            const ds = `${demY2}-${String(demM2).padStart(2,"0")}-${String(dd).padStart(2,"0")}`;
+                            if (!schedMap2[ds] || schedMap2[ds] === "comptrab") planned2++;
+                          }
+                        }
+                        for (let dd = 1; dd < demDay2 && dd <= daysInDemMonth2; dd++) {
+                          const ds = `${demY2}-${String(demM2).padStart(2,"0")}-${String(dd).padStart(2,"0")}`;
+                          if (!schedMap2[ds] || schedMap2[ds] === "comptrab") worked2++;
+                        }
+                        const vtPaid2 = round2(rate2 * planned2);
+                        const vtOwed2 = round2(rate2 * worked2);
+                        const toReturn2 = Math.max(0, round2(vtPaid2 - vtOwed2));
+                        // Previous month pending adjust
+                        const prevDemDate2 = new Date(demY2, demM2 - 2, 1);
+                        const prevDemMk2 = `${prevDemDate2.getFullYear()}-${String(prevDemDate2.getMonth()+1).padStart(2,"0")}`;
+                        const prevPay2 = vtPayments?.[rid]?.[prevDemMk2];
+                        let pendAdj2 = 0;
+                        if (prevPay2?.snapshot) {
+                          const ps2 = prevPay2.snapshot.find(s => s.empId === emp.id);
+                          if (ps2) {
+                            const pLastDay = new Date(prevDemDate2.getFullYear(), prevDemDate2.getMonth()+1, 0).getDate();
+                            const pMap = schedules?.[rid]?.[prevDemMk2]?.[emp.id] ?? {};
+                            let pActual = 0;
+                            for (let dd = 1; dd <= pLastDay; dd++) {
+                              const ds = `${prevDemDate2.getFullYear()}-${String(prevDemDate2.getMonth()+1).padStart(2,"0")}-${String(dd).padStart(2,"0")}`;
+                              if (!pMap[ds] || pMap[ds] === "comptrab") pActual++;
+                            }
+                            pendAdj2 = round2((pActual - ps2.plannedDays) * ps2.dailyRate);
+                          }
+                        }
+                        return (
+                          <div style={{padding:"12px 16px",borderRadius:10,background:"#10b98109",border:"1px solid #10b98133"}}>
+                            <div style={{fontWeight:700,color:"var(--green)",fontSize:12,marginBottom:8}}>{"🚌"} Saldo VT no desligamento</div>
+                            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:4,fontSize:11,color:"var(--text2)"}}>
+                              <span>VT pago (mês):</span><span style={{textAlign:"right",fontFamily:"'DM Mono',monospace"}}>R$ {vtPaid2.toFixed(2).replace(".",",")}</span>
+                              <span>Dias trabalhados:</span><span style={{textAlign:"right",fontFamily:"'DM Mono',monospace"}}>{worked2}d</span>
+                              <span>A restituir:</span><span style={{textAlign:"right",fontFamily:"'DM Mono',monospace",color:"var(--red)",fontWeight:700}}>R$ {toReturn2.toFixed(2).replace(".",",")}</span>
+                              {pendAdj2 !== 0 && <><span>Ajuste pendente ant.:</span><span style={{textAlign:"right",fontFamily:"'DM Mono',monospace",color:pendAdj2>0?"var(--green)":"var(--red)"}}>R$ {pendAdj2.toFixed(2).replace(".",",")}</span></>}
+                            </div>
+                          </div>
+                        );
+                      })()}
                     </>
                   )}
                   {/* Inativar/Reativar */}
@@ -4921,6 +4986,66 @@ Inclua apenas as ações solicitadas. Arrays vazios se não houver ação daquel
         ));
       })()}
       </>}
+
+      {/* Pre-dismissal checklist modal (#71) */}
+      {showDismissalChecklist && dismissalCheckEmp && (() => {
+        const dce = dismissalCheckEmp;
+        const demMk3 = dce.demitidoEm?.slice(0,7) ?? "";
+        const [demY3, demM3] = demMk3 ? demMk3.split("-").map(Number) : [0,0];
+        const demDay3 = parseInt(dce.demitidoEm?.slice(8,10) ?? "0");
+        const daysInDemMonth3 = demY3 ? new Date(demY3, demM3, 0).getDate() : 0;
+        // VT status
+        const vtPaid3 = !!vtPayments?.[rid]?.[demMk3];
+        // Previous month schedule status
+        const prevDem3 = demY3 ? new Date(demY3, demM3 - 2, 1) : null;
+        const prevDemMk3 = prevDem3 ? `${prevDem3.getFullYear()}-${String(prevDem3.getMonth()+1).padStart(2,"0")}` : "";
+        const prevSchedClosed3 = prevDemMk3 ? scheduleStatus?.[rid]?.[prevDemMk3]?.status === "closed" : false;
+        // Current month work days until dismissal
+        const schedMap3 = schedules?.[rid]?.[demMk3]?.[dce.id] ?? {};
+        let workDays3 = 0;
+        for (let dd = 1; dd < demDay3 && dd <= daysInDemMonth3; dd++) {
+          const ds = `${demY3}-${String(demM3).padStart(2,"0")}-${String(dd).padStart(2,"0")}`;
+          if (!schedMap3[ds] || schedMap3[ds] === "comptrab") workDays3++;
+        }
+        // Tips check - find last date with tips up to dismissal
+        const hasWarnings = !vtPaid3 || !prevSchedClosed3;
+        const checks = [
+          { label: "VT do mês de demissão", ok: vtPaid3, okText: "Pago", warnText: "Não pago — valores provisórios" },
+          { label: "Escala do mês anterior", ok: prevSchedClosed3, okText: "Fechada — ajuste definitivo", warnText: "Não fechada — ajuste provisório" },
+          { label: `Dias trabalhados até demissão (${demMk3})`, ok: true, okText: `${workDays3} dias de trabalho computados`, warnText: "" },
+        ];
+        return (
+          <div style={{position:"fixed",top:0,left:0,right:0,bottom:0,background:"rgba(0,0,0,0.6)",zIndex:9999,display:"flex",alignItems:"center",justifyContent:"center",padding:16}} onClick={()=>setShowDismissalChecklist(false)}>
+            <div onClick={e=>e.stopPropagation()} style={{background:"var(--bg2)",borderRadius:16,padding:24,maxWidth:480,width:"100%",maxHeight:"80vh",overflowY:"auto",border:"1px solid var(--border)"}}>
+              <h3 style={{color:"var(--text)",margin:"0 0 16px",fontSize:16}}>Checklist de desligamento</h3>
+              <p style={{color:"var(--text2)",fontSize:13,margin:"0 0 12px"}}>{dce.name} — demissão em {dce.demitidoEm ? new Date(dce.demitidoEm+"T12:00:00").toLocaleDateString("pt-BR") : "—"}</p>
+              <div style={{display:"flex",flexDirection:"column",gap:8,marginBottom:16}}>
+                {checks.map((c,i) => (
+                  <div key={i} style={{display:"flex",alignItems:"center",gap:10,padding:"10px 14px",borderRadius:10,background:c.ok?"#10b98109":"#f59e0b09",border:`1px solid ${c.ok?"#10b98133":"#f59e0b33"}`}}>
+                    <span style={{fontSize:16}}>{c.ok ? "\u2705" : "\u26A0\uFE0F"}</span>
+                    <div>
+                      <div style={{color:"var(--text)",fontSize:12,fontWeight:600}}>{c.label}</div>
+                      <div style={{color:c.ok?"var(--green)":"#f59e0b",fontSize:11}}>{c.ok ? c.okText : c.warnText}</div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+              {hasWarnings && (
+                <p style={{color:"#f59e0b",fontSize:11,margin:"0 0 12px"}}>Existem itens pendentes. O relatório pode conter valores provisórios.</p>
+              )}
+              <div style={{display:"flex",gap:8,justifyContent:"flex-end"}}>
+                <button onClick={()=>setShowDismissalChecklist(false)} style={S.btnSecondary}>Cancelar</button>
+                <button onClick={()=>{
+                  setShowDismissalChecklist(false);
+                  onGenerateDismissalReport(dce);
+                }} style={{...S.btnPrimary,fontSize:13}}>
+                  {hasWarnings ? "Gerar mesmo assim" : "Gerar PDF"}
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 }
@@ -4928,7 +5053,7 @@ Inclua apenas as ações solicitadas. Arrays vazios se não houver ação daquel
 // ═══════════════════════════════════════════════════════════════════
 // VALE TRANSPORTE TAB
 // ═══════════════════════════════════════════════════════════════════
-function ValeTransporteTab({ restaurantId, employees, roles, workSchedules, schedules, vtConfig, vtMonthly, vtPayments, onUpdate, currentUser, isOwner, mobileOnly }) {
+function ValeTransporteTab({ restaurantId, employees, roles, workSchedules, schedules, vtConfig, vtMonthly, vtPayments, onUpdate, currentUser, isOwner, mobileOnly, schedulePrevista, scheduleStatus }) {
   const now = new Date();
   const [year, setYear] = useState(now.getFullYear());
   const [month, setMonth] = useState(now.getMonth());
@@ -4999,6 +5124,8 @@ function ValeTransporteTab({ restaurantId, employees, roles, workSchedules, sche
 
   function calcAutoAdjust(empId) {
     if (!prevPayment?.snapshot) return 0;
+    const prevClosed = scheduleStatus?.[restaurantId]?.[prevMk]?.status === "closed";
+    if (!prevClosed) return 0; // adjustment deferred until previous month is closed
     const prevSnap = prevPayment.snapshot.find(s => s.empId === empId);
     if (!prevSnap) return 0;
     const actualDays = countActualDays(empId, prevMk, prevDate.getFullYear(), prevDate.getMonth());
@@ -5018,7 +5145,16 @@ function ValeTransporteTab({ restaurantId, employees, roles, workSchedules, sche
     const autoAdjust = overrides.adjustOverride !== null && overrides.adjustOverride !== undefined ? overrides.adjustOverride : suggestedAdjust;
     const manualDiscount = overrides.manualDiscount ?? 0;
     const totalPaid = round2(grossVT + autoAdjust - manualDiscount);
-    return { emp, role, area, dailyRate, plannedDays, grossVT, suggestedAdjust, autoAdjust, manualDiscount, totalPaid };
+    // Previous month actual days (only when closed)
+    const prevClosed = scheduleStatus?.[restaurantId]?.[prevMk]?.status === "closed";
+    let prevActualDays = null;
+    if (prevClosed && prevPayment?.snapshot) {
+      const prevSnap = prevPayment.snapshot.find(s => s.empId === emp.id);
+      if (prevSnap) {
+        prevActualDays = countActualDays(emp.id, prevMk, prevDate.getFullYear(), prevDate.getMonth());
+      }
+    }
+    return { emp, role, area, dailyRate, plannedDays, grossVT, suggestedAdjust, autoAdjust, manualDiscount, totalPaid, prevActualDays };
   }).sort((a,b) => (a.emp.name??"").localeCompare(b.emp.name??""));
 
   // ── Group by area ──
@@ -5058,6 +5194,14 @@ function ValeTransporteTab({ restaurantId, employees, roles, workSchedules, sche
     }));
     const newPayments = { ...(vtPayments ?? {}), [restaurantId]: { ...(vtPayments?.[restaurantId] ?? {}), [mk]: { paidAt: new Date().toISOString(), paidBy: currentUser?.name ?? "Gestor", snapshot, grandTotal: round2(grandTotal) } } };
     onUpdate("vtPayments", newPayments);
+    // Freeze prevista when VT is paid
+    if (!schedulePrevista?.[restaurantId]?.[mk]) {
+      const frozenPrevista = JSON.parse(JSON.stringify(schedules?.[restaurantId]?.[mk] ?? {}));
+      const newPrev = { ...(schedulePrevista ?? {}) };
+      if (!newPrev[restaurantId]) newPrev[restaurantId] = {};
+      newPrev[restaurantId][mk] = frozenPrevista;
+      onUpdate("schedulePrevista", newPrev);
+    }
     onUpdate("_toast", "💰 VT marcado como pago!");
   }
 
@@ -5177,6 +5321,7 @@ function ValeTransporteTab({ restaurantId, employees, roles, workSchedules, sche
                   <th style={{ padding: cellPad, textAlign: "right", color: "var(--text3)", fontWeight: 600, borderBottom: "2px solid var(--border)", width: 110 }}>VT Diário</th>
                   <th style={{ padding: cellPad, textAlign: "center", color: "var(--text3)", fontWeight: 600, borderBottom: "2px solid var(--border)", width: 60 }}>Dias</th>
                   <th style={{ padding: cellPad, textAlign: "right", color: "var(--text3)", fontWeight: 600, borderBottom: "2px solid var(--border)", width: 110 }}>VT Bruto</th>
+                  <th style={{ padding: cellPad, textAlign: "center", color: "var(--text3)", fontWeight: 600, borderBottom: "2px solid var(--border)", width: 80 }}>Real (mês ant.)</th>
                   <th style={{ padding: cellPad, textAlign: "right", color: "var(--text3)", fontWeight: 600, borderBottom: "2px solid var(--border)", width: 140 }}>Ajuste Mês Ant.</th>
                   <th style={{ padding: cellPad, textAlign: "right", color: "var(--text3)", fontWeight: 600, borderBottom: "2px solid var(--border)", width: 110 }}>Desconto</th>
                   <th style={{ padding: cellPad, textAlign: "right", color: "var(--text)", fontWeight: 700, borderBottom: "2px solid var(--border)", width: 120 }}>Total</th>
@@ -5194,6 +5339,7 @@ function ValeTransporteTab({ restaurantId, employees, roles, workSchedules, sche
                       </td>
                       <td style={{ padding: cellPad, textAlign: "center", color: "var(--text)", fontWeight: 600, fontFamily: "'DM Mono',monospace" }}>{r.plannedDays}</td>
                       <td style={{ padding: cellPad, textAlign: "right", color: "var(--text)", fontFamily: "'DM Mono',monospace" }}>{fmt(r.grossVT)}</td>
+                      <td style={{ padding: cellPad, textAlign: "center", color: r.prevActualDays !== null ? "var(--text)" : "var(--text3)", fontFamily: "'DM Mono',monospace", fontSize: 13 }}>{r.prevActualDays !== null ? r.prevActualDays : "—"}</td>
                       <td style={{ padding: cellPad, textAlign: "right" }}>
                         <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 6 }}>
                           {r.suggestedAdjust !== 0 && <span style={{ fontSize: 10, color: "var(--text3)" }} title="Sugerido pelo sistema">({r.suggestedAdjust > 0 ? "+" : ""}{fmtBR(r.suggestedAdjust)})</span>}
@@ -5244,6 +5390,14 @@ function ValeTransporteTab({ restaurantId, employees, roles, workSchedules, sche
       {prevPayment && (
         <div style={{ ...S.card, background: "#3b82f618", borderColor: "#3b82f633", marginBottom: 16, padding: "12px 20px" }}>
           <div style={{ color: "#2563eb", fontWeight: 600, fontSize: 13 }}>ℹ️ Ajustes calculados a partir do pagamento de {new Date(prevPayment.paidAt).toLocaleDateString("pt-BR")}</div>
+        </div>
+      )}
+      {prevPayment && !(scheduleStatus?.[restaurantId]?.[prevMk]?.status === "closed") && (
+        <div style={{background:"#f59e0b15",border:"1px solid #f59e0b44",borderRadius:10,padding:"10px 16px",marginBottom:12,display:"flex",alignItems:"center",gap:8}}>
+          <span style={{fontSize:16}}>{"⚠️"}</span>
+          <span style={{color:"#f59e0b",fontSize:12}}>
+            {prevMk} ainda não fechado — o ajuste automático de {prevMk} será aplicado quando o mês for fechado.
+          </span>
         </div>
       )}
       {!prevPayment && (
@@ -5817,6 +5971,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
   // Month close confirmation
   const [showCloseConfirm, setShowCloseConfirm] = useState(false);
   const [closeDelta, setCloseDelta] = useState(null);
+  const [closeVtImpact, setCloseVtImpact] = useState(null);
   // Ponto summary for post-import dashboard
   const [pontoSummary, setPontoSummary] = useState(null);
   // Local schedule edits — accumulated before saving as new version
@@ -5833,8 +5988,8 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
     }
     return base;
   })();
-  // The "prevista" view is the saved schedule without local edits
-  const previstaMonth = schedules?.[rid]?.[mk] ?? {};
+  // The "prevista" view is the frozen snapshot, falling back to current schedules
+  const previstaMonth = data?.schedulePrevista?.[rid]?.[mk] ?? schedules?.[rid]?.[mk] ?? {};
   // Displayed schedule depends on view mode
   const displayedMonth = schedViewMode === "prevista" ? previstaMonth : effectiveMonth;
   // Month status from scheduleStatus
@@ -6199,6 +6354,14 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
             if (tab === "schedule" && id !== "schedule" && schedDirty) {
               const action = window.confirm("Você tem edições na escala não salvas.\n\nDeseja salvar como nova versão antes de sair?");
               if (action) {
+                // Freeze prevista on first adjustment
+                if (!data?.schedulePrevista?.[rid]?.[mk]) {
+                  const frozenPrevista = JSON.parse(JSON.stringify(schedules?.[rid]?.[mk] ?? {}));
+                  const newPrev = { ...(data?.schedulePrevista ?? {}) };
+                  if (!newPrev[rid]) newPrev[rid] = {};
+                  newPrev[rid][mk] = frozenPrevista;
+                  onUpdate("schedulePrevista", newPrev);
+                }
                 // Save as new version
                 const preSnap = snapshotSchedulesMonth(schedules, rid, mk);
                 saveVersion("schedules", rid, mk, data?.scheduleVersions, preSnap, currentUser?.name || (isOwner?"Admin AppTip":"Gestor"), "Edição manual", onUpdate, true);
@@ -6228,6 +6391,14 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
           if (tab === "schedule" && schedDirty) {
             const action = window.confirm("Você tem edições na escala não salvas.\n\nDeseja salvar como nova versão antes de sair?");
             if (action) {
+              // Freeze prevista on first adjustment
+              if (!data?.schedulePrevista?.[rid]?.[mk]) {
+                const frozenPrevista = JSON.parse(JSON.stringify(schedules?.[rid]?.[mk] ?? {}));
+                const newPrev = { ...(data?.schedulePrevista ?? {}) };
+                if (!newPrev[rid]) newPrev[rid] = {};
+                newPrev[rid][mk] = frozenPrevista;
+                onUpdate("schedulePrevista", newPrev);
+              }
               const preSnap = snapshotSchedulesMonth(schedules, rid, mk);
               saveVersion("schedules", rid, mk, data?.scheduleVersions, preSnap, currentUser?.name || (isOwner?"Admin AppTip":"Gestor"), "Edição manual", onUpdate, true);
               let newMonth = { ...(schedules?.[rid]?.[mk] ?? {}) };
@@ -6252,6 +6423,14 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
             if (tab === "schedule" && schedDirty) {
               const action = window.confirm("Você tem edições na escala não salvas.\n\nDeseja salvar como nova versão antes de mudar de mês?");
               if (action) {
+                // Freeze prevista on first adjustment
+                if (!data?.schedulePrevista?.[rid]?.[mk]) {
+                  const frozenPrevista = JSON.parse(JSON.stringify(schedules?.[rid]?.[mk] ?? {}));
+                  const newPrev = { ...(data?.schedulePrevista ?? {}) };
+                  if (!newPrev[rid]) newPrev[rid] = {};
+                  newPrev[rid][mk] = frozenPrevista;
+                  onUpdate("schedulePrevista", newPrev);
+                }
                 const preSnap = snapshotSchedulesMonth(schedules, rid, mk);
                 saveVersion("schedules", rid, mk, data?.scheduleVersions, preSnap, currentUser?.name || (isOwner?"Admin AppTip":"Gestor"), "Edição manual", onUpdate, true);
                 let newMonth2 = { ...(schedules?.[rid]?.[mk] ?? {}) };
@@ -6906,6 +7085,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
               incidents={data?.incidents??[]} feedbacks={data?.feedbacks??[]}
               devChecklists={data?.devChecklists??{}} schedules={data?.schedules??{}}
               currentUser={currentUser} isLider={isLider} mobileOnly={mobileOnly} roles={roles}
+              vtPayments={data?.vtPayments??{}} vtConfig={data?.vtConfig??{}} scheduleStatus={data?.scheduleStatus??{}}
               onGenerateDismissalReport={async (emp) => {
                 try {
                   await loadScript("https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js");
@@ -7032,30 +7212,60 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                   doc.text("RESTITUIÇÃO DE VALE TRANSPORTE", 14, y);
                   y += 2;
 
-                  const vtConf = data?.vtConfig?.[rid]?.[emp.id];
-                  const dailyRate = vtConf?.dailyRate ?? 0;
                   const demMk = demDate.slice(0,7);
                   const [demY, demM] = demMk.split("-").map(Number);
                   const demDay = parseInt(demDate.slice(8,10));
                   const daysInDemMonth = new Date(demY, demM, 0).getDate();
 
+                  // Use VT snapshot if available, otherwise fall back to config
+                  const vtSnap = data?.vtPayments?.[rid]?.[demMk]?.snapshot?.find(s => s.empId === emp.id);
+                  const vtConf = data?.vtConfig?.[rid]?.[emp.id];
+                  const dailyRate = vtSnap?.dailyRate ?? vtConf?.dailyRate ?? 0;
+
                   // Count planned days (full month) and actual days worked until dismissal
                   // Alinhado com visual: sem status = dia de trabalho
                   const schedDayMap = schedules?.[rid]?.[demMk]?.[emp.id] ?? {};
 
-                  let plannedFullMonth = 0;
+                  let plannedFullMonth = vtSnap?.plannedDays ?? 0;
                   let workedUntilDismissal = 0;
-                  for (let d = 1; d <= daysInDemMonth; d++) {
+                  if (!vtSnap) {
+                    for (let d = 1; d <= daysInDemMonth; d++) {
+                      const dateStr = `${demY}-${String(demM).padStart(2,"0")}-${String(d).padStart(2,"0")}`;
+                      const escalaSt = schedDayMap[dateStr];
+                      const isWork = !escalaSt || escalaSt === "comptrab";
+                      if (isWork) plannedFullMonth++;
+                    }
+                  }
+                  for (let d = 1; d < demDay && d <= daysInDemMonth; d++) {
                     const dateStr = `${demY}-${String(demM).padStart(2,"0")}-${String(d).padStart(2,"0")}`;
                     const escalaSt = schedDayMap[dateStr];
                     const isWork = !escalaSt || escalaSt === "comptrab";
-                    if (isWork) plannedFullMonth++;
-                    if (d < demDay && isWork) workedUntilDismissal++;
+                    if (isWork) workedUntilDismissal++;
                   }
 
                   const vtPaidMonth = dailyRate * plannedFullMonth;
                   const vtOwed = dailyRate * workedUntilDismissal;
                   const vtToReturn = Math.max(0, vtPaidMonth - vtOwed);
+
+                  // Check for pending adjustments from previous months
+                  const prevDemDate = new Date(demY, demM - 2, 1);
+                  const prevDemMk = monthKey(prevDemDate.getFullYear(), prevDemDate.getMonth());
+                  const prevDemPayment = data?.vtPayments?.[rid]?.[prevDemMk];
+                  let pendingAdjust = 0;
+                  if (prevDemPayment?.snapshot) {
+                    const prevSnap = prevDemPayment.snapshot.find(s => s.empId === emp.id);
+                    if (prevSnap) {
+                      const prevLastDay = new Date(prevDemDate.getFullYear(), prevDemDate.getMonth()+1, 0).getDate();
+                      const prevSchedMap = schedules?.[rid]?.[prevDemMk]?.[emp.id] ?? {};
+                      let prevActual = 0;
+                      for (let d = 1; d <= prevLastDay; d++) {
+                        const dateStr = `${prevDemDate.getFullYear()}-${String(prevDemDate.getMonth()+1).padStart(2,"0")}-${String(d).padStart(2,"0")}`;
+                        const st = prevSchedMap[dateStr];
+                        if (!st || st === "comptrab") prevActual++;
+                      }
+                      pendingAdjust = round2((prevActual - prevSnap.plannedDays) * prevSnap.dailyRate);
+                    }
+                  }
 
                   doc.autoTable({
                     startY: y,
@@ -7066,7 +7276,8 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                       ["Dias trabalhados até demissão", String(workedUntilDismissal)],
                       ["VT pago (mês inteiro)", `R$ ${vtPaidMonth.toLocaleString("pt-BR",{minimumFractionDigits:2})}`],
                       ["VT devido (até demissão)", `R$ ${vtOwed.toLocaleString("pt-BR",{minimumFractionDigits:2})}`],
-                      [{content:"VT A RESTITUIR", styles:{fontStyle:"bold",textColor:[220,50,50]}}, {content:`R$ ${vtToReturn.toLocaleString("pt-BR",{minimumFractionDigits:2})}`, styles:{fontStyle:"bold",textColor:[220,50,50]}}],
+                      ...(pendingAdjust !== 0 ? [["Ajuste pendente mês anterior", `R$ ${pendingAdjust.toLocaleString("pt-BR",{minimumFractionDigits:2})}`]] : []),
+                      [{content:"VT A RESTITUIR", styles:{fontStyle:"bold",textColor:[220,50,50]}}, {content:`R$ ${Math.max(0, vtToReturn - pendingAdjust).toLocaleString("pt-BR",{minimumFractionDigits:2})}`, styles:{fontStyle:"bold",textColor:[220,50,50]}}],
                     ],
                     theme: "grid",
                     styles: { fontSize: 10, cellPadding: 3 },
@@ -7121,6 +7332,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
               <div style={{display:"flex",alignItems:"center",gap:10,flexWrap:"wrap"}}>
                 <h3 style={{color:"var(--text)",margin:0,fontSize:mobileOnly?16:20}}>📅 Escala — {monthLabel(year,month)}</h3>
                 {monthClosed && <span style={{fontSize:11,padding:"3px 10px",borderRadius:6,background:"var(--red)22",color:"var(--red)",fontWeight:700}}>Mes fechado</span>}
+                {(() => { const vtPaidInfo = data?.vtPayments?.[rid]?.[mk]; return vtPaidInfo ? <span style={{fontSize:11,padding:"3px 10px",borderRadius:6,background:"#10b98122",color:"var(--green)",fontWeight:700}}>VT pago em {new Date(vtPaidInfo.paidAt).toLocaleDateString("pt-BR")}</span> : null; })()}
                 <div style={{display:"flex",borderRadius:6,overflow:"hidden",border:"1px solid var(--border)"}}>
                   {["vigente","prevista"].map(mode => (
                     <button key={mode} onClick={()=>setSchedViewMode(mode)}
@@ -7146,6 +7358,14 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                 </div>
                 <div style={{display:"flex",gap:8}}>
                   <button onClick={()=>{
+                    // Freeze prevista on first adjustment
+                    if (!data?.schedulePrevista?.[rid]?.[mk]) {
+                      const frozenPrevista = JSON.parse(JSON.stringify(schedules?.[rid]?.[mk] ?? {}));
+                      const newPrev = { ...(data?.schedulePrevista ?? {}) };
+                      if (!newPrev[rid]) newPrev[rid] = {};
+                      newPrev[rid][mk] = frozenPrevista;
+                      onUpdate("schedulePrevista", newPrev);
+                    }
                     // Save as new version
                     const preSnap = snapshotSchedulesMonth(schedules, rid, mk);
                     saveVersion("schedules", rid, mk, data?.scheduleVersions, preSnap, currentUser?.name || (isOwner?"Admin AppTip":"Gestor"), "Edição manual", onUpdate, true);
@@ -7320,8 +7540,28 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                         delta[emp.id] = { name: emp.name, prevWork, curWork, diff: curWork - prevWork };
                       }
                     });
-                    if (Object.keys(delta).length > 0) {
-                      setCloseDelta(delta);
+                    // Compute VT impact
+                    const vtPayment = data?.vtPayments?.[rid]?.[mk];
+                    const vtImpact = {};
+                    if (vtPayment?.snapshot) {
+                      const daysInM2 = new Date(year, month + 1, 0).getDate();
+                      vtPayment.snapshot.forEach(snap => {
+                        let actualDays = 0;
+                        for (let d2 = 1; d2 <= daysInM2; d2++) {
+                          const dt2 = `${year}-${String(month+1).padStart(2,"0")}-${String(d2).padStart(2,"0")}`;
+                          const emp2 = schedEmps.find(e => e.id === snap.empId);
+                          if (emp2?.demitidoEm && dt2 >= emp2.demitidoEm) continue;
+                          const cs2 = effectiveMonth[snap.empId]?.[dt2];
+                          if (!cs2 || cs2 === "comptrab") actualDays++;
+                        }
+                        if (actualDays !== snap.plannedDays) {
+                          vtImpact[snap.empId] = { name: snap.name, plannedDays: snap.plannedDays, actualDays, diff: actualDays - snap.plannedDays, dailyRate: snap.dailyRate, adjustValue: parseFloat(((actualDays - snap.plannedDays) * snap.dailyRate).toFixed(2)) };
+                        }
+                      });
+                    }
+                    setCloseVtImpact(Object.keys(vtImpact).length > 0 ? vtImpact : null);
+                    if (Object.keys(delta).length > 0 || Object.keys(vtImpact).length > 0) {
+                      setCloseDelta(Object.keys(delta).length > 0 ? delta : null);
                       setShowCloseConfirm(true);
                     } else {
                       // No delta, close directly
@@ -7370,6 +7610,20 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                       ))}
                     </div>
                     <p style={{color:"#f59e0b",fontSize:12,margin:"0 0 16px"}}>As gorjetas serao recalculadas com base na escala vigente.</p>
+                    {closeVtImpact && Object.keys(closeVtImpact).length > 0 && (
+                      <div style={{marginTop:12}}>
+                        <p style={{color:"var(--text)",fontSize:13,fontWeight:700,marginBottom:8}}>Impacto no VT</p>
+                        {Object.entries(closeVtImpact).map(([empId, v]) => (
+                          <div key={empId} style={{display:"flex",justifyContent:"space-between",padding:"6px 12px",borderRadius:8,background:v.adjustValue>0?"#10b98109":"#e74c3c09",border:`1px solid ${v.adjustValue>0?"#10b98133":"#e74c3c33"}`,marginBottom:4}}>
+                            <span style={{color:"var(--text)",fontSize:12}}>{v.name}</span>
+                            <span style={{fontSize:12,color:v.adjustValue>0?"var(--green)":"var(--red)",fontWeight:700}}>
+                              {v.plannedDays}d pago {"\u2192"} {v.actualDays}d real = {v.adjustValue>0?"+":""}R$ {Math.abs(v.adjustValue).toFixed(2).replace(".",",")}
+                            </span>
+                          </div>
+                        ))}
+                        <p style={{color:"var(--text3)",fontSize:11,marginTop:6}}>Esses ajustes serão aplicados no próximo ciclo de VT.</p>
+                      </div>
+                    )}
                     <div style={{display:"flex",gap:8,justifyContent:"flex-end"}}>
                       <button onClick={()=>setShowCloseConfirm(false)} style={S.btnSecondary}>Cancelar</button>
                       <button onClick={()=>{
@@ -7384,6 +7638,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                         setSchedLocalEdits(null);
                         setShowCloseConfirm(false);
                         setCloseDelta(null);
+                        setCloseVtImpact(null);
                         onUpdate("_toast", "Mes fechado e gorjetas ajustadas");
                       }} style={{...S.btnPrimary,fontSize:13}}>
                         Confirmar e fechar
@@ -8537,7 +8792,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
 
         {/* VALE TRANSPORTE */}
         {tab === "vt" && (
-          <ValeTransporteTab restaurantId={rid} employees={employees} roles={roles} workSchedules={data?.workSchedules??{}} schedules={data?.schedules??{}} vtConfig={data?.vtConfig??{}} vtMonthly={data?.vtMonthly??{}} vtPayments={data?.vtPayments??{}} onUpdate={onUpdate} currentUser={currentUser} isOwner={isOwner} mobileOnly={mobileOnly} />
+          <ValeTransporteTab restaurantId={rid} employees={employees} roles={roles} workSchedules={data?.workSchedules??{}} schedules={data?.schedules??{}} vtConfig={data?.vtConfig??{}} vtMonthly={data?.vtMonthly??{}} vtPayments={data?.vtPayments??{}} onUpdate={onUpdate} currentUser={currentUser} isOwner={isOwner} mobileOnly={mobileOnly} schedulePrevista={data?.schedulePrevista??{}} scheduleStatus={data?.scheduleStatus??{}} />
         )}
 
         {/* TRILHA — integrada na aba Equipe */}
@@ -12837,6 +13092,7 @@ export default function App() {
   const [devChecklists,    setDevChecklists]    = useState({});
   const [scheduleAdjustments, setScheduleAdjustments] = useState({});
   const [scheduleStatus,      setScheduleStatus]      = useState({});
+  const [schedulePrevista,    setSchedulePrevista]    = useState({});
 
   useEffect(() => {
     const savedId = currentUserId;
@@ -12864,7 +13120,7 @@ export default function App() {
       setLoadProgress("Preparando o sistema...");
 
       const keys = keyNames;
-      const map = { owners:setOwners, managers:setManagers, restaurants:setRestaurants, employees:setEmployees, roles:setRoles, tips:setTips, splits:setSplits, schedules:setSchedules, communications:setCommunications, commAcks:setCommAcks, faq:setFaq, dpMessages:setDpMessages, workSchedules:setWorkSchedules, notifications:setNotifications, noTipDays:setNoTipDays, trash:setTrash, schedTemplates:setSchedTemplates, schedDrafts:setSchedDrafts, scheduleVersions:setScheduleVersions, tipVersions:setTipVersions, vtConfig:setVtConfig, vtMonthly:setVtMonthly, vtPayments:setVtPayments, incidents:setIncidents, feedbacks:setFeedbacks, devChecklists:setDevChecklists, scheduleAdjustments:setScheduleAdjustments, scheduleStatus:setScheduleStatus };
+      const map = { owners:setOwners, managers:setManagers, restaurants:setRestaurants, employees:setEmployees, roles:setRoles, tips:setTips, splits:setSplits, schedules:setSchedules, communications:setCommunications, commAcks:setCommAcks, faq:setFaq, dpMessages:setDpMessages, workSchedules:setWorkSchedules, notifications:setNotifications, noTipDays:setNoTipDays, trash:setTrash, schedTemplates:setSchedTemplates, schedDrafts:setSchedDrafts, scheduleVersions:setScheduleVersions, tipVersions:setTipVersions, vtConfig:setVtConfig, vtMonthly:setVtMonthly, vtPayments:setVtPayments, incidents:setIncidents, feedbacks:setFeedbacks, devChecklists:setDevChecklists, scheduleAdjustments:setScheduleAdjustments, scheduleStatus:setScheduleStatus, schedulePrevista:setSchedulePrevista };
       const loaded_data = {};
       let successCount = 0;
       keys.forEach((k, i) => {
@@ -13012,12 +13268,12 @@ export default function App() {
     return () => { clearTimeout(slowTimer); clearTimeout(verySlowTimer); };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const data = { owners, managers, restaurants, employees, roles, tips, splits, schedules, communications, commAcks, faq, dpMessages, workSchedules, notifications, noTipDays, trash, schedTemplates, schedDrafts, scheduleVersions, tipVersions, vtConfig, vtMonthly, vtPayments, incidents, feedbacks, devChecklists, scheduleAdjustments, scheduleStatus };
+  const data = { owners, managers, restaurants, employees, roles, tips, splits, schedules, communications, commAcks, faq, dpMessages, workSchedules, notifications, noTipDays, trash, schedTemplates, schedDrafts, scheduleVersions, tipVersions, vtConfig, vtMonthly, vtPayments, incidents, feedbacks, devChecklists, scheduleAdjustments, scheduleStatus, schedulePrevista };
 
   async function handleUpdate(field, value) {
     if (field === "_toast") { setToast(value); return; }
-    const setters = { owners:setOwners, managers:setManagers, restaurants:setRestaurants, employees:setEmployees, roles:setRoles, tips:setTips, splits:setSplits, schedules:setSchedules, communications:setCommunications, commAcks:setCommAcks, faq:setFaq, dpMessages:setDpMessages, workSchedules:setWorkSchedules, notifications:setNotifications, noTipDays:setNoTipDays, trash:setTrash, schedTemplates:setSchedTemplates, schedDrafts:setSchedDrafts, scheduleVersions:setScheduleVersions, tipVersions:setTipVersions, vtConfig:setVtConfig, vtMonthly:setVtMonthly, vtPayments:setVtPayments, incidents:setIncidents, feedbacks:setFeedbacks, devChecklists:setDevChecklists, scheduleAdjustments:setScheduleAdjustments, scheduleStatus:setScheduleStatus };
-    const keys    = { owners:K.owners, managers:K.managers, restaurants:K.restaurants, employees:K.employees, roles:K.roles, tips:K.tips, splits:K.splits, schedules:K.schedules, communications:K.communications, commAcks:K.commAcks, faq:K.faq, dpMessages:K.dpMessages, workSchedules:K.workSchedules, notifications:K.notifications, noTipDays:K.noTipDays, trash:K.trash, schedTemplates:K.schedTemplates, schedDrafts:K.schedDrafts, scheduleVersions:K.scheduleVersions, tipVersions:K.tipVersions, vtConfig:K.vtConfig, vtMonthly:K.vtMonthly, vtPayments:K.vtPayments, incidents:K.incidents, feedbacks:K.feedbacks, devChecklists:K.devChecklists, scheduleAdjustments:K.scheduleAdjustments, scheduleStatus:K.scheduleStatus };
+    const setters = { owners:setOwners, managers:setManagers, restaurants:setRestaurants, employees:setEmployees, roles:setRoles, tips:setTips, splits:setSplits, schedules:setSchedules, communications:setCommunications, commAcks:setCommAcks, faq:setFaq, dpMessages:setDpMessages, workSchedules:setWorkSchedules, notifications:setNotifications, noTipDays:setNoTipDays, trash:setTrash, schedTemplates:setSchedTemplates, schedDrafts:setSchedDrafts, scheduleVersions:setScheduleVersions, tipVersions:setTipVersions, vtConfig:setVtConfig, vtMonthly:setVtMonthly, vtPayments:setVtPayments, incidents:setIncidents, feedbacks:setFeedbacks, devChecklists:setDevChecklists, scheduleAdjustments:setScheduleAdjustments, scheduleStatus:setScheduleStatus, schedulePrevista:setSchedulePrevista };
+    const keys    = { owners:K.owners, managers:K.managers, restaurants:K.restaurants, employees:K.employees, roles:K.roles, tips:K.tips, splits:K.splits, schedules:K.schedules, communications:K.communications, commAcks:K.commAcks, faq:K.faq, dpMessages:K.dpMessages, workSchedules:K.workSchedules, notifications:K.notifications, noTipDays:K.noTipDays, trash:K.trash, schedTemplates:K.schedTemplates, schedDrafts:K.schedDrafts, scheduleVersions:K.scheduleVersions, tipVersions:K.tipVersions, vtConfig:K.vtConfig, vtMonthly:K.vtMonthly, vtPayments:K.vtPayments, incidents:K.incidents, feedbacks:K.feedbacks, devChecklists:K.devChecklists, scheduleAdjustments:K.scheduleAdjustments, scheduleStatus:K.scheduleStatus, schedulePrevista:K.schedulePrevista };
     // Support functional updates to prevent stale-state race conditions:
     // When value is a function, it receives the latest state (like setState(prev => ...))
     let resolvedValue;
@@ -13037,7 +13293,7 @@ export default function App() {
         return;
       }
     }
-    const labels = { owners:"Admins atualizados", managers:"Gestores atualizados", restaurants:"Restaurantes atualizados", employees:"Empregados atualizados", roles:"Cargos atualizados", tips:"Gorjetas atualizadas", splits:"Percentuais salvos", schedules:"Escala atualizada", communications:"Comunicados atualizados", commAcks:"Ciências atualizadas", faq:"FAQ atualizado", dpMessages:"Mensagem enviada", workSchedules:"Horários salvos", notifications:"Notificações atualizadas", schedTemplates:"Template salvo", schedDrafts:"Rascunho salvo", trash:"Lixeira atualizada", noTipDays:"Dias sem gorjeta atualizados", scheduleVersions:null, tipVersions:null, vtConfig:null, vtMonthly:null, vtPayments:"VT registrado", incidents:"Ocorrência registrada", feedbacks:"Feedback registrado", devChecklists:"Checklist atualizado", scheduleAdjustments:null, scheduleStatus:null };
+    const labels = { owners:"Admins atualizados", managers:"Gestores atualizados", restaurants:"Restaurantes atualizados", employees:"Empregados atualizados", roles:"Cargos atualizados", tips:"Gorjetas atualizadas", splits:"Percentuais salvos", schedules:"Escala atualizada", communications:"Comunicados atualizados", commAcks:"Ciências atualizadas", faq:"FAQ atualizado", dpMessages:"Mensagem enviada", workSchedules:"Horários salvos", notifications:"Notificações atualizadas", schedTemplates:"Template salvo", schedDrafts:"Rascunho salvo", trash:"Lixeira atualizada", noTipDays:"Dias sem gorjeta atualizados", scheduleVersions:null, tipVersions:null, vtConfig:null, vtMonthly:null, vtPayments:"VT registrado", incidents:"Ocorrência registrada", feedbacks:"Feedback registrado", devChecklists:"Checklist atualizado", scheduleAdjustments:null, scheduleStatus:null, schedulePrevista:null };
     if (labels[field] === null) return; // silent save (e.g. version snapshots)
     setToast(labels[field] ?? (typeof value === "string" ? value : "Salvo!"));
   }
