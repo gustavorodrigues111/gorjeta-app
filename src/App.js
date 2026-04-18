@@ -3,7 +3,7 @@ import { useState, useEffect, Component } from "react";
 import { db } from "./firebase";
 import { doc, getDoc, setDoc } from "firebase/firestore";
 
-const APP_VERSION = "5.22.0";
+const APP_VERSION = "5.23.0";
 
 const DEFAULT_ADMISSION = () => `${new Date().getFullYear()}-01-01`;
 const round2 = (v) => Math.round(v * 100) / 100;
@@ -5095,12 +5095,15 @@ Inclua apenas as ações solicitadas. Arrays vazios se não houver ação daquel
 // ═══════════════════════════════════════════════════════════════════
 // VALE TRANSPORTE TAB
 // ═══════════════════════════════════════════════════════════════════
-function ValeTransporteTab({ restaurantId, employees, roles, workSchedules, schedules, vtConfig, vtMonthly, vtPayments, onUpdate, currentUser, isOwner, mobileOnly, schedulePrevista, scheduleStatus }) {
+function ValeTransporteTab({ restaurantId, employees, roles, workSchedules, schedules, vtConfig, vtMonthly, vtPayments, onUpdate, currentUser, isOwner, mobileOnly, schedulePrevista, scheduleStatus, scheduleVersions }) {
   const now = new Date();
   const [year, setYear] = useState(now.getFullYear());
   const [month, setMonth] = useState(now.getMonth());
   const mk = monthKey(year, month);
   const ac = "var(--accent)";
+  const [showPayDateModal, setShowPayDateModal] = useState(false);
+  const [payDate, setPayDate] = useState(today());
+  const [versionWarning, setVersionWarning] = useState(null);
 
   const restEmps = (employees ?? []).filter(e => e.restaurantId === restaurantId && !e.isFreela && !(e.inactive && e.inactiveFrom && e.inactiveFrom <= today()));
   const restRoles = (roles ?? []).filter(r => r.restaurantId === restaurantId);
@@ -5225,16 +5228,62 @@ function ValeTransporteTab({ restaurantId, employees, roles, workSchedules, sche
   }
 
 
-  // ── Mark as paid ──
-  function markAsPaid() {
-    if (!window.confirm("Marcar este mês como PAGO?\n\nOs valores atuais serão congelados como referência para o cálculo de ajuste do próximo mês.")) return;
+  // ── Mark as paid (modal flow with date selector) ──
+  function openPayModal() {
+    setPayDate(today());
+    setVersionWarning(null);
+    setShowPayDateModal(true);
+  }
+
+  function checkVersionAndPay() {
+    const chosenDate = payDate;
+    const todayStr = today();
+    if (chosenDate >= todayStr) {
+      // Date is today or future — pay with current values, no version check needed
+      confirmPay(chosenDate, false);
+      return;
+    }
+    // Date is in the past — check scheduleVersions for edits between chosenDate and now
+    const versions = scheduleVersions?.[restaurantId]?.[mk] ?? [];
+    const editsAfterPayDate = versions.filter(v => v.ts && v.ts.slice(0, 10) > chosenDate);
+    if (editsAfterPayDate.length > 0) {
+      setVersionWarning({
+        edits: editsAfterPayDate,
+        payDateStr: chosenDate,
+        oldestEditSnapshot: editsAfterPayDate[editsAfterPayDate.length - 1]?.snapshot ?? null,
+      });
+    } else {
+      confirmPay(chosenDate, false);
+    }
+  }
+
+  function confirmPay(chosenDate, useOldSnapshot) {
     if (dirty) persistAll();
-    const snapshot = rows.map(r => ({
-      empId: r.emp.id, name: r.emp.name, role: r.role?.name ?? "—", area: r.area,
-      dailyRate: r.dailyRate, plannedDays: r.plannedDays, grossVT: r.grossVT,
-      autoAdjust: r.autoAdjust, manualDiscount: r.manualDiscount, totalPaid: Math.max(0, r.totalPaid),
-    }));
-    const newPayments = { ...(vtPayments ?? {}), [restaurantId]: { ...(vtPayments?.[restaurantId] ?? {}), [mk]: { paidAt: new Date().toISOString(), paidBy: currentUser?.name ?? "Gestor", snapshot, grandTotal: round2(grandTotal) } } };
+    let snapshot;
+    if (useOldSnapshot && versionWarning?.oldestEditSnapshot) {
+      // Reconstruct rows from the version snapshot closest to the payment date
+      const oldSched = versionWarning.oldestEditSnapshot;
+      // Build rows using old schedule data but current VT config
+      snapshot = rows.map(r => {
+        const empDays = oldSched?.[r.emp.id] ? Object.values(oldSched[r.emp.id]).filter(s => s === "work" || s === null || s === undefined).length : r.plannedDays;
+        const gross = round2(empDays * r.dailyRate);
+        const total = round2(gross + r.autoAdjust - (r.manualDiscount ?? 0));
+        return {
+          empId: r.emp.id, name: r.emp.name, role: r.role?.name ?? "—", area: r.area,
+          dailyRate: r.dailyRate, plannedDays: empDays, grossVT: gross,
+          autoAdjust: r.autoAdjust, manualDiscount: r.manualDiscount, totalPaid: Math.max(0, total),
+        };
+      });
+    } else {
+      snapshot = rows.map(r => ({
+        empId: r.emp.id, name: r.emp.name, role: r.role?.name ?? "—", area: r.area,
+        dailyRate: r.dailyRate, plannedDays: r.plannedDays, grossVT: r.grossVT,
+        autoAdjust: r.autoAdjust, manualDiscount: r.manualDiscount, totalPaid: Math.max(0, r.totalPaid),
+      }));
+    }
+    const paidAtISO = new Date(chosenDate + "T12:00:00").toISOString();
+    const total = useOldSnapshot ? round2(snapshot.reduce((s, r) => s + r.totalPaid, 0)) : round2(grandTotal);
+    const newPayments = { ...(vtPayments ?? {}), [restaurantId]: { ...(vtPayments?.[restaurantId] ?? {}), [mk]: { paidAt: paidAtISO, paidBy: currentUser?.name ?? "Gestor", snapshot, grandTotal: total } } };
     onUpdate("vtPayments", newPayments);
     // Freeze prevista when VT is paid
     if (!schedulePrevista?.[restaurantId]?.[mk]) {
@@ -5244,7 +5293,9 @@ function ValeTransporteTab({ restaurantId, employees, roles, workSchedules, sche
       newPrev[restaurantId][mk] = frozenPrevista;
       onUpdate("schedulePrevista", newPrev);
     }
-    onUpdate("_toast", "💰 VT marcado como pago!");
+    setShowPayDateModal(false);
+    setVersionWarning(null);
+    onUpdate("_toast", `💰 VT marcado como pago em ${chosenDate.split("-").reverse().join("/")}!`);
   }
 
   // ── Export CSV (grouped) ──
@@ -5461,7 +5512,7 @@ function ValeTransporteTab({ restaurantId, employees, roles, workSchedules, sche
 
       {/* Action buttons */}
       <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 8 }}>
-        <button onClick={markAsPaid} style={{ ...S.btn, background: currentPayment ? "#10b981" : "#2563eb", color: "#fff", fontWeight: 700, padding: "12px 24px", fontSize: 14 }}>
+        <button onClick={openPayModal} style={{ ...S.btn, background: currentPayment ? "#10b981" : "#2563eb", color: "#fff", fontWeight: 700, padding: "12px 24px", fontSize: 14 }}>
           {currentPayment ? "🔄 Remarcar como Pago" : "💰 Marcar como Pago"}
         </button>
       </div>
@@ -5470,6 +5521,49 @@ function ValeTransporteTab({ restaurantId, employees, roles, workSchedules, sche
         <div style={{ textAlign: "center", padding: 40, color: "var(--text3)" }}>
           <div style={{ fontSize: 40, marginBottom: 12 }}>🚌</div>
           <div style={{ fontSize: 15 }}>Nenhum empregado cadastrado</div>
+        </div>
+      )}
+
+      {/* ── Modal: selecionar data do pagamento ── */}
+      {showPayDateModal && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", zIndex: 9999, display: "flex", alignItems: "center", justifyContent: "center" }} onClick={() => { setShowPayDateModal(false); setVersionWarning(null); }}>
+          <div style={{ background: "var(--bg)", borderRadius: 16, padding: 28, maxWidth: 440, width: "90%", boxShadow: "0 20px 60px rgba(0,0,0,0.3)" }} onClick={e => e.stopPropagation()}>
+            {!versionWarning ? (
+              <>
+                <h3 style={{ margin: "0 0 6px", color: "var(--text)", fontSize: 18 }}>💰 Marcar como Pago</h3>
+                <p style={{ color: "var(--text2)", fontSize: 13, margin: "0 0 18px", lineHeight: 1.5 }}>Os valores serão congelados como referência para o cálculo de ajuste do próximo mês.</p>
+                <label style={{ display: "block", color: "var(--text2)", fontSize: 13, marginBottom: 6 }}>Data do pagamento:</label>
+                <input type="date" value={payDate} onChange={e => setPayDate(e.target.value)} style={{ ...S.input, fontSize: 15, padding: "10px 14px", marginBottom: 18, width: "100%", boxSizing: "border-box" }} />
+                <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}>
+                  <button onClick={() => { setShowPayDateModal(false); setVersionWarning(null); }} style={{ ...S.btn, padding: "10px 20px" }}>Cancelar</button>
+                  <button onClick={checkVersionAndPay} style={{ ...S.btn, background: "#2563eb", color: "#fff", fontWeight: 700, padding: "10px 20px" }}>Confirmar</button>
+                </div>
+              </>
+            ) : (
+              <>
+                <h3 style={{ margin: "0 0 6px", color: "#b45309", fontSize: 18 }}>⚠️ Edições encontradas após a data</h3>
+                <p style={{ color: "var(--text2)", fontSize: 13, margin: "0 0 12px", lineHeight: 1.5 }}>
+                  A escala foi editada <strong>{versionWarning.edits.length}×</strong> após {versionWarning.payDateStr.split("-").reverse().join("/")}. Qual versão dos valores deseja usar?
+                </p>
+                <div style={{ background: "var(--bg1)", borderRadius: 10, padding: 12, marginBottom: 16, maxHeight: 150, overflowY: "auto", fontSize: 12, color: "var(--text2)" }}>
+                  {versionWarning.edits.map((e, i) => (
+                    <div key={i} style={{ padding: "4px 0", borderBottom: i < versionWarning.edits.length - 1 ? "1px solid var(--border)" : "none" }}>
+                      📝 {new Date(e.ts).toLocaleString("pt-BR")} — {e.author} ({e.reason})
+                    </div>
+                  ))}
+                </div>
+                <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                  <button onClick={() => confirmPay(versionWarning.payDateStr, true)} style={{ ...S.btn, background: "#f59e0b", color: "#fff", fontWeight: 700, padding: "12px 16px", fontSize: 13, textAlign: "left" }}>
+                    📋 Usar valores da data do pagamento ({versionWarning.payDateStr.split("-").reverse().join("/")})
+                  </button>
+                  <button onClick={() => confirmPay(versionWarning.payDateStr, false)} style={{ ...S.btn, background: "#2563eb", color: "#fff", fontWeight: 700, padding: "12px 16px", fontSize: 13, textAlign: "left" }}>
+                    📊 Usar valores atuais (com as edições recentes)
+                  </button>
+                  <button onClick={() => { setVersionWarning(null); }} style={{ ...S.btn, padding: "10px 16px", fontSize: 13 }}>← Voltar</button>
+                </div>
+              </>
+            )}
+          </div>
         </div>
       )}
     </div>
@@ -8836,7 +8930,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
 
         {/* VALE TRANSPORTE */}
         {tab === "vt" && (
-          <ValeTransporteTab restaurantId={rid} employees={employees} roles={roles} workSchedules={data?.workSchedules??{}} schedules={data?.schedules??{}} vtConfig={data?.vtConfig??{}} vtMonthly={data?.vtMonthly??{}} vtPayments={data?.vtPayments??{}} onUpdate={onUpdate} currentUser={currentUser} isOwner={isOwner} mobileOnly={mobileOnly} schedulePrevista={data?.schedulePrevista??{}} scheduleStatus={data?.scheduleStatus??{}} />
+          <ValeTransporteTab restaurantId={rid} employees={employees} roles={roles} workSchedules={data?.workSchedules??{}} schedules={data?.schedules??{}} vtConfig={data?.vtConfig??{}} vtMonthly={data?.vtMonthly??{}} vtPayments={data?.vtPayments??{}} onUpdate={onUpdate} currentUser={currentUser} isOwner={isOwner} mobileOnly={mobileOnly} schedulePrevista={data?.schedulePrevista??{}} scheduleStatus={data?.scheduleStatus??{}} scheduleVersions={data?.scheduleVersions??{}} />
         )}
 
         {/* TRILHA — integrada na aba Equipe */}
