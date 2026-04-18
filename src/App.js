@@ -6715,7 +6715,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
 
   // forms
   const [tipRows, setTipRows]   = useState([{date:today(),total:"",note:""}]);
-  const [showRecalc, setShowRecalc] = useState(false);
+  // showRecalc removido — recalcular agora fica na coluna de confirmação semanal
   const [splitForm, setSplitForm]         = useState(null);
   const [schedArea, setSchedArea]           = useState("Todos");
   const [showVacForm, setShowVacForm]       = useState(false);
@@ -7627,62 +7627,12 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
               </div>
             )}
 
-            {/* Confirmação semanal de gorjetas — DP */}
-            {(isDP || isOwner) && (() => {
-              const weeks = getWeeksInMonth(year, month);
-              const ridApprovals = data?.tipApprovals?.[rid] ?? {};
-              const monthTips = (tips ?? []).filter(t => t.restaurantId === rid && t.monthKey === mk);
-              const pendingCount = weeks.filter(w => !ridApprovals[w.monday]).length;
-              return (
-                <div style={{...S.card, marginBottom:24, border: pendingCount > 0 ? "2px solid #f59e0b" : "2px solid var(--ac)33"}}>
-                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
-                    <p style={{color:ac,fontSize:14,fontWeight:700,margin:0}}>✅ Confirmação Semanal</p>
-                    {pendingCount > 0 ? (
-                      <span style={{background:"#f59e0b22",color:"#f59e0b",padding:"3px 10px",borderRadius:8,fontSize:11,fontWeight:700}}>{pendingCount} pendente{pendingCount>1?"s":""}</span>
-                    ) : (
-                      <span style={{background:"var(--ac)11",color:ac,padding:"3px 10px",borderRadius:8,fontSize:11,fontWeight:700}}>Tudo confirmado</span>
-                    )}
-                  </div>
-                  <p style={{color:"var(--text3)",fontSize:12,marginBottom:14}}>Confirme cada semana para liberar os valores no extrato do empregado. Só semanas confirmadas ficam visíveis.</p>
-                  <div style={{display:"flex",flexDirection:"column",gap:10}}>
-                    {weeks.map(w => {
-                      const approval = ridApprovals[w.monday];
-                      const weekTips = monthTips.filter(t => { const day = parseInt(t.date.split("-")[2]); return w.daysInMonth.includes(day); });
-                      const weekTotal = weekTips.reduce((s,t) => s + (t.myNet ?? 0), 0);
-                      const weekEmps = new Set(weekTips.map(t => t.employeeId)).size;
-                      const fmtDay = (ds) => { const [,mm,dd] = ds.split("-"); return `${dd}/${mm}`; };
-                      return (
-                        <div key={w.monday} style={{display:"flex",alignItems:"center",gap:12,padding:"12px 14px",borderRadius:12,background:approval?"var(--ac)08":"var(--bg2)",border:`1px solid ${approval?"var(--ac)33":"var(--border)"}`}}>
-                          <div style={{flex:1}}>
-                            <div style={{fontWeight:700,fontSize:13,color:"var(--text)",marginBottom:2}}>{fmtDay(w.monday)} — {fmtDay(w.sunday)}</div>
-                            <div style={{fontSize:11,color:"var(--text3)"}}>{weekTips.length} lançamento{weekTips.length!==1?"s":""} · {weekEmps} empregado{weekEmps!==1?"s":""} · Líq. R$ {weekTotal.toFixed(2)}</div>
-                            {approval && <div style={{fontSize:10,color:"var(--ac-text)",marginTop:4}}>Confirmado por {approval.approvedByName} em {new Date(approval.approvedAt).toLocaleDateString("pt-BR")} {new Date(approval.approvedAt).toLocaleTimeString("pt-BR",{hour:"2-digit",minute:"2-digit"})}</div>}
-                          </div>
-                          {approval ? (
-                            <button onClick={() => {
-                              if (!window.confirm(`Desconfirmar a semana ${fmtDay(w.monday)} — ${fmtDay(w.sunday)}?\n\nOs valores desta semana serão ocultados do extrato do empregado até nova confirmação.`)) return;
-                              const updated = { ...(data?.tipApprovals ?? {}) };
-                              const ridObj = { ...(updated[rid] ?? {}) };
-                              delete ridObj[w.monday];
-                              updated[rid] = ridObj;
-                              onUpdate("tipApprovals", updated);
-                            }} style={{...S.btnSecondary,fontSize:11,padding:"6px 12px",color:"var(--red)",borderColor:"var(--red)44"}}>Desconfirmar</button>
-                          ) : (
-                            <button onClick={() => {
-                              const updated = { ...(data?.tipApprovals ?? {}) };
-                              updated[rid] = { ...(updated[rid] ?? {}), [w.monday]: { approvedAt: new Date().toISOString(), approvedBy: currentUser?.id || "admin", approvedByName: currentUser?.name || (isOwner ? "Admin AppTip" : "Gestor") } };
-                              onUpdate("tipApprovals", updated);
-                            }} style={{...S.btnPrimary,fontSize:11,padding:"6px 14px"}}>Confirmar ✅</button>
-                          )}
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              );
-            })()}
+            {/* Layout 2 colunas: Lançamento + Confirmação */}
+            <div style={{display:"grid",gridTemplateColumns: mobileOnly ? "1fr" : "1fr 1fr",gap:20,marginBottom:24}}>
 
-            <div style={{ ...S.card, marginBottom: 24 }}>
+            {/* COLUNA ESQUERDA: Lançamento de gorjeta */}
+            <div style={{ ...S.card }}>
+              <p style={{color:ac,fontSize:14,fontWeight:700,margin:"0 0 12px"}}>💸 Lançamento Diário</p>
               {(() => {
                 const daysInMonth = new Date(year, month+1, 0).getDate();
                 const noTipDays = data?.noTipDays?.[rid] ?? [];
@@ -7801,48 +7751,82 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
               })()}
             </div>
 
-            {/* Recalcular periodo */}
-            <div style={{...S.card, marginBottom:16, background:"var(--bg2)"}}>
-              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-                <div>
-                  <p style={{color:"#f59e0b",fontSize:13,fontWeight:700,margin:0}}>🔄 Recalcular por Escala</p>
-                  <p style={{color:"var(--text3)",fontSize:11,margin:"2px 0 0"}}>Recalcula lançamentos existentes respeitando a escala atual</p>
+            {/* COLUNA DIREITA: Confirmação semanal */}
+            {(isDP || isOwner) ? (() => {
+              const weeks = getWeeksInMonth(year, month);
+              const ridApprovals = data?.tipApprovals?.[rid] ?? {};
+              const pendingCount = weeks.filter(w => !ridApprovals[w.monday]).length;
+              return (
+                <div style={{...S.card, border: pendingCount > 0 ? "2px solid #f59e0b" : "2px solid var(--ac)33"}}>
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
+                    <p style={{color:ac,fontSize:14,fontWeight:700,margin:0}}>✅ Confirmação</p>
+                    {pendingCount > 0 ? (
+                      <span style={{background:"#f59e0b22",color:"#f59e0b",padding:"3px 10px",borderRadius:8,fontSize:11,fontWeight:700}}>{pendingCount} pendente{pendingCount>1?"s":""}</span>
+                    ) : (
+                      <span style={{background:"var(--ac)11",color:ac,padding:"3px 10px",borderRadius:8,fontSize:11,fontWeight:700}}>Tudo confirmado</span>
+                    )}
+                  </div>
+                  <p style={{color:"var(--text3)",fontSize:11,marginBottom:12,lineHeight:1.5}}>Confirme cada semana para liberar os valores no extrato do empregado.</p>
+                  <div style={{display:"flex",flexDirection:"column",gap:8}}>
+                    {weeks.map(w => {
+                      const approval = ridApprovals[w.monday];
+                      const weekTips = monthTips.filter(t => { const day = parseInt(t.date.split("-")[2]); return w.daysInMonth.includes(day); });
+                      const weekTotal = weekTips.reduce((s,t) => s + (t.myNet ?? 0), 0);
+                      const weekEmps = new Set(weekTips.map(t => t.employeeId)).size;
+                      const weekDates = [...new Set(weekTips.map(t => t.date))].sort();
+                      const fmtDay = (ds) => { const [,mm,dd] = ds.split("-"); return `${dd}/${mm}`; };
+                      return (
+                        <div key={w.monday} style={{padding:"10px 12px",borderRadius:10,background:approval?"var(--ac)06":"var(--bg2)",border:`1px solid ${approval?"var(--ac)33":"var(--border)"}`}}>
+                          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:4}}>
+                            <div style={{fontWeight:700,fontSize:13,color:"var(--text)"}}>{fmtDay(w.monday)} — {fmtDay(w.sunday)}</div>
+                            {approval && <span style={{fontSize:9,color:ac,fontWeight:600}}>✓</span>}
+                          </div>
+                          <div style={{fontSize:11,color:"var(--text3)",marginBottom:6}}>{weekTips.length} lanç. · {weekEmps} emp. · Líq. R$ {weekTotal.toFixed(2)}</div>
+                          {approval && <div style={{fontSize:10,color:"var(--text3)",marginBottom:6}}>Por {approval.approvedByName} em {new Date(approval.approvedAt).toLocaleDateString("pt-BR")} {new Date(approval.approvedAt).toLocaleTimeString("pt-BR",{hour:"2-digit",minute:"2-digit"})}</div>}
+                          <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+                            {approval ? (<>
+                              <button onClick={() => {
+                                if (weekDates.length === 0) { onUpdate("_toast","Nenhum lançamento nesta semana para recalcular."); return; }
+                                let total=0, currentTips=tips;
+                                const preSnap = snapshotTipsMonth(tips, rid, mk);
+                                weekDates.forEach(d => { const r=recalcTipDay(d,currentTips); total+=r.count; currentTips=r.updatedTips; });
+                                if(total>0){
+                                  saveVersion("tips", rid, mk, data?.tipVersions, preSnap, currentUser?.name || (isOwner?"Admin AppTip":"Gestor"), `Recalcular semana ${fmtDay(w.monday)}—${fmtDay(w.sunday)}`, onUpdate, true);
+                                  onUpdate("tips",currentTips);
+                                }
+                                // Re-confirm after recalc
+                                const upd = { ...(data?.tipApprovals ?? {}) };
+                                upd[rid] = { ...(upd[rid] ?? {}), [w.monday]: { approvedAt: new Date().toISOString(), approvedBy: currentUser?.id || "admin", approvedByName: currentUser?.name || (isOwner ? "Admin AppTip" : "Gestor") } };
+                                onUpdate("tipApprovals", upd);
+                                onUpdate("_toast",`🔄 Semana recalculada: ${total} empregados atualizados`);
+                              }} style={{padding:"5px 10px",borderRadius:8,border:"1px solid #f59e0b44",background:"transparent",color:"#f59e0b",cursor:"pointer",fontSize:11,fontFamily:"'DM Mono',monospace"}}>🔄 Recalcular</button>
+                              <button onClick={() => {
+                                if (!window.confirm(`Desconfirmar a semana ${fmtDay(w.monday)} — ${fmtDay(w.sunday)}?\n\nOs valores desta semana serão ocultados do extrato do empregado.`)) return;
+                                const updated = { ...(data?.tipApprovals ?? {}) };
+                                const ridObj = { ...(updated[rid] ?? {}) };
+                                delete ridObj[w.monday];
+                                updated[rid] = ridObj;
+                                onUpdate("tipApprovals", updated);
+                              }} style={{padding:"5px 10px",borderRadius:8,border:"1px solid var(--red)33",background:"transparent",color:"var(--red)",cursor:"pointer",fontSize:11,fontFamily:"'DM Mono',monospace"}}>Desconfirmar</button>
+                            </>) : (
+                              <button onClick={() => {
+                                const updated = { ...(data?.tipApprovals ?? {}) };
+                                updated[rid] = { ...(updated[rid] ?? {}), [w.monday]: { approvedAt: new Date().toISOString(), approvedBy: currentUser?.id || "admin", approvedByName: currentUser?.name || (isOwner ? "Admin AppTip" : "Gestor") } };
+                                onUpdate("tipApprovals", updated);
+                              }} style={{...S.btnPrimary,fontSize:11,padding:"5px 12px"}}>Confirmar ✅</button>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
                 </div>
-                <button onClick={()=>setShowRecalc(!showRecalc)} style={{...S.btnSecondary,fontSize:12}}>{showRecalc?"Fechar":"Ver"}</button>
-              </div>
-              {showRecalc && (
-                <div style={{marginTop:14}}>
-                  {tipDates.length === 0 && <p style={{color:"var(--text3)",fontSize:13}}>Nenhum lançamento para recalcular neste mês.</p>}
-                  {tipDates.map(d => (
-                    <div key={d} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"8px 0",borderBottom:"1px solid var(--border)"}}>
-                      <span style={{color:"var(--text2)",fontSize:13}}>{fmtDate(d)}</span>
-                      <button onClick={()=>{
-                        const { count, updatedTips }=recalcTipDay(d);
-                        if(count>0){
-                          const preSnap = snapshotTipsMonth(tips, rid, mk);
-                          saveVersion("tips", rid, mk, data?.tipVersions, preSnap, currentUser?.name || (isOwner?"Admin AppTip":"Gestor"), `Recalcular dia ${fmtDate(d)}`, onUpdate, true);
-                          onUpdate("tips",updatedTips);
-                        }
-                        onUpdate("_toast",`🔄 Dia ${fmtDate(d)} recalculado para ${count} empregados`);
-                      }} style={{padding:"6px 14px",borderRadius:8,border:"1px solid #f59e0b44",background:"transparent",color:"#f59e0b",cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:12}}>Recalcular</button>
-                    </div>
-                  ))}
-                  {tipDates.length > 1 && (
-                    <button onClick={()=>{
-                      let total=0,currentTips=tips;
-                      const preSnap = snapshotTipsMonth(tips, rid, mk);
-                      tipDates.forEach(d=>{const r=recalcTipDay(d,currentTips);total+=r.count;currentTips=r.updatedTips;});
-                      if(total>0){
-                        saveVersion("tips", rid, mk, data?.tipVersions, preSnap, currentUser?.name || (isOwner?"Admin AppTip":"Gestor"), `Recalcular todos os dias (${tipDates.length})`, onUpdate, true);
-                        onUpdate("tips",currentTips);
-                      }
-                      onUpdate("_toast",`🔄 ${tipDates.length} dias recalculados!`);
-                    }} style={{...S.btnPrimary,marginTop:12,background:"#f59e0b"}}>Recalcular Todos os Dias do Mês</button>
-                  )}
-                </div>
-              )}
-            </div>
+              );
+            })() : <div/>}
 
+            </div>{/* Fecha grid 2 colunas */}
+
+            {/* Divisão por dia — largura total */}
             {tipDates.length === 0 && <p style={{ color: "var(--text3)", textAlign: "center" }}>Nenhum lançamento neste mês.</p>}
             {tipDates.map(d => {
               const dT = monthTips.filter(t => t.date === d);
