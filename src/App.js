@@ -7305,7 +7305,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
   // ── Grouped tabs ──
   const TAB_GROUPS = isLider ? [
     { id:"equipe", label:"👥 Equipe", icon:"👥", tabs: [
-      ["employees","Empregados"],
+      ["employees","Pessoas"],
       ["reunioes","Reuniões"],
     ].filter(Boolean) },
     { id:"operacao", label:"📅 Operação", icon:"📅", tabs: [
@@ -7320,8 +7320,8 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
       (isOwner || (perms.vt !== false && tabVisible("vt"))) && ["vt","Vale Transporte"],
     ].filter(Boolean) },
     { id:"equipe", label:"👥 Equipe", icon:"👥", tabs: [
-      (isOwner || canTips || tabVisible("employees")) && ["employees","Empregados"],
       (isOwner || tabVisible("roles")) && ["roles","Cargos"],
+      (isOwner || canTips || tabVisible("employees")) && ["employees","Pessoas"],
       (isOwner || canTips || tabVisible("employees")) && ["reunioes","Reuniões"],
       (isOwner || tabVisible("horarios")) && ["horarios","Horários"],
     ].filter(Boolean) },
