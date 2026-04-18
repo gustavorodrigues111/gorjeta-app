@@ -126,6 +126,439 @@ function makeEmpCode(restaurantCode, seq) {
   return restaurantCode.toUpperCase() + String(seq).padStart(4, "0");
 }
 
+// ═══════════════════════════════════════════════════════════════
+// ──  Ponto Import: Parser determinístico + Comparador         ──
+// ═══════════════════════════════════════════════════════════════
+
+const PONTO_SYSTEMS = [
+  { id: "solides", label: "Sólides" },
+  // futuro: { id: "tangerino", label: "Tangerino" }, etc.
+];
+
+// ── Helpers de horário ──
+function parseHHMM(str) {
+  if (!str) return null;
+  const m = str.replace(/[^\d:]/g,"").match(/^(\d{1,2}):(\d{2})$/);
+  if (!m) return null;
+  return parseInt(m[1]) * 60 + parseInt(m[2]);
+}
+function fmtMinutes(mins) {
+  const h = Math.floor(Math.abs(mins) / 60);
+  const m = Math.abs(mins) % 60;
+  return `${h}h${m.toString().padStart(2,"0")}min`;
+}
+
+// ── Normalizar string p/ fuzzy match ──
+function normalizeStr(s) {
+  return (s||"").normalize("NFD").replace(/[\u0300-\u036f]/g,"").toLowerCase().trim();
+}
+function fuzzyNameMatch(pdfName, sysEmps) {
+  const norm = normalizeStr(pdfName);
+  const normParts = norm.split(/\s+/);
+  // 1. Exact normalized match
+  const exact = sysEmps.find(e => normalizeStr(e.name) === norm);
+  if (exact) return exact;
+  // 2. First+Last name match
+  if (normParts.length >= 2) {
+    const first = normParts[0], last = normParts[normParts.length - 1];
+    const match = sysEmps.find(e => {
+      const ep = normalizeStr(e.name).split(/\s+/);
+      return ep[0] === first && ep[ep.length - 1] === last;
+    });
+    if (match) return match;
+  }
+  // 3. Contains match (one name contains the other)
+  const contains = sysEmps.find(e => {
+    const en = normalizeStr(e.name);
+    return en.includes(norm) || norm.includes(en);
+  });
+  if (contains) return contains;
+  // 4. Partial word overlap (>= 70%)
+  const best = { emp: null, score: 0 };
+  sysEmps.forEach(e => {
+    const ep = new Set(normalizeStr(e.name).split(/\s+/));
+    const overlap = normParts.filter(w => ep.has(w)).length;
+    const score = overlap / Math.max(normParts.length, ep.size);
+    if (score > best.score) { best.score = score; best.emp = e; }
+  });
+  if (best.score >= 0.6 && best.emp) return best.emp;
+  return null;
+}
+
+// ── Mapa dia da semana pt-BR → index (0=dom) ──
+const DOW_MAP = { domingo:0, segunda:1, "terça":1, terca:1, quarta:2, quinta:3, sexta:4, "sábado":5, sabado:5 };
+function getDow(dateStr) { // "2026-03-01" → 0-6 (dom-sáb)
+  const d = new Date(dateStr + "T12:00:00");
+  return d.getDay();
+}
+// DOW_NAMES available for future parser extensions
+// const DOW_NAMES = ["domingo","segunda","terca","quarta","quinta","sexta","sabado"];
+
+// ── Parser Sólides ──
+function parseSolidesPDF(fullText, expectedYear, expectedMonth) {
+  // Validate month from PDF header
+  const periodMatch = fullText.match(/(\d{2})\/(\d{2})\/(\d{4})\s+a\s+(\d{2})\/(\d{2})\/(\d{4})/);
+  if (periodMatch) {
+    const pdfMonth = parseInt(periodMatch[2]) - 1; // 0-indexed
+    const pdfYear = parseInt(periodMatch[3]);
+    if (pdfMonth !== expectedMonth || pdfYear !== expectedYear) {
+      return { error: `O PDF é de ${periodMatch[2]}/${periodMatch[3]} mas você está vendo ${String(expectedMonth+1).padStart(2,"0")}/${expectedYear}. Navegue para o mês correto.` };
+    }
+  }
+
+  // Split into per-employee blocks using "DADOS DO COLABORADOR" as separator
+  const blocks = fullText.split(/DADOS DO COLABORADOR/i);
+  blocks.shift(); // remove header before first employee
+
+  const employees = [];
+
+  for (const block of blocks) {
+    const lines = block.split("\n").map(l => l.trim()).filter(Boolean);
+
+    // Extract name
+    let name = "";
+    for (const l of lines) {
+      const nm = l.match(/Nome:\s*(.+?)(?:\s{2,}CPF|CPF:|$)/);
+      if (nm && nm[1].trim().length > 2 && !nm[1].includes("CNPJ")) { name = nm[1].trim(); break; }
+    }
+    if (!name) continue;
+
+    // Extract function/role
+    let funcao = "";
+    for (const l of lines) {
+      const fm = l.match(/Fun[çc][aã]o:\s*(.+?)(?:\s{2,}|Centro|$)/);
+      if (fm) { funcao = fm[1].trim(); break; }
+    }
+
+    // Extract "Quadro de Horários" — expected schedule per day of week
+    const quadro = {}; // { 0: {start:min, end:min, total:min}, 1: ... } (0=dom,1=seg...)
+    let inQuadro = false;
+    for (const l of lines) {
+      if (/Quadro de Hor/i.test(l)) { inQuadro = true; continue; }
+      if (/DIA\s*\/\s*M[EÊ]S/i.test(l)) { inQuadro = false; continue; }
+      if (inQuadro) {
+        const dowMatch = l.match(/^(Domingo|Segunda|Ter[çc]a|Quarta|Quinta|Sexta|S[aá]bado)/i);
+        if (dowMatch) {
+          const dowName = normalizeStr(dowMatch[1].replace(/-feira/i,""));
+          const dowIdx = DOW_MAP[dowName];
+          if (dowIdx !== undefined) {
+            // Extract all HH:MM times in the line
+            const times = l.match(/\d{1,2}:\d{2}/g) || [];
+            // Last HH:MM is usually the Total
+            const totalStr = times.length > 0 ? times[times.length - 1] : null;
+            const total = parseHHMM(totalStr);
+            // First time is start, second-to-last time pair is end
+            const start = times.length >= 2 ? parseHHMM(times[0]) : null;
+            // Find "às" pattern: "09:00 às 11:00  12:00 às 18:00" → start=09:00
+            const asMatch = l.match(/(\d{1,2}:\d{2})\s+[aà]s\s+(\d{1,2}:\d{2})/g);
+            let firstStart = start;
+            let lastEnd = null;
+            if (asMatch && asMatch.length > 0) {
+              const firstPair = asMatch[0].match(/(\d{1,2}:\d{2})\s+[aà]s\s+(\d{1,2}:\d{2})/);
+              if (firstPair) firstStart = parseHHMM(firstPair[1]);
+              const lastPair = asMatch[asMatch.length - 1].match(/(\d{1,2}:\d{2})\s+[aà]s\s+(\d{1,2}:\d{2})/);
+              if (lastPair) lastEnd = parseHHMM(lastPair[2]);
+            }
+            quadro[dowIdx] = { start: firstStart, end: lastEnd, total };
+          }
+        }
+      }
+    }
+
+    // Extract daily entries
+    const dailyEntries = []; // [{date:"YYYY-MM-DD", status:"work"|"folga"|"faultu"|"faultj"|"ferias"|"off_day", firstEntry:min|null, lastExit:min|null, worked:min|null, expected:min|null, saldo:min|null}]
+
+    // Regex to match day lines: "01/03  domingo  ..."
+    const dayLineRegex = /^(\d{2})\/(\d{2})\s+(domingo|segunda|ter[çc]a|quarta|quinta|sexta|s[aá]bado)[-\s]*(feira)?\s*(.*)/i;
+
+    for (const l of lines) {
+      const dm = l.match(dayLineRegex);
+      if (!dm) continue;
+      const day = dm[1], mon = dm[2];
+      const dateStr = `${expectedYear}-${mon}-${day}`;
+      const rest = dm[5] || "";
+      const restUpper = rest.toUpperCase();
+
+      let status = "work";
+      let firstEntry = null;
+      let lastExit = null;
+      let worked = null;
+      let expected = null;
+      let saldo = null;
+
+      if (restUpper.includes("FALTA") && restUpper.includes("NAO JUSTIFICADA")) {
+        status = "faultu";
+      } else if (restUpper.includes("FALTA") && restUpper.includes("JUSTIFICADA")) {
+        status = "faultj";
+      } else if (restUpper.includes("FÉRIAS") || restUpper.includes("FERIAS")) {
+        status = "ferias";
+      } else if (restUpper.trim() === "FOLGA" || restUpper.startsWith("FOLGA ") || restUpper.includes(" FOLGA")) {
+        status = "folga";
+      } else if (rest.trim() === "-" || rest.trim() === "") {
+        status = "off_day";
+      } else {
+        // Work day — extract times
+        // Get entry/exit times (before pipe and including pipe-separated groups)
+        // The format is typically: "11:36 18:02 | 18:36 22:42"  then  "10:32"  then "10:00"  then "+00:32"
+        // Or: "(m)11:30 16:00 | (m)18:30 22:55 |   08:55   10:00   -1:05"
+
+        // Clean (m), (fh), (p) markers for parsing
+        const cleaned = rest.replace(/\([a-z]+\)/gi, "");
+
+        // Split by multiple spaces (3+) to separate columns
+        const columns = cleaned.split(/\s{3,}/).map(c => c.trim()).filter(Boolean);
+
+        // First column(s) before large gap = entry/exit times (PONTOS)
+        // The entry/exit block may contain | separators
+        let entryBlock = columns[0] || "";
+        // Sometimes columns[0] has both pontos and trabalhadas if spacing is inconsistent
+        // Use a heuristic: extract paired times from the beginning
+
+        // Get ALL times from the entry block
+        const entryTimes = [];
+        const entryParts = entryBlock.split(/\|/);
+        for (const part of entryParts) {
+          const ts = part.match(/\d{1,2}:\d{2}/g) || [];
+          entryTimes.push(...ts.map(parseHHMM).filter(t => t !== null));
+        }
+
+        if (entryTimes.length >= 2) {
+          firstEntry = entryTimes[0]; // first clock-in
+          lastExit = entryTimes[entryTimes.length - 1]; // last clock-out
+        } else if (entryTimes.length === 1) {
+          firstEntry = entryTimes[0];
+        }
+
+        // Extract worked/expected/saldo from remaining columns
+        // These are typically single HH:MM values
+        const summaryTimes = [];
+        for (let ci = 1; ci < columns.length; ci++) {
+          const ts = columns[ci].match(/-?\d{1,2}:\d{2}/g) || [];
+          summaryTimes.push(...ts);
+        }
+        // Order: TRABALHADAS, [ABONO], PREVISTAS, SALDO
+        // SALDO has +/- prefix
+        for (const st of summaryTimes) {
+          const val = parseHHMM(st.replace(/^[+-]/, ""));
+          if (st.startsWith("-") || st.startsWith("+")) {
+            saldo = st.startsWith("-") ? -val : val;
+          } else if (worked === null) {
+            worked = val;
+          } else if (expected === null) {
+            expected = val;
+          }
+        }
+      }
+
+      // For non-work statuses, try to extract expected hours from the line
+      if (status !== "work" && status !== "off_day") {
+        const allTimes = rest.match(/\d{1,2}:\d{2}/g) || [];
+        if (allTimes.length > 0) {
+          expected = parseHHMM(allTimes[allTimes.length - 1]);
+        }
+      }
+
+      dailyEntries.push({ date: dateStr, status, firstEntry, lastExit, worked, expected, saldo });
+    }
+
+    // Extract "Dias Faltosos"
+    let diasFaltosos = 0;
+    for (const l of lines) {
+      const df = l.match(/Dias Faltosos:\s*(\d+)/);
+      if (df) { diasFaltosos = parseInt(df[1]); break; }
+    }
+
+    employees.push({ name, funcao, quadro, dailyEntries, diasFaltosos });
+  }
+
+  return { employees, error: null };
+}
+
+// ── Comparador: ponto vs escala do sistema ──
+function comparePontoVsSchedule(parsedEmps, schedEmps, effectiveMonth, mk, restRoles) {
+  const TOLERANCE_ATRASO = 10; // minutos
+  const TOLERANCE_SAIDA = 30; // minutos
+  const TOLERANCE_HE = 30; // minutos para hora extra
+
+  const scheduleChanges = {}; // {empId: {date: status}}
+  const incidents = [];
+  const unmatchedNames = [];
+  const matchedSummary = []; // [{pdfName, sysName, empId}]
+  const noScheduleEmps = []; // empregados sem escala no sistema
+
+  for (const pEmp of parsedEmps) {
+    // Fuzzy match
+    const sysEmp = fuzzyNameMatch(pEmp.name, schedEmps);
+
+    if (!sysEmp) {
+      // Build unmatched entry
+      const uSchedChanges = {};
+      const uIncidents = [];
+      for (const entry of pEmp.dailyEntries) {
+        if (entry.status === "faultu") {
+          uSchedChanges[entry.date] = "faultu";
+          uIncidents.push({ type: "faultu", date: entry.date, description: "Falta não justificada", severity: "media" });
+        } else if (entry.status === "faultj") {
+          uSchedChanges[entry.date] = "faultj";
+          uIncidents.push({ type: "faultj", date: entry.date, description: "Falta justificada", severity: "leve" });
+        } else if (entry.status === "ferias") {
+          uSchedChanges[entry.date] = "vac";
+        } else if (entry.status === "folga") {
+          uSchedChanges[entry.date] = "off";
+        }
+      }
+      unmatchedNames.push({
+        name: pEmp.name,
+        funcao: pEmp.funcao,
+        scheduleChanges: uSchedChanges,
+        incidents: uIncidents
+      });
+      continue;
+    }
+
+    matchedSummary.push({ pdfName: pEmp.name, sysName: sysEmp.name, empId: sysEmp.id });
+    const empSched = effectiveMonth[sysEmp.id] ?? {};
+    const hasSchedule = Object.keys(empSched).length > 0;
+
+    if (!hasSchedule) {
+      noScheduleEmps.push(sysEmp.name);
+    }
+
+    for (const entry of pEmp.dailyEntries) {
+      const sysStatus = empSched[entry.date] ?? "";
+      const dow = getDow(entry.date);
+      const quadroDay = pEmp.quadro[dow];
+
+      // ── Faltas ──
+      if (entry.status === "faultu") {
+        if (sysStatus !== "faultu") {
+          if (!scheduleChanges[sysEmp.id]) scheduleChanges[sysEmp.id] = {};
+          scheduleChanges[sysEmp.id][entry.date] = "faultu";
+        }
+        incidents.push({
+          empId: sysEmp.id,
+          empName: sysEmp.name,
+          type: "faultu",
+          date: entry.date,
+          description: "Falta não justificada",
+          severity: "media"
+        });
+        continue;
+      }
+      if (entry.status === "faultj") {
+        if (sysStatus !== "faultj") {
+          if (!scheduleChanges[sysEmp.id]) scheduleChanges[sysEmp.id] = {};
+          scheduleChanges[sysEmp.id][entry.date] = "faultj";
+        }
+        incidents.push({
+          empId: sysEmp.id,
+          empName: sysEmp.name,
+          type: "faultj",
+          date: entry.date,
+          description: "Falta justificada",
+          severity: "leve"
+        });
+        continue;
+      }
+
+      // ── Férias ──
+      if (entry.status === "ferias") {
+        if (sysStatus !== "vac") {
+          if (!scheduleChanges[sysEmp.id]) scheduleChanges[sysEmp.id] = {};
+          scheduleChanges[sysEmp.id][entry.date] = "vac";
+        }
+        continue;
+      }
+
+      // ── Folga ──
+      if (entry.status === "folga") {
+        if (sysStatus !== "off" && sysStatus !== "comp" && sysStatus !== "") {
+          // System says work but PDF says folga
+          if (!scheduleChanges[sysEmp.id]) scheduleChanges[sysEmp.id] = {};
+          scheduleChanges[sysEmp.id][entry.date] = "off";
+        } else if (sysStatus === "" || sysStatus === "trabalho") {
+          // System has as work day, PDF has folga
+          if (!scheduleChanges[sysEmp.id]) scheduleChanges[sysEmp.id] = {};
+          scheduleChanges[sysEmp.id][entry.date] = "off";
+        }
+        continue;
+      }
+
+      // ── Dia sem escala (off_day) — skip ──
+      if (entry.status === "off_day") continue;
+
+      // ── Trabalho — check atraso, saída antecipada, hora extra ──
+      if (entry.status === "work" && quadroDay && hasSchedule) {
+        // Atraso na entrada
+        if (entry.firstEntry !== null && quadroDay.start !== null) {
+          const atraso = entry.firstEntry - quadroDay.start;
+          if (atraso > TOLERANCE_ATRASO) {
+            const sev = atraso > 60 ? "grave" : atraso > 30 ? "media" : "leve";
+            incidents.push({
+              empId: sysEmp.id,
+              empName: sysEmp.name,
+              type: "atraso",
+              date: entry.date,
+              description: `Atraso de ${fmtMinutes(atraso)} na entrada (previsto ${Math.floor(quadroDay.start/60)}:${String(quadroDay.start%60).padStart(2,"0")}, entrada ${Math.floor(entry.firstEntry/60)}:${String(entry.firstEntry%60).padStart(2,"0")})`,
+              severity: sev
+            });
+          }
+        }
+
+        // Saída antecipada
+        if (entry.lastExit !== null && quadroDay.end !== null) {
+          const antecipada = quadroDay.end - entry.lastExit;
+          if (antecipada > TOLERANCE_SAIDA) {
+            const sev = antecipada > 60 ? "grave" : antecipada > 30 ? "media" : "leve";
+            incidents.push({
+              empId: sysEmp.id,
+              empName: sysEmp.name,
+              type: "saida_antecipada",
+              date: entry.date,
+              description: `Saída ${fmtMinutes(antecipada)} antes do previsto (previsto ${Math.floor(quadroDay.end/60)}:${String(quadroDay.end%60).padStart(2,"0")}, saída ${Math.floor(entry.lastExit/60)}:${String(entry.lastExit%60).padStart(2,"0")})`,
+              severity: sev
+            });
+          }
+        }
+
+        // Hora extra (saldo positivo)
+        if (entry.saldo !== null && entry.saldo > TOLERANCE_HE) {
+          incidents.push({
+            empId: sysEmp.id,
+            empName: sysEmp.name,
+            type: "hora_extra",
+            date: entry.date,
+            description: `Hora extra de ${fmtMinutes(entry.saldo)} (trabalhou ${entry.worked ? fmtMinutes(entry.worked) : "?"} / previsto ${entry.expected ? fmtMinutes(entry.expected) : "?"})`,
+            severity: entry.saldo > 120 ? "grave" : entry.saldo > 60 ? "media" : "leve"
+          });
+        }
+      }
+    }
+  }
+
+  // Count schedule changes
+  let totalSchedChanges = 0;
+  Object.values(scheduleChanges).forEach(days => { totalSchedChanges += Object.keys(days).length; });
+
+  // Build summary
+  const parts = [];
+  parts.push(`${parsedEmps.length} empregado(s) no PDF`);
+  parts.push(`${matchedSummary.length} identificado(s) no sistema`);
+  if (unmatchedNames.length > 0) parts.push(`${unmatchedNames.length} não identificado(s)`);
+  if (totalSchedChanges > 0) parts.push(`${totalSchedChanges} alteração(ões) na escala`);
+  if (incidents.length > 0) parts.push(`${incidents.length} ocorrência(s)`);
+  if (noScheduleEmps.length > 0) parts.push(`${noScheduleEmps.length} sem escala no sistema (atrasos não verificados): ${noScheduleEmps.join(", ")}`);
+
+  return {
+    scheduleChanges,
+    incidents,
+    unmatchedNames: unmatchedNames.map((u, i) => ({ ...u, _key: `unm-${i}` })),
+    totalSchedChanges,
+    matchedSummary,
+    summary: parts.join(". ") + "."
+  };
+}
+
 //
 const K = {
   owners: "v4:owners",
@@ -1214,7 +1647,7 @@ async function groqGenerate(systemPrompt, userInput) {
         ],
         temperature: 0.15,
         response_format: { type: "json_object" },
-        max_tokens: 2048,
+        max_tokens: 4096,
       }),
     });
   } catch (netErr) {
@@ -5356,8 +5789,9 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
   const [showPontoImport, setShowPontoImport] = useState(false);
   const [pontoLoading, setPontoLoading] = useState(false);
   const [pontoError, setPontoError] = useState("");
-  const [pontoPreview, setPontoPreview] = useState(null); // { scheduleChanges:{empId:{date:status}}, incidents:[{empId,type,date,desc}], unmatchedNames:[...] }
+  const [pontoPreview, setPontoPreview] = useState(null); // { scheduleChanges, incidents, unmatchedNames, totalSchedChanges, summary, matchedSummary }
   const [pontoResolutions, setPontoResolutions] = useState({}); // { _key: { action:"ignore"|"link"|"create", linkedEmpId, newRoleId } }
+  const [pontoSystem, setPontoSystem] = useState("solides");
   // Local schedule edits — accumulated before saving as new version
   const [schedLocalEdits, setSchedLocalEdits] = useState(null); // null = no pending edits, object = pending edits overlay
   const schedDirty = schedLocalEdits !== null;
@@ -6963,12 +7397,21 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                   <span style={{fontSize:18}}>📄</span>
                   <div>
                     <div style={{color:"var(--ac)",fontWeight:700,fontSize:14}}>Importar folha de ponto</div>
-                    <div style={{color:"var(--text3)",fontSize:11}}>Upload do PDF da folha de ponto — a IA analisa e sugere atualizações na escala e ocorrências</div>
+                    <div style={{color:"var(--text3)",fontSize:11}}>Upload do PDF da folha de ponto — compara automaticamente com a escala e detecta divergências</div>
                   </div>
                 </div>
 
                 {!pontoPreview && (
                   <div>
+                    {/* System selector */}
+                    <div style={{marginBottom:10,display:"flex",alignItems:"center",gap:8}}>
+                      <label style={{color:"var(--text3)",fontSize:12,fontWeight:500}}>Sistema de ponto:</label>
+                      <select value={pontoSystem} onChange={e=>setPontoSystem(e.target.value)}
+                        style={{...S.input,width:"auto",fontSize:12,padding:"5px 10px"}}>
+                        {PONTO_SYSTEMS.map(s => <option key={s.id} value={s.id}>{s.label}</option>)}
+                      </select>
+                    </div>
+
                     <input type="file" accept=".pdf" id="ponto-upload" style={{display:"none"}} onChange={async(e)=>{
                       const file = e.target.files?.[0];
                       if (!file) return;
@@ -6991,79 +7434,32 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                           return;
                         }
 
-                        // 2. Build context
-                        const empList = schedEmps.map(emp => {
-                          const r = restRoles.find(rl=>rl.id===emp.roleId);
-                          return `- nome:"${emp.name}" id:"${emp.id}" cargo:"${r?.name??"—"}" area:"${r?.area??"—"}"`;
-                        }).join("\n");
+                        // 2. Parse PDF based on selected system
+                        let parsed;
+                        if (pontoSystem === "solides") {
+                          parsed = parseSolidesPDF(fullText, year, month);
+                        } else {
+                          setPontoError(`Parser para "${pontoSystem}" ainda não implementado.`);
+                          setPontoLoading(false);
+                          return;
+                        }
 
-                        const currentSchedule = {};
-                        schedEmps.forEach(emp => {
-                          const days = effectiveMonth[emp.id] ?? {};
-                          const entries = Object.entries(days).filter(([d])=>d.startsWith(mk));
-                          if (entries.length) currentSchedule[emp.name] = Object.fromEntries(entries.map(([d,s])=>[d,s||"trabalho"]));
-                        });
+                        if (parsed.error) {
+                          setPontoError(parsed.error);
+                          setPontoLoading(false);
+                          return;
+                        }
 
-                        // 3. Send to Groq
-                        const result = await groqGenerate(
-                          `Você é um assistente de análise de folha de ponto para restaurante. Receba o texto extraído de um PDF de folha de ponto e compare com a escala prevista.
+                        if (!parsed.employees || parsed.employees.length === 0) {
+                          setPontoError("Nenhum empregado encontrado no PDF. Verifique se o formato é compatível com o sistema selecionado.");
+                          setPontoLoading(false);
+                          return;
+                        }
 
-Empregados do restaurante:
-${empList}
-
-Escala prevista para ${monthLabel(year,month)}:
-${JSON.stringify(currentSchedule, null, 1)}
-
-Status possíveis na escala: "off" (folga), "faultu" (falta injustificada), "faultj" (falta justificada), "vac" (férias), "comp" (folga compensação), "comptrab" (trabalho compensação), "freela" (freela), null ou "" = trabalho normal.
-
-Analise o texto do PDF e retorne um JSON com:
-{
-  "scheduleChanges": {
-    "<empId>": { "<YYYY-MM-DD>": "<novo_status>" }
-  },
-  "incidents": [
-    { "empId":"<id>", "type":"<tipo>", "date":"<YYYY-MM-DD>", "description":"<descrição>", "severity":"<leve|media|grave>" }
-  ],
-  "unmatchedNames": [
-    { "name":"<nome como aparece no PDF>", "scheduleChanges":{ "<YYYY-MM-DD>":"<status>" }, "incidents":[{ "type":"<tipo>", "date":"<YYYY-MM-DD>", "description":"<descrição>", "severity":"<leve|media|grave>" }] }
-  ],
-  "summary": "<resumo em português do que foi encontrado>"
-}
-
-Regras:
-- Em scheduleChanges inclua APENAS os dias que MUDARAM comparado com a escala prevista (ex: previsto trabalho mas faltou → "faultu" ou "faultj")
-- Atrasos >15 min devem virar um incident com type "atraso" e a descrição incluindo os minutos. Atraso NÃO muda o status na escala (empregado trabalhou).
-- Faltas viram mudança de status na escala (faultu ou faultj) E um incident
-- Horas extras podem virar incident tipo "hora_extra" para registro
-- Se não conseguir identificar um empregado do PDF pelo nome (completo ou parcial), inclua em unmatchedNames com os dados encontrados
-- Tente fazer o match pelo nome (completo ou parcial)
-- severity: "leve" para atrasos <30min, "media" para atrasos 30-60min ou 1 falta, "grave" para múltiplas faltas ou atrasos >60min
-- Os types de incident válidos são: "atraso", "faultu", "faultj", "hora_extra", "advertencia_verbal", "advertencia_escrita"
-- Retorne arrays vazios se não houver mudanças
-- No summary, mencione quantos empregados não foram identificados, se houver`,
-                          `Texto da folha de ponto:\n\n${fullText.slice(0, 8000)}`
-                        );
-
-                        // 4. Build preview with employee name resolution
-                        const preview = {
-                          scheduleChanges: result.scheduleChanges ?? {},
-                          incidents: (result.incidents ?? []).map(inc => ({
-                            ...inc,
-                            empName: schedEmps.find(e=>e.id===inc.empId)?.name ?? "Desconhecido"
-                          })),
-                          unmatchedNames: (result.unmatchedNames ?? []).map((u, idx) => ({
-                            ...u,
-                            _key: `unm-${idx}`,
-                            scheduleChanges: u.scheduleChanges ?? {},
-                            incidents: u.incidents ?? []
-                          })),
-                          summary: result.summary ?? "Análise concluída."
-                        };
-                        // Count changes
-                        let totalSchedChanges = 0;
-                        Object.values(preview.scheduleChanges).forEach(days => { totalSchedChanges += Object.keys(days).length; });
-                        preview.totalSchedChanges = totalSchedChanges;
+                        // 3. Compare against system schedule
+                        const preview = comparePontoVsSchedule(parsed.employees, schedEmps, effectiveMonth, mk, restRoles);
                         setPontoPreview(preview);
+
                         // Init resolutions for unmatched names
                         if (preview.unmatchedNames.length > 0) {
                           const init = {};
@@ -7083,12 +7479,12 @@ Regras:
                     <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
                       <button onClick={()=>document.getElementById("ponto-upload").click()} disabled={pontoLoading}
                         style={{...S.btnPrimary,fontSize:13,opacity:pontoLoading?0.6:1}}>
-                        {pontoLoading ? "⏳ Analisando..." : "📎 Selecionar PDF da folha de ponto"}
+                        {pontoLoading ? "⏳ Processando..." : "📎 Selecionar PDF da folha de ponto"}
                       </button>
                       <button onClick={()=>{setShowPontoImport(false);setPontoError("");setPontoPreview(null);setPontoResolutions({});}} style={S.btnSecondary}>Cancelar</button>
                     </div>
                     {pontoError && <p style={{color:"var(--red)",fontSize:12,margin:"8px 0 0"}}>{pontoError}</p>}
-                    <p style={{color:"var(--text3)",fontSize:11,margin:"8px 0 0"}}>O PDF precisa ter texto selecionável (não escaneado). A IA vai cruzar com a escala prevista de {monthLabel(year,month)}.</p>
+                    <p style={{color:"var(--text3)",fontSize:11,margin:"8px 0 0"}}>O PDF precisa ter texto selecionável (não escaneado). Será comparado com a escala de {monthLabel(year,month)}.</p>
                   </div>
                 )}
 
@@ -7098,6 +7494,20 @@ Regras:
                     <div style={{background:"var(--bg1)",borderRadius:8,padding:"10px 14px",marginBottom:12}}>
                       <p style={{color:"var(--text)",fontSize:13,margin:0,lineHeight:1.5}}>{pontoPreview.summary}</p>
                     </div>
+
+                    {/* Matched employees */}
+                    {pontoPreview.matchedSummary?.length > 0 && (
+                      <details style={{marginBottom:12,fontSize:12}}>
+                        <summary style={{color:"var(--text3)",cursor:"pointer",fontSize:11}}>👥 Empregados identificados ({pontoPreview.matchedSummary.length})</summary>
+                        <div style={{marginTop:6,display:"flex",flexWrap:"wrap",gap:4}}>
+                          {pontoPreview.matchedSummary.map(m => (
+                            <span key={m.empId} style={{fontSize:10,padding:"3px 8px",borderRadius:4,background:"var(--bg2)",border:"1px solid var(--border)",color:"var(--text2)"}}>
+                              {m.pdfName !== m.sysName ? `${m.pdfName} → ${m.sysName}` : m.sysName}
+                            </span>
+                          ))}
+                        </div>
+                      </details>
+                    )}
 
                     {/* Schedule changes */}
                     {pontoPreview.totalSchedChanges > 0 && (
@@ -7135,11 +7545,13 @@ Regras:
                         <div style={{color:"var(--red)",fontSize:12,fontWeight:700,marginBottom:6}}>🚨 Ocorrências detectadas ({pontoPreview.incidents.length})</div>
                         {pontoPreview.incidents.map((inc, i) => {
                           const sevColor = {leve:"#f59e0b",media:"#f97316",grave:"#e74c3c"}[inc.severity] ?? "#888";
+                          const typeLabel = {atraso:"⏰ Atraso",saida_antecipada:"🚪 Saída antecipada",hora_extra:"⏱️ Hora extra",faultu:"❌ Falta injust.",faultj:"⚠️ Falta just."}[inc.type] ?? inc.type;
                           return (
                             <div key={i} style={{padding:"8px 12px",borderRadius:8,background:"#e74c3c09",border:"1px solid #e74c3c22",marginBottom:4,display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:8}}>
                               <div>
                                 <span style={{fontWeight:700,fontSize:12,color:"var(--text)"}}>{inc.empName}</span>
                                 <span style={{color:"var(--text3)",fontSize:11,marginLeft:6}}>{new Date(inc.date+"T12:00:00").toLocaleDateString("pt-BR")}</span>
+                                <span style={{fontSize:10,marginLeft:6,color:"var(--text3)"}}>{typeLabel}</span>
                                 <div style={{color:"var(--text2)",fontSize:12,marginTop:2}}>{inc.description}</div>
                               </div>
                               <span style={{fontSize:9,padding:"2px 6px",borderRadius:4,background:sevColor+"22",color:sevColor,fontWeight:700,whiteSpace:"nowrap",flexShrink:0}}>{inc.severity}</span>
@@ -7299,7 +7711,7 @@ Regras:
                               id: `${Date.now()}-${Math.random().toString(36).slice(2,6)}`,
                               restaurantId: rid,
                               employeeIds: [inc.empId],
-                              type: inc.type === "atraso" ? "outro" : inc.type === "hora_extra" ? "destaque_positivo" : inc.type === "faultu" ? "indisciplina" : inc.type === "faultj" ? "outro" : inc.type,
+                              type: inc.type === "atraso" ? "outro" : inc.type === "saida_antecipada" ? "outro" : inc.type === "hora_extra" ? "destaque_positivo" : inc.type === "faultu" ? "indisciplina" : inc.type === "faultj" ? "outro" : inc.type,
                               severity: inc.severity || "leve",
                               description: `[Importado do ponto] ${inc.description}`,
                               date: inc.date,
