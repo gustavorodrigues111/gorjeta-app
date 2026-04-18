@@ -7234,44 +7234,87 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                   const demDate = emp.demitidoEm;
                   const admDate = emp.admission || "—";
                   const W = doc.internal.pageSize.getWidth();
-                  let y = 15;
+                  const H = doc.internal.pageSize.getHeight();
+                  const mx = 12; // margin x
+                  const cw = W - mx * 2; // content width
+                  const f2 = v => `R$ ${(v??0).toLocaleString("pt-BR",{minimumFractionDigits:2})}`;
+                  const fmtDate = d => d && d !== "—" ? new Date(d+"T12:00:00").toLocaleDateString("pt-BR") : "—";
+                  let y = 0;
 
-                  // Header
-                  doc.setFontSize(16);
-                  doc.setTextColor(30,30,30);
-                  doc.text("RELATÓRIO DE DESLIGAMENTO", W/2, y, {align:"center"});
-                  y += 8;
+                  // ── Accent bar at top ──
+                  doc.setFillColor(37, 99, 235);
+                  doc.rect(0, 0, W, 4, "F");
+
+                  // ── Header ──
+                  y = 12;
+                  doc.setFontSize(15);
+                  doc.setTextColor(37, 99, 235);
+                  doc.setFont(undefined, "bold");
+                  doc.text("RELATÓRIO DE DESLIGAMENTO", mx, y);
+                  doc.setFontSize(9);
+                  doc.setTextColor(120, 120, 120);
+                  doc.setFont(undefined, "normal");
+                  doc.text(`${restaurant.name}  ·  ${new Date().toLocaleDateString("pt-BR")}`, mx, y + 5);
+
+                  // AppTip logo text right-aligned
                   doc.setFontSize(10);
-                  doc.setTextColor(100,100,100);
-                  doc.text(`${restaurant.name} — Gerado em ${new Date().toLocaleDateString("pt-BR")}`, W/2, y, {align:"center"});
+                  doc.setTextColor(37, 99, 235);
+                  doc.setFont(undefined, "bold");
+                  doc.text("AppTip", W - mx, y, { align: "right" });
+                  doc.setFont(undefined, "normal");
                   y += 10;
 
-                  // Employee info
-                  doc.setFontSize(12);
-                  doc.setTextColor(30,30,30);
-                  doc.text("DADOS DO EMPREGADO", 14, y);
-                  y += 2;
+                  // Thin separator line
+                  doc.setDrawColor(220, 220, 220);
+                  doc.setLineWidth(0.3);
+                  doc.line(mx, y, W - mx, y);
+                  y += 5;
+
+                  // ── Section 1: Employee data (2-column compact layout) ──
+                  doc.setFontSize(9);
+                  doc.setTextColor(37, 99, 235);
+                  doc.setFont(undefined, "bold");
+                  doc.text("DADOS DO EMPREGADO", mx, y);
+                  doc.setFont(undefined, "normal");
+                  y += 1;
+
+                  const empFields = [
+                    ["Nome", emp.name], ["CPF", emp.cpf || "—"],
+                    ["Código", emp.empCode || "—"], ["Cargo", role?.name || "—"],
+                    ["Área", role?.area || "—"], ["Admissão", fmtDate(admDate)],
+                    ["Demissão", fmtDate(demDate)], ["Demitido por", emp.demitidoPor || "—"],
+                  ];
                   doc.autoTable({
                     startY: y,
                     head: [],
                     body: [
-                      ["Nome Completo", emp.name],
-                      ["CPF", emp.cpf || "—"],
-                      ["Código", emp.empCode || "—"],
-                      ["Cargo", role?.name || "—"],
-                      ["Área", role?.area || "—"],
-                      ["Data de Admissão", admDate !== "—" ? new Date(admDate+"T12:00:00").toLocaleDateString("pt-BR") : "—"],
-                      ["Data de Demissão", new Date(demDate+"T12:00:00").toLocaleDateString("pt-BR")],
-                      ["Demitido por", emp.demitidoPor || "—"],
+                      [empFields[0][0], empFields[0][1], empFields[1][0], empFields[1][1]],
+                      [empFields[2][0], empFields[2][1], empFields[3][0], empFields[3][1]],
+                      [empFields[4][0], empFields[4][1], empFields[5][0], empFields[5][1]],
+                      [empFields[6][0], empFields[6][1], empFields[7][0], empFields[7][1]],
                     ],
-                    theme: "grid",
-                    styles: { fontSize: 10, cellPadding: 3 },
-                    columnStyles: { 0: { fontStyle: "bold", cellWidth: 50 } },
-                    margin: { left: 14, right: 14 },
+                    theme: "plain",
+                    styles: { fontSize: 8, cellPadding: {top:1.5,bottom:1.5,left:2,right:2}, textColor: [50,50,50] },
+                    columnStyles: {
+                      0: { fontStyle: "bold", cellWidth: 24, textColor: [100,100,100] },
+                      1: { cellWidth: cw/2 - 24 },
+                      2: { fontStyle: "bold", cellWidth: 24, textColor: [100,100,100] },
+                      3: { cellWidth: cw/2 - 24 },
+                    },
+                    margin: { left: mx, right: mx },
+                    tableLineColor: [230,230,230],
+                    tableLineWidth: 0.2,
                   });
-                  y = doc.lastAutoTable.finalY + 10;
+                  y = doc.lastAutoTable.finalY + 5;
 
-                  // Tip report — day by day
+                  // ── Section 2: Gorjetas summary ──
+                  doc.setFontSize(9);
+                  doc.setTextColor(37, 99, 235);
+                  doc.setFont(undefined, "bold");
+                  doc.text("GORJETAS — RESUMO MENSAL", mx, y);
+                  doc.setFont(undefined, "normal");
+                  y += 1;
+
                   const empTips = tips.filter(t => t.restaurantId === rid && t.employeeId === emp.id);
                   const tipsByMonth = {};
                   empTips.forEach(t => {
@@ -7280,28 +7323,22 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                   });
                   const sortedMonths = Object.keys(tipsByMonth).sort();
 
-                  doc.setFontSize(12);
-                  doc.setTextColor(30,30,30);
-                  doc.text("RELATÓRIO DE GORJETAS", 14, y);
-                  y += 2;
-
                   let grandBruto = 0, grandDed = 0, grandLiq = 0;
                   const tipSummaryRows = [];
-                  sortedMonths.forEach(mk => {
-                    const monthTips = tipsByMonth[mk].sort((a,b) => a.date.localeCompare(b.date));
+                  sortedMonths.forEach(smk => {
+                    const monthTips = tipsByMonth[smk].sort((a,b) => a.date.localeCompare(b.date));
                     const mBruto = monthTips.reduce((s,t) => s + (t.myShare ?? 0), 0);
                     const mDed = monthTips.reduce((s,t) => s + (t.myTax ?? 0), 0);
                     const mLiq = monthTips.reduce((s,t) => s + (t.myNet ?? 0), 0);
                     grandBruto += mBruto; grandDed += mDed; grandLiq += mLiq;
-                    const f2 = v => `R$ ${v.toLocaleString("pt-BR",{minimumFractionDigits:2})}`;
-                    tipSummaryRows.push([mk, `${monthTips.length} dias`, f2(mBruto), f2(mDed), f2(mLiq)]);
+                    tipSummaryRows.push([smk, `${monthTips.length}d`, f2(mBruto), f2(mDed), f2(mLiq)]);
                   });
-                  const f2 = v => `R$ ${v.toLocaleString("pt-BR",{minimumFractionDigits:2})}`;
                   tipSummaryRows.push([
-                    {content:"TOTAL", styles:{fontStyle:"bold"}}, "",
-                    {content:f2(grandBruto), styles:{fontStyle:"bold"}},
-                    {content:f2(grandDed), styles:{fontStyle:"bold",textColor:[220,50,50]}},
-                    {content:f2(grandLiq), styles:{fontStyle:"bold",textColor:[16,185,129]}},
+                    { content: "TOTAL", styles: { fontStyle: "bold" } },
+                    { content: "", styles: {} },
+                    { content: f2(grandBruto), styles: { fontStyle: "bold" } },
+                    { content: f2(grandDed), styles: { fontStyle: "bold", textColor: [220,50,50] } },
+                    { content: f2(grandLiq), styles: { fontStyle: "bold", textColor: [16,185,129] } },
                   ]);
 
                   doc.autoTable({
@@ -7309,59 +7346,105 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                     head: [["Mês", "Dias", "Bruto", "Dedução", "Líquido"]],
                     body: tipSummaryRows,
                     theme: "striped",
-                    styles: { fontSize: 9, cellPadding: 3 },
-                    headStyles: { fillColor: [59,130,246] },
-                    margin: { left: 14, right: 14 },
+                    styles: { fontSize: 7.5, cellPadding: { top: 1.5, bottom: 1.5, left: 3, right: 3 } },
+                    headStyles: { fillColor: [37,99,235], fontSize: 7.5, cellPadding: { top: 2, bottom: 2, left: 3, right: 3 } },
+                    columnStyles: {
+                      0: { cellWidth: 22 },
+                      1: { cellWidth: 14, halign: "center" },
+                      2: { halign: "right" },
+                      3: { halign: "right" },
+                      4: { halign: "right" },
+                    },
+                    alternateRowStyles: { fillColor: [245, 247, 250] },
+                    margin: { left: mx, right: mx },
                   });
-                  y = doc.lastAutoTable.finalY + 6;
+                  y = doc.lastAutoTable.finalY + 5;
 
-                  // Detailed day-by-day for last month worked
+                  // ── Section 3: Day-by-day detail (last month, compact 2-col if > 16 days) ──
                   if (sortedMonths.length > 0) {
                     const lastMk = sortedMonths[sortedMonths.length - 1];
                     const lastTips = tipsByMonth[lastMk].sort((a,b) => a.date.localeCompare(b.date));
-                    doc.setFontSize(10);
-                    doc.text(`Detalhamento dia a dia — ${lastMk}`, 14, y);
-                    y += 2;
-                    doc.autoTable({
-                      startY: y,
-                      head: [["Data", "Bruto", "Dedução", "Penalidade", "Líquido"]],
-                      body: lastTips.map(t => {
-                        const f = v => `R$ ${(v??0).toLocaleString("pt-BR",{minimumFractionDigits:2})}`;
-                        return [
-                          new Date(t.date+"T12:00:00").toLocaleDateString("pt-BR"),
-                          f(t.myShare),
-                          f(t.myTax),
-                          t.penalty ? `- ${f(t.penalty)}` : "—",
-                          f(t.myNet),
-                        ];
-                      }),
-                      theme: "striped",
-                      styles: { fontSize: 8, cellPadding: 2 },
-                      headStyles: { fillColor: [100,100,100] },
-                      margin: { left: 14, right: 14 },
-                    });
-                    y = doc.lastAutoTable.finalY + 10;
+                    doc.setFontSize(9);
+                    doc.setTextColor(37, 99, 235);
+                    doc.setFont(undefined, "bold");
+                    doc.text(`DETALHAMENTO DIA A DIA — ${lastMk}`, mx, y);
+                    doc.setFont(undefined, "normal");
+                    y += 1;
+
+                    if (lastTips.length <= 16) {
+                      // Single compact table
+                      doc.autoTable({
+                        startY: y,
+                        head: [["Data", "Bruto", "Ded.", "Pen.", "Líquido"]],
+                        body: lastTips.map(t => [
+                          fmtDate(t.date),
+                          f2(t.myShare), f2(t.myTax),
+                          t.penalty ? `-${f2(t.penalty)}` : "—", f2(t.myNet),
+                        ]),
+                        theme: "striped",
+                        styles: { fontSize: 6.5, cellPadding: { top: 1, bottom: 1, left: 2, right: 2 } },
+                        headStyles: { fillColor: [100,116,139], fontSize: 6.5, cellPadding: { top: 1.5, bottom: 1.5, left: 2, right: 2 } },
+                        columnStyles: { 1: { halign: "right" }, 2: { halign: "right" }, 3: { halign: "right" }, 4: { halign: "right" } },
+                        alternateRowStyles: { fillColor: [248,249,250] },
+                        margin: { left: mx, right: mx },
+                      });
+                      y = doc.lastAutoTable.finalY + 5;
+                    } else {
+                      // Split into 2 side-by-side tables for compactness
+                      const half = Math.ceil(lastTips.length / 2);
+                      const col1 = lastTips.slice(0, half);
+                      const col2 = lastTips.slice(half);
+                      const colW = (cw - 4) / 2;
+                      const colStyles = { fontSize: 6.5, cellPadding: { top: 0.8, bottom: 0.8, left: 1.5, right: 1.5 } };
+                      const colHead = { fillColor: [100,116,139], fontSize: 6.5, cellPadding: { top: 1.2, bottom: 1.2, left: 1.5, right: 1.5 } };
+                      const mkBody = arr => arr.map(t => [fmtDate(t.date), f2(t.myShare), f2(t.myNet)]);
+
+                      doc.autoTable({
+                        startY: y,
+                        head: [["Data", "Bruto", "Líq."]],
+                        body: mkBody(col1),
+                        theme: "striped",
+                        styles: colStyles,
+                        headStyles: colHead,
+                        columnStyles: { 1: { halign: "right" }, 2: { halign: "right" } },
+                        alternateRowStyles: { fillColor: [248,249,250] },
+                        margin: { left: mx, right: W - mx - colW },
+                        tableWidth: colW,
+                      });
+                      const y1 = doc.lastAutoTable.finalY;
+
+                      doc.autoTable({
+                        startY: y,
+                        head: [["Data", "Bruto", "Líq."]],
+                        body: mkBody(col2),
+                        theme: "striped",
+                        styles: colStyles,
+                        headStyles: colHead,
+                        columnStyles: { 1: { halign: "right" }, 2: { halign: "right" } },
+                        alternateRowStyles: { fillColor: [248,249,250] },
+                        margin: { left: mx + colW + 4, right: mx },
+                        tableWidth: colW,
+                      });
+                      y = Math.max(y1, doc.lastAutoTable.finalY) + 5;
+                    }
                   }
 
-                  // VT restitution report
-                  if (y > 250) { doc.addPage(); y = 15; }
-                  doc.setFontSize(12);
-                  doc.setTextColor(30,30,30);
-                  doc.text("RESTITUIÇÃO DE VALE TRANSPORTE", 14, y);
-                  y += 2;
+                  // ── Section 4: VT Restitution ──
+                  doc.setFontSize(9);
+                  doc.setTextColor(37, 99, 235);
+                  doc.setFont(undefined, "bold");
+                  doc.text("RESTITUIÇÃO DE VALE TRANSPORTE", mx, y);
+                  doc.setFont(undefined, "normal");
+                  y += 1;
 
                   const demMk = demDate.slice(0,7);
                   const [demY, demM] = demMk.split("-").map(Number);
                   const demDay = parseInt(demDate.slice(8,10));
                   const daysInDemMonth = new Date(demY, demM, 0).getDate();
 
-                  // Use VT snapshot if available, otherwise fall back to config
                   const vtSnap = data?.vtPayments?.[rid]?.[demMk]?.snapshot?.find(s => s.empId === emp.id);
                   const vtConf = data?.vtConfig?.[rid]?.[emp.id];
                   const dailyRate = vtSnap?.dailyRate ?? vtConf?.dailyRate ?? 0;
-
-                  // Count planned days (full month) and actual days worked until dismissal
-                  // Alinhado com visual: sem status = dia de trabalho
                   const schedDayMap = schedules?.[rid]?.[demMk]?.[emp.id] ?? {};
 
                   let plannedFullMonth = vtSnap?.plannedDays ?? 0;
@@ -7370,22 +7453,19 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                     for (let d = 1; d <= daysInDemMonth; d++) {
                       const dateStr = `${demY}-${String(demM).padStart(2,"0")}-${String(d).padStart(2,"0")}`;
                       const escalaSt = schedDayMap[dateStr];
-                      const isWork = !escalaSt || escalaSt === "comptrab";
-                      if (isWork) plannedFullMonth++;
+                      if (!escalaSt || escalaSt === "comptrab") plannedFullMonth++;
                     }
                   }
                   for (let d = 1; d < demDay && d <= daysInDemMonth; d++) {
                     const dateStr = `${demY}-${String(demM).padStart(2,"0")}-${String(d).padStart(2,"0")}`;
                     const escalaSt = schedDayMap[dateStr];
-                    const isWork = !escalaSt || escalaSt === "comptrab";
-                    if (isWork) workedUntilDismissal++;
+                    if (!escalaSt || escalaSt === "comptrab") workedUntilDismissal++;
                   }
 
                   const vtPaidMonth = dailyRate * plannedFullMonth;
                   const vtOwed = dailyRate * workedUntilDismissal;
                   const vtToReturn = Math.max(0, vtPaidMonth - vtOwed);
 
-                  // Check for pending adjustments from previous months
                   const prevDemDate = new Date(demY, demM - 2, 1);
                   const prevDemMk = monthKey(prevDemDate.getFullYear(), prevDemDate.getMonth());
                   const prevDemPayment = data?.vtPayments?.[rid]?.[prevDemMk];
@@ -7405,33 +7485,50 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                     }
                   }
 
+                  const vtFinalReturn = Math.max(0, vtToReturn - pendingAdjust);
+                  const vtRows = [
+                    ["VT diário", f2(dailyRate), "Dias planejados", String(plannedFullMonth), "Dias até demissão", String(workedUntilDismissal)],
+                    ["VT pago (mês)", f2(vtPaidMonth), "VT devido", f2(vtOwed), pendingAdjust !== 0 ? "Ajuste ant." : "", pendingAdjust !== 0 ? f2(pendingAdjust) : ""],
+                  ];
+
                   doc.autoTable({
                     startY: y,
-                    head: [["Item", "Valor"]],
-                    body: [
-                      ["Valor diário VT", `R$ ${dailyRate.toLocaleString("pt-BR",{minimumFractionDigits:2})}`],
-                      ["Dias planejados no mês", String(plannedFullMonth)],
-                      ["Dias trabalhados até demissão", String(workedUntilDismissal)],
-                      ["VT pago (mês inteiro)", `R$ ${vtPaidMonth.toLocaleString("pt-BR",{minimumFractionDigits:2})}`],
-                      ["VT devido (até demissão)", `R$ ${vtOwed.toLocaleString("pt-BR",{minimumFractionDigits:2})}`],
-                      ...(pendingAdjust !== 0 ? [["Ajuste pendente mês anterior", `R$ ${pendingAdjust.toLocaleString("pt-BR",{minimumFractionDigits:2})}`]] : []),
-                      [{content:"VT A RESTITUIR", styles:{fontStyle:"bold",textColor:[220,50,50]}}, {content:`R$ ${Math.max(0, vtToReturn - pendingAdjust).toLocaleString("pt-BR",{minimumFractionDigits:2})}`, styles:{fontStyle:"bold",textColor:[220,50,50]}}],
-                    ],
-                    theme: "grid",
-                    styles: { fontSize: 10, cellPadding: 3 },
-                    columnStyles: { 0: { fontStyle: "bold", cellWidth: 80 } },
-                    headStyles: { fillColor: [39,174,96] },
-                    margin: { left: 14, right: 14 },
+                    head: [],
+                    body: vtRows,
+                    theme: "plain",
+                    styles: { fontSize: 7.5, cellPadding: { top: 1.5, bottom: 1.5, left: 2, right: 2 }, textColor: [60,60,60] },
+                    columnStyles: {
+                      0: { fontStyle: "bold", textColor: [100,100,100], cellWidth: 24 },
+                      1: { cellWidth: (cw-24*3)/3, halign: "right" },
+                      2: { fontStyle: "bold", textColor: [100,100,100], cellWidth: 24 },
+                      3: { cellWidth: (cw-24*3)/3, halign: "right" },
+                      4: { fontStyle: "bold", textColor: [100,100,100], cellWidth: 24 },
+                      5: { cellWidth: (cw-24*3)/3, halign: "right" },
+                    },
+                    margin: { left: mx, right: mx },
                   });
+                  y = doc.lastAutoTable.finalY + 2;
 
-                  // Footer
-                  const pages = doc.internal.getNumberOfPages();
-                  for (let i = 1; i <= pages; i++) {
-                    doc.setPage(i);
-                    doc.setFontSize(8);
-                    doc.setTextColor(150,150,150);
-                    doc.text(`AppTip · Relatório de Desligamento · ${emp.name} · Página ${i}/${pages}`, W/2, doc.internal.pageSize.getHeight() - 8, {align:"center"});
-                  }
+                  // VT return highlight box
+                  const boxH = 8;
+                  doc.setFillColor(254, 243, 199); // warm yellow bg
+                  doc.roundedRect(mx, y, cw, boxH, 2, 2, "F");
+                  doc.setFontSize(9);
+                  doc.setFont(undefined, "bold");
+                  doc.setTextColor(180, 83, 9);
+                  doc.text("VT A RESTITUIR:", mx + 4, y + boxH/2 + 1);
+                  doc.setFontSize(11);
+                  doc.setTextColor(220, 50, 50);
+                  doc.text(f2(vtFinalReturn), W - mx - 4, y + boxH/2 + 1, { align: "right" });
+                  doc.setFont(undefined, "normal");
+                  y += boxH + 8;
+
+                  // ── Footer: accent bar + text ──
+                  doc.setFillColor(37, 99, 235);
+                  doc.rect(0, H - 3, W, 3, "F");
+                  doc.setFontSize(7);
+                  doc.setTextColor(150,150,150);
+                  doc.text(`AppTip  ·  Relatório de Desligamento  ·  ${emp.name}  ·  ${fmtDate(demDate)}`, W/2, H - 6, { align: "center" });
 
                   const safeName = emp.name.replace(/[^a-zA-Z0-9]/g,"_").toLowerCase();
                   setPreviewDoc(doc); setPreviewFileName(`relatorio_desligamento_${safeName}_${demDate}.pdf`);
