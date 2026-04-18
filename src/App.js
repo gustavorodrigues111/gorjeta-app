@@ -3,7 +3,7 @@ import { useState, useEffect, Component } from "react";
 import { db } from "./firebase";
 import { doc, getDoc, setDoc } from "firebase/firestore";
 
-const APP_VERSION = "5.23.0";
+const APP_VERSION = "5.24.0";
 
 const DEFAULT_ADMISSION = () => `${new Date().getFullYear()}-01-01`;
 const round2 = (v) => Math.round(v * 100) / 100;
@@ -607,6 +607,7 @@ const K = {
   scheduleAdjustments: "v4:scheduleAdjustments", // {[rid]: {[mk]: [{id, empId, date, from, to, author, timestamp}]}}
   scheduleStatus:      "v4:scheduleStatus",      // {[rid]: {[mk]: {status:"open"|"review"|"closed", closedAt, closedBy, lastPontoImport, pontoSystem, missingFromPonto:[], importHistory:[], lastImportSummary}}}
   schedulePrevista:    "v4:schedulePrevista",     // {[rid]: {[mk]: frozen snapshot of schedules at first edit/VT payment}}
+  employeeGoals:       "v4:employeeGoals",        // {[empId]: [{id, type, title, targetRoleId?, topic?, materials:[], metas:[], createdAt, createdBy, status:"active"|"completed"|"cancelled"}]}
 };
 
 // ── Version retention ──
@@ -3429,7 +3430,7 @@ function DpManagerTab({ restaurantId, dpMessages, onUpdate, isOwner }) {
   );
 }
 
-function EmployeePortal({ employees, roles, tips, schedules, splits, restaurants, communications, commAcks, faq, dpMessages, workSchedules, incidents, feedbacks, devChecklists, onBack, onUpdateEmployee, onUpdate, toggleTheme, theme, onSwitchToManager }) {
+function EmployeePortal({ employees, roles, tips, schedules, splits, restaurants, communications, commAcks, faq, dpMessages, workSchedules, incidents, feedbacks, devChecklists, onBack, onUpdateEmployee, onUpdate, toggleTheme, theme, onSwitchToManager, employeeGoals }) {
   const [empId, setEmpId] = useState(() => localStorage.getItem("apptip_empid") || null);
 
   useEffect(() => {
@@ -3804,7 +3805,7 @@ function EmployeePortal({ employees, roles, tips, schedules, splits, restaurants
         )}
 
         {tab === "trilha" && emp && (
-          <EmpTrilhaView empId={empId} employees={employees} roles={roles} schedules={schedules} incidents={incidents??[]} feedbacks={feedbacks??[]} devChecklists={devChecklists??{}} restaurantId={emp.restaurantId} onUpdate={onUpdate}/>
+          <EmpTrilhaView empId={empId} employees={employees} roles={roles} schedules={schedules} incidents={incidents??[]} feedbacks={feedbacks??[]} devChecklists={devChecklists??{}} restaurantId={emp.restaurantId} onUpdate={onUpdate} employeeGoals={employeeGoals??{}}/>
         )}
 
         {tab === "dp" && (
@@ -4172,7 +4173,7 @@ Inclua apenas as ações solicitadas. Arrays vazios se não houver ação daquel
 
 
 
-function EmployeeSpreadsheet({ restEmps, restRoles, rid, employees, onUpdate, restCode: restCode_, isOwner, restaurant, notifications, privacyMask, onGenerateDismissalReport, incidents, feedbacks, devChecklists, schedules, currentUser, isLider, mobileOnly: mobileOnlyProp, roles, vtPayments, vtConfig, scheduleStatus }) {
+function EmployeeSpreadsheet({ restEmps, restRoles, rid, employees, onUpdate, restCode: restCode_, isOwner, restaurant, notifications, privacyMask, onGenerateDismissalReport, incidents, feedbacks, devChecklists, schedules, currentUser, isLider, mobileOnly: mobileOnlyProp, roles, vtPayments, vtConfig, scheduleStatus, employeeGoals }) {
   const mobileOnly = mobileOnlyProp ?? false; // eslint-disable-line no-unused-vars
   const PLANOS = [
     { id:"p10",  empMax:10  },
@@ -4793,13 +4794,13 @@ Inclua apenas as ações solicitadas. Arrays vazios se não houver ação daquel
                         doc.setFontSize(12); doc.text("FEEDBACKS", 14, y); y += 2;
                         doc.autoTable({
                           startY:y,
-                          head:[["Período","Nota","Pontos Fortes","Melhorar","Meta"]],
+                          head:[["Período","Avaliação","Pontos Positivos","A Melhorar","Outras Notas"]],
                           body:empFbs.sort((a,b)=>(a.createdAt??"").localeCompare(b.createdAt??"")).map(fb => [
                             `Q${fb.quarter}/${fb.year}`,
-                            "★".repeat(fb.rating) + "☆".repeat(5-fb.rating),
+                            RATING_LABELS[fb.rating-1] ?? "—",
                             (fb.strengths??"").slice(0,50),
                             (fb.improvements??"").slice(0,50),
-                            (fb.goal??"").slice(0,50)
+                            (fb.internalNotes??"").slice(0,50)
                           ]),
                           theme:"striped", styles:{fontSize:9,cellPadding:2}, headStyles:{fillColor:[245,158,11]}, margin:{left:14,right:14}
                         });
@@ -4861,6 +4862,29 @@ Inclua apenas as ações solicitadas. Arrays vazios se não houver ação daquel
                 </div>
                 {showIncForm && <div style={{marginBottom:16}}><IncidentForm restaurantId={rid} employees={restEmps.filter(e=>!e.inactive)} onUpdate={onUpdate} incidents={incidents??[]} currentUser={currentUser} isOwner={isOwner} preSelectedEmpId={emp.id}/></div>}
                 {showFbForm && <div style={{marginBottom:16}}><FeedbackForm restaurantId={rid} employees={restEmps.filter(e=>!e.inactive)} roles={restRoles} onUpdate={onUpdate} feedbacks={feedbacks??[]} currentUser={currentUser} isOwner={isOwner} preSelectedEmpId={emp.id}/></div>}
+                {(() => {
+                  const empFbs = (feedbacks??[]).filter(f => f.employeeId === emp.id && f.nextFeedbackDate).sort((a,b) => b.createdAt.localeCompare(a.createdAt));
+                  const lastNfd = empFbs[0]?.nextFeedbackDate;
+                  if (!lastNfd) return null;
+                  const nfdDate = new Date(lastNfd + "T00:00:00");
+                  const today = new Date(); today.setHours(0,0,0,0);
+                  const diffDays = Math.round((nfdDate - today) / 86400000);
+                  const isOverdue = diffDays < 0;
+                  const isDueSoon = diffDays >= 0 && diffDays <= 14;
+                  if (!isOverdue && !isDueSoon) return null;
+                  const bgColor = isOverdue ? "#fef2f2" : "#fffbeb";
+                  const borderColor = isOverdue ? "#fca5a5" : "#fcd34d";
+                  const textColor = isOverdue ? "#dc2626" : "#d97706";
+                  const icon = isOverdue ? "⚠️" : "📅";
+                  const label = isOverdue
+                    ? `Feedback atrasado! Previsto para ${nfdDate.toLocaleDateString("pt-BR")} (${Math.abs(diffDays)} dia${Math.abs(diffDays)!==1?"s":""} atrás)`
+                    : `Próximo feedback em ${diffDays} dia${diffDays!==1?"s":""} (${nfdDate.toLocaleDateString("pt-BR")})`;
+                  return <div style={{padding:"10px 14px",borderRadius:10,border:`1px solid ${borderColor}`,background:bgColor,color:textColor,fontSize:13,fontFamily:"'DM Mono',monospace",marginBottom:12,display:"flex",alignItems:"center",gap:8}}>
+                    <span style={{fontSize:16}}>{icon}</span>
+                    <span>{label}</span>
+                  </div>;
+                })()}
+                <GoalsManager empId={emp.id} employeeGoals={employeeGoals} roles={roles??restRoles} restaurantId={rid} onUpdate={onUpdate} currentUser={currentUser} isOwner={isOwner} schedules={schedules??{}} feedbacks={feedbacks??[]} employees={employees}/>
                 <EmpTimeline empId={emp.id} employees={employees} roles={roles??restRoles} schedules={schedules??{}} incidents={incidents??[]} feedbacks={feedbacks??[]} restaurantId={rid}/>
               </div>
             )}
@@ -5623,7 +5647,7 @@ function EmpTimeline({ empId, employees, roles, schedules, incidents, feedbacks,
 
   // Feedbacks
   (feedbacks ?? []).filter(fb => fb.restaurantId === restaurantId && fb.employeeId === empId).forEach(fb => {
-    events.push({ date: fb.createdAt?.slice(0,10) ?? "2026-01-01", type: "feedback", cat: "Feedbacks", icon: "💬", label: `Feedback Q${fb.quarter}/${fb.year}`, desc: `Nota: ${"★".repeat(fb.rating)}${"☆".repeat(5 - fb.rating)}${fb.goal ? " · Meta: " + fb.goal : ""}` });
+    events.push({ date: fb.createdAt?.slice(0,10) ?? "2026-01-01", type: "feedback", cat: "Feedbacks", icon: "💬", label: `Feedback Q${fb.quarter}/${fb.year}`, desc: `${RATING_LABELS[fb.rating-1] ?? "—"}${fb.strengths ? " · " + fb.strengths.slice(0,60) : ""}` });
   });
 
   // Schedule events — aggregate per month
@@ -5786,46 +5810,404 @@ function IncidentForm({ restaurantId, employees, onUpdate, incidents, currentUse
   );
 }
 
+const RATING_LABELS = ["Abaixo do esperado","Em desenvolvimento","Atende","Supera","Excepcional"];
+const RATING_COLORS = ["#ef4444","#f97316","#eab308","#3b82f6","#10b981"];
+
+const GOAL_TYPES = [
+  { value: "manter", label: "Manter no cargo", icon: "🏠", color: "#10b981" },
+  { value: "subir",  label: "Subir de cargo",  icon: "⬆️", color: "#3b82f6" },
+  { value: "conhecimento", label: "Aprofundar conhecimento", icon: "📚", color: "#8b5cf6" },
+  { value: "personalizado", label: "Personalizado", icon: "✏️", color: "#f59e0b" },
+];
+const MATERIAL_TYPES = [
+  { value: "livro", label: "Livro", icon: "📖" },
+  { value: "video", label: "Vídeo", icon: "🎬" },
+  { value: "curso", label: "Curso", icon: "🎓" },
+  { value: "pratica", label: "Prática", icon: "🔧" },
+  { value: "link", label: "Link", icon: "🔗" },
+];
+
+const AUTO_META_RULES = [
+  { id: "zero_faltas_inj", label: "0 faltas injustificadas no mês", check: (empId, schedules, rid) => {
+    const now = new Date();
+    const mk = monthKey(now.getFullYear(), now.getMonth());
+    const days = schedules?.[rid]?.[mk]?.[empId] ?? {};
+    return Object.values(days).filter(s => s === DAY_FAULT_U).length === 0;
+  }},
+  { id: "zero_faltas_tot", label: "0 faltas (todas) no mês", check: (empId, schedules, rid) => {
+    const now = new Date();
+    const mk = monthKey(now.getFullYear(), now.getMonth());
+    const days = schedules?.[rid]?.[mk]?.[empId] ?? {};
+    return Object.values(days).filter(s => s === DAY_FAULT_U || s === DAY_FAULT_J).length === 0;
+  }},
+  { id: "feedback_excepcional", label: "Avaliação Excepcional no último feedback", check: (empId, _s, _r, feedbacks, rid) => {
+    const myFbs = (feedbacks ?? []).filter(f => f.employeeId === empId && f.restaurantId === rid).sort((a,b)=>(b.createdAt??"").localeCompare(a.createdAt??""));
+    return myFbs[0]?.rating === 5;
+  }},
+  { id: "90_dias", label: "90 dias na empresa", check: (empId, _s, _r, _f, _rid, employees) => {
+    const emp = (employees ?? []).find(e => e.id === empId);
+    if (!emp?.admission) return false;
+    return Math.floor((new Date() - new Date(emp.admission+"T12:00:00")) / 86400000) >= 90;
+  }},
+];
+
+function GoalsManager({ empId, employeeGoals, roles, restaurantId, onUpdate, currentUser, isOwner, schedules, feedbacks, employees }) {
+  const [showForm, setShowForm] = useState(false);
+  const [goalType, setGoalType] = useState("manter");
+  const [goalTitle, setGoalTitle] = useState("");
+  const [goalTopic, setGoalTopic] = useState("");
+  const [goalTargetRoleId, setGoalTargetRoleId] = useState("");
+  const [showMaterialForm, setShowMaterialForm] = useState(null); // goalId
+  const [matTitle, setMatTitle] = useState("");
+  const [matLink, setMatLink] = useState("");
+  const [matType, setMatType] = useState("link");
+  const [showMetaForm, setShowMetaForm] = useState(null); // goalId
+  const [metaTitle, setMetaTitle] = useState("");
+  const [metaAutoRule, setMetaAutoRule] = useState("");
+
+  const restRoles = (roles ?? []).filter(r => r.restaurantId === restaurantId && !r.inactive);
+  const goals = (employeeGoals?.[empId] ?? []).filter(g => g.status !== "cancelled");
+  const activeGoals = goals.filter(g => g.status === "active");
+  const completedGoals = goals.filter(g => g.status === "completed");
+
+  function saveGoals(newGoals) {
+    const updated = { ...(employeeGoals ?? {}), [empId]: newGoals };
+    onUpdate("employeeGoals", updated);
+  }
+
+  function addGoal() {
+    let title = "";
+    if (goalType === "manter") title = "Manter no cargo";
+    else if (goalType === "subir") {
+      const tRole = restRoles.find(r => r.id === goalTargetRoleId);
+      title = tRole ? `Subir para ${tRole.name}` : "Subir de cargo";
+    } else if (goalType === "conhecimento") title = goalTopic.trim() || "Aprofundar conhecimento";
+    else title = goalTitle.trim() || "Objetivo personalizado";
+
+    const newGoal = {
+      id: `${Date.now()}-${Math.random().toString(36).slice(2,6)}`,
+      type: goalType,
+      title,
+      targetRoleId: goalType === "subir" ? goalTargetRoleId || null : null,
+      topic: goalType === "conhecimento" ? goalTopic.trim() : null,
+      materials: [],
+      metas: [],
+      createdAt: new Date().toISOString(),
+      createdBy: isOwner ? "Admin AppTip" : (currentUser?.name ?? "Gestor"),
+      status: "active",
+    };
+    saveGoals([...(employeeGoals?.[empId] ?? []), newGoal]);
+    setShowForm(false); setGoalTitle(""); setGoalTopic(""); setGoalTargetRoleId("");
+  }
+
+  function toggleGoalStatus(goalId) {
+    const all = [...(employeeGoals?.[empId] ?? [])];
+    const idx = all.findIndex(g => g.id === goalId);
+    if (idx < 0) return;
+    all[idx] = { ...all[idx], status: all[idx].status === "active" ? "completed" : "active" };
+    saveGoals(all);
+  }
+
+  function removeGoal(goalId) {
+    if (!window.confirm("Remover este objetivo?")) return;
+    const all = [...(employeeGoals?.[empId] ?? [])];
+    const idx = all.findIndex(g => g.id === goalId);
+    if (idx < 0) return;
+    all[idx] = { ...all[idx], status: "cancelled" };
+    saveGoals(all);
+  }
+
+  function addMaterial(goalId) {
+    if (!matTitle.trim()) return;
+    const all = [...(employeeGoals?.[empId] ?? [])];
+    const idx = all.findIndex(g => g.id === goalId);
+    if (idx < 0) return;
+    const mat = { id: `m${Date.now()}`, title: matTitle.trim(), link: matLink.trim() || null, type: matType };
+    all[idx] = { ...all[idx], materials: [...(all[idx].materials ?? []), mat] };
+    saveGoals(all);
+    setMatTitle(""); setMatLink(""); setShowMaterialForm(null);
+  }
+
+  function removeMaterial(goalId, matId) {
+    const all = [...(employeeGoals?.[empId] ?? [])];
+    const idx = all.findIndex(g => g.id === goalId);
+    if (idx < 0) return;
+    all[idx] = { ...all[idx], materials: (all[idx].materials ?? []).filter(m => m.id !== matId) };
+    saveGoals(all);
+  }
+
+  function addMeta(goalId) {
+    if (metaAutoRule) {
+      const rule = AUTO_META_RULES.find(r => r.id === metaAutoRule);
+      if (!rule) return;
+      const meta = { id: `t${Date.now()}`, title: rule.label, done: false, doneAt: null, doneBy: null, autoCheck: true, autoCheckRule: metaAutoRule };
+      const all = [...(employeeGoals?.[empId] ?? [])];
+      const idx = all.findIndex(g => g.id === goalId);
+      if (idx < 0) return;
+      all[idx] = { ...all[idx], metas: [...(all[idx].metas ?? []), meta] };
+      saveGoals(all);
+      setMetaAutoRule(""); setShowMetaForm(null);
+      return;
+    }
+    if (!metaTitle.trim()) return;
+    const all = [...(employeeGoals?.[empId] ?? [])];
+    const idx = all.findIndex(g => g.id === goalId);
+    if (idx < 0) return;
+    const meta = { id: `t${Date.now()}`, title: metaTitle.trim(), done: false, doneAt: null, doneBy: null, autoCheck: false, autoCheckRule: null };
+    all[idx] = { ...all[idx], metas: [...(all[idx].metas ?? []), meta] };
+    saveGoals(all);
+    setMetaTitle(""); setMetaAutoRule(""); setShowMetaForm(null);
+  }
+
+  function toggleMeta(goalId, metaId) {
+    const all = [...(employeeGoals?.[empId] ?? [])];
+    const idx = all.findIndex(g => g.id === goalId);
+    if (idx < 0) return;
+    all[idx] = { ...all[idx], metas: (all[idx].metas ?? []).map(m =>
+      m.id === metaId ? { ...m, done: !m.done, doneAt: !m.done ? new Date().toISOString() : null, doneBy: !m.done ? (currentUser?.name ?? "Gestor") : null } : m
+    )};
+    saveGoals(all);
+  }
+
+  function removeMeta(goalId, metaId) {
+    const all = [...(employeeGoals?.[empId] ?? [])];
+    const idx = all.findIndex(g => g.id === goalId);
+    if (idx < 0) return;
+    all[idx] = { ...all[idx], metas: (all[idx].metas ?? []).filter(m => m.id !== metaId) };
+    saveGoals(all);
+  }
+
+  function renderGoalCard(goal) {
+    const typeInfo = GOAL_TYPES.find(t => t.value === goal.type) ?? GOAL_TYPES[3];
+    const metas = goal.metas ?? [];
+    const doneMetas = metas.filter(m => {
+      if (m.autoCheck && m.autoCheckRule) {
+        const rule = AUTO_META_RULES.find(r => r.id === m.autoCheckRule);
+        return rule ? rule.check(empId, schedules, restaurantId, feedbacks, restaurantId, employees) : m.done;
+      }
+      return m.done;
+    }).length;
+    const progressPct = metas.length > 0 ? Math.round((doneMetas / metas.length) * 100) : 0;
+    const isCompleted = goal.status === "completed";
+
+    return (
+      <div key={goal.id} style={{...S.card, marginBottom: 12, padding: "14px 16px", opacity: isCompleted ? 0.7 : 1, borderLeft: `4px solid ${typeInfo.color}`}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:8}}>
+          <div style={{flex:1,minWidth:0}}>
+            <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:2}}>
+              <span style={{fontSize:16}}>{typeInfo.icon}</span>
+              <span style={{color:"var(--text)",fontWeight:700,fontSize:14}}>{goal.title}</span>
+              {isCompleted && <span style={{fontSize:10,background:"#10b98122",color:"#10b981",padding:"2px 8px",borderRadius:8,fontWeight:600}}>Concluído</span>}
+            </div>
+            <div style={{color:"var(--text3)",fontSize:11}}>
+              {typeInfo.label} · Criado em {new Date(goal.createdAt).toLocaleDateString("pt-BR")} por {goal.createdBy}
+            </div>
+          </div>
+          <div style={{display:"flex",gap:4}}>
+            <button onClick={()=>toggleGoalStatus(goal.id)} title={isCompleted?"Reabrir":"Concluir"} style={{background:"none",border:"none",cursor:"pointer",fontSize:16,padding:2}}>{isCompleted?"🔄":"✅"}</button>
+            <button onClick={()=>removeGoal(goal.id)} title="Remover" style={{background:"none",border:"none",cursor:"pointer",fontSize:16,padding:2}}>🗑️</button>
+          </div>
+        </div>
+
+        {/* Progress bar */}
+        {metas.length > 0 && (
+          <div style={{marginBottom:10}}>
+            <div style={{display:"flex",justifyContent:"space-between",marginBottom:3}}>
+              <span style={{color:"var(--text3)",fontSize:11}}>Progresso</span>
+              <span style={{color:typeInfo.color,fontSize:11,fontWeight:700}}>{doneMetas}/{metas.length} ({progressPct}%)</span>
+            </div>
+            <div style={{height:6,borderRadius:3,background:"var(--border)",overflow:"hidden"}}>
+              <div style={{height:"100%",borderRadius:3,background:typeInfo.color,width:`${progressPct}%`,transition:"width 0.3s"}}/>
+            </div>
+          </div>
+        )}
+
+        {/* Metas checklist */}
+        {metas.length > 0 && (
+          <div style={{marginBottom:8}}>
+            {metas.map(meta => {
+              const isAuto = meta.autoCheck && meta.autoCheckRule;
+              const autoRule = isAuto ? AUTO_META_RULES.find(r => r.id === meta.autoCheckRule) : null;
+              const autoResult = autoRule ? autoRule.check(empId, schedules, restaurantId, feedbacks, restaurantId, []) : false;
+              const isDone = isAuto ? autoResult : meta.done;
+              return (
+              <div key={meta.id} style={{display:"flex",alignItems:"center",gap:8,padding:"5px 0",borderBottom:"1px solid var(--border)22"}}>
+                {isAuto ? (
+                  <span style={{fontSize:14,padding:0,lineHeight:1}}>{isDone?"✅":"⏳"}</span>
+                ) : (
+                  <button onClick={()=>toggleMeta(goal.id, meta.id)} style={{background:"none",border:"none",cursor:"pointer",fontSize:14,padding:0,lineHeight:1}}>{isDone?"☑️":"⬜"}</button>
+                )}
+                <span style={{flex:1,color:isDone?"var(--text3)":"var(--text)",fontSize:12,textDecoration:isDone?"line-through":"none"}}>{meta.title}</span>
+                {isAuto && <span style={{fontSize:9,color:"#8b5cf6",background:"#8b5cf611",padding:"1px 6px",borderRadius:4}}>auto</span>}
+                {!isAuto && isDone && meta.doneAt && <span style={{color:"var(--text3)",fontSize:9}}>{new Date(meta.doneAt).toLocaleDateString("pt-BR")}</span>}
+                <button onClick={()=>removeMeta(goal.id, meta.id)} style={{background:"none",border:"none",cursor:"pointer",fontSize:10,color:"var(--text3)",padding:0}}>✕</button>
+              </div>
+              );
+            })}
+          </div>
+        )}
+        {showMetaForm === goal.id ? (
+          <div style={{display:"flex",flexDirection:"column",gap:6,marginBottom:8}}>
+            <div style={{display:"flex",gap:6}}>
+              <input value={metaTitle} onChange={e=>{setMetaTitle(e.target.value);setMetaAutoRule("");}} placeholder="Meta manual..." style={{...S.input,flex:1,fontSize:12,padding:"6px 10px"}} onKeyDown={e=>e.key==="Enter"&&addMeta(goal.id)}/>
+              <button onClick={()=>addMeta(goal.id)} style={{...S.btn,fontSize:11,padding:"6px 12px",background:typeInfo.color,color:"#fff",fontWeight:600}}>+</button>
+              <button onClick={()=>{setShowMetaForm(null);setMetaTitle("");setMetaAutoRule("");}} style={{...S.btn,fontSize:11,padding:"6px 10px"}}>✕</button>
+            </div>
+            <div style={{display:"flex",gap:6,alignItems:"center"}}>
+              <span style={{fontSize:10,color:"#8b5cf6",fontWeight:600,whiteSpace:"nowrap"}}>ou automática:</span>
+              <select value={metaAutoRule} onChange={e=>{setMetaAutoRule(e.target.value);if(e.target.value)setMetaTitle("");}} style={{...S.input,flex:1,fontSize:11,padding:"5px 8px"}}>
+                <option value="">Selecionar regra...</option>
+                {AUTO_META_RULES.map(r=><option key={r.id} value={r.id}>{r.label}</option>)}
+              </select>
+              {metaAutoRule && <button onClick={()=>addMeta(goal.id)} style={{...S.btn,fontSize:11,padding:"5px 10px",background:"#8b5cf6",color:"#fff",fontWeight:600}}>+</button>}
+            </div>
+          </div>
+        ) : (
+          <button onClick={()=>{setShowMetaForm(goal.id);setMetaTitle("");setMetaAutoRule("");}} style={{background:"none",border:"none",color:typeInfo.color,cursor:"pointer",fontSize:11,fontWeight:600,padding:"2px 0",marginBottom:6}}>+ Adicionar meta</button>
+        )}
+
+        {/* Materials */}
+        {(goal.materials ?? []).length > 0 && (
+          <div style={{marginBottom:6}}>
+            <div style={{color:"var(--text3)",fontSize:10,fontWeight:600,marginBottom:4}}>📎 Material de apoio</div>
+            {goal.materials.map(mat => {
+              const mtIcon = MATERIAL_TYPES.find(t=>t.value===mat.type)?.icon ?? "📋";
+              return (
+                <div key={mat.id} style={{display:"flex",alignItems:"center",gap:6,padding:"3px 0",fontSize:12}}>
+                  <span>{mtIcon}</span>
+                  {mat.link ? <a href={mat.link} target="_blank" rel="noreferrer" style={{color:"#3b82f6",flex:1}}>{mat.title}</a> : <span style={{color:"var(--text)",flex:1}}>{mat.title}</span>}
+                  <button onClick={()=>removeMaterial(goal.id, mat.id)} style={{background:"none",border:"none",cursor:"pointer",fontSize:10,color:"var(--text3)",padding:0}}>✕</button>
+                </div>
+              );
+            })}
+          </div>
+        )}
+        {showMaterialForm === goal.id ? (
+          <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:4}}>
+            <select value={matType} onChange={e=>setMatType(e.target.value)} style={{...S.input,width:90,fontSize:11,padding:"5px 8px"}}>
+              {MATERIAL_TYPES.map(t=><option key={t.value} value={t.value}>{t.icon} {t.label}</option>)}
+            </select>
+            <input value={matTitle} onChange={e=>setMatTitle(e.target.value)} placeholder="Título" style={{...S.input,flex:1,fontSize:11,padding:"5px 8px",minWidth:100}}/>
+            <input value={matLink} onChange={e=>setMatLink(e.target.value)} placeholder="Link (opcional)" style={{...S.input,flex:1,fontSize:11,padding:"5px 8px",minWidth:100}}/>
+            <button onClick={()=>addMaterial(goal.id)} style={{...S.btn,fontSize:11,padding:"5px 10px",background:typeInfo.color,color:"#fff",fontWeight:600}}>+</button>
+            <button onClick={()=>{setShowMaterialForm(null);setMatTitle("");setMatLink("");}} style={{...S.btn,fontSize:11,padding:"5px 10px"}}>✕</button>
+          </div>
+        ) : (
+          <button onClick={()=>{setShowMaterialForm(goal.id);setMatTitle("");setMatLink("");}} style={{background:"none",border:"none",color:"var(--text3)",cursor:"pointer",fontSize:11,padding:"2px 0"}}>+ Material de apoio</button>
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <div style={{marginBottom:16}}>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
+        <h4 style={{color:"var(--text)",margin:0,fontSize:15,fontWeight:700}}>🎯 Objetivos</h4>
+        <button onClick={()=>setShowForm(!showForm)} style={{...S.btn,fontSize:12,padding:"6px 14px",background:showForm?"var(--accent)11":"transparent",color:showForm?"var(--accent)":"var(--text3)",border:`1px solid ${showForm?"var(--accent)":"var(--border)"}`}}>
+          {showForm ? "✕ Fechar" : "+ Novo objetivo"}
+        </button>
+      </div>
+
+      {showForm && (
+        <div style={{...S.card,padding:"16px",marginBottom:12}}>
+          <label style={S.label}>Tipo de objetivo</label>
+          <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:12}}>
+            {GOAL_TYPES.map(t => (
+              <button key={t.value} onClick={()=>setGoalType(t.value)} style={{
+                padding:"8px 14px",fontSize:12,fontWeight:goalType===t.value?700:500,
+                border:`2px solid ${goalType===t.value?t.color:"var(--border)"}`,borderRadius:8,cursor:"pointer",
+                background:goalType===t.value?t.color+"18":"var(--bg)",color:goalType===t.value?t.color:"var(--text2)",
+              }}>{t.icon} {t.label}</button>
+            ))}
+          </div>
+
+          {goalType === "subir" && (
+            <div style={{marginBottom:12}}>
+              <label style={S.label}>Cargo-alvo</label>
+              <select value={goalTargetRoleId} onChange={e=>setGoalTargetRoleId(e.target.value)} style={S.input}>
+                <option value="">Selecionar cargo...</option>
+                {restRoles.map(r => <option key={r.id} value={r.id}>{r.name} ({r.area})</option>)}
+              </select>
+            </div>
+          )}
+          {goalType === "conhecimento" && (
+            <div style={{marginBottom:12}}>
+              <label style={S.label}>Tema</label>
+              <input value={goalTopic} onChange={e=>setGoalTopic(e.target.value)} placeholder="Ex: Vinhos italianos, Atendimento VIP..." style={S.input}/>
+            </div>
+          )}
+          {goalType === "personalizado" && (
+            <div style={{marginBottom:12}}>
+              <label style={S.label}>Título do objetivo</label>
+              <input value={goalTitle} onChange={e=>setGoalTitle(e.target.value)} placeholder="Ex: Melhorar comunicação com equipe" style={S.input}/>
+            </div>
+          )}
+          <button onClick={addGoal} style={{...S.btnPrimary,width:"auto",padding:"10px 20px"}}>Criar objetivo</button>
+        </div>
+      )}
+
+      {activeGoals.length === 0 && !showForm && (
+        <div style={{textAlign:"center",padding:24,color:"var(--text3)"}}>
+          <div style={{fontSize:32,marginBottom:8}}>🎯</div>
+          <div style={{fontSize:13}}>Nenhum objetivo ativo</div>
+        </div>
+      )}
+
+      {activeGoals.map(g => renderGoalCard(g))}
+
+      {completedGoals.length > 0 && (
+        <details style={{marginTop:8}}>
+          <summary style={{color:"var(--text3)",fontSize:12,cursor:"pointer",marginBottom:8}}>Objetivos concluídos ({completedGoals.length})</summary>
+          {completedGoals.map(g => renderGoalCard(g))}
+        </details>
+      )}
+    </div>
+  );
+}
+
 function FeedbackForm({ restaurantId, employees, roles, onUpdate, feedbacks, currentUser, isOwner, preSelectedEmpId }) {
   const restEmps = employees.filter(e => e.restaurantId === restaurantId && !(e.inactive && e.inactiveFrom && e.inactiveFrom <= today()));
-  const restRoles = roles.filter(r => r.restaurantId === restaurantId && !r.inactive);
   const now = new Date();
   const [empId, setEmpId] = useState(preSelectedEmpId ?? "");
   const [rating, setRating] = useState(0);
   const [strengths, setStrengths] = useState("");
   const [improvements, setImprovements] = useState("");
-  const [internalNotes, setInternalNotes] = useState("");
-  const [goal, setGoal] = useState("");
-  const [targetRoleId, setTargetRoleId] = useState("");
-  const quarter = Math.ceil((now.getMonth()+1)/3);
+  const [otherNotes, setOtherNotes] = useState("");
+  const [quarter, setQuarter] = useState(Math.ceil((now.getMonth()+1)/3));
+  const [fbYear, setFbYear] = useState(now.getFullYear());
+  const [nextFbDate, setNextFbDate] = useState("");
 
   function handleSubmit() {
     if (!empId) { window.alert("Selecione um empregado."); return; }
-    if (rating < 1) { window.alert("Defina a avaliação (1-5 estrelas)."); return; }
+    if (rating < 1) { window.alert("Selecione a avaliação."); return; }
     const fb = {
       id: `${Date.now()}-${Math.random().toString(36).slice(2,6)}`,
       restaurantId,
       employeeId: empId,
       quarter,
-      year: now.getFullYear(),
+      year: fbYear,
       rating,
       strengths: strengths.trim(),
       improvements: improvements.trim(),
-      internalNotes: internalNotes.trim(),
-      goal: goal.trim(),
-      targetRoleId: targetRoleId || null,
+      internalNotes: otherNotes.trim(),
+      nextFeedbackDate: nextFbDate || null,
+      goal: "",
+      targetRoleId: null,
       devChecklist: [],
       createdAt: new Date().toISOString(),
       createdBy: isOwner ? "Admin AppTip" : (currentUser?.name ?? "Gestor"),
     };
     onUpdate("feedbacks", [...(feedbacks ?? []), fb]);
-    setEmpId(""); setRating(0); setStrengths(""); setImprovements(""); setInternalNotes(""); setGoal(""); setTargetRoleId("");
+    setEmpId(""); setRating(0); setStrengths(""); setImprovements(""); setOtherNotes(""); setNextFbDate("");
   }
+
+  const yearOpts = [];
+  for (let yr = now.getFullYear(); yr >= now.getFullYear() - 2; yr--) yearOpts.push(yr);
 
   return (
     <div style={{...S.card, padding:"18px 20px"}}>
       <h4 style={{color:"var(--text)",margin:"0 0 14px",fontSize:15,fontWeight:700}}>Registrar feedback trimestral</h4>
-      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:12}}>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:10,marginBottom:12}}>
         <div>
           <label style={S.label}>Empregado</label>
           <select value={empId} onChange={e=>setEmpId(e.target.value)} style={S.input}>
@@ -5835,19 +6217,39 @@ function FeedbackForm({ restaurantId, employees, roles, onUpdate, feedbacks, cur
         </div>
         <div>
           <label style={S.label}>Trimestre</label>
-          <div style={{...S.input,background:"var(--bg1)",display:"flex",alignItems:"center"}}>Q{quarter}/{now.getFullYear()}</div>
+          <select value={quarter} onChange={e=>setQuarter(Number(e.target.value))} style={S.input}>
+            <option value={1}>Q1 (Jan–Mar)</option>
+            <option value={2}>Q2 (Abr–Jun)</option>
+            <option value={3}>Q3 (Jul–Set)</option>
+            <option value={4}>Q4 (Out–Dez)</option>
+          </select>
+        </div>
+        <div>
+          <label style={S.label}>Ano</label>
+          <select value={fbYear} onChange={e=>setFbYear(Number(e.target.value))} style={S.input}>
+            {yearOpts.map(yr => <option key={yr} value={yr}>{yr}</option>)}
+          </select>
         </div>
       </div>
-      <div style={{marginBottom:12}}>
+      <div style={{marginBottom:14}}>
         <label style={S.label}>Avaliação</label>
-        <div style={{display:"flex",gap:4}}>
-          {[1,2,3,4,5].map(n => (
-            <button key={n} onClick={()=>setRating(n)} style={{background:"none",border:"none",fontSize:28,cursor:"pointer",color:n<=rating?"#f59e0b":"var(--border)",padding:2,lineHeight:1}}>★</button>
-          ))}
+        <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+          {RATING_LABELS.map((label, i) => {
+            const val = i + 1;
+            const active = rating === val;
+            const color = RATING_COLORS[i];
+            return (
+              <button key={val} onClick={()=>setRating(val)} style={{
+                padding:"8px 14px",fontSize:12,fontWeight:active?700:500,border:`2px solid ${active?color:"var(--border)"}`,
+                borderRadius:8,cursor:"pointer",background:active?color+"18":"var(--bg)",color:active?color:"var(--text2)",
+                transition:"all 0.15s",lineHeight:1.2,
+              }}>{label}</button>
+            );
+          })}
         </div>
       </div>
       <div style={{marginBottom:12}}>
-        <label style={S.label}>Pontos fortes</label>
+        <label style={S.label}>Pontos positivos</label>
         <textarea value={strengths} onChange={e=>setStrengths(e.target.value)} rows={2} placeholder="O que o empregado faz bem..." style={{...S.input,resize:"vertical"}}/>
       </div>
       <div style={{marginBottom:12}}>
@@ -5855,21 +6257,12 @@ function FeedbackForm({ restaurantId, employees, roles, onUpdate, feedbacks, cur
         <textarea value={improvements} onChange={e=>setImprovements(e.target.value)} rows={2} placeholder="Onde pode evoluir..." style={{...S.input,resize:"vertical"}}/>
       </div>
       <div style={{marginBottom:12}}>
-        <label style={S.label}>Notas internas <span style={{fontSize:10,color:"var(--text3)",fontWeight:400}}>(não visível ao empregado)</span></label>
-        <textarea value={internalNotes} onChange={e=>setInternalNotes(e.target.value)} rows={2} placeholder="Observações confidenciais..." style={{...S.input,resize:"vertical",borderColor:"#e74c3c33"}}/>
+        <label style={S.label}>Outras notas</label>
+        <textarea value={otherNotes} onChange={e=>setOtherNotes(e.target.value)} rows={2} placeholder="Observações adicionais..." style={{...S.input,resize:"vertical"}}/>
       </div>
-      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:14}}>
-        <div>
-          <label style={S.label}>Meta para o próximo trimestre</label>
-          <input value={goal} onChange={e=>setGoal(e.target.value)} placeholder="Ex: Liderar a abertura do salão" style={S.input}/>
-        </div>
-        <div>
-          <label style={S.label}>Cargo-alvo (desenvolvimento)</label>
-          <select value={targetRoleId} onChange={e=>setTargetRoleId(e.target.value)} style={S.input}>
-            <option value="">Manter atual</option>
-            {restRoles.map(r => <option key={r.id} value={r.id}>{r.name} ({r.area})</option>)}
-          </select>
-        </div>
+      <div style={{marginBottom:14}}>
+        <label style={S.label}>Próximo feedback agendado <span style={{fontWeight:400,color:"var(--text3)"}}>(opcional)</span></label>
+        <input type="date" value={nextFbDate} onChange={e=>setNextFbDate(e.target.value)} style={{...S.input,maxWidth:200}}/>
       </div>
       <button onClick={handleSubmit} style={{...S.btnPrimary,width:"auto",padding:"10px 24px"}}>Registrar feedback</button>
     </div>
@@ -5878,7 +6271,7 @@ function FeedbackForm({ restaurantId, employees, roles, onUpdate, feedbacks, cur
 
 
 // ── Gamified Employee Trail View ──
-function EmpTrilhaView({ empId, employees, roles, schedules, incidents, feedbacks, devChecklists, restaurantId, onUpdate }) {
+function EmpTrilhaView({ empId, employees, roles, schedules, incidents, feedbacks, devChecklists, restaurantId, onUpdate, employeeGoals }) {
   const emp = employees.find(e => e.id === empId);
   const role = emp ? roles.find(r => r.id === emp.roleId) : null;
   const restEmps = employees.filter(e => e.restaurantId === restaurantId && !(e.inactive && e.inactiveFrom && e.inactiveFrom <= today()));
@@ -5888,7 +6281,7 @@ function EmpTrilhaView({ empId, employees, roles, schedules, incidents, feedback
   // Latest feedback
   const myFeedbacks = (feedbacks ?? []).filter(f => f.restaurantId === restaurantId && f.employeeId === empId).sort((a,b)=>(b.createdAt??"").localeCompare(a.createdAt??""));
   const latestFb = myFeedbacks[0];
-  const targetRole = latestFb?.targetRoleId ? roles.find(r => r.id === latestFb.targetRoleId) : null;
+  // targetRole removed — goals system replaces it
 
   // Incidents are fully internal — employee sees nothing
   // const positiveIncidents = []; // removed: ocorrências são internas
@@ -5899,7 +6292,7 @@ function EmpTrilhaView({ empId, employees, roles, schedules, incidents, feedback
   if (daysInCompany >= 180) badges.push({ icon:"⭐", label:"6 Meses", desc:"6 meses de dedicação" });
   if (daysInCompany >= 90) badges.push({ icon:"🌟", label:"3 Meses", desc:"Primeiros 90 dias concluídos" });
   if ((emp?.roleHistory ?? []).length > 0) badges.push({ icon:"⬆️", label:"Promovido", desc:"Já recebeu uma promoção" });
-  if (latestFb?.rating === 5) badges.push({ icon:"💎", label:"Excelência", desc:"Recebeu avaliação 5 estrelas" });
+  if (latestFb?.rating === 5) badges.push({ icon:"💎", label:"Excelência", desc:"Avaliação Excepcional" });
 
   // Schedule metrics — mês anterior (fechado) para comparação justa
   const now = new Date();
@@ -5921,10 +6314,7 @@ function EmpTrilhaView({ empId, employees, roles, schedules, incidents, feedback
   const timePct = Math.min(daysInCompany / 365 * 50, 50);
   const progressPct = Math.min(Math.round(ratingPct + timePct), 100);
 
-  // Dev checklist for current role
-  const roleChecklist = devChecklists?.[emp?.roleId] ?? [];
-  // Checklist progress stored in latest feedback
-  const doneItems = latestFb?.devChecklist?.filter(d => d.done).map(d => d.title) ?? [];
+  // Dev checklist removed — replaced by goals system
 
   if (!emp) return <p style={{color:"var(--text3)",textAlign:"center"}}>Empregado não encontrado.</p>;
 
@@ -5939,12 +6329,7 @@ function EmpTrilhaView({ empId, employees, roles, schedules, incidents, feedback
             <div style={{color:"var(--ac)",fontSize:13,fontWeight:600}}>{role?.name ?? "—"}</div>
             <div style={{color:"var(--text3)",fontSize:11}}>{role?.area ?? "—"} · {daysInCompany} dias na empresa</div>
           </div>
-          {targetRole && (
-            <div style={{textAlign:"right"}}>
-              <div style={{color:"var(--text3)",fontSize:10}}>Cargo-alvo</div>
-              <div style={{color:"#3b82f6",fontSize:13,fontWeight:700}}>{targetRole.name}</div>
-            </div>
-          )}
+          {/* Cargo-alvo removed — now shown in objectives */}
         </div>
 
         {/* Progress bar */}
@@ -6004,50 +6389,81 @@ function EmpTrilhaView({ empId, employees, roles, schedules, incidents, feedback
         </div>
       </div>
 
-      {/* Meta e cargo-alvo do último feedback */}
-      {latestFb && (latestFb.goal || targetRole) && (
-        <div style={{...S.card,marginBottom:16}}>
-          <h4 style={{color:"var(--text)",margin:"0 0 12px",fontSize:14}}>🎯 Minha Meta</h4>
-          {latestFb.goal && (
-            <div style={{background:"var(--bg1)",borderRadius:8,padding:"12px 14px",marginBottom:targetRole?10:0}}>
-              <p style={{color:"var(--text)",fontSize:13,margin:0,fontWeight:600,lineHeight:1.5}}>{latestFb.goal}</p>
-              <div style={{color:"var(--text3)",fontSize:10,marginTop:4}}>Definida em Q{latestFb.quarter}/{latestFb.year}</div>
-            </div>
-          )}
-          {targetRole && (
-            <div style={{display:"flex",alignItems:"center",gap:8,padding:"10px 14px",borderRadius:8,background:"#3b82f611",border:"1px solid #3b82f633"}}>
-              <span style={{fontSize:16}}>⬆️</span>
-              <div>
-                <div style={{color:"#3b82f6",fontSize:13,fontWeight:700}}>Cargo-alvo: {targetRole.name}</div>
-                <div style={{color:"var(--text3)",fontSize:11}}>{targetRole.area}</div>
-              </div>
-            </div>
-          )}
-        </div>
-      )}
+      {/* Objetivos do empregado */}
+      {(() => {
+        const myGoals = ((employeeGoals ?? {})[empId] ?? []).filter(g => g.status === "active");
+        if (myGoals.length === 0) return null;
+        return (
+          <div style={{marginBottom:16}}>
+            <h4 style={{color:"var(--text)",margin:"0 0 12px",fontSize:14}}>🎯 Seus Objetivos</h4>
+            {myGoals.map(goal => {
+              const typeInfo = GOAL_TYPES.find(t => t.value === goal.type) ?? GOAL_TYPES[3];
+              const metas = goal.metas ?? [];
+              const doneMetas = metas.filter(m => {
+                if (m.autoCheck && m.autoCheckRule) {
+                  const rule = AUTO_META_RULES.find(r => r.id === m.autoCheckRule);
+                  return rule ? rule.check(empId, schedules, restaurantId, feedbacks, restaurantId, employees) : m.done;
+                }
+                return m.done;
+              }).length;
+              const pct = metas.length > 0 ? Math.round((doneMetas / metas.length) * 100) : 0;
+              const materials = goal.materials ?? [];
 
-      {/* Dev Checklist */}
-      {roleChecklist.length > 0 && (
-        <div style={{...S.card,marginBottom:16}}>
-          <h4 style={{color:"var(--text)",margin:"0 0 12px",fontSize:14}}>📚 Checklist de Desenvolvimento</h4>
-          <div style={{display:"flex",flexDirection:"column",gap:6}}>
-            {roleChecklist.map((item, i) => {
-              const isDone = doneItems.includes(item.title);
-              const typeIcon = {livro:"📖",video:"🎬",curso:"🎓",pratica:"🔧"}[item.type] ?? "📋";
               return (
-                <div key={i} style={{display:"flex",alignItems:"center",gap:10,padding:"8px 12px",borderRadius:8,border:"1px solid var(--border)",background:isDone?"#10b98111":"transparent",opacity:isDone?0.7:1}}>
-                  <span style={{fontSize:16}}>{typeIcon}</span>
-                  <div style={{flex:1,minWidth:0}}>
-                    <div style={{color:isDone?"var(--green)":"var(--text)",fontSize:13,fontWeight:isDone?600:400,textDecoration:isDone?"line-through":"none"}}>{item.title}</div>
-                    {item.link && <a href={item.link} target="_blank" rel="noreferrer" style={{color:"#3b82f6",fontSize:11}}>Acessar →</a>}
+                <div key={goal.id} style={{...S.card,marginBottom:10,padding:"14px 16px",borderLeft:`4px solid ${typeInfo.color}`}}>
+                  <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:6}}>
+                    <span style={{fontSize:18}}>{typeInfo.icon}</span>
+                    <div style={{flex:1}}>
+                      <div style={{color:"var(--text)",fontWeight:700,fontSize:14}}>{goal.title}</div>
+                      <div style={{color:"var(--text3)",fontSize:11}}>{typeInfo.label}</div>
+                    </div>
                   </div>
-                  <span style={{fontSize:10,color:"var(--text3)",padding:"2px 6px",borderRadius:4,background:"var(--bg1)"}}>{item.type}</span>
+
+                  {metas.length > 0 && (
+                    <>
+                      <div style={{display:"flex",justifyContent:"space-between",marginBottom:3}}>
+                        <span style={{color:"var(--text3)",fontSize:11}}>Progresso</span>
+                        <span style={{color:typeInfo.color,fontSize:11,fontWeight:700}}>{pct}%</span>
+                      </div>
+                      <div style={{height:6,borderRadius:3,background:"var(--border)",overflow:"hidden",marginBottom:8}}>
+                        <div style={{height:"100%",borderRadius:3,background:typeInfo.color,width:`${pct}%`,transition:"width 0.3s"}}/>
+                      </div>
+                      <div style={{display:"flex",flexDirection:"column",gap:4,marginBottom:8}}>
+                        {metas.map(meta => {
+                          const isAuto = meta.autoCheck && meta.autoCheckRule;
+                          const autoRule = isAuto ? AUTO_META_RULES.find(r => r.id === meta.autoCheckRule) : null;
+                          const isDone = isAuto ? (autoRule ? autoRule.check(empId, schedules, restaurantId, feedbacks, restaurantId, employees) : meta.done) : meta.done;
+                          return (
+                            <div key={meta.id} style={{display:"flex",alignItems:"center",gap:8,padding:"4px 0"}}>
+                              <span style={{fontSize:13}}>{isDone?"✅":"⬜"}</span>
+                              <span style={{color:isDone?"var(--text3)":"var(--text)",fontSize:12,textDecoration:isDone?"line-through":"none",flex:1}}>{meta.title}</span>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </>
+                  )}
+
+                  {materials.length > 0 && (
+                    <div>
+                      <div style={{color:"var(--text3)",fontSize:10,fontWeight:600,marginBottom:4}}>📎 Material de apoio</div>
+                      {materials.map(mat => {
+                        const mtIcon = MATERIAL_TYPES.find(t=>t.value===mat.type)?.icon ?? "📋";
+                        return (
+                          <div key={mat.id} style={{display:"flex",alignItems:"center",gap:6,padding:"3px 0",fontSize:12}}>
+                            <span>{mtIcon}</span>
+                            {mat.link ? <a href={mat.link} target="_blank" rel="noreferrer" style={{color:"#3b82f6"}}>{mat.title}</a> : <span style={{color:"var(--text)"}}>{mat.title}</span>}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
                 </div>
               );
             })}
           </div>
-        </div>
-      )}
+        );
+      })()}
 
       {/* Ocorrências removidas — 100% internas */}
     </div>
@@ -7224,6 +7640,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
               devChecklists={data?.devChecklists??{}} schedules={data?.schedules??{}}
               currentUser={currentUser} isLider={isLider} mobileOnly={mobileOnly} roles={roles}
               vtPayments={data?.vtPayments??{}} vtConfig={data?.vtConfig??{}} scheduleStatus={data?.scheduleStatus??{}}
+              employeeGoals={data?.employeeGoals??{}}
               onGenerateDismissalReport={async (emp) => {
                 try {
                   await loadScript("https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js");
@@ -13386,6 +13803,7 @@ export default function App() {
   const [scheduleAdjustments, setScheduleAdjustments] = useState({});
   const [scheduleStatus,      setScheduleStatus]      = useState({});
   const [schedulePrevista,    setSchedulePrevista]    = useState({});
+  const [employeeGoals,       setEmployeeGoals]       = useState({});
 
   useEffect(() => {
     const savedId = currentUserId;
@@ -13413,7 +13831,7 @@ export default function App() {
       setLoadProgress("Preparando o sistema...");
 
       const keys = keyNames;
-      const map = { owners:setOwners, managers:setManagers, restaurants:setRestaurants, employees:setEmployees, roles:setRoles, tips:setTips, splits:setSplits, schedules:setSchedules, communications:setCommunications, commAcks:setCommAcks, faq:setFaq, dpMessages:setDpMessages, workSchedules:setWorkSchedules, notifications:setNotifications, noTipDays:setNoTipDays, trash:setTrash, schedTemplates:setSchedTemplates, schedDrafts:setSchedDrafts, scheduleVersions:setScheduleVersions, tipVersions:setTipVersions, vtConfig:setVtConfig, vtMonthly:setVtMonthly, vtPayments:setVtPayments, incidents:setIncidents, feedbacks:setFeedbacks, devChecklists:setDevChecklists, scheduleAdjustments:setScheduleAdjustments, scheduleStatus:setScheduleStatus, schedulePrevista:setSchedulePrevista };
+      const map = { owners:setOwners, managers:setManagers, restaurants:setRestaurants, employees:setEmployees, roles:setRoles, tips:setTips, splits:setSplits, schedules:setSchedules, communications:setCommunications, commAcks:setCommAcks, faq:setFaq, dpMessages:setDpMessages, workSchedules:setWorkSchedules, notifications:setNotifications, noTipDays:setNoTipDays, trash:setTrash, schedTemplates:setSchedTemplates, schedDrafts:setSchedDrafts, scheduleVersions:setScheduleVersions, tipVersions:setTipVersions, vtConfig:setVtConfig, vtMonthly:setVtMonthly, vtPayments:setVtPayments, incidents:setIncidents, feedbacks:setFeedbacks, devChecklists:setDevChecklists, scheduleAdjustments:setScheduleAdjustments, scheduleStatus:setScheduleStatus, schedulePrevista:setSchedulePrevista, employeeGoals:setEmployeeGoals };
       const loaded_data = {};
       let successCount = 0;
       keys.forEach((k, i) => {
@@ -13561,12 +13979,12 @@ export default function App() {
     return () => { clearTimeout(slowTimer); clearTimeout(verySlowTimer); };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const data = { owners, managers, restaurants, employees, roles, tips, splits, schedules, communications, commAcks, faq, dpMessages, workSchedules, notifications, noTipDays, trash, schedTemplates, schedDrafts, scheduleVersions, tipVersions, vtConfig, vtMonthly, vtPayments, incidents, feedbacks, devChecklists, scheduleAdjustments, scheduleStatus, schedulePrevista };
+  const data = { owners, managers, restaurants, employees, roles, tips, splits, schedules, communications, commAcks, faq, dpMessages, workSchedules, notifications, noTipDays, trash, schedTemplates, schedDrafts, scheduleVersions, tipVersions, vtConfig, vtMonthly, vtPayments, incidents, feedbacks, devChecklists, scheduleAdjustments, scheduleStatus, schedulePrevista, employeeGoals };
 
   async function handleUpdate(field, value) {
     if (field === "_toast") { setToast(value); return; }
-    const setters = { owners:setOwners, managers:setManagers, restaurants:setRestaurants, employees:setEmployees, roles:setRoles, tips:setTips, splits:setSplits, schedules:setSchedules, communications:setCommunications, commAcks:setCommAcks, faq:setFaq, dpMessages:setDpMessages, workSchedules:setWorkSchedules, notifications:setNotifications, noTipDays:setNoTipDays, trash:setTrash, schedTemplates:setSchedTemplates, schedDrafts:setSchedDrafts, scheduleVersions:setScheduleVersions, tipVersions:setTipVersions, vtConfig:setVtConfig, vtMonthly:setVtMonthly, vtPayments:setVtPayments, incidents:setIncidents, feedbacks:setFeedbacks, devChecklists:setDevChecklists, scheduleAdjustments:setScheduleAdjustments, scheduleStatus:setScheduleStatus, schedulePrevista:setSchedulePrevista };
-    const keys    = { owners:K.owners, managers:K.managers, restaurants:K.restaurants, employees:K.employees, roles:K.roles, tips:K.tips, splits:K.splits, schedules:K.schedules, communications:K.communications, commAcks:K.commAcks, faq:K.faq, dpMessages:K.dpMessages, workSchedules:K.workSchedules, notifications:K.notifications, noTipDays:K.noTipDays, trash:K.trash, schedTemplates:K.schedTemplates, schedDrafts:K.schedDrafts, scheduleVersions:K.scheduleVersions, tipVersions:K.tipVersions, vtConfig:K.vtConfig, vtMonthly:K.vtMonthly, vtPayments:K.vtPayments, incidents:K.incidents, feedbacks:K.feedbacks, devChecklists:K.devChecklists, scheduleAdjustments:K.scheduleAdjustments, scheduleStatus:K.scheduleStatus, schedulePrevista:K.schedulePrevista };
+    const setters = { owners:setOwners, managers:setManagers, restaurants:setRestaurants, employees:setEmployees, roles:setRoles, tips:setTips, splits:setSplits, schedules:setSchedules, communications:setCommunications, commAcks:setCommAcks, faq:setFaq, dpMessages:setDpMessages, workSchedules:setWorkSchedules, notifications:setNotifications, noTipDays:setNoTipDays, trash:setTrash, schedTemplates:setSchedTemplates, schedDrafts:setSchedDrafts, scheduleVersions:setScheduleVersions, tipVersions:setTipVersions, vtConfig:setVtConfig, vtMonthly:setVtMonthly, vtPayments:setVtPayments, incidents:setIncidents, feedbacks:setFeedbacks, devChecklists:setDevChecklists, scheduleAdjustments:setScheduleAdjustments, scheduleStatus:setScheduleStatus, schedulePrevista:setSchedulePrevista, employeeGoals:setEmployeeGoals };
+    const keys    = { owners:K.owners, managers:K.managers, restaurants:K.restaurants, employees:K.employees, roles:K.roles, tips:K.tips, splits:K.splits, schedules:K.schedules, communications:K.communications, commAcks:K.commAcks, faq:K.faq, dpMessages:K.dpMessages, workSchedules:K.workSchedules, notifications:K.notifications, noTipDays:K.noTipDays, trash:K.trash, schedTemplates:K.schedTemplates, schedDrafts:K.schedDrafts, scheduleVersions:K.scheduleVersions, tipVersions:K.tipVersions, vtConfig:K.vtConfig, vtMonthly:K.vtMonthly, vtPayments:K.vtPayments, incidents:K.incidents, feedbacks:K.feedbacks, devChecklists:K.devChecklists, scheduleAdjustments:K.scheduleAdjustments, scheduleStatus:K.scheduleStatus, schedulePrevista:K.schedulePrevista, employeeGoals:K.employeeGoals };
     // Support functional updates to prevent stale-state race conditions:
     // When value is a function, it receives the latest state (like setState(prev => ...))
     let resolvedValue;
@@ -13586,7 +14004,7 @@ export default function App() {
         return;
       }
     }
-    const labels = { owners:"Admins atualizados", managers:"Gestores atualizados", restaurants:"Restaurantes atualizados", employees:"Empregados atualizados", roles:"Cargos atualizados", tips:"Gorjetas atualizadas", splits:"Percentuais salvos", schedules:"Escala atualizada", communications:"Comunicados atualizados", commAcks:"Ciências atualizadas", faq:"FAQ atualizado", dpMessages:"Mensagem enviada", workSchedules:"Horários salvos", notifications:"Notificações atualizadas", schedTemplates:"Template salvo", schedDrafts:"Rascunho salvo", trash:"Lixeira atualizada", noTipDays:"Dias sem gorjeta atualizados", scheduleVersions:null, tipVersions:null, vtConfig:null, vtMonthly:null, vtPayments:"VT registrado", incidents:"Ocorrência registrada", feedbacks:"Feedback registrado", devChecklists:"Checklist atualizado", scheduleAdjustments:null, scheduleStatus:null, schedulePrevista:null };
+    const labels = { owners:"Admins atualizados", managers:"Gestores atualizados", restaurants:"Restaurantes atualizados", employees:"Empregados atualizados", roles:"Cargos atualizados", tips:"Gorjetas atualizadas", splits:"Percentuais salvos", schedules:"Escala atualizada", communications:"Comunicados atualizados", commAcks:"Ciências atualizadas", faq:"FAQ atualizado", dpMessages:"Mensagem enviada", workSchedules:"Horários salvos", notifications:"Notificações atualizadas", schedTemplates:"Template salvo", schedDrafts:"Rascunho salvo", trash:"Lixeira atualizada", noTipDays:"Dias sem gorjeta atualizados", scheduleVersions:null, tipVersions:null, vtConfig:null, vtMonthly:null, vtPayments:"VT registrado", incidents:"Ocorrência registrada", feedbacks:"Feedback registrado", devChecklists:"Checklist atualizado", scheduleAdjustments:null, scheduleStatus:null, schedulePrevista:null, employeeGoals:"Objetivo atualizado" };
     if (labels[field] === null) return; // silent save (e.g. version snapshots)
     setToast(labels[field] ?? (typeof value === "string" ? value : "Salvo!"));
   }
@@ -13682,7 +14100,7 @@ export default function App() {
             return () => { setCurrentUser(emp); setUserRole("employee"); localStorage.setItem("apptip_role","employee"); localStorage.setItem("apptip_userid",emp.id); localStorage.setItem("apptip_empid",emp.id); setView("employee"); };
           })()} />
       ))}
-      {view === "employee" && <EmployeePortal employees={employees} roles={roles} tips={tips} schedules={schedules} splits={splits} restaurants={restaurants} communications={communications} commAcks={commAcks} faq={faq} dpMessages={dpMessages} workSchedules={workSchedules} incidents={incidents} feedbacks={feedbacks} devChecklists={devChecklists} onBack={doLogout} onUpdateEmployee={emp=>{const next=employees.map(e=>e.id===emp.id?emp:e);handleUpdate("employees",next);}} onUpdate={handleUpdate} toggleTheme={toggleTheme} theme={theme}
+      {view === "employee" && <EmployeePortal employees={employees} roles={roles} tips={tips} schedules={schedules} splits={splits} restaurants={restaurants} communications={communications} commAcks={commAcks} faq={faq} dpMessages={dpMessages} workSchedules={workSchedules} incidents={incidents} feedbacks={feedbacks} devChecklists={devChecklists} employeeGoals={employeeGoals} onBack={doLogout} onUpdateEmployee={emp=>{const next=employees.map(e=>e.id===emp.id?emp:e);handleUpdate("employees",next);}} onUpdate={handleUpdate} toggleTheme={toggleTheme} theme={theme}
         onSwitchToManager={(() => {
           const cpf = currentUser?.cpf?.replace(/\D/g,"");
           let mgr = cpf ? managers.find(m => m.cpf?.replace(/\D/g,"") === cpf) : null;
