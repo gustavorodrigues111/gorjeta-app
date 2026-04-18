@@ -246,7 +246,7 @@ const ac = "#d4a017";
 const S = {
   input: { width:"100%", boxSizing:"border-box", padding:"11px 14px", borderRadius:10, border:"1px solid var(--border)", background:"var(--input-bg)", color:"var(--text)", fontSize:14, fontFamily:"'DM Sans',sans-serif", outline:"none" },
   btnPrimary: { width:"100%", padding:"12px", borderRadius:12, background:ac, border:"none", color:"var(--text)", fontWeight:700, fontSize:14, cursor:"pointer", fontFamily:"'DM Sans',sans-serif" },
-  btnSecondary: { padding:"8px 18px", borderRadius:10, border:"1px solid var(--border)", background:"transparent", color:"var(--text2)", cursor:"pointer", fontFamily:"'DM Sans',sans-serif", fontSize:13, minHeight:44, display:"inline-flex", alignItems:"center" },
+  btnSecondary: { padding:"8px 18px", borderRadius:10, border:"1px solid var(--border)", background:"transparent", color:"var(--text2)", cursor:"pointer", fontFamily:"'DM Sans',sans-serif", fontSize:13 },
   // Small action button with minimum touch target (44px)
   btnSmall: { padding:"8px 14px", borderRadius:8, border:"1px solid var(--border)", background:"transparent", cursor:"pointer", fontFamily:"'DM Sans',sans-serif", fontSize:12, minHeight:44, display:"inline-flex", alignItems:"center", justifyContent:"center" },
   card: { background:"var(--card-bg)", borderRadius:16, padding:"18px 20px", border:"1px solid var(--border)" },
