@@ -3,7 +3,7 @@ import { useState, useEffect, Component } from "react";
 import { db } from "./firebase";
 import { doc, getDoc, setDoc } from "firebase/firestore";
 
-const APP_VERSION = "5.31.0";
+const APP_VERSION = "5.32.0";
 
 const DEFAULT_ADMISSION = () => `${new Date().getFullYear()}-01-01`;
 const round2 = (v) => Math.round(v * 100) / 100;
@@ -612,6 +612,7 @@ const K = {
   employeeGoals:       "v4:employeeGoals",        // {[empId]: [{id, type, title, targetRoleId?, topic?, materials:[], metas:[], createdAt, createdBy, status:"active"|"completed"|"cancelled"}]}
   delays:              "v4:delays",               // {[rid]: {[mk]: {[empId]: {[day]: minutes}}}}
   tipApprovals:        "v4:tipApprovals",         // {[rid]: {[weekMonday]: {approvedAt, approvedBy, approvedByName}}}
+  meetingPlans:        "v4:meetingPlans",         // [{id, restaurantId, type:"alinhamento"|"avaliação", employeeIds:[], plannedDate, note, createdBy, createdAt, completedFeedbackIds:{[empId]:fbId}}]
 };
 
 // ── Version retention ──
@@ -3437,7 +3438,7 @@ function DpManagerTab({ restaurantId, dpMessages, onUpdate, isOwner }) {
   );
 }
 
-function EmployeePortal({ employees, roles, tips, schedules, splits, restaurants, communications, commAcks, faq, dpMessages, workSchedules, incidents, feedbacks, devChecklists, onBack, onUpdateEmployee, onUpdate, toggleTheme, theme, onSwitchToManager, employeeGoals, tipApprovals, delays }) {
+function EmployeePortal({ employees, roles, tips, schedules, splits, restaurants, communications, commAcks, faq, dpMessages, workSchedules, incidents, feedbacks, devChecklists, onBack, onUpdateEmployee, onUpdate, toggleTheme, theme, onSwitchToManager, employeeGoals, tipApprovals, delays, meetingPlans }) {
   const [empId, setEmpId] = useState(() => localStorage.getItem("apptip_empid") || null);
 
   useEffect(() => {
@@ -3822,7 +3823,7 @@ function EmployeePortal({ employees, roles, tips, schedules, splits, restaurants
         )}
 
         {tab === "trilha" && emp && (
-          <EmpTrilhaView empId={empId} employees={employees} roles={roles} schedules={schedules} incidents={incidents??[]} feedbacks={feedbacks??[]} devChecklists={devChecklists??{}} restaurantId={emp.restaurantId} onUpdate={onUpdate} employeeGoals={employeeGoals??{}}/>
+          <EmpTrilhaView empId={empId} employees={employees} roles={roles} schedules={schedules} incidents={incidents??[]} feedbacks={feedbacks??[]} devChecklists={devChecklists??{}} restaurantId={emp.restaurantId} onUpdate={onUpdate} employeeGoals={employeeGoals??{}} meetingPlans={meetingPlans??[]}/>
         )}
 
         {tab === "dp" && (
@@ -4190,7 +4191,7 @@ Inclua apenas as ações solicitadas. Arrays vazios se não houver ação daquel
 
 
 
-function EmployeeSpreadsheet({ restEmps, restRoles, rid, employees, onUpdate, restCode: restCode_, isOwner, restaurant, notifications, privacyMask, onGenerateDismissalReport, incidents, feedbacks, devChecklists, schedules, currentUser, isLider, mobileOnly: mobileOnlyProp, roles, vtPayments, vtConfig, scheduleStatus, employeeGoals, delays }) {
+function EmployeeSpreadsheet({ restEmps, restRoles, rid, employees, onUpdate, restCode: restCode_, isOwner, restaurant, notifications, privacyMask, onGenerateDismissalReport, incidents, feedbacks, devChecklists, schedules, currentUser, isLider, mobileOnly: mobileOnlyProp, roles, vtPayments, vtConfig, scheduleStatus, employeeGoals, delays, meetingPlans }) {
   const mobileOnly = mobileOnlyProp ?? false; // eslint-disable-line no-unused-vars
   const PLANOS = [
     { id:"p10",  empMax:10  },
@@ -4731,7 +4732,7 @@ Inclua apenas as ações solicitadas. Arrays vazios se não houver ação daquel
                     📋 Registrar ocorrência
                   </button>
                   <button onClick={()=>{setShowFbForm(!showFbForm);setShowIncForm(false);}} style={{padding:"8px 16px",borderRadius:10,border:`1px solid ${showFbForm?"#f59e0b":"var(--border)"}`,background:showFbForm?"#f59e0b11":"transparent",color:showFbForm?"#f59e0b":"var(--text3)",cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:12}}>
-                    ⭐ Feedback
+                    💬 Reunião
                   </button>
                   <button onClick={async()=>{
                     // ── Export trail as PDF ──
@@ -4804,22 +4805,25 @@ Inclua apenas as ações solicitadas. Arrays vazios se não houver ação daquel
                         y = doc.lastAutoTable.finalY + 8;
                       }
 
-                      // Feedbacks in period
-                      const empFbs = (feedbacks??[]).filter(f => f.restaurantId===rid && f.employeeId===emp.id && !f.deletedAt && (f.createdAt??"").slice(0,10)>=fromISO && (f.createdAt??"").slice(0,10)<=toISO);
+                      // Reuniões in period
+                      const empFbs = (feedbacks??[]).filter(f => f.restaurantId===rid && f.employeeId===emp.id && !f.deletedAt && ((f.meetingDate??f.createdAt??"").slice(0,10))>=fromISO && ((f.meetingDate??f.createdAt??"").slice(0,10))<=toISO);
                       if (empFbs.length > 0) {
                         if (y > 240) { doc.addPage(); y = 15; }
-                        doc.setFontSize(12); doc.text("FEEDBACKS", 14, y); y += 2;
+                        doc.setFontSize(12); doc.text("REUNIÕES", 14, y); y += 2;
                         doc.autoTable({
                           startY:y,
-                          head:[["Período","Avaliação","Pontos Positivos","A Melhorar","Outras Notas"]],
-                          body:empFbs.sort((a,b)=>(a.createdAt??"").localeCompare(b.createdAt??"")).map(fb => [
-                            `Q${fb.quarter}/${fb.year}`,
-                            RATING_LABELS[fb.rating-1] ?? "—",
-                            (fb.strengths??"").slice(0,50),
-                            (fb.improvements??"").slice(0,50),
-                            (fb.internalNotes??"").slice(0,50)
-                          ]),
-                          theme:"striped", styles:{fontSize:9,cellPadding:2}, headStyles:{fillColor:[245,158,11]}, margin:{left:14,right:14}
+                          head:[["Data","Tipo","Avaliação","Anotações","Pontos Positivos"]],
+                          body:empFbs.sort((a,b)=>(a.meetingDate??a.createdAt??"").localeCompare(b.meetingDate??b.createdAt??"")).map(fb => {
+                            const isAv = fb.meetingType === "avaliação" || (!fb.meetingType && fb.rating > 0);
+                            return [
+                              fb.meetingDate ? new Date(fb.meetingDate+"T12:00:00").toLocaleDateString("pt-BR") : (fb.createdAt ? new Date(fb.createdAt).toLocaleDateString("pt-BR") : "—"),
+                              isAv ? "Avaliação" : "Alinhamento",
+                              fb.rating ? (RATING_LABELS[fb.rating-1] ?? "—") : "—",
+                              (fb.notes??"").slice(0,50) || (fb.internalNotes??"").slice(0,50),
+                              (fb.strengths??"").slice(0,50)
+                            ];
+                          }),
+                          theme:"striped", styles:{fontSize:9,cellPadding:2}, headStyles:{fillColor:[59,130,246]}, margin:{left:14,right:14}
                         });
                         y = doc.lastAutoTable.finalY + 8;
                       }
@@ -4878,24 +4882,33 @@ Inclua apenas as ações solicitadas. Arrays vazios se não houver ação daquel
                   </button>
                 </div>
                 {showIncForm && <div style={{marginBottom:16}}><IncidentForm restaurantId={rid} employees={restEmps.filter(e=>!e.inactive)} onUpdate={onUpdate} incidents={incidents??[]} currentUser={currentUser} isOwner={isOwner} preSelectedEmpId={emp.id}/></div>}
-                {showFbForm && <div style={{marginBottom:16}}><FeedbackForm restaurantId={rid} employees={restEmps.filter(e=>!e.inactive)} roles={restRoles} onUpdate={onUpdate} feedbacks={feedbacks??[]} currentUser={currentUser} isOwner={isOwner} preSelectedEmpId={emp.id}/></div>}
+                {showFbForm && <div style={{marginBottom:16}}><FeedbackForm restaurantId={rid} employees={restEmps.filter(e=>!e.inactive)} roles={restRoles} onUpdate={onUpdate} feedbacks={feedbacks??[]} currentUser={currentUser} isOwner={isOwner} preSelectedEmpId={emp.id} allMeetingPlans={meetingPlans??[]}/></div>}
                 {(() => {
+                  // Check meeting plans first
+                  const empPlans = (meetingPlans??[]).filter(p => p.restaurantId === rid && (p.employeeIds??[]).includes(emp.id)).sort((a,b)=>a.plannedDate.localeCompare(b.plannedDate));
+                  const nextPlan = empPlans.find(p => p.plannedDate >= today());
+                  const overduePlan = empPlans.filter(p => p.plannedDate < today()).pop();
+                  // Fallback to legacy nextFeedbackDate
                   const empFbs = (feedbacks??[]).filter(f => f.employeeId === emp.id && !f.deletedAt && f.nextFeedbackDate).sort((a,b) => b.createdAt.localeCompare(a.createdAt));
                   const lastNfd = empFbs[0]?.nextFeedbackDate;
-                  if (!lastNfd) return null;
-                  const nfdDate = new Date(lastNfd + "T00:00:00");
-                  const today = new Date(); today.setHours(0,0,0,0);
-                  const diffDays = Math.round((nfdDate - today) / 86400000);
+                  // Determine what to show
+                  const targetDate = overduePlan?.plannedDate || (nextPlan?.plannedDate) || lastNfd;
+                  if (!targetDate) return null;
+                  const nfdDate = new Date(targetDate + "T00:00:00");
+                  const todayD = new Date(); todayD.setHours(0,0,0,0);
+                  const diffDays = Math.round((nfdDate - todayD) / 86400000);
                   const isOverdue = diffDays < 0;
                   const isDueSoon = diffDays >= 0 && diffDays <= 14;
                   if (!isOverdue && !isDueSoon) return null;
+                  const planType = (overduePlan || nextPlan)?.type;
+                  const typeLabel = planType === "avaliação" ? "avaliação" : planType === "alinhamento" ? "alinhamento" : "reunião";
                   const bgColor = isOverdue ? "#fef2f2" : "#fffbeb";
                   const borderColor = isOverdue ? "#fca5a5" : "#fcd34d";
                   const textColor = isOverdue ? "#dc2626" : "#d97706";
                   const icon = isOverdue ? "⚠️" : "📅";
                   const label = isOverdue
-                    ? `Feedback atrasado! Previsto para ${nfdDate.toLocaleDateString("pt-BR")} (${Math.abs(diffDays)} dia${Math.abs(diffDays)!==1?"s":""} atrás)`
-                    : `Próximo feedback em ${diffDays} dia${diffDays!==1?"s":""} (${nfdDate.toLocaleDateString("pt-BR")})`;
+                    ? `Conversa de ${typeLabel} atrasada! Prevista para ${nfdDate.toLocaleDateString("pt-BR")} (${Math.abs(diffDays)} dia${Math.abs(diffDays)!==1?"s":""} atrás)`
+                    : `Próxima ${typeLabel} em ${diffDays} dia${diffDays!==1?"s":""} (${nfdDate.toLocaleDateString("pt-BR")})`;
                   return <div style={{padding:"10px 14px",borderRadius:10,border:`1px solid ${borderColor}`,background:bgColor,color:textColor,fontSize:13,fontFamily:"'DM Mono',monospace",marginBottom:12,display:"flex",alignItems:"center",gap:8}}>
                     <span style={{fontSize:16}}>{icon}</span>
                     <span>{label}</span>
@@ -4992,29 +5005,34 @@ Inclua apenas as ações solicitadas. Arrays vazios se não houver ação daquel
                     <div style={{...S.card,marginBottom:12,padding:"14px"}}>
                       <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:10}}>
                         <span style={{fontSize:16}}>💬</span>
-                        <span style={{color:"var(--text)",fontWeight:700,fontSize:14}}>Feedbacks anteriores</span>
+                        <span style={{color:"var(--text)",fontWeight:700,fontSize:14}}>Reuniões anteriores</span>
                         <span style={{color:"var(--text3)",fontSize:11,marginLeft:"auto"}}>{empFbsHist.length} registro{empFbsHist.length!==1?"s":""}</span>
                       </div>
-                      {empFbsHist.slice(0,4).map(fb => {
-                        const rLabel = fb.rating ? RATING_LABELS[fb.rating - 1] : "—";
+                      {empFbsHist.slice(0,6).map(fb => {
+                        const isAval = fb.meetingType === "avaliação" || (!fb.meetingType && fb.rating > 0);
+                        const rLabel = fb.rating ? RATING_LABELS[fb.rating - 1] : null;
                         const rColor = fb.rating ? RATING_COLORS[fb.rating - 1] : "var(--text3)";
-                        const qLabel = fb.quarter ? `Q${fb.quarter}/${fb.year ?? ""}` : "";
+                        const typeIcon = isAval ? "📋" : "💬";
+                        const typeLabel = isAval ? "Avaliação" : "Alinhamento";
+                        const typeColor = isAval ? "#8b5cf6" : "#3b82f6";
+                        const dateStr = fb.meetingDate ? new Date(fb.meetingDate+"T12:00:00").toLocaleDateString("pt-BR") : (fb.createdAt ? new Date(fb.createdAt).toLocaleDateString("pt-BR") : "");
                         return (
                           <div key={fb.id} style={{padding:"10px 0",borderBottom:"1px solid var(--border)22"}}>
                             <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:4}}>
                               <div style={{display:"flex",alignItems:"center",gap:6}}>
-                                <span style={{fontSize:11,padding:"2px 8px",borderRadius:6,background:rColor+"18",color:rColor,fontWeight:700}}>{rLabel}</span>
-                                {qLabel && <span style={{color:"var(--text3)",fontSize:11}}>{qLabel}</span>}
+                                <span style={{fontSize:11,padding:"2px 8px",borderRadius:6,background:typeColor+"18",color:typeColor,fontWeight:700}}>{typeIcon} {typeLabel}</span>
+                                {rLabel && <span style={{fontSize:11,padding:"2px 8px",borderRadius:6,background:rColor+"18",color:rColor,fontWeight:700}}>{rLabel}</span>}
                               </div>
                               <div style={{display:"flex",alignItems:"center",gap:6}}>
-                                <span style={{color:"var(--text3)",fontSize:10}}>{fb.createdAt ? new Date(fb.createdAt).toLocaleDateString("pt-BR") : ""} · {fb.createdBy ?? ""}</span>
+                                <span style={{color:"var(--text3)",fontSize:10}}>{dateStr} · {fb.createdBy ?? ""}</span>
                                 {canDeleteFb && <button onClick={()=>{
-                                  if (!window.confirm(`Excluir feedback de ${fb.createdAt ? new Date(fb.createdAt).toLocaleDateString("pt-BR") : "—"}?\n\nO feedback ficará na lixeira por 90 dias e poderá ser restaurado.`)) return;
+                                  if (!window.confirm(`Excluir reunião de ${dateStr}?\n\nO registro ficará na lixeira por 90 dias e poderá ser restaurado.`)) return;
                                   const updated = (feedbacks??[]).map(f => f.id === fb.id ? {...f, deletedAt: new Date().toISOString(), deletedBy: currentUser?.name || (isOwner ? "Admin AppTip" : "Gestor")} : f);
                                   onUpdate("feedbacks", updated);
                                 }} style={{padding:"2px 6px",borderRadius:6,border:"1px solid var(--red)33",background:"transparent",color:"var(--red)",cursor:"pointer",fontSize:9,fontFamily:"'DM Mono',monospace"}}>✕</button>}
                               </div>
                             </div>
+                            {fb.notes && <div style={{fontSize:11,color:"var(--text2)",marginBottom:2}}>{fb.notes}</div>}
                             {fb.strengths && <div style={{fontSize:11,color:"var(--text2)",marginBottom:2}}><strong style={{color:"#10b981"}}>+</strong> {fb.strengths}</div>}
                             {fb.improvements && <div style={{fontSize:11,color:"var(--text2)",marginBottom:2}}><strong style={{color:"#f59e0b"}}>△</strong> {fb.improvements}</div>}
                             {fb.internalNotes && <div style={{fontSize:11,color:"var(--text3)",fontStyle:"italic"}}>{fb.internalNotes}</div>}
@@ -5806,7 +5824,12 @@ function EmpTimeline({ empId, employees, roles, schedules, incidents, feedbacks,
 
   // Feedbacks
   (feedbacks ?? []).filter(fb => fb.restaurantId === restaurantId && fb.employeeId === empId && !fb.deletedAt).forEach(fb => {
-    events.push({ date: fb.createdAt?.slice(0,10) ?? "2026-01-01", type: "feedback", cat: "Feedbacks", icon: "💬", label: `Feedback Q${fb.quarter}/${fb.year}`, desc: `${RATING_LABELS[fb.rating-1] ?? "—"}${fb.strengths ? " · " + fb.strengths.slice(0,60) : ""}` });
+    const isAval = fb.meetingType === "avaliação" || (!fb.meetingType && fb.rating > 0);
+    const fbDateStr = fb.meetingDate ?? fb.createdAt?.slice(0,10) ?? "2026-01-01";
+    const fbIcon = isAval ? "📋" : "💬";
+    const fbLabel = isAval ? "Conversa de avaliação" : "Conversa de alinhamento";
+    const fbDesc = isAval ? `${RATING_LABELS[fb.rating-1] ?? "—"}${fb.strengths ? " · " + fb.strengths.slice(0,60) : ""}` : (fb.notes ? fb.notes.slice(0,80) : "");
+    events.push({ date: fbDateStr, type: "feedback", cat: "Reuniões", icon: fbIcon, label: fbLabel, desc: fbDesc });
   });
 
   // Schedule events — aggregate per month
@@ -5836,7 +5859,7 @@ function EmpTimeline({ empId, employees, roles, schedules, incidents, feedbacks,
 
   events.sort((a, b) => b.date.localeCompare(a.date));
 
-  const filters = ["Todos", "Escala", "Ocorrências", "Promoções", "Feedbacks"];
+  const filters = ["Todos", "Escala", "Ocorrências", "Promoções", "Reuniões"];
   const filtered = filter === "Todos" ? events : events.filter(e => e.cat === filter);
 
   return (
@@ -6356,32 +6379,246 @@ function GoalsManager({ empId, employeeGoals, roles, restaurantId, onUpdate, cur
   );
 }
 
-function FeedbackForm({ restaurantId, employees, roles, onUpdate, feedbacks, currentUser, isOwner, preSelectedEmpId }) {
+function MeetingPlannerSection({ restaurantId, employees, roles, areas, meetingPlans, allMeetingPlans, feedbacks, onUpdate, currentUser, isOwner, mobileOnly }) {
+  const [showForm, setShowForm] = useState(false);
+  const [planType, setPlanType] = useState("alinhamento");
+  const [planDate, setPlanDate] = useState("");
+  const [planNote, setPlanNote] = useState("");
+  const [selectedAreas, setSelectedAreas] = useState([]);
+  const [selectedEmps, setSelectedEmps] = useState([]);
+
+  const toggleArea = (area) => {
+    const areaEmps = employees.filter(e => { const r = roles.find(rl => rl.id === e.roleId); return r?.area === area; }).map(e => e.id);
+    if (selectedAreas.includes(area)) {
+      setSelectedAreas(prev => prev.filter(a => a !== area));
+      setSelectedEmps(prev => prev.filter(id => !areaEmps.includes(id)));
+    } else {
+      setSelectedAreas(prev => [...prev, area]);
+      setSelectedEmps(prev => [...new Set([...prev, ...areaEmps])]);
+    }
+  };
+
+  const toggleEmp = (empId) => {
+    setSelectedEmps(prev => prev.includes(empId) ? prev.filter(id => id !== empId) : [...prev, empId]);
+  };
+
+  function handleCreatePlan() {
+    if (!planDate) { window.alert("Informe a data prevista."); return; }
+    if (selectedEmps.length === 0) { window.alert("Selecione ao menos um participante."); return; }
+    const plan = {
+      id: `${Date.now()}-${Math.random().toString(36).slice(2,6)}`,
+      restaurantId,
+      type: planType,
+      employeeIds: [...selectedEmps],
+      plannedDate: planDate,
+      note: planNote.trim(),
+      createdBy: isOwner ? "Admin AppTip" : (currentUser?.name ?? "Gestor"),
+      createdAt: new Date().toISOString(),
+      completedFeedbackIds: {},
+    };
+    onUpdate("meetingPlans", [...(allMeetingPlans ?? []), plan]);
+    setPlanDate(""); setPlanNote(""); setSelectedAreas([]); setSelectedEmps([]); setShowForm(false);
+  }
+
+  function handleDeletePlan(planId) {
+    if (!window.confirm("Excluir esta reunião planejada?")) return;
+    onUpdate("meetingPlans", (allMeetingPlans ?? []).filter(p => p.id !== planId));
+  }
+
+  // Determine status for each employee in a plan
+  function getEmpStatus(plan, empId) {
+    if (plan.completedFeedbackIds?.[empId]) return "realizada";
+    // Check if there's a matching feedback (same employee, same type, date within ±7 days)
+    const fb = (feedbacks ?? []).find(f => {
+      if (f.employeeId !== empId || f.deletedAt) return false;
+      const fbType = f.meetingType || (f.rating > 0 ? "avaliação" : "alinhamento");
+      if (fbType !== plan.type) return false;
+      const fbDate = f.meetingDate || f.createdAt?.slice(0,10);
+      if (!fbDate) return false;
+      const diff = Math.abs(new Date(fbDate+"T12:00:00") - new Date(plan.plannedDate+"T12:00:00"));
+      return diff < 7 * 86400000;
+    });
+    if (fb) return "realizada";
+    if (plan.plannedDate < today()) return "atrasada";
+    return "pendente";
+  }
+
+  const typeColor = planType === "avaliação" ? "#8b5cf6" : "#3b82f6";
+
+  // Group plans by month
+  const grouped = {};
+  meetingPlans.forEach(p => {
+    const mk = p.plannedDate?.slice(0,7) ?? "sem-data";
+    if (!grouped[mk]) grouped[mk] = [];
+    grouped[mk].push(p);
+  });
+
+  return (
+    <div>
+      {/* New plan button */}
+      <button onClick={()=>setShowForm(!showForm)} style={{...S.btnPrimary,marginBottom:16,fontSize:13,padding:"10px 20px",background:showForm?"var(--red)":"#3b82f6",borderColor:showForm?"var(--red)":"#3b82f6"}}>
+        {showForm ? "✕ Cancelar" : "+ Planejar reunião"}
+      </button>
+
+      {/* Form */}
+      {showForm && (
+        <div style={{...S.card,padding:"18px 20px",marginBottom:20,border:`1px solid ${typeColor}22`}}>
+          <h4 style={{color:"var(--text)",margin:"0 0 14px",fontSize:15,fontWeight:700}}>Nova reunião</h4>
+          {/* Type toggle */}
+          <div style={{display:"flex",gap:6,marginBottom:14}}>
+            {[["alinhamento","💬 Alinhamento","#3b82f6"],["avaliação","📋 Avaliação","#8b5cf6"]].map(([val,lbl,col]) => (
+              <button key={val} onClick={()=>setPlanType(val)} style={{
+                flex:1,padding:"10px",borderRadius:10,border:`2px solid ${planType===val?col:"var(--border)"}`,
+                background:planType===val?col+"14":"transparent",color:planType===val?col:"var(--text3)",
+                cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:12,fontWeight:planType===val?700:400
+              }}>{lbl}</button>
+            ))}
+          </div>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:12}}>
+            <div>
+              <label style={S.label}>Data prevista</label>
+              <input type="date" value={planDate} onChange={e=>setPlanDate(e.target.value)} style={S.input}/>
+            </div>
+            <div>
+              <label style={S.label}>Observação <span style={{fontWeight:400,color:"var(--text3)"}}>(opcional)</span></label>
+              <input value={planNote} onChange={e=>setPlanNote(e.target.value)} placeholder="Ex: Fechamento trimestral" style={S.input}/>
+            </div>
+          </div>
+          {/* Area selector */}
+          <label style={S.label}>Participantes</label>
+          <div style={{display:"flex",gap:6,marginBottom:10,flexWrap:"wrap"}}>
+            {areas.map(area => {
+              const active = selectedAreas.includes(area);
+              const col = AREA_COLORS[area] ?? "#888";
+              return (
+                <button key={area} onClick={()=>toggleArea(area)} style={{
+                  padding:"6px 14px",borderRadius:20,border:`1px solid ${active?col:"var(--border)"}`,
+                  background:active?col+"22":"transparent",color:active?col:"var(--text3)",
+                  cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:12,fontWeight:active?700:400
+                }}>{area}</button>
+              );
+            })}
+          </div>
+          {/* Employee chips */}
+          {selectedAreas.length > 0 && (
+            <div style={{display:"flex",gap:4,flexWrap:"wrap",marginBottom:14,maxHeight:160,overflowY:"auto",padding:4}}>
+              {employees.filter(e => {
+                const r = roles.find(rl => rl.id === e.roleId);
+                return selectedAreas.includes(r?.area);
+              }).map(emp => {
+                const active = selectedEmps.includes(emp.id);
+                return (
+                  <button key={emp.id} onClick={()=>toggleEmp(emp.id)} style={{
+                    padding:"4px 10px",borderRadius:8,border:`1px solid ${active?"var(--ac)":"var(--border)"}`,
+                    background:active?"var(--ac-bg,#d4a01711)":"transparent",color:active?"var(--ac)":"var(--text3)",
+                    cursor:"pointer",fontSize:11,fontFamily:"'DM Mono',monospace",fontWeight:active?600:400
+                  }}>{active ? "✓ " : ""}{emp.name}</button>
+                );
+              })}
+            </div>
+          )}
+          {selectedEmps.length > 0 && <div style={{fontSize:11,color:"var(--text3)",marginBottom:10}}>{selectedEmps.length} participante{selectedEmps.length!==1?"s":""} selecionado{selectedEmps.length!==1?"s":""}</div>}
+          <button onClick={handleCreatePlan} style={{...S.btnPrimary,width:"auto",padding:"10px 24px",background:typeColor,borderColor:typeColor}}>Criar reunião</button>
+        </div>
+      )}
+
+      {/* Plans list grouped by month */}
+      {Object.keys(grouped).length === 0 && !showForm && (
+        <div style={{...S.card,textAlign:"center",padding:40}}>
+          <div style={{fontSize:36,marginBottom:12}}>📅</div>
+          <p style={{color:"var(--text3)",fontSize:14}}>Nenhuma reunião planejada ainda.</p>
+          <p style={{color:"var(--text3)",fontSize:12}}>Clique em "+ Planejar reunião" para começar.</p>
+        </div>
+      )}
+      {Object.entries(grouped).sort(([a],[b])=>b.localeCompare(a)).map(([mk, plans]) => {
+        const [y,m] = mk.split("-");
+        const monthName = new Date(parseInt(y), parseInt(m)-1, 15).toLocaleDateString("pt-BR", {month:"long", year:"numeric"});
+        return (
+          <div key={mk} style={{marginBottom:20}}>
+            <h4 style={{color:"var(--text)",fontSize:14,fontWeight:700,margin:"0 0 10px",textTransform:"capitalize"}}>{monthName}</h4>
+            {plans.map(plan => {
+              const pColor = plan.type === "avaliação" ? "#8b5cf6" : "#3b82f6";
+              const pIcon = plan.type === "avaliação" ? "📋" : "💬";
+              const totalEmps = (plan.employeeIds ?? []).length;
+              const doneCount = (plan.employeeIds ?? []).filter(eid => getEmpStatus(plan, eid) === "realizada").length;
+              const lateCount = (plan.employeeIds ?? []).filter(eid => getEmpStatus(plan, eid) === "atrasada").length;
+              const dateStr = plan.plannedDate ? new Date(plan.plannedDate+"T12:00:00").toLocaleDateString("pt-BR") : "—";
+              const isPast = plan.plannedDate < today();
+              return (
+                <div key={plan.id} style={{...S.card,padding:"14px 16px",marginBottom:8,border:`1px solid ${isPast && doneCount < totalEmps ? "#f59e0b33" : pColor+"22"}`}}>
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
+                    <div style={{display:"flex",alignItems:"center",gap:8}}>
+                      <span style={{fontSize:16}}>{pIcon}</span>
+                      <span style={{color:pColor,fontWeight:700,fontSize:13}}>Conversa de {plan.type}</span>
+                      <span style={{color:"var(--text3)",fontSize:11}}>— {dateStr}</span>
+                    </div>
+                    <div style={{display:"flex",alignItems:"center",gap:6}}>
+                      <span style={{fontSize:10,color:doneCount===totalEmps?"#10b981":lateCount>0?"#f59e0b":"var(--text3)",fontWeight:700}}>
+                        {doneCount}/{totalEmps} {doneCount===totalEmps?"✓":""}
+                      </span>
+                      <button onClick={()=>handleDeletePlan(plan.id)} style={{padding:"2px 6px",borderRadius:6,border:"1px solid var(--red)33",background:"transparent",color:"var(--red)",cursor:"pointer",fontSize:9,fontFamily:"'DM Mono',monospace"}}>✕</button>
+                    </div>
+                  </div>
+                  {plan.note && <div style={{fontSize:11,color:"var(--text3)",marginBottom:8,fontStyle:"italic"}}>{plan.note}</div>}
+                  <div style={{display:"flex",gap:4,flexWrap:"wrap"}}>
+                    {(plan.employeeIds ?? []).map(eid => {
+                      const emp = employees.find(e => e.id === eid);
+                      const status = getEmpStatus(plan, eid);
+                      const sColor = status === "realizada" ? "#10b981" : status === "atrasada" ? "#f59e0b" : "var(--text3)";
+                      const sIcon = status === "realizada" ? "✓" : status === "atrasada" ? "⏰" : "○";
+                      return (
+                        <span key={eid} style={{fontSize:10,padding:"3px 8px",borderRadius:6,border:`1px solid ${sColor}33`,background:sColor+"08",color:sColor,fontWeight:status==="realizada"?700:400}}>
+                          {sIcon} {emp?.name?.split(" ")[0] ?? eid}
+                        </span>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function FeedbackForm({ restaurantId, employees, roles, onUpdate, feedbacks, currentUser, isOwner, preSelectedEmpId, allMeetingPlans }) {
   const restEmps = employees.filter(e => e.restaurantId === restaurantId && !(e.inactive && e.inactiveFrom && e.inactiveFrom <= today()));
-  const now = new Date();
   const [empId, setEmpId] = useState(preSelectedEmpId ?? "");
+  const [meetingType, setMeetingType] = useState("alinhamento");
+  const [meetingDate, setMeetingDate] = useState(today());
+  const [notes, setNotes] = useState("");
   const [rating, setRating] = useState(0);
   const [strengths, setStrengths] = useState("");
   const [improvements, setImprovements] = useState("");
   const [otherNotes, setOtherNotes] = useState("");
-  const [quarter, setQuarter] = useState(Math.ceil((now.getMonth()+1)/3));
-  const [fbYear, setFbYear] = useState(now.getFullYear());
-  const [nextFbDate, setNextFbDate] = useState("");
+  const [showNextSuggestion, setShowNextSuggestion] = useState(false);
+  const [suggestedNextDate, setSuggestedNextDate] = useState("");
+  const [lastRegisteredEmpId, setLastRegisteredEmpId] = useState("");
+
+  const isAvaliacao = meetingType === "avaliação";
 
   function handleSubmit() {
     if (!empId) { window.alert("Selecione um empregado."); return; }
-    if (rating < 1) { window.alert("Selecione a avaliação."); return; }
+    if (!meetingDate) { window.alert("Informe a data da reunião."); return; }
+    if (isAvaliacao && rating < 1) { window.alert("Selecione a avaliação."); return; }
     const fb = {
       id: `${Date.now()}-${Math.random().toString(36).slice(2,6)}`,
       restaurantId,
       employeeId: empId,
-      quarter,
-      year: fbYear,
-      rating,
-      strengths: strengths.trim(),
-      improvements: improvements.trim(),
-      internalNotes: otherNotes.trim(),
-      nextFeedbackDate: nextFbDate || null,
+      meetingType,
+      meetingDate,
+      notes: notes.trim(),
+      // Campos de avaliação (só preenchidos quando é avaliação)
+      rating: isAvaliacao ? rating : null,
+      strengths: isAvaliacao ? strengths.trim() : "",
+      improvements: isAvaliacao ? improvements.trim() : "",
+      internalNotes: isAvaliacao ? otherNotes.trim() : "",
+      // Compatibilidade — preencher quarter/year automaticamente
+      quarter: Math.ceil((new Date(meetingDate+"T12:00:00").getMonth()+1)/3),
+      year: new Date(meetingDate+"T12:00:00").getFullYear(),
+      nextFeedbackDate: null,
       goal: "",
       targetRoleId: null,
       devChecklist: [],
@@ -6389,16 +6626,49 @@ function FeedbackForm({ restaurantId, employees, roles, onUpdate, feedbacks, cur
       createdBy: isOwner ? "Admin AppTip" : (currentUser?.name ?? "Gestor"),
     };
     onUpdate("feedbacks", [...(feedbacks ?? []), fb]);
-    setEmpId(""); setRating(0); setStrengths(""); setImprovements(""); setOtherNotes(""); setNextFbDate("");
+    // Suggest next meeting
+    const daysAhead = isAvaliacao ? 90 : 15;
+    const nextD = new Date(meetingDate+"T12:00:00");
+    nextD.setDate(nextD.getDate() + daysAhead);
+    setSuggestedNextDate(nextD.toISOString().slice(0,10));
+    setLastRegisteredEmpId(empId);
+    setShowNextSuggestion(true);
+    setEmpId(""); setRating(0); setStrengths(""); setImprovements(""); setOtherNotes(""); setNotes(""); setMeetingDate(today());
   }
 
-  const yearOpts = [];
-  for (let yr = now.getFullYear(); yr >= now.getFullYear() - 2; yr--) yearOpts.push(yr);
+  function handleCreateNextPlan() {
+    if (!suggestedNextDate || !lastRegisteredEmpId) return;
+    const plan = {
+      id: `${Date.now()}-${Math.random().toString(36).slice(2,6)}`,
+      restaurantId,
+      type: meetingType || "alinhamento",
+      employeeIds: [lastRegisteredEmpId],
+      plannedDate: suggestedNextDate,
+      note: "Sugestão automática",
+      createdBy: isOwner ? "Admin AppTip" : (currentUser?.name ?? "Gestor"),
+      createdAt: new Date().toISOString(),
+      completedFeedbackIds: {},
+    };
+    onUpdate("meetingPlans", [...(allMeetingPlans ?? []), plan]);
+    setShowNextSuggestion(false);
+  }
+
+  const typeColor = isAvaliacao ? "#8b5cf6" : "#3b82f6";
 
   return (
-    <div style={{...S.card, padding:"18px 20px"}}>
-      <h4 style={{color:"var(--text)",margin:"0 0 14px",fontSize:15,fontWeight:700}}>Registrar feedback trimestral</h4>
-      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:10,marginBottom:12}}>
+    <div style={{...S.card, padding:"18px 20px", border:`1px solid ${typeColor}22`}}>
+      <h4 style={{color:"var(--text)",margin:"0 0 14px",fontSize:15,fontWeight:700}}>Registrar reunião</h4>
+      {/* Tipo toggle */}
+      <div style={{display:"flex",gap:6,marginBottom:14}}>
+        {[["alinhamento","💬 Alinhamento","#3b82f6"],["avaliação","📋 Avaliação","#8b5cf6"]].map(([val,lbl,col]) => (
+          <button key={val} onClick={()=>setMeetingType(val)} style={{
+            flex:1,padding:"10px",borderRadius:10,border:`2px solid ${meetingType===val?col:"var(--border)"}`,
+            background:meetingType===val?col+"14":"transparent",color:meetingType===val?col:"var(--text3)",
+            cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:12,fontWeight:meetingType===val?700:400,transition:"all 0.15s"
+          }}>{lbl}</button>
+        ))}
+      </div>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:12}}>
         <div>
           <label style={S.label}>Empregado</label>
           <select value={empId} onChange={e=>setEmpId(e.target.value)} style={S.input}>
@@ -6407,62 +6677,69 @@ function FeedbackForm({ restaurantId, employees, roles, onUpdate, feedbacks, cur
           </select>
         </div>
         <div>
-          <label style={S.label}>Trimestre</label>
-          <select value={quarter} onChange={e=>setQuarter(Number(e.target.value))} style={S.input}>
-            <option value={1}>Q1 (Jan–Mar)</option>
-            <option value={2}>Q2 (Abr–Jun)</option>
-            <option value={3}>Q3 (Jul–Set)</option>
-            <option value={4}>Q4 (Out–Dez)</option>
-          </select>
-        </div>
-        <div>
-          <label style={S.label}>Ano</label>
-          <select value={fbYear} onChange={e=>setFbYear(Number(e.target.value))} style={S.input}>
-            {yearOpts.map(yr => <option key={yr} value={yr}>{yr}</option>)}
-          </select>
-        </div>
-      </div>
-      <div style={{marginBottom:14}}>
-        <label style={S.label}>Avaliação</label>
-        <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
-          {RATING_LABELS.map((label, i) => {
-            const val = i + 1;
-            const active = rating === val;
-            const color = RATING_COLORS[i];
-            return (
-              <button key={val} onClick={()=>setRating(val)} style={{
-                padding:"8px 14px",fontSize:12,fontWeight:active?700:500,border:`2px solid ${active?color:"var(--border)"}`,
-                borderRadius:8,cursor:"pointer",background:active?color+"18":"var(--bg)",color:active?color:"var(--text2)",
-                transition:"all 0.15s",lineHeight:1.2,
-              }}>{label}</button>
-            );
-          })}
+          <label style={S.label}>Data da reunião</label>
+          <input type="date" value={meetingDate} onChange={e=>setMeetingDate(e.target.value)} style={S.input}/>
         </div>
       </div>
       <div style={{marginBottom:12}}>
-        <label style={S.label}>Pontos positivos</label>
-        <textarea value={strengths} onChange={e=>setStrengths(e.target.value)} rows={2} placeholder="O que o empregado faz bem..." style={{...S.input,resize:"vertical"}}/>
+        <label style={S.label}>Anotações / pauta</label>
+        <textarea value={notes} onChange={e=>setNotes(e.target.value)} rows={2} placeholder="O que foi conversado..." style={{...S.input,resize:"vertical"}}/>
       </div>
-      <div style={{marginBottom:12}}>
-        <label style={S.label}>Pontos a melhorar</label>
-        <textarea value={improvements} onChange={e=>setImprovements(e.target.value)} rows={2} placeholder="Onde pode evoluir..." style={{...S.input,resize:"vertical"}}/>
-      </div>
-      <div style={{marginBottom:12}}>
-        <label style={S.label}>Outras notas</label>
-        <textarea value={otherNotes} onChange={e=>setOtherNotes(e.target.value)} rows={2} placeholder="Observações adicionais..." style={{...S.input,resize:"vertical"}}/>
-      </div>
-      <div style={{marginBottom:14}}>
-        <label style={S.label}>Próximo feedback agendado <span style={{fontWeight:400,color:"var(--text3)"}}>(opcional)</span></label>
-        <input type="date" value={nextFbDate} onChange={e=>setNextFbDate(e.target.value)} style={{...S.input,maxWidth:200}}/>
-      </div>
-      <button onClick={handleSubmit} style={{...S.btnPrimary,width:"auto",padding:"10px 24px"}}>Registrar feedback</button>
+      {isAvaliacao && <>
+        <div style={{marginBottom:14}}>
+          <label style={S.label}>Avaliação</label>
+          <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+            {RATING_LABELS.map((label, i) => {
+              const val = i + 1;
+              const active = rating === val;
+              const color = RATING_COLORS[i];
+              return (
+                <button key={val} onClick={()=>setRating(val)} style={{
+                  padding:"8px 14px",fontSize:12,fontWeight:active?700:500,border:`2px solid ${active?color:"var(--border)"}`,
+                  borderRadius:8,cursor:"pointer",background:active?color+"18":"var(--bg)",color:active?color:"var(--text2)",
+                  transition:"all 0.15s",lineHeight:1.2,
+                }}>{label}</button>
+              );
+            })}
+          </div>
+        </div>
+        <div style={{marginBottom:12}}>
+          <label style={S.label}>Pontos positivos</label>
+          <textarea value={strengths} onChange={e=>setStrengths(e.target.value)} rows={2} placeholder="O que o empregado faz bem..." style={{...S.input,resize:"vertical"}}/>
+        </div>
+        <div style={{marginBottom:12}}>
+          <label style={S.label}>Pontos a melhorar</label>
+          <textarea value={improvements} onChange={e=>setImprovements(e.target.value)} rows={2} placeholder="Onde pode evoluir..." style={{...S.input,resize:"vertical"}}/>
+        </div>
+        <div style={{marginBottom:12}}>
+          <label style={S.label}>Notas internas</label>
+          <textarea value={otherNotes} onChange={e=>setOtherNotes(e.target.value)} rows={2} placeholder="Observações adicionais..." style={{...S.input,resize:"vertical"}}/>
+        </div>
+      </>}
+      <button onClick={handleSubmit} style={{...S.btnPrimary,width:"auto",padding:"10px 24px",background:typeColor,borderColor:typeColor}}>
+        {isAvaliacao ? "Registrar avaliação" : "Registrar alinhamento"}
+      </button>
+      {/* Suggestion to plan next meeting */}
+      {showNextSuggestion && (
+        <div style={{marginTop:12,padding:"12px 14px",borderRadius:10,border:"1px solid #10b98133",background:"#10b98108"}}>
+          <div style={{fontSize:12,color:"#10b981",fontWeight:700,marginBottom:6}}>✓ Reunião registrada!</div>
+          <div style={{fontSize:11,color:"var(--text2)",marginBottom:8}}>
+            Agendar próxima para <strong>{new Date(suggestedNextDate+"T12:00:00").toLocaleDateString("pt-BR")}</strong>?
+          </div>
+          <div style={{display:"flex",gap:6}}>
+            <button onClick={handleCreateNextPlan} style={{padding:"6px 14px",borderRadius:8,border:"1px solid #10b98144",background:"#10b98118",color:"#10b981",cursor:"pointer",fontSize:11,fontFamily:"'DM Mono',monospace",fontWeight:700}}>Sim, agendar</button>
+            <input type="date" value={suggestedNextDate} onChange={e=>setSuggestedNextDate(e.target.value)} style={{...S.input,fontSize:11,padding:"4px 8px",maxWidth:140}}/>
+            <button onClick={()=>setShowNextSuggestion(false)} style={{padding:"6px 10px",borderRadius:8,border:"1px solid var(--border)",background:"transparent",color:"var(--text3)",cursor:"pointer",fontSize:11,fontFamily:"'DM Mono',monospace"}}>Não</button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
 
 
 // ── Gamified Employee Trail View ──
-function EmpTrilhaView({ empId, employees, roles, schedules, incidents, feedbacks, devChecklists, restaurantId, onUpdate, employeeGoals }) {
+function EmpTrilhaView({ empId, employees, roles, schedules, incidents, feedbacks, devChecklists, restaurantId, onUpdate, employeeGoals, meetingPlans }) {
   const emp = employees.find(e => e.id === empId);
   const role = emp ? roles.find(r => r.id === emp.roleId) : null;
   const admDate = emp?.admission ? new Date(emp.admission+"T12:00:00") : null;
@@ -6528,9 +6805,15 @@ function EmpTrilhaView({ empId, employees, roles, schedules, incidents, feedback
         events.push({ date: d, label: lb, icon: ic });
       }
     });
-    // Feedbacks — texto genérico, sem nota/avaliação
+    // Reuniões — texto genérico, sem nota/avaliação
     (feedbacks ?? []).filter(f => f.restaurantId === restaurantId && f.employeeId === empId && !f.deletedAt && f.createdAt).forEach(f => {
-      events.push({ date: new Date(f.createdAt), label: "Conversa de desenvolvimento realizada", icon: "💬" });
+      const isAval = f.meetingType === "avaliação" || (!f.meetingType && f.rating > 0);
+      events.push({ date: new Date(f.meetingDate ? f.meetingDate+"T12:00:00" : f.createdAt), label: isAval ? "Conversa de avaliação realizada" : "Conversa de alinhamento realizada", icon: isAval ? "📋" : "💬" });
+    });
+    // Reuniões planejadas futuras
+    (meetingPlans ?? []).filter(p => p.restaurantId === restaurantId && (p.employeeIds ?? []).includes(empId) && p.plannedDate >= today()).forEach(p => {
+      const isAval = p.type === "avaliação";
+      events.push({ date: new Date(p.plannedDate+"T12:00:00"), label: isAval ? "Conversa de avaliação prevista" : "Conversa de alinhamento prevista", icon: "📅", future: true });
     });
     // Objetivos concluídos
     myGoalsAll.filter(g => g.status === "completed").forEach(g => {
@@ -6662,26 +6945,47 @@ function EmpTrilhaView({ empId, employees, roles, schedules, incidents, feedback
         </div>
       )}
 
-      {/* Próximo feedback */}
-      {nextFbInfo && (() => {
-        const nfd = new Date(nextFbInfo + "T00:00:00");
-        const todayD = new Date(); todayD.setHours(0,0,0,0);
-        const diff = Math.round((nfd - todayD) / 86400000);
-        const isOverdue = diff < 0;
-        return (
-          <div style={{...S.card,marginBottom:16,padding:"14px 16px",display:"flex",alignItems:"center",gap:10,borderLeft:`4px solid ${isOverdue?"#f59e0b":"#3b82f6"}`}}>
-            <span style={{fontSize:20}}>{isOverdue ? "📋" : "📅"}</span>
-            <div>
-              <div style={{color:"var(--text)",fontWeight:600,fontSize:13}}>
-                {isOverdue ? "Feedback pendente" : "Próximo feedback"}
-              </div>
-              <div style={{color:"var(--text3)",fontSize:12}}>
-                {isOverdue
-                  ? `Agendado para ${nfd.toLocaleDateString("pt-BR")}`
-                  : diff === 0 ? "Agendado para hoje"
-                  : `Em ${diff} dia${diff!==1?"s":""} · ${nfd.toLocaleDateString("pt-BR")}`}
+      {/* Próximas reuniões planejadas */}
+      {(() => {
+        const upcoming = (meetingPlans ?? []).filter(p => p.restaurantId === restaurantId && (p.employeeIds ?? []).includes(empId) && p.plannedDate >= today()).sort((a,b)=>a.plannedDate.localeCompare(b.plannedDate)).slice(0,3);
+        if (upcoming.length === 0 && nextFbInfo) {
+          // Fallback: old nextFbDate from legacy feedbacks
+          const nfd = new Date(nextFbInfo + "T00:00:00");
+          const todayD = new Date(); todayD.setHours(0,0,0,0);
+          const diff = Math.round((nfd - todayD) / 86400000);
+          return (
+            <div style={{...S.card,marginBottom:16,padding:"14px 16px",display:"flex",alignItems:"center",gap:10,borderLeft:"4px solid #3b82f6"}}>
+              <span style={{fontSize:20}}>📅</span>
+              <div>
+                <div style={{color:"var(--text)",fontWeight:600,fontSize:13}}>Próxima reunião</div>
+                <div style={{color:"var(--text3)",fontSize:12}}>{diff <= 0 ? `Agendada para ${nfd.toLocaleDateString("pt-BR")}` : `Em ${diff} dia${diff!==1?"s":""} · ${nfd.toLocaleDateString("pt-BR")}`}</div>
               </div>
             </div>
+          );
+        }
+        if (upcoming.length === 0) return null;
+        return (
+          <div style={{marginBottom:16}}>
+            {upcoming.map(p => {
+              const pDate = new Date(p.plannedDate+"T12:00:00");
+              const todayD = new Date(); todayD.setHours(0,0,0,0);
+              const diff = Math.round((pDate - todayD) / 86400000);
+              const isAval = p.type === "avaliação";
+              const pColor = isAval ? "#8b5cf6" : "#3b82f6";
+              return (
+                <div key={p.id} style={{...S.card,padding:"14px 16px",marginBottom:8,display:"flex",alignItems:"center",gap:10,borderLeft:`4px solid ${pColor}`}}>
+                  <span style={{fontSize:20}}>📅</span>
+                  <div>
+                    <div style={{color:"var(--text)",fontWeight:600,fontSize:13}}>
+                      {isAval ? "Conversa de avaliação prevista" : "Conversa de alinhamento prevista"}
+                    </div>
+                    <div style={{color:"var(--text3)",fontSize:12}}>
+                      {diff === 0 ? "Hoje" : diff === 1 ? "Amanhã" : `Em ${diff} dia${diff!==1?"s":""}`} · {pDate.toLocaleDateString("pt-BR")}
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
           </div>
         );
       })()}
@@ -7082,12 +7386,14 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
     canSched && ["schedule",    "📅 Escala"],
     ["horarios",    "🕐 Horários"],
     ["employees",   "👥 Equipe"],
+    ["reunioes",    "📅 Reuniões"],
   ].filter(Boolean) : [
     canTips                                           && ["dashboard",   "📊 Dashboard"],
     canTips                                           && ["tips",        "💸 Gorjetas"],
     canSched                                          && ["schedule",    "📅 Escala"],
     (isOwner || tabVisible("roles"))           && ["roles",       "🏷️ Cargos"],
     (isOwner || canTips || tabVisible("employees")) && ["employees","👥 Equipe"],
+    (isOwner || canTips || tabVisible("employees")) && ["reunioes","📅 Reuniões"],
     (isOwner || tabVisible("horarios"))          && ["horarios",    "🕐 Horários"],
     (isOwner || (perms.vt !== false && tabVisible("vt"))) && ["vt",          "🚌 Vale Transporte"],
     (isOwner || tabVisible("faq"))               && ["faq",         "❓ FAQ"],
@@ -7096,7 +7402,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
     isDP                                       && ["notificacoes",`📬 Caixa${inboxUnread>0?` (${inboxUnread})`:""}`],
     isDP                                       && ["dp_gestores", "👔 Gestores"],
     (canTips || isOwner)                       && ["config",       "⚙️ Configurações"],
-  ].filter(Boolean).filter(([id]) => !mobileOnly || ["dashboard","schedule","horarios","vt","notificacoes","employees"].includes(id));
+  ].filter(Boolean).filter(([id]) => !mobileOnly || ["dashboard","schedule","horarios","vt","notificacoes","employees","reunioes"].includes(id));
 
   const [tab, setTab] = useState("dashboard");
 
@@ -7961,6 +8267,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
               vtPayments={data?.vtPayments??{}} vtConfig={data?.vtConfig??{}} scheduleStatus={data?.scheduleStatus??{}}
               employeeGoals={data?.employeeGoals??{}}
               delays={data?.delays??{}}
+              meetingPlans={data?.meetingPlans??[]}
               onGenerateDismissalReport={async (emp) => {
                 try {
                   await loadScript("https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js");
@@ -8335,6 +8642,35 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
             />
           </div>
         )}
+
+        {/* REUNIÕES — Planejamento de reuniões */}
+        {tab === "reunioes" && (() => {
+          const restEmps = employees.filter(e => e.restaurantId === rid && !e.inactive);
+          const areas = [...new Set(restRoles.map(r => r.area).filter(Boolean))];
+          const plans = (data?.meetingPlans ?? []).filter(p => p.restaurantId === rid).sort((a,b) => (b.plannedDate??"").localeCompare(a.plannedDate??""));
+          // Form state via refs is not possible in this inline pattern, so we use a sub-component approach
+          // We'll render a self-contained section
+          return (
+            <div>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:12,marginBottom:16}}>
+                <h3 style={{color:"var(--text)",margin:0,fontSize:mobileOnly?16:20}}>📅 Reuniões</h3>
+              </div>
+              <MeetingPlannerSection
+                restaurantId={rid}
+                employees={restEmps}
+                roles={restRoles}
+                areas={areas}
+                meetingPlans={plans}
+                allMeetingPlans={data?.meetingPlans ?? []}
+                feedbacks={data?.feedbacks ?? []}
+                onUpdate={onUpdate}
+                currentUser={currentUser}
+                isOwner={isOwner}
+                mobileOnly={mobileOnly}
+              />
+            </div>
+          );
+        })()}
 
         {/* CARGOS (super only) */}
         {tab === "roles" && (
@@ -14257,6 +14593,7 @@ export default function App() {
   const [employeeGoals,       setEmployeeGoals]       = useState({});
   const [delays,              setDelays]              = useState({});
   const [tipApprovals,        setTipApprovals]        = useState({});
+  const [meetingPlans,        setMeetingPlans]        = useState([]);
 
   useEffect(() => {
     const savedId = currentUserId;
@@ -14284,7 +14621,7 @@ export default function App() {
       setLoadProgress("Preparando o sistema...");
 
       const keys = keyNames;
-      const map = { owners:setOwners, managers:setManagers, restaurants:setRestaurants, employees:setEmployees, roles:setRoles, tips:setTips, splits:setSplits, schedules:setSchedules, communications:setCommunications, commAcks:setCommAcks, faq:setFaq, dpMessages:setDpMessages, workSchedules:setWorkSchedules, notifications:setNotifications, noTipDays:setNoTipDays, trash:setTrash, schedTemplates:setSchedTemplates, schedDrafts:setSchedDrafts, scheduleVersions:setScheduleVersions, tipVersions:setTipVersions, vtConfig:setVtConfig, vtMonthly:setVtMonthly, vtPayments:setVtPayments, incidents:setIncidents, feedbacks:setFeedbacks, devChecklists:setDevChecklists, scheduleAdjustments:setScheduleAdjustments, scheduleStatus:setScheduleStatus, schedulePrevista:setSchedulePrevista, employeeGoals:setEmployeeGoals, delays:setDelays, tipApprovals:setTipApprovals };
+      const map = { owners:setOwners, managers:setManagers, restaurants:setRestaurants, employees:setEmployees, roles:setRoles, tips:setTips, splits:setSplits, schedules:setSchedules, communications:setCommunications, commAcks:setCommAcks, faq:setFaq, dpMessages:setDpMessages, workSchedules:setWorkSchedules, notifications:setNotifications, noTipDays:setNoTipDays, trash:setTrash, schedTemplates:setSchedTemplates, schedDrafts:setSchedDrafts, scheduleVersions:setScheduleVersions, tipVersions:setTipVersions, vtConfig:setVtConfig, vtMonthly:setVtMonthly, vtPayments:setVtPayments, incidents:setIncidents, feedbacks:setFeedbacks, devChecklists:setDevChecklists, scheduleAdjustments:setScheduleAdjustments, scheduleStatus:setScheduleStatus, schedulePrevista:setSchedulePrevista, employeeGoals:setEmployeeGoals, delays:setDelays, tipApprovals:setTipApprovals, meetingPlans:setMeetingPlans };
       const loaded_data = {};
       let successCount = 0;
       keys.forEach((k, i) => {
@@ -14432,12 +14769,12 @@ export default function App() {
     return () => { clearTimeout(slowTimer); clearTimeout(verySlowTimer); };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const data = { owners, managers, restaurants, employees, roles, tips, splits, schedules, communications, commAcks, faq, dpMessages, workSchedules, notifications, noTipDays, trash, schedTemplates, schedDrafts, scheduleVersions, tipVersions, vtConfig, vtMonthly, vtPayments, incidents, feedbacks, devChecklists, scheduleAdjustments, scheduleStatus, schedulePrevista, employeeGoals, delays, tipApprovals };
+  const data = { owners, managers, restaurants, employees, roles, tips, splits, schedules, communications, commAcks, faq, dpMessages, workSchedules, notifications, noTipDays, trash, schedTemplates, schedDrafts, scheduleVersions, tipVersions, vtConfig, vtMonthly, vtPayments, incidents, feedbacks, devChecklists, scheduleAdjustments, scheduleStatus, schedulePrevista, employeeGoals, delays, tipApprovals, meetingPlans };
 
   async function handleUpdate(field, value) {
     if (field === "_toast") { setToast(value); return; }
-    const setters = { owners:setOwners, managers:setManagers, restaurants:setRestaurants, employees:setEmployees, roles:setRoles, tips:setTips, splits:setSplits, schedules:setSchedules, communications:setCommunications, commAcks:setCommAcks, faq:setFaq, dpMessages:setDpMessages, workSchedules:setWorkSchedules, notifications:setNotifications, noTipDays:setNoTipDays, trash:setTrash, schedTemplates:setSchedTemplates, schedDrafts:setSchedDrafts, scheduleVersions:setScheduleVersions, tipVersions:setTipVersions, vtConfig:setVtConfig, vtMonthly:setVtMonthly, vtPayments:setVtPayments, incidents:setIncidents, feedbacks:setFeedbacks, devChecklists:setDevChecklists, scheduleAdjustments:setScheduleAdjustments, scheduleStatus:setScheduleStatus, schedulePrevista:setSchedulePrevista, employeeGoals:setEmployeeGoals, delays:setDelays, tipApprovals:setTipApprovals };
-    const keys    = { owners:K.owners, managers:K.managers, restaurants:K.restaurants, employees:K.employees, roles:K.roles, tips:K.tips, splits:K.splits, schedules:K.schedules, communications:K.communications, commAcks:K.commAcks, faq:K.faq, dpMessages:K.dpMessages, workSchedules:K.workSchedules, notifications:K.notifications, noTipDays:K.noTipDays, trash:K.trash, schedTemplates:K.schedTemplates, schedDrafts:K.schedDrafts, scheduleVersions:K.scheduleVersions, tipVersions:K.tipVersions, vtConfig:K.vtConfig, vtMonthly:K.vtMonthly, vtPayments:K.vtPayments, incidents:K.incidents, feedbacks:K.feedbacks, devChecklists:K.devChecklists, scheduleAdjustments:K.scheduleAdjustments, scheduleStatus:K.scheduleStatus, schedulePrevista:K.schedulePrevista, employeeGoals:K.employeeGoals, delays:K.delays, tipApprovals:K.tipApprovals };
+    const setters = { owners:setOwners, managers:setManagers, restaurants:setRestaurants, employees:setEmployees, roles:setRoles, tips:setTips, splits:setSplits, schedules:setSchedules, communications:setCommunications, commAcks:setCommAcks, faq:setFaq, dpMessages:setDpMessages, workSchedules:setWorkSchedules, notifications:setNotifications, noTipDays:setNoTipDays, trash:setTrash, schedTemplates:setSchedTemplates, schedDrafts:setSchedDrafts, scheduleVersions:setScheduleVersions, tipVersions:setTipVersions, vtConfig:setVtConfig, vtMonthly:setVtMonthly, vtPayments:setVtPayments, incidents:setIncidents, feedbacks:setFeedbacks, devChecklists:setDevChecklists, scheduleAdjustments:setScheduleAdjustments, scheduleStatus:setScheduleStatus, schedulePrevista:setSchedulePrevista, employeeGoals:setEmployeeGoals, delays:setDelays, tipApprovals:setTipApprovals, meetingPlans:setMeetingPlans };
+    const keys    = { owners:K.owners, managers:K.managers, restaurants:K.restaurants, employees:K.employees, roles:K.roles, tips:K.tips, splits:K.splits, schedules:K.schedules, communications:K.communications, commAcks:K.commAcks, faq:K.faq, dpMessages:K.dpMessages, workSchedules:K.workSchedules, notifications:K.notifications, noTipDays:K.noTipDays, trash:K.trash, schedTemplates:K.schedTemplates, schedDrafts:K.schedDrafts, scheduleVersions:K.scheduleVersions, tipVersions:K.tipVersions, vtConfig:K.vtConfig, vtMonthly:K.vtMonthly, vtPayments:K.vtPayments, incidents:K.incidents, feedbacks:K.feedbacks, devChecklists:K.devChecklists, scheduleAdjustments:K.scheduleAdjustments, scheduleStatus:K.scheduleStatus, schedulePrevista:K.schedulePrevista, employeeGoals:K.employeeGoals, delays:K.delays, tipApprovals:K.tipApprovals, meetingPlans:K.meetingPlans };
     // Support functional updates to prevent stale-state race conditions:
     // When value is a function, it receives the latest state (like setState(prev => ...))
     let resolvedValue;
@@ -14553,7 +14890,7 @@ export default function App() {
             return () => { setCurrentUser(emp); setUserRole("employee"); localStorage.setItem("apptip_role","employee"); localStorage.setItem("apptip_userid",emp.id); localStorage.setItem("apptip_empid",emp.id); setView("employee"); };
           })()} />
       ))}
-      {view === "employee" && <EmployeePortal employees={employees} roles={roles} tips={tips} schedules={schedules} splits={splits} restaurants={restaurants} communications={communications} commAcks={commAcks} faq={faq} dpMessages={dpMessages} workSchedules={workSchedules} incidents={incidents} feedbacks={feedbacks} devChecklists={devChecklists} employeeGoals={employeeGoals} tipApprovals={tipApprovals} delays={delays} onBack={doLogout} onUpdateEmployee={emp=>{const next=employees.map(e=>e.id===emp.id?emp:e);handleUpdate("employees",next);}} onUpdate={handleUpdate} toggleTheme={toggleTheme} theme={theme}
+      {view === "employee" && <EmployeePortal employees={employees} roles={roles} tips={tips} schedules={schedules} splits={splits} restaurants={restaurants} communications={communications} commAcks={commAcks} faq={faq} dpMessages={dpMessages} workSchedules={workSchedules} incidents={incidents} feedbacks={feedbacks} devChecklists={devChecklists} employeeGoals={employeeGoals} tipApprovals={tipApprovals} delays={delays} meetingPlans={meetingPlans} onBack={doLogout} onUpdateEmployee={emp=>{const next=employees.map(e=>e.id===emp.id?emp:e);handleUpdate("employees",next);}} onUpdate={handleUpdate} toggleTheme={toggleTheme} theme={theme}
         onSwitchToManager={(() => {
           const cpf = currentUser?.cpf?.replace(/\D/g,"");
           let mgr = cpf ? managers.find(m => m.cpf?.replace(/\D/g,"") === cpf) : null;
