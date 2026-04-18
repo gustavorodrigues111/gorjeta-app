@@ -3,7 +3,7 @@ import { useState, useEffect, Component } from "react";
 import { db } from "./firebase";
 import { doc, getDoc, setDoc } from "firebase/firestore";
 
-const APP_VERSION = "5.21.0";
+const APP_VERSION = "5.22.0";
 
 const DEFAULT_ADMISSION = () => `${new Date().getFullYear()}-01-01`;
 const round2 = (v) => Math.round(v * 100) / 100;
@@ -754,6 +754,42 @@ function Modal({ title, onClose, children, wide }) {
   );
 }
 
+// ── PDF Preview Modal ──
+function PDFPreviewModal({ pdfDoc, fileName, onClose, title }) {
+  const [blobUrl, setBlobUrl] = useState(null);
+  useEffect(() => {
+    if (!pdfDoc) return;
+    const blob = pdfDoc.output("blob");
+    const url = URL.createObjectURL(blob);
+    setBlobUrl(url);
+    return () => URL.revokeObjectURL(url);
+  }, [pdfDoc]);
+  return (
+    <div style={{position:"fixed",top:0,left:0,right:0,bottom:0,background:"rgba(0,0,0,0.7)",zIndex:10000,display:"flex",alignItems:"center",justifyContent:"center",padding:16}} onClick={onClose}>
+      <div onClick={e=>e.stopPropagation()} style={{background:"var(--bg2)",borderRadius:16,display:"flex",flexDirection:"column",width:"95vw",maxWidth:900,height:"90vh",border:"1px solid var(--border)",overflow:"hidden"}}>
+        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"14px 20px",borderBottom:"1px solid var(--border)",flexShrink:0}}>
+          <span style={{color:"var(--text)",fontWeight:700,fontSize:15,fontFamily:"'DM Sans',sans-serif"}}>{title || "Pré-visualização do PDF"}</span>
+          <div style={{display:"flex",gap:8}}>
+            <button onClick={()=>{ if(pdfDoc) pdfDoc.save(fileName || "documento.pdf"); }} style={{padding:"6px 16px",borderRadius:8,border:"none",background:"var(--ac)",color:"#fff",fontWeight:700,fontSize:13,cursor:"pointer",fontFamily:"'DM Sans',sans-serif"}}>
+              Baixar PDF
+            </button>
+            <button onClick={onClose} style={{padding:"6px 16px",borderRadius:8,border:"1px solid var(--border)",background:"transparent",color:"var(--text3)",fontSize:13,cursor:"pointer",fontFamily:"'DM Sans',sans-serif"}}>
+              Fechar
+            </button>
+          </div>
+        </div>
+        <div style={{flex:1,overflow:"hidden",background:"#525659"}}>
+          {blobUrl ? (
+            <iframe src={blobUrl} title="PDF Preview" style={{width:"100%",height:"100%",border:"none"}} />
+          ) : (
+            <div style={{display:"flex",alignItems:"center",justifyContent:"center",height:"100%",color:"#fff",fontSize:14}}>Carregando...</div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── Version History Modal (shared by Escala + Gorjetas) ──
 function VersionHistoryModal({ title, versions, currentSnapshot, onRestore, onClose, restoreLabel = "Restaurar esta versão", emptyMsg = "Nenhuma versão salva ainda. Qualquer alteração gera automaticamente um ponto de histórico." }) {
   const list = versions ?? [];
@@ -906,6 +942,8 @@ function ExportModal({ onClose, employees, roles, tips, restaurant }) {
   const [dateFrom, setDateFrom] = useState(`${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,"0")}-01`);
   const [dateTo, setDateTo] = useState(today());
   const [status, setStatus] = useState("");
+  const [previewDoc, setPreviewDoc] = useState(null);
+  const [previewFileName, setPreviewFileName] = useState("");
   function buildMatrix() {
     const filtered = tips.filter(t => t.restaurantId === restaurant.id && t.date >= dateFrom && t.date <= dateTo);
     const dates = [...new Set(filtered.map(t => t.date))].sort();
@@ -1017,7 +1055,7 @@ function ExportModal({ onClose, employees, roles, tips, restaurant }) {
 
       doc.setFontSize(7); doc.setTextColor(150);
       doc.text("* Valores brutos sem dedução fiscal. Documento gerado pelo AppTip.", 10, doc.lastAutoTable.finalY + 5);
-      doc.save(`gorjetas_${restaurant.name}_${dateFrom}_${dateTo}.pdf`);
+      setPreviewDoc(doc); setPreviewFileName(`gorjetas_${restaurant.name}_${dateFrom}_${dateTo}.pdf`);
       setStatus("done");
     } catch (e) { console.error(e); setStatus("error"); }
   }
@@ -1050,6 +1088,7 @@ function ExportModal({ onClose, employees, roles, tips, restaurant }) {
         </div>
         <button onClick={onClose} style={{ ...S.btnSecondary, textAlign: "center" }}>Fechar</button>
       </div>
+      {previewDoc && <PDFPreviewModal pdfDoc={previewDoc} fileName={previewFileName} title="Relatório de Gorjetas" onClose={()=>setPreviewDoc(null)} />}
     </Modal>
   );
 }
@@ -4153,6 +4192,8 @@ function EmployeeSpreadsheet({ restEmps, restRoles, rid, employees, onUpdate, re
   const [aiEmpInput, setAiEmpInput] = useState("");
   const { generate: aiEmpGenerate, aiLoading: aiEmpLoading, aiError: aiEmpError, setAiError: setAiEmpError } = useAiGenerate();
   const [aiEmpPreview, setAiEmpPreview] = useState(null);
+  const [previewDoc, setPreviewDoc] = useState(null);
+  const [previewFileName, setPreviewFileName] = useState("");
   const [showDismissalChecklist, setShowDismissalChecklist] = useState(false);
   const [dismissalCheckEmp, setDismissalCheckEmp] = useState(null);
   const [detailEmp, setDetailEmp] = useState(null); // empId for detail view
@@ -4808,7 +4849,7 @@ Inclua apenas as ações solicitadas. Arrays vazios se não houver ação daquel
                       }
 
                       const safeName = emp.name.replace(/[^a-zA-Z0-9]/g,"_").toLowerCase();
-                      doc.save(`trilha_${safeName}_${fromISO}_${toISO}.pdf`);
+                      setPreviewDoc(doc); setPreviewFileName(`trilha_${safeName}_${fromISO}_${toISO}.pdf`);
                       onUpdate("_toast", `📄 Trilha de ${emp.name} exportada!`);
                     } catch(err) {
                       console.error("Erro ao exportar trilha:", err);
@@ -5046,6 +5087,7 @@ Inclua apenas as ações solicitadas. Arrays vazios se não houver ação daquel
           </div>
         );
       })()}
+      {previewDoc && <PDFPreviewModal pdfDoc={previewDoc} fileName={previewFileName} title="Trilha do Empregado" onClose={()=>setPreviewDoc(null)} />}
     </div>
   );
 }
@@ -5995,6 +6037,8 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
   // Month status from scheduleStatus
   const monthStatus = data?.scheduleStatus?.[rid]?.[mk]?.status ?? "open";
   const monthClosed = monthStatus === "closed";
+  const [previewDoc, setPreviewDoc] = useState(null);
+  const [previewFileName, setPreviewFileName] = useState("");
   const [showTipHistory, setShowTipHistory]     = useState(false);
   const [vacEmpId, setVacEmpId]             = useState("");
   const [vacFrom, setVacFrom]               = useState("");
@@ -7296,7 +7340,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                   }
 
                   const safeName = emp.name.replace(/[^a-zA-Z0-9]/g,"_").toLowerCase();
-                  doc.save(`relatorio_desligamento_${safeName}_${demDate}.pdf`);
+                  setPreviewDoc(doc); setPreviewFileName(`relatorio_desligamento_${safeName}_${demDate}.pdf`);
                   onUpdate("_toast", `📄 Relatório de ${emp.name} exportado!`);
                 } catch (err) {
                   console.error("Erro ao gerar relatório:", err);
@@ -7786,7 +7830,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                     curY = drawTable(body, curY, empsForArea) + 4;
                   });
 
-                  doc.save(`escala_${schedArea}_${year}_${String(month+1).padStart(2,"0")}.pdf`);
+                  setPreviewDoc(doc); setPreviewFileName(`escala_${schedArea}_${year}_${String(month+1).padStart(2,"0")}.pdf`);
                 }} style={{padding:"8px 12px",borderRadius:10,border:"1px solid var(--border)",background:"transparent",color:"var(--text2)",cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:12,whiteSpace:"nowrap"}}>
                 📄 Exportar PDF
               </button>}
@@ -9307,6 +9351,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
       </div>
 
       {showExport && <ExportModal onClose={()=>setShowExport(false)} employees={employees} roles={roles} tips={tips} restaurant={restaurant}/>}
+      {previewDoc && <PDFPreviewModal pdfDoc={previewDoc} fileName={previewFileName} title="Pré-visualização do PDF" onClose={()=>setPreviewDoc(null)} />}
     </div>
   );
 }
