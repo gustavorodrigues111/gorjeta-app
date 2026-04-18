@@ -3,7 +3,7 @@ import { useState, useEffect, Component } from "react";
 import { db } from "./firebase";
 import { doc, getDoc, setDoc } from "firebase/firestore";
 
-const APP_VERSION = "5.34.0";
+const APP_VERSION = "5.35.0";
 
 const DEFAULT_ADMISSION = () => `${new Date().getFullYear()}-01-01`;
 const round2 = (v) => Math.round(v * 100) / 100;
@@ -4777,8 +4777,7 @@ Inclua apenas as ações solicitadas. Arrays vazios se não houver ação daquel
               // Meeting plans
               const empPlans = (meetingPlans??[]).filter(p => p.restaurantId === rid && (p.employeeIds??[]).includes(emp.id)).sort((a,b)=>a.plannedDate.localeCompare(b.plannedDate));
               const upcomingPlans = empPlans.filter(p => p.plannedDate >= today()).slice(0,3);
-              const overduePlan = empPlans.filter(p => p.plannedDate < today()).pop();
-              const nextPlan = empPlans.find(p => p.plannedDate >= today());
+              // overduePlan / nextPlan removed (unused)
               // Jornada events
               const jornadaEvents = (() => {
                 if (!admDate) return [];
@@ -4908,30 +4907,7 @@ Inclua apenas as ações solicitadas. Arrays vazios se não houver ação daquel
                 {showIncForm && <div style={{marginBottom:16}}><IncidentForm restaurantId={rid} employees={restEmps.filter(e=>!e.inactive)} onUpdate={onUpdate} incidents={incidents??[]} currentUser={currentUser} isOwner={isOwner} preSelectedEmpId={emp.id}/></div>}
                 {showFbForm && <div style={{marginBottom:16}}><FeedbackForm restaurantId={rid} employees={restEmps.filter(e=>!e.inactive)} roles={restRoles} onUpdate={onUpdate} feedbacks={feedbacks??[]} currentUser={currentUser} isOwner={isOwner} preSelectedEmpId={emp.id} allMeetingPlans={meetingPlans??[]}/></div>}
 
-                {/* ── Meeting alert ── */}
-                {(() => {
-                  const legacyNfd = myFeedbacks.find(f => f.nextFeedbackDate)?.nextFeedbackDate;
-                  const targetDate = overduePlan?.plannedDate || nextPlan?.plannedDate || legacyNfd;
-                  if (!targetDate) return null;
-                  const nfdDate = new Date(targetDate + "T00:00:00");
-                  const todayD = new Date(); todayD.setHours(0,0,0,0);
-                  const diffDays = Math.round((nfdDate - todayD) / 86400000);
-                  const isOverdue = diffDays < 0;
-                  const isDueSoon = diffDays >= 0 && diffDays <= 14;
-                  if (!isOverdue && !isDueSoon) return null;
-                  const planType = (overduePlan || nextPlan)?.type;
-                  const typeLabel = planType === "avaliação" ? "avaliação" : planType === "alinhamento" ? "alinhamento" : "reunião";
-                  const bgColor = isOverdue ? "#fef2f2" : "#fffbeb";
-                  const borderColor = isOverdue ? "#fca5a5" : "#fcd34d";
-                  const textColor = isOverdue ? "#dc2626" : "#d97706";
-                  const ic = isOverdue ? "⚠️" : "📅";
-                  const lbl = isOverdue
-                    ? `Conversa de ${typeLabel} atrasada! Prevista para ${nfdDate.toLocaleDateString("pt-BR")} (${Math.abs(diffDays)} dia${Math.abs(diffDays)!==1?"s":""} atrás)`
-                    : `Próxima ${typeLabel} em ${diffDays} dia${diffDays!==1?"s":""} (${nfdDate.toLocaleDateString("pt-BR")})`;
-                  return <div style={{padding:"10px 14px",borderRadius:10,border:`1px solid ${borderColor}`,background:bgColor,color:textColor,fontSize:13,fontFamily:"'DM Mono',monospace",marginBottom:12,display:"flex",alignItems:"center",gap:8}}>
-                    <span style={{fontSize:16}}>{ic}</span><span>{lbl}</span>
-                  </div>;
-                })()}
+                {/* Meeting alert removed — info now in Jornada timeline */}
 
                 {/* ── 2. Conquistas / Badges ── */}
                 {badgesNew.length > 0 && (
@@ -7326,30 +7302,57 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
   const inboxUnread = ((data?.notifications??[]).filter(n=>n.restaurantId===rid&&!n.read&&!n.deleted&&n.targetRole!=="admin"&&n.type!=="upgrade_request").length + (data?.dpMessages??[]).filter(m=>m.restaurantId===rid&&!m.read&&!m.deleted).length);
 
   // Líder de área: acesso restrito a Dashboard + Escala + Horários + Equipe
-  const TABS = isLider ? [
-    ["dashboard",   "📊 Dashboard"],
-    canSched && ["schedule",    "📅 Escala"],
-    ["horarios",    "🕐 Horários"],
-    ["employees",   "👥 Equipe"],
-    ["reunioes",    "📅 Reuniões"],
-  ].filter(Boolean) : [
-    canTips                                           && ["dashboard",   "📊 Dashboard"],
-    canTips                                           && ["tips",        "💸 Gorjetas"],
-    canSched                                          && ["schedule",    "📅 Escala"],
-    (isOwner || tabVisible("roles"))           && ["roles",       "🏷️ Cargos"],
-    (isOwner || canTips || tabVisible("employees")) && ["employees","👥 Equipe"],
-    (isOwner || canTips || tabVisible("employees")) && ["reunioes","📅 Reuniões"],
-    (isOwner || tabVisible("horarios"))          && ["horarios",    "🕐 Horários"],
-    (isOwner || (perms.vt !== false && tabVisible("vt"))) && ["vt",          "🚌 Vale Transporte"],
-    (isOwner || tabVisible("faq"))               && ["faq",         "❓ FAQ"],
-    (isOwner || tabVisible("comunicados"))        && ["comunicados", "📢 Comunicados"],
-    (isOwner || tabVisible("dp"))                && ["dp",          "💬 Fale com DP"],
-    isDP                                       && ["notificacoes",`📬 Caixa${inboxUnread>0?` (${inboxUnread})`:""}`],
-    isDP                                       && ["dp_gestores", "👔 Gestores"],
-    (canTips || isOwner)                       && ["config",       "⚙️ Configurações"],
-  ].filter(Boolean).filter(([id]) => !mobileOnly || ["dashboard","schedule","horarios","vt","notificacoes","employees","reunioes"].includes(id));
+  // ── Grouped tabs ──
+  const TAB_GROUPS = isLider ? [
+    { id:"equipe", label:"👥 Equipe", icon:"👥", tabs: [
+      ["employees","Empregados"],
+      ["reunioes","Reuniões"],
+    ].filter(Boolean) },
+    { id:"operacao", label:"📅 Operação", icon:"📅", tabs: [
+      canSched && ["schedule","Escala"],
+      ["horarios","Horários"],
+    ].filter(Boolean) },
+  ] : [
+    { id:"operacao", label:"💰 Operação", icon:"💰", tabs: [
+      canTips && ["dashboard","Dashboard"],
+      canTips && ["tips","Gorjetas"],
+      canSched && ["schedule","Escala"],
+      (isOwner || tabVisible("horarios")) && ["horarios","Horários"],
+      (isOwner || (perms.vt !== false && tabVisible("vt"))) && ["vt","Vale Transporte"],
+    ].filter(Boolean) },
+    { id:"equipe", label:"👥 Equipe", icon:"👥", tabs: [
+      (isOwner || canTips || tabVisible("employees")) && ["employees","Empregados"],
+      (isOwner || tabVisible("roles")) && ["roles","Cargos"],
+      (isOwner || canTips || tabVisible("employees")) && ["reunioes","Reuniões"],
+    ].filter(Boolean) },
+    { id:"comunicacao", label:"📢 Comunicação", icon:"📢", tabs: [
+      (isOwner || tabVisible("comunicados")) && ["comunicados","Comunicados"],
+      (isOwner || tabVisible("faq")) && ["faq","FAQ"],
+      (isOwner || tabVisible("dp")) && ["dp","Fale com DP"],
+      isDP && ["notificacoes",`Caixa${inboxUnread>0?` (${inboxUnread})`:""}`],
+      isDP && ["dp_gestores","Gestores"],
+    ].filter(Boolean) },
+    { id:"config", label:"⚙️ Config", icon:"⚙️", tabs: [
+      (canTips || isOwner) && ["config","Configurações"],
+    ].filter(Boolean) },
+  ].filter(g => g.tabs.length > 0);
 
-  const [tab, setTab] = useState("dashboard");
+  // Flat TABS for backward compatibility
+  const TABS = TAB_GROUPS.flatMap(g => g.tabs.map(([id,lbl]) => [id,lbl]));
+
+  const defaultGroup = isLider ? "equipe" : "operacao";
+  const [tabGroup, setTabGroup] = useState(defaultGroup);
+  const [tab, setTab] = useState(isLider ? "employees" : "dashboard");
+  const activeGroup = TAB_GROUPS.find(g => g.id === tabGroup) ?? TAB_GROUPS[0];
+
+  function switchGroup(gid) {
+    const g = TAB_GROUPS.find(x => x.id === gid);
+    if (!g || g.tabs.length === 0) return;
+    setTabGroup(gid);
+    // If current tab is already in this group, keep it
+    if (g.tabs.some(([id]) => id === tab)) return;
+    setTab(g.tabs[0][0]);
+  }
 
   // Reset de aba — só Admin AppTip (isOwner)
   function resetTab(tabKey, tabLabel, getSnapshot) {
@@ -7422,9 +7425,18 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
 
   return (
     <div style={{ fontFamily:"'DM Sans',sans-serif" }}>
-      {/* Tabs com scroll suave */}
+      {/* Tab groups — row 1: group pills */}
+      <div style={{ display:"flex", gap:4, padding:"8px 12px 0", background:"var(--header-bg)", overflowX:"auto", scrollbarWidth:"none", WebkitOverflowScrolling:"touch" }}>
+        {TAB_GROUPS.map(g => (
+          <button key={g.id} onClick={() => switchGroup(g.id)}
+            style={{ padding:"7px 14px", background:tabGroup===g.id?ac:"transparent", border:"none", borderRadius:20, color:tabGroup===g.id?"#fff":"var(--text3)", cursor:"pointer", fontSize:13, fontFamily:"'DM Sans',sans-serif", fontWeight:tabGroup===g.id?700:500, whiteSpace:"nowrap", flexShrink:0, transition:"all .15s" }}>
+            {g.label}
+          </button>
+        ))}
+      </div>
+      {/* Tab groups — row 2: sub-tab pills */}
       <div style={{ display:"flex", borderBottom:"1px solid var(--border)", background:"var(--header-bg)", overflowX:"auto", scrollbarWidth:"none", WebkitOverflowScrolling:"touch" }}>
-        {TABS.map(([id, lbl]) => (
+        {(activeGroup?.tabs??[]).map(([id, lbl]) => (
           <button key={id} onClick={() => {
             if (tab === "config" && id !== "config" && configDirty) {
               const action = window.confirm("Você tem alterações não salvas nas configurações.\n\nDeseja salvar antes de sair?");
@@ -7439,7 +7451,6 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
             if (tab === "schedule" && id !== "schedule" && schedDirty) {
               const action = window.confirm("Você tem edições na escala não salvas.\n\nDeseja salvar como nova versão antes de sair?");
               if (action) {
-                // Freeze prevista on first adjustment
                 if (!data?.schedulePrevista?.[rid]?.[mk]) {
                   const frozenPrevista = JSON.parse(JSON.stringify(schedules?.[rid]?.[mk] ?? {}));
                   const newPrev = { ...(data?.schedulePrevista ?? {}) };
@@ -7447,7 +7458,6 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                   newPrev[rid][mk] = frozenPrevista;
                   onUpdate("schedulePrevista", newPrev);
                 }
-                // Save as new version
                 const preSnap = snapshotSchedulesMonth(schedules, rid, mk);
                 saveVersion("schedules", rid, mk, data?.scheduleVersions, preSnap, currentUser?.name || (isOwner?"Admin AppTip":"Gestor"), "Edição manual", onUpdate, true);
                 let newMonth = { ...(schedules?.[rid]?.[mk] ?? {}) };
