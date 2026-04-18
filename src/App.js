@@ -3,7 +3,7 @@ import { useState, useEffect, Component } from "react";
 import { db } from "./firebase";
 import { doc, getDoc, setDoc } from "firebase/firestore";
 
-const APP_VERSION = "5.29.0";
+const APP_VERSION = "5.30.0";
 
 const DEFAULT_ADMISSION = () => `${new Date().getFullYear()}-01-01`;
 const round2 = (v) => Math.round(v * 100) / 100;
@@ -3437,7 +3437,7 @@ function DpManagerTab({ restaurantId, dpMessages, onUpdate, isOwner }) {
   );
 }
 
-function EmployeePortal({ employees, roles, tips, schedules, splits, restaurants, communications, commAcks, faq, dpMessages, workSchedules, incidents, feedbacks, devChecklists, onBack, onUpdateEmployee, onUpdate, toggleTheme, theme, onSwitchToManager, employeeGoals, tipApprovals }) {
+function EmployeePortal({ employees, roles, tips, schedules, splits, restaurants, communications, commAcks, faq, dpMessages, workSchedules, incidents, feedbacks, devChecklists, onBack, onUpdateEmployee, onUpdate, toggleTheme, theme, onSwitchToManager, employeeGoals, tipApprovals, delays }) {
   const [empId, setEmpId] = useState(() => localStorage.getItem("apptip_empid") || null);
 
   useEffect(() => {
@@ -3669,11 +3669,12 @@ function EmployeePortal({ employees, roles, tips, schedules, splits, restaurants
             {empSchedView === "mine" && (
               <div>
                 <p style={{ color: "var(--text3)", fontSize: 13, marginBottom: 16, textTransform: "capitalize" }}>Sua escala em {monthLabel(year, month)}</p>
-                <CalendarGrid year={year} month={month} dayMap={dayMap} readOnly />
+                <CalendarGrid year={year} month={month} dayMap={dayMap} readOnly delayMap={delays?.[emp?.restaurantId]?.[mk]?.[empId] ?? {}} />
                 <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 8, marginTop: 20 }}>
                   {(() => {
                     const dim = new Date(year, month + 1, 0).getDate();
-                    const counts = { work: 0, off: 0, freela: 0, comp: 0, comptrab: 0, vac: 0, fj: 0, fu: 0 };
+                    const empDelayMap = delays?.[emp?.restaurantId]?.[mk]?.[empId] ?? {};
+                    const counts = { work: 0, off: 0, freela: 0, comp: 0, comptrab: 0, vac: 0, fj: 0, fu: 0, delays: 0 };
                     for (let d = 1; d <= dim; d++) {
                       const k = `${year}-${String(month+1).padStart(2,"0")}-${String(d).padStart(2,"0")}`;
                       const s = dayMap[k];
@@ -3685,6 +3686,7 @@ function EmployeePortal({ employees, roles, tips, schedules, splits, restaurants
                       else if (s === DAY_FAULT_J) counts.fj++;
                       else if (s === DAY_FAULT_U) counts.fu++;
                       else counts.work++;
+                      if (empDelayMap[String(d)] > 0) counts.delays++;
                     }
                     return [
                       ["Trabalho", counts.work, "var(--green)"], ["Folga", counts.off, "var(--red)"],
@@ -3692,7 +3694,8 @@ function EmployeePortal({ employees, roles, tips, schedules, splits, restaurants
                       ["Folga Comp.", counts.comp, "#3b82f6"], ["Trab. Comp.", counts.comptrab, "#0ea5e9"],
                       ["Férias", counts.vac, "#8b5cf6"],
                       ["Falta Just.", counts.fj, "#f59e0b"], ["Falta Injust.", counts.fu, "var(--red)"],
-                    ].map(([lbl, val, col]) => (
+                      ["Atrasos", counts.delays, "#f59e0b"],
+                    ].filter(([,val]) => val > 0).map(([lbl, val, col]) => (
                       <div key={lbl} style={{ ...S.card, textAlign: "center", padding: "12px 8px" }}>
                         <div style={{ color: "var(--text3)", fontSize: 9, marginBottom: 4 }}>{lbl}</div>
                         <div style={{ color: col, fontWeight: 700, fontSize: 20 }}>{val}</div>
@@ -3780,14 +3783,17 @@ function EmployeePortal({ employees, roles, tips, schedules, splits, restaurants
                                 const wd = new Date(date+"T12:00:00").getDay();
                                 const isWe = wd===0||wd===6;
                                 const isToday = date === today();
+                                const delayMin = delays?.[emp?.restaurantId]?.[mk]?.[e.id]?.[String(d)] ?? 0;
                                 return (
-                                  <td key={d} style={{
+                                  <td key={d} title={delayMin > 0 ? `⏰ ${delayMin}min atraso` : undefined} style={{
                                     textAlign:"center",padding:"3px 1px",
                                     background:isToday?"var(--ac)11":status?color+"22":(isWe?"var(--bg1)":"transparent"),
-                                    borderRight:"1px solid var(--border)",
+                                    borderRight:`1px solid ${delayMin > 0 ? "#f59e0b" : "var(--border)"}`,
+                                    borderBottom: delayMin > 0 ? "2px solid #f59e0b" : undefined,
                                     width:22,outline:isToday?`1px solid ${ac}44`:undefined
                                   }}>
                                     <span style={{color:color,fontSize:status?8:9,fontWeight:status?700:300}}>{label}</span>
+                                    {delayMin > 0 && <div style={{fontSize:6,color:"#f59e0b",lineHeight:1}}>⏰</div>}
                                   </td>
                                 );
                               })}
@@ -4484,7 +4490,7 @@ Inclua apenas as ações solicitadas. Arrays vazios se não houver ação daquel
         const emp = detailEmpObj;
         const role = detailRole;
         const empIncidents = (incidents??[]).filter(i => i.restaurantId === rid && (i.employeeIds??[]).includes(emp.id));
-        const empFeedbacks = (feedbacks??[]).filter(f => f.restaurantId === rid && f.employeeId === emp.id);
+        const empFeedbacks = (feedbacks??[]).filter(f => f.restaurantId === rid && f.employeeId === emp.id && !f.deletedAt);
         const negCount = empIncidents.filter(i => { const t = INCIDENT_TYPES.find(x=>x.id===i.type); return t?.negative; }).length;
         const posCount = empIncidents.filter(i => { const t = INCIDENT_TYPES.find(x=>x.id===i.type); return !t?.negative; }).length;
         const avgStars = empFeedbacks.length > 0 ? (empFeedbacks.reduce((a,f)=>a+(f.stars??0),0)/empFeedbacks.length).toFixed(1) : "—";
@@ -4799,7 +4805,7 @@ Inclua apenas as ações solicitadas. Arrays vazios se não houver ação daquel
                       }
 
                       // Feedbacks in period
-                      const empFbs = (feedbacks??[]).filter(f => f.restaurantId===rid && f.employeeId===emp.id && (f.createdAt??"").slice(0,10)>=fromISO && (f.createdAt??"").slice(0,10)<=toISO);
+                      const empFbs = (feedbacks??[]).filter(f => f.restaurantId===rid && f.employeeId===emp.id && !f.deletedAt && (f.createdAt??"").slice(0,10)>=fromISO && (f.createdAt??"").slice(0,10)<=toISO);
                       if (empFbs.length > 0) {
                         if (y > 240) { doc.addPage(); y = 15; }
                         doc.setFontSize(12); doc.text("FEEDBACKS", 14, y); y += 2;
@@ -4874,7 +4880,7 @@ Inclua apenas as ações solicitadas. Arrays vazios se não houver ação daquel
                 {showIncForm && <div style={{marginBottom:16}}><IncidentForm restaurantId={rid} employees={restEmps.filter(e=>!e.inactive)} onUpdate={onUpdate} incidents={incidents??[]} currentUser={currentUser} isOwner={isOwner} preSelectedEmpId={emp.id}/></div>}
                 {showFbForm && <div style={{marginBottom:16}}><FeedbackForm restaurantId={rid} employees={restEmps.filter(e=>!e.inactive)} roles={restRoles} onUpdate={onUpdate} feedbacks={feedbacks??[]} currentUser={currentUser} isOwner={isOwner} preSelectedEmpId={emp.id}/></div>}
                 {(() => {
-                  const empFbs = (feedbacks??[]).filter(f => f.employeeId === emp.id && f.nextFeedbackDate).sort((a,b) => b.createdAt.localeCompare(a.createdAt));
+                  const empFbs = (feedbacks??[]).filter(f => f.employeeId === emp.id && !f.deletedAt && f.nextFeedbackDate).sort((a,b) => b.createdAt.localeCompare(a.createdAt));
                   const lastNfd = empFbs[0]?.nextFeedbackDate;
                   if (!lastNfd) return null;
                   const nfdDate = new Date(lastNfd + "T00:00:00");
@@ -4977,8 +4983,11 @@ Inclua apenas as ações solicitadas. Arrays vazios se não houver ação daquel
                 })()}
                 {/* Histórico de feedbacks — só gestor */}
                 {(() => {
-                  const empFbsHist = (feedbacks??[]).filter(f => f.restaurantId === rid && f.employeeId === emp.id).sort((a,b) => (b.createdAt??"").localeCompare(a.createdAt??""));
-                  if (empFbsHist.length === 0) return null;
+                  const allEmpFbs = (feedbacks??[]).filter(f => f.restaurantId === rid && f.employeeId === emp.id);
+                  const empFbsHist = allEmpFbs.filter(f => !f.deletedAt).sort((a,b) => (b.createdAt??"").localeCompare(a.createdAt??""));
+                  const deletedFbs = allEmpFbs.filter(f => f.deletedAt && (Date.now() - new Date(f.deletedAt).getTime()) < 7 * 86400000).sort((a,b) => (b.deletedAt??"").localeCompare(a.deletedAt??""));
+                  const canDeleteFb = !isLider;
+                  if (empFbsHist.length === 0 && deletedFbs.length === 0) return null;
                   return (
                     <div style={{...S.card,marginBottom:12,padding:"14px"}}>
                       <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:10}}>
@@ -4997,7 +5006,14 @@ Inclua apenas as ações solicitadas. Arrays vazios se não houver ação daquel
                                 <span style={{fontSize:11,padding:"2px 8px",borderRadius:6,background:rColor+"18",color:rColor,fontWeight:700}}>{rLabel}</span>
                                 {qLabel && <span style={{color:"var(--text3)",fontSize:11}}>{qLabel}</span>}
                               </div>
-                              <span style={{color:"var(--text3)",fontSize:10}}>{fb.createdAt ? new Date(fb.createdAt).toLocaleDateString("pt-BR") : ""} · {fb.createdBy ?? ""}</span>
+                              <div style={{display:"flex",alignItems:"center",gap:6}}>
+                                <span style={{color:"var(--text3)",fontSize:10}}>{fb.createdAt ? new Date(fb.createdAt).toLocaleDateString("pt-BR") : ""} · {fb.createdBy ?? ""}</span>
+                                {canDeleteFb && <button onClick={()=>{
+                                  if (!window.confirm(`Excluir feedback de ${fb.createdAt ? new Date(fb.createdAt).toLocaleDateString("pt-BR") : "—"}?\n\nO feedback ficará na lixeira por 7 dias e poderá ser restaurado.`)) return;
+                                  const updated = (feedbacks??[]).map(f => f.id === fb.id ? {...f, deletedAt: new Date().toISOString(), deletedBy: currentUser?.name || (isOwner ? "Admin AppTip" : "Gestor")} : f);
+                                  onUpdate("feedbacks", updated);
+                                }} style={{padding:"2px 6px",borderRadius:6,border:"1px solid var(--red)33",background:"transparent",color:"var(--red)",cursor:"pointer",fontSize:9,fontFamily:"'DM Mono',monospace"}}>✕</button>}
+                              </div>
                             </div>
                             {fb.strengths && <div style={{fontSize:11,color:"var(--text2)",marginBottom:2}}><strong style={{color:"#10b981"}}>+</strong> {fb.strengths}</div>}
                             {fb.improvements && <div style={{fontSize:11,color:"var(--text2)",marginBottom:2}}><strong style={{color:"#f59e0b"}}>△</strong> {fb.improvements}</div>}
@@ -5005,6 +5021,25 @@ Inclua apenas as ações solicitadas. Arrays vazios se não houver ação daquel
                           </div>
                         );
                       })}
+                      {/* Lixeira de feedbacks — restaurar em até 7 dias */}
+                      {canDeleteFb && deletedFbs.length > 0 && (
+                        <div style={{marginTop:10,padding:"10px 12px",borderRadius:8,background:"var(--red)08",border:"1px solid var(--red)22"}}>
+                          <div style={{fontSize:11,color:"var(--red)",fontWeight:700,marginBottom:6}}>🗑️ Lixeira ({deletedFbs.length})</div>
+                          {deletedFbs.map(fb => {
+                            const daysLeft = Math.max(0, 7 - Math.floor((Date.now() - new Date(fb.deletedAt).getTime()) / 86400000));
+                            const qLabel = fb.quarter ? `Q${fb.quarter}/${fb.year ?? ""}` : "";
+                            return (
+                              <div key={fb.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"4px 0",fontSize:10}}>
+                                <span style={{color:"var(--text3)"}}>{qLabel} — excluído por {fb.deletedBy} ({daysLeft}d restantes)</span>
+                                <button onClick={()=>{
+                                  const updated = (feedbacks??[]).map(f => f.id === fb.id ? (()=>{ const {deletedAt, deletedBy, ...rest} = f; return rest; })() : f);
+                                  onUpdate("feedbacks", updated);
+                                }} style={{padding:"2px 8px",borderRadius:6,border:"1px solid var(--ac)44",background:"transparent",color:"var(--ac-text)",cursor:"pointer",fontSize:10,fontFamily:"'DM Mono',monospace"}}>Restaurar</button>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
                     </div>
                   );
                 })()}
@@ -5770,7 +5805,7 @@ function EmpTimeline({ empId, employees, roles, schedules, incidents, feedbacks,
   });
 
   // Feedbacks
-  (feedbacks ?? []).filter(fb => fb.restaurantId === restaurantId && fb.employeeId === empId).forEach(fb => {
+  (feedbacks ?? []).filter(fb => fb.restaurantId === restaurantId && fb.employeeId === empId && !fb.deletedAt).forEach(fb => {
     events.push({ date: fb.createdAt?.slice(0,10) ?? "2026-01-01", type: "feedback", cat: "Feedbacks", icon: "💬", label: `Feedback Q${fb.quarter}/${fb.year}`, desc: `${RATING_LABELS[fb.rating-1] ?? "—"}${fb.strengths ? " · " + fb.strengths.slice(0,60) : ""}` });
   });
 
@@ -5965,7 +6000,7 @@ const AUTO_META_RULES = [
     return Object.values(days).filter(s => s === DAY_FAULT_U || s === DAY_FAULT_J).length === 0;
   }},
   { id: "feedback_excepcional", label: "Avaliação Excepcional no último feedback", check: (empId, _s, _r, feedbacks, rid) => {
-    const myFbs = (feedbacks ?? []).filter(f => f.employeeId === empId && f.restaurantId === rid).sort((a,b)=>(b.createdAt??"").localeCompare(a.createdAt??""));
+    const myFbs = (feedbacks ?? []).filter(f => f.employeeId === empId && f.restaurantId === rid && !f.deletedAt).sort((a,b)=>(b.createdAt??"").localeCompare(a.createdAt??""));
     return myFbs[0]?.rating === 5;
   }},
   { id: "90_dias", label: "90 dias na empresa", check: (empId, _s, _r, _f, _rid, employees) => {
@@ -6404,7 +6439,7 @@ function EmpTrilhaView({ empId, employees, roles, schedules, incidents, feedback
   const daysInCompany = admDate ? Math.floor((new Date() - admDate) / 86400000) : 0;
 
   // Latest feedback
-  const myFeedbacks = (feedbacks ?? []).filter(f => f.restaurantId === restaurantId && f.employeeId === empId).sort((a,b)=>(b.createdAt??"").localeCompare(a.createdAt??""));
+  const myFeedbacks = (feedbacks ?? []).filter(f => f.restaurantId === restaurantId && f.employeeId === empId && !f.deletedAt).sort((a,b)=>(b.createdAt??"").localeCompare(a.createdAt??""));
   const latestFb = myFeedbacks[0];
   // targetRole removed — goals system replaces it
 
@@ -6439,7 +6474,7 @@ function EmpTrilhaView({ empId, employees, roles, schedules, incidents, feedback
 
   // Próximo feedback agendado
   const nextFbInfo = (() => {
-    const empFbs = (feedbacks ?? []).filter(f => f.restaurantId === restaurantId && f.employeeId === empId && f.nextFeedbackDate).sort((a,b) => (b.createdAt??"").localeCompare(a.createdAt??""));
+    const empFbs = (feedbacks ?? []).filter(f => f.restaurantId === restaurantId && f.employeeId === empId && !f.deletedAt && f.nextFeedbackDate).sort((a,b) => (b.createdAt??"").localeCompare(a.createdAt??""));
     return empFbs[0]?.nextFeedbackDate ?? null;
   })();
 
@@ -6464,7 +6499,7 @@ function EmpTrilhaView({ empId, employees, roles, schedules, incidents, feedback
       }
     });
     // Feedbacks — texto genérico, sem nota/avaliação
-    (feedbacks ?? []).filter(f => f.restaurantId === restaurantId && f.employeeId === empId && f.createdAt).forEach(f => {
+    (feedbacks ?? []).filter(f => f.restaurantId === restaurantId && f.employeeId === empId && !f.deletedAt && f.createdAt).forEach(f => {
       events.push({ date: new Date(f.createdAt), label: "Conversa de desenvolvimento realizada", icon: "💬" });
     });
     // Objetivos concluídos
@@ -14459,7 +14494,7 @@ export default function App() {
             return () => { setCurrentUser(emp); setUserRole("employee"); localStorage.setItem("apptip_role","employee"); localStorage.setItem("apptip_userid",emp.id); localStorage.setItem("apptip_empid",emp.id); setView("employee"); };
           })()} />
       ))}
-      {view === "employee" && <EmployeePortal employees={employees} roles={roles} tips={tips} schedules={schedules} splits={splits} restaurants={restaurants} communications={communications} commAcks={commAcks} faq={faq} dpMessages={dpMessages} workSchedules={workSchedules} incidents={incidents} feedbacks={feedbacks} devChecklists={devChecklists} employeeGoals={employeeGoals} tipApprovals={tipApprovals} onBack={doLogout} onUpdateEmployee={emp=>{const next=employees.map(e=>e.id===emp.id?emp:e);handleUpdate("employees",next);}} onUpdate={handleUpdate} toggleTheme={toggleTheme} theme={theme}
+      {view === "employee" && <EmployeePortal employees={employees} roles={roles} tips={tips} schedules={schedules} splits={splits} restaurants={restaurants} communications={communications} commAcks={commAcks} faq={faq} dpMessages={dpMessages} workSchedules={workSchedules} incidents={incidents} feedbacks={feedbacks} devChecklists={devChecklists} employeeGoals={employeeGoals} tipApprovals={tipApprovals} delays={delays} onBack={doLogout} onUpdateEmployee={emp=>{const next=employees.map(e=>e.id===emp.id?emp:e);handleUpdate("employees",next);}} onUpdate={handleUpdate} toggleTheme={toggleTheme} theme={theme}
         onSwitchToManager={(() => {
           const cpf = currentUser?.cpf?.replace(/\D/g,"");
           let mgr = cpf ? managers.find(m => m.cpf?.replace(/\D/g,"") === cpf) : null;
