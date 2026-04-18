@@ -656,7 +656,7 @@ function saveVersion(kind, rid, mk, currentVersions, snapshot, author, reason, o
     const entry = {
       id: `${Date.now()}-${Math.random().toString(36).slice(2,6)}`,
       ts: new Date().toISOString(),
-      author: author || "Gestor",
+      author: author || "Gestor Adm.",
       reason: reas,
       snapshot: snap,
     };
@@ -4401,7 +4401,7 @@ Inclua apenas as ações solicitadas. Arrays vazios se não houver ação daquel
     const demitidoEm = `${yyyy}-${mm.padStart(2,"0")}-${dd.padStart(2,"0")}`;
     if (isNaN(new Date(demitidoEm+"T12:00:00").getTime())) { window.alert("Data inválida."); return; }
     if (!window.confirm(`Confirmar demissão de "${emp.name}" em ${dataStr}?\n\nA partir desta data:\n• Sai do cálculo de gorjeta\n• Consta como "DEM" na escala\n• No próximo mês será movido para inativo`)) return;
-    onUpdate("employees", employees.map(x => x.id===emp.id ? {...x, demitidoEm, demitidoPor: isOwner ? "Admin AppTip" : "Gestor", inactive: true, inactiveFrom: demitidoEm} : x));
+    onUpdate("employees", employees.map(x => x.id===emp.id ? {...x, demitidoEm, demitidoPor: isOwner ? "Gestor AppTip" : "Gestor Adm.", inactive: true, inactiveFrom: demitidoEm} : x));
     onUpdate("_toast", `📋 ${emp.name} demitido em ${dataStr}`);
   }
 
@@ -4434,7 +4434,7 @@ Inclua apenas as ações solicitadas. Arrays vazios se não houver ação daquel
     const effectiveDate = `${yyyy}-${mm.padStart(2,"0")}-${dd.padStart(2,"0")}`;
     if (isNaN(new Date(effectiveDate+"T12:00:00").getTime())) { window.alert("Data inválida."); return; }
     const reason = window.prompt("Motivo (opcional):") || "";
-    const changedBy = isOwner ? "Admin AppTip" : "Gestor";
+    const changedBy = isOwner ? "Gestor AppTip" : "Gestor Adm.";
     const oldRole = restRoles.find(r => r.id === emp.roleId);
 
     if (effectiveDate <= today()) {
@@ -5052,7 +5052,7 @@ Inclua apenas as ações solicitadas. Arrays vazios se não houver ação daquel
                                   e.stopPropagation();
                                   const dateStr = ev.fb.meetingDate ? new Date(ev.fb.meetingDate+"T12:00:00").toLocaleDateString("pt-BR") : "";
                                   if (!window.confirm(`Excluir reunião de ${dateStr}?\n\nO registro ficará na lixeira por 90 dias.`)) return;
-                                  const updated = (feedbacks??[]).map(f => f.id === ev.fb.id ? {...f, deletedAt: new Date().toISOString(), deletedBy: currentUser?.name || (isOwner ? "Admin AppTip" : "Gestor")} : f);
+                                  const updated = (feedbacks??[]).map(f => f.id === ev.fb.id ? {...f, deletedAt: new Date().toISOString(), deletedBy: currentUser?.name || (isOwner ? "Gestor AppTip" : "Gestor Adm.")} : f);
                                   onUpdate("feedbacks", updated);
                                   setExpandedJornada(null);
                                 }} style={{padding:"3px 10px",borderRadius:6,border:"1px solid var(--red)33",background:"transparent",color:"var(--red)",cursor:"pointer",fontSize:10,fontFamily:"'DM Mono',monospace"}}>🗑️ Excluir</button></div>}
@@ -5071,7 +5071,7 @@ Inclua apenas as ações solicitadas. Arrays vazios se não houver ação daquel
                                 {canDeleteInc && <div style={{marginTop:6,display:"flex",justifyContent:"flex-end"}}><button onClick={(e)=>{
                                   e.stopPropagation();
                                   if (!window.confirm(`Excluir ocorrência?\n\nO registro ficará na lixeira por 90 dias.`)) return;
-                                  const updated = (incidents??[]).map(inc => inc.id === ev.inc.id ? {...inc, deletedAt: new Date().toISOString(), deletedBy: currentUser?.name || (isOwner ? "Admin AppTip" : "Gestor")} : inc);
+                                  const updated = (incidents??[]).map(inc => inc.id === ev.inc.id ? {...inc, deletedAt: new Date().toISOString(), deletedBy: currentUser?.name || (isOwner ? "Gestor AppTip" : "Gestor Adm.")} : inc);
                                   onUpdate("incidents", updated);
                                   setExpandedJornada(null);
                                 }} style={{padding:"3px 10px",borderRadius:6,border:"1px solid var(--red)33",background:"transparent",color:"var(--red)",cursor:"pointer",fontSize:10,fontFamily:"'DM Mono',monospace"}}>🗑️ Excluir</button></div>}
@@ -5542,7 +5542,7 @@ function ValeTransporteTab({ restaurantId, employees, roles, workSchedules, sche
     }
     const paidAtISO = new Date(chosenDate + "T12:00:00").toISOString();
     const total = useOldSnapshot ? round2(snapshot.reduce((s, r) => s + r.totalPaid, 0)) : round2(grandTotal);
-    const newPayments = { ...(vtPayments ?? {}), [restaurantId]: { ...(vtPayments?.[restaurantId] ?? {}), [mk]: { paidAt: paidAtISO, paidBy: currentUser?.name ?? "Gestor", snapshot, grandTotal: total } } };
+    const newPayments = { ...(vtPayments ?? {}), [restaurantId]: { ...(vtPayments?.[restaurantId] ?? {}), [mk]: { paidAt: paidAtISO, paidBy: currentUser?.name ?? "Gestor Adm.", snapshot, grandTotal: total } } };
     onUpdate("vtPayments", newPayments);
     // Freeze prevista when VT is paid
     if (!schedulePrevista?.[restaurantId]?.[mk]) {
@@ -5877,7 +5877,7 @@ function IncidentForm({ restaurantId, employees, onUpdate, incidents, currentUse
       description: description.trim(),
       date,
       createdAt: new Date().toISOString(),
-      createdBy: isOwner ? "Admin AppTip" : (currentUser?.name ?? "Gestor"),
+      createdBy: isOwner ? "Gestor AppTip" : (currentUser?.name ?? "Gestor Adm."),
       createdById: currentUser?.id ?? null,
       visibility: "internal",
     };
@@ -6026,7 +6026,7 @@ function GoalsManager({ empId, employeeGoals, roles, restaurantId, onUpdate, cur
       materials: [],
       metas: [],
       createdAt: new Date().toISOString(),
-      createdBy: isOwner ? "Admin AppTip" : (currentUser?.name ?? "Gestor"),
+      createdBy: isOwner ? "Gestor AppTip" : (currentUser?.name ?? "Gestor Adm."),
       status: "active",
     };
     saveGoals([...(employeeGoals?.[empId] ?? []), newGoal]);
@@ -6097,7 +6097,7 @@ function GoalsManager({ empId, employeeGoals, roles, restaurantId, onUpdate, cur
     const idx = all.findIndex(g => g.id === goalId);
     if (idx < 0) return;
     all[idx] = { ...all[idx], metas: (all[idx].metas ?? []).map(m =>
-      m.id === metaId ? { ...m, done: !m.done, doneAt: !m.done ? new Date().toISOString() : null, doneBy: !m.done ? (currentUser?.name ?? "Gestor") : null } : m
+      m.id === metaId ? { ...m, done: !m.done, doneAt: !m.done ? new Date().toISOString() : null, doneBy: !m.done ? (currentUser?.name ?? "Gestor Adm.") : null } : m
     )};
     saveGoals(all);
   }
@@ -6333,7 +6333,7 @@ function MeetingPlannerSection({ restaurantId, employees, roles, areas, meetingP
       employeeIds: [...selectedEmps],
       plannedDate: planDate,
       note: planNote.trim(),
-      createdBy: isOwner ? "Admin AppTip" : (currentUser?.name ?? "Gestor"),
+      createdBy: isOwner ? "Gestor AppTip" : (currentUser?.name ?? "Gestor Adm."),
       createdAt: new Date().toISOString(),
       completedFeedbackIds: {},
     };
@@ -6544,7 +6544,7 @@ function FeedbackForm({ restaurantId, employees, roles, onUpdate, feedbacks, cur
       targetRoleId: null,
       devChecklist: [],
       createdAt: new Date().toISOString(),
-      createdBy: isOwner ? "Admin AppTip" : (currentUser?.name ?? "Gestor"),
+      createdBy: isOwner ? "Gestor AppTip" : (currentUser?.name ?? "Gestor Adm."),
     };
     onUpdate("feedbacks", [...(feedbacks ?? []), fb]);
     // Suggest next meeting
@@ -6566,7 +6566,7 @@ function FeedbackForm({ restaurantId, employees, roles, onUpdate, feedbacks, cur
       employeeIds: [lastRegisteredEmpId],
       plannedDate: suggestedNextDate,
       note: "Sugestão automática",
-      createdBy: isOwner ? "Admin AppTip" : (currentUser?.name ?? "Gestor"),
+      createdBy: isOwner ? "Gestor AppTip" : (currentUser?.name ?? "Gestor Adm."),
       createdAt: new Date().toISOString(),
       completedFeedbackIds: {},
     };
@@ -7301,7 +7301,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
 
   const inboxUnread = ((data?.notifications??[]).filter(n=>n.restaurantId===rid&&!n.read&&!n.deleted&&n.targetRole!=="admin"&&n.type!=="upgrade_request").length + (data?.dpMessages??[]).filter(m=>m.restaurantId===rid&&!m.read&&!m.deleted).length);
 
-  // Líder de área: acesso restrito a Dashboard + Escala + Horários + Equipe
+  // Líder Operacional: acesso restrito a Dashboard + Escala + Horários + Equipe
   // ── Grouped tabs ──
   const TAB_GROUPS = isLider ? [
     { id:"equipe", label:"👥 Equipe", icon:"👥", tabs: [
@@ -7409,7 +7409,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
     if (count > 0) {
       // Snapshot pré-save das gorjetas do mês
       const preSnapT = snapshotTipsMonth(tips, rid, mk);
-      saveVersion("tips", rid, mk, data?.tipVersions, preSnapT, currentUser?.name || (isOwner?"Admin AppTip":"Gestor"), `Salvar gorjetas (${dirtyRows.length} dia${dirtyRows.length>1?"s":""})`, onUpdate, true);
+      saveVersion("tips", rid, mk, data?.tipVersions, preSnapT, currentUser?.name || (isOwner?"Gestor AppTip":"Gestor Adm."), `Salvar gorjetas (${dirtyRows.length} dia${dirtyRows.length>1?"s":""})`, onUpdate, true);
       onUpdate("tips", currentTips);
       setTipRows([]);
       onUpdate("_toast", `✅ ${dirtyRows.length} dia${dirtyRows.length>1?"s":""} salvo${dirtyRows.length>1?"s":""}! (${count} empregados)`);
@@ -7465,7 +7465,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                   onUpdate("schedulePrevista", newPrev);
                 }
                 const preSnap = snapshotSchedulesMonth(schedules, rid, mk);
-                saveVersion("schedules", rid, mk, data?.scheduleVersions, preSnap, currentUser?.name || (isOwner?"Admin AppTip":"Gestor"), "Edição manual", onUpdate, true);
+                saveVersion("schedules", rid, mk, data?.scheduleVersions, preSnap, currentUser?.name || (isOwner?"Gestor AppTip":"Gestor Adm."), "Edição manual", onUpdate, true);
                 let newMonth = { ...(schedules?.[rid]?.[mk] ?? {}) };
                 Object.entries(schedLocalEdits).forEach(([eid, dayEdits]) => {
                   const empMap = { ...(newMonth[eid] ?? {}) };
@@ -7501,7 +7501,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                 onUpdate("schedulePrevista", newPrev);
               }
               const preSnap = snapshotSchedulesMonth(schedules, rid, mk);
-              saveVersion("schedules", rid, mk, data?.scheduleVersions, preSnap, currentUser?.name || (isOwner?"Admin AppTip":"Gestor"), "Edição manual", onUpdate, true);
+              saveVersion("schedules", rid, mk, data?.scheduleVersions, preSnap, currentUser?.name || (isOwner?"Gestor AppTip":"Gestor Adm."), "Edição manual", onUpdate, true);
               let newMonth = { ...(schedules?.[rid]?.[mk] ?? {}) };
               Object.entries(schedLocalEdits).forEach(([eid, dayEdits]) => {
                 const empMap = { ...(newMonth[eid] ?? {}) };
@@ -7533,7 +7533,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                   onUpdate("schedulePrevista", newPrev);
                 }
                 const preSnap = snapshotSchedulesMonth(schedules, rid, mk);
-                saveVersion("schedules", rid, mk, data?.scheduleVersions, preSnap, currentUser?.name || (isOwner?"Admin AppTip":"Gestor"), "Edição manual", onUpdate, true);
+                saveVersion("schedules", rid, mk, data?.scheduleVersions, preSnap, currentUser?.name || (isOwner?"Gestor AppTip":"Gestor Adm."), "Edição manual", onUpdate, true);
                 let newMonth2 = { ...(schedules?.[rid]?.[mk] ?? {}) };
                 Object.entries(schedLocalEdits).forEach(([eid, dayEdits]) => {
                   const empMap = { ...(newMonth2[eid] ?? {}) };
@@ -7937,7 +7937,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                 onRestore={(v)=>{
                   // Salva estado atual como nova versão
                   const curSnap = snapshotTipsMonth(tips, rid, mk);
-                  saveVersion("tips", rid, mk, data?.tipVersions, curSnap, currentUser?.name || (isOwner?"Admin AppTip":"Gestor"), `Antes de restaurar "${v.reason}"`, onUpdate, true);
+                  saveVersion("tips", rid, mk, data?.tipVersions, curSnap, currentUser?.name || (isOwner?"Gestor AppTip":"Gestor Adm."), `Antes de restaurar "${v.reason}"`, onUpdate, true);
                   // Aplica versão restaurada: remove tips atuais desse mês e adiciona os do snapshot
                   const otherTips = (tips ?? []).filter(t => !(t.restaurantId === rid && t.monthKey === mk));
                   const restoredTips = [...otherTips, ...((v.snapshot ?? []).map(t => ({...t})))];
@@ -8067,7 +8067,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                               <button onClick={()=>{
                                 if(!window.confirm(`Zerar gorjeta de ${fmtDate(date)}?\n\n⚠️ Um backup será salvo no Histórico — você pode restaurar depois.`)) return;
                                 const preSnap = snapshotTipsMonth(tips, rid, mk);
-                                saveVersion("tips", rid, mk, data?.tipVersions, preSnap, currentUser?.name || (isOwner?"Admin AppTip":"Gestor"), `Remover gorjeta de ${fmtDate(date)}`, onUpdate, true);
+                                saveVersion("tips", rid, mk, data?.tipVersions, preSnap, currentUser?.name || (isOwner?"Gestor AppTip":"Gestor Adm."), `Remover gorjeta de ${fmtDate(date)}`, onUpdate, true);
                                 onUpdate("tips",tips.filter(t=>!(t.restaurantId===rid&&t.date===date)));
                                 setTipRows(prev=>prev.filter(r=>r.date!==date));
                                 onUpdate("_toast",`🗑️ ${fmtDate(date)}: removido`);
@@ -8124,12 +8124,12 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                                 const preSnap = snapshotTipsMonth(tips, rid, mk);
                                 weekDates.forEach(d => { const r=recalcTipDay(d,currentTips); total+=r.count; currentTips=r.updatedTips; });
                                 if(total>0){
-                                  saveVersion("tips", rid, mk, data?.tipVersions, preSnap, currentUser?.name || (isOwner?"Admin AppTip":"Gestor"), `Recalcular semana ${fmtDay(w.monday)}—${fmtDay(w.sunday)}`, onUpdate, true);
+                                  saveVersion("tips", rid, mk, data?.tipVersions, preSnap, currentUser?.name || (isOwner?"Gestor AppTip":"Gestor Adm."), `Recalcular semana ${fmtDay(w.monday)}—${fmtDay(w.sunday)}`, onUpdate, true);
                                   onUpdate("tips",currentTips);
                                 }
                                 // Re-confirm after recalc
                                 const upd = { ...(data?.tipApprovals ?? {}) };
-                                upd[rid] = { ...(upd[rid] ?? {}), [w.monday]: { approvedAt: new Date().toISOString(), approvedBy: currentUser?.id || "admin", approvedByName: currentUser?.name || (isOwner ? "Admin AppTip" : "Gestor") } };
+                                upd[rid] = { ...(upd[rid] ?? {}), [w.monday]: { approvedAt: new Date().toISOString(), approvedBy: currentUser?.id || "admin", approvedByName: currentUser?.name || (isOwner ? "Gestor AppTip" : "Gestor Adm.") } };
                                 onUpdate("tipApprovals", upd);
                                 onUpdate("_toast",`🔄 Semana recalculada: ${total} empregados atualizados`);
                               }} style={{padding:"5px 10px",borderRadius:8,border:"1px solid #f59e0b44",background:"transparent",color:"#f59e0b",cursor:"pointer",fontSize:11,fontFamily:"'DM Mono',monospace"}}>🔄 Recalcular</button>
@@ -8144,7 +8144,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                             </>) : (
                               <button onClick={() => {
                                 const updated = { ...(data?.tipApprovals ?? {}) };
-                                updated[rid] = { ...(updated[rid] ?? {}), [w.monday]: { approvedAt: new Date().toISOString(), approvedBy: currentUser?.id || "admin", approvedByName: currentUser?.name || (isOwner ? "Admin AppTip" : "Gestor") } };
+                                updated[rid] = { ...(updated[rid] ?? {}), [w.monday]: { approvedAt: new Date().toISOString(), approvedBy: currentUser?.id || "admin", approvedByName: currentUser?.name || (isOwner ? "Gestor AppTip" : "Gestor Adm.") } };
                                 onUpdate("tipApprovals", updated);
                               }} style={{...S.btnPrimary,fontSize:11,padding:"5px 12px"}}>Confirmar ✅</button>
                             )}
@@ -8194,7 +8194,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                   <button onClick={()=>{
                     const ids=new Set(dT.map(t=>t.id));
                     const preSnap = snapshotTipsMonth(tips, rid, mk);
-                    saveVersion("tips", rid, mk, data?.tipVersions, preSnap, currentUser?.name || (isOwner?"Admin AppTip":"Gestor"), `Remover lançamento (${fmtDate(dT[0]?.date)})`, onUpdate, true);
+                    saveVersion("tips", rid, mk, data?.tipVersions, preSnap, currentUser?.name || (isOwner?"Gestor AppTip":"Gestor Adm."), `Remover lançamento (${fmtDate(dT[0]?.date)})`, onUpdate, true);
                     onUpdate("tips",tips.filter(t=>!ids.has(t.id)));
                     onUpdate("_toast","Lançamento removido.");
                   }} style={{marginTop:10,background:"none",border:"1px solid #e74c3c33",borderRadius:8,color:"var(--red)",cursor:"pointer",fontSize:12,padding:"4px 12px",fontFamily:"'DM Mono',monospace"}}>Remover lançamento</button>
@@ -8694,9 +8694,9 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                     }
                     // Save as new version
                     const preSnap = snapshotSchedulesMonth(schedules, rid, mk);
-                    saveVersion("schedules", rid, mk, data?.scheduleVersions, preSnap, currentUser?.name || (isOwner?"Admin AppTip":"Gestor"), "Edição manual", onUpdate, true);
+                    saveVersion("schedules", rid, mk, data?.scheduleVersions, preSnap, currentUser?.name || (isOwner?"Gestor AppTip":"Gestor Adm."), "Edição manual", onUpdate, true);
                     // Record adjustments for Phase 2
-                    const adjAuthor = currentUser?.name || (isOwner?"Admin AppTip":"Gestor");
+                    const adjAuthor = currentUser?.name || (isOwner?"Gestor AppTip":"Gestor Adm.");
                     const adjTimestamp = new Date().toISOString();
                     const newAdjs = [];
                     Object.entries(schedLocalEdits).forEach(([eid, dayEdits]) => {
@@ -8899,7 +8899,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                       // No delta, close directly
                       const newStatus = { ...(data?.scheduleStatus ?? {}) };
                       if (!newStatus[rid]) newStatus[rid] = {};
-                      newStatus[rid][mk] = { ...(newStatus[rid][mk] ?? {}), status: "closed", closedAt: new Date().toISOString(), closedBy: currentUser?.name || "Admin AppTip" };
+                      newStatus[rid][mk] = { ...(newStatus[rid][mk] ?? {}), status: "closed", closedAt: new Date().toISOString(), closedBy: currentUser?.name || "Gestor AppTip" };
                       onUpdate("scheduleStatus", newStatus);
                       onUpdate("_toast", "Mes fechado com sucesso");
                     }
@@ -8955,7 +8955,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                         // Close the month and persist
                         const newStatus = { ...(data?.scheduleStatus ?? {}) };
                         if (!newStatus[rid]) newStatus[rid] = {};
-                        newStatus[rid][mk] = { ...(newStatus[rid][mk] ?? {}), status: "closed", closedAt: new Date().toISOString(), closedBy: currentUser?.name || "Admin AppTip" };
+                        newStatus[rid][mk] = { ...(newStatus[rid][mk] ?? {}), status: "closed", closedAt: new Date().toISOString(), closedBy: currentUser?.name || "Gestor AppTip" };
                         onUpdate("scheduleStatus", newStatus);
                         // Save effective schedule as the final schedule
                         const finalMonth = { ...effectiveMonth };
@@ -9017,7 +9017,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                   onRestore={(v)=>{
                     // Salva o estado atual como nova versão (pra poder desfazer o restore)
                     const curSnap = snapshotSchedulesMonth(schedules, rid, mk);
-                    saveVersion("schedules", rid, mk, data?.scheduleVersions, curSnap, currentUser?.name || (isOwner?"Admin AppTip":"Gestor"), `Antes de restaurar "${v.reason}"`, onUpdate, true);
+                    saveVersion("schedules", rid, mk, data?.scheduleVersions, curSnap, currentUser?.name || (isOwner?"Gestor AppTip":"Gestor Adm."), `Antes de restaurar "${v.reason}"`, onUpdate, true);
                     // Aplica a versão restaurada
                     const newSched = JSON.parse(JSON.stringify(schedules ?? {}));
                     if (!newSched[rid]) newSched[rid] = {};
@@ -9533,7 +9533,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                               description: `[Importado do ponto] ${inc.description}`,
                               date: inc.date,
                               createdAt: new Date().toISOString(),
-                              createdBy: isOwner ? "Admin AppTip" : (currentUser?.name ?? "Gestor"),
+                              createdBy: isOwner ? "Gestor AppTip" : (currentUser?.name ?? "Gestor Adm."),
                               createdById: currentUser?.id ?? null,
                               visibility: "internal",
                             }));
@@ -9572,7 +9572,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                             system: pontoSystem,
                             matchedCount: importSummary.matchedCount,
                             totalPdf: importSummary.totalPdf,
-                            user: currentUser?.name || (isOwner ? "Admin AppTip" : "Gestor"),
+                            user: currentUser?.name || (isOwner ? "Gestor AppTip" : "Gestor Adm."),
                             incidents: allNewIncidents.length,
                             schedChanges: totalSched,
                           };
@@ -10075,7 +10075,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
               <ComunicadosManagerTab
                 restaurantId={rid} communications={data?.communications ?? []}
                 commAcks={data?.commAcks ?? {}} employees={employees}
-                onUpdate={onUpdate} currentManagerName={currentUser?.name ?? "Gestor"}
+                onUpdate={onUpdate} currentManagerName={currentUser?.name ?? "Gestor Adm."}
                 isOwner={isOwner} trash={data?.trash}
               />
             )}
@@ -10232,7 +10232,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
         {/* HORARIOS */}
         {tab === "horarios" && (
           <div>
-            <WorkScheduleManagerTab restaurantId={rid} employees={employees} roles={roles} workSchedules={data?.workSchedules??{}} notifications={data?.notifications??[]} managers={data?.managers??[]} currentManagerName={currentUser?.name ?? (isOwner?"Admin AppTip":"Gestor")} onUpdate={onUpdate} communications={data?.communications??[]} isOwner={isOwner} mobileOnly={mobileOnly} />
+            <WorkScheduleManagerTab restaurantId={rid} employees={employees} roles={roles} workSchedules={data?.workSchedules??{}} notifications={data?.notifications??[]} managers={data?.managers??[]} currentManagerName={currentUser?.name ?? (isOwner?"Gestor AppTip":"Gestor Adm.")} onUpdate={onUpdate} communications={data?.communications??[]} isOwner={isOwner} mobileOnly={mobileOnly} />
           </div>
         )}
 
@@ -10292,7 +10292,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
               )}
 
               {restMgrs.map(m => {
-                const profileLabel = m.profile==="dp"?"📬 DP":m.profile==="lider"?"👔 Líder":"⚙️ Custom";
+                const profileLabel = m.profile==="dp"?"📬 Gestor Adm.":m.profile==="lider"?"👔 Líder Op.":"⚙️ Custom";
                 const mine = canEdit(m);
                 return (
                   <div key={m.id} style={{...S.card,marginBottom:10,display:"flex",justifyContent:"space-between",alignItems:"center",gap:12}}>
@@ -10367,8 +10367,8 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                 <label style={S.label}>Perfil do gestor</label>
                 <div style={{display:"flex",flexDirection:"column",gap:8}}>
                   {[
-                    {id:"dp",icon:"📬",title:"DP (Departamento Pessoal)",desc:"Acesso completo: gorjetas, escala, cargos, equipe, comunicados, FAQ, DP e notificações."},
-                    {id:"lider",icon:"👔",title:"Líder de Área",desc:"Acesso apenas à escala e horários da(s) sua(s) área(s)."},
+                    {id:"dp",icon:"📬",title:"Gestor Administrativo",desc:"Acesso completo: gorjetas, escala, cargos, equipe, comunicados, FAQ, DP e notificações."},
+                    {id:"lider",icon:"👔",title:"Líder Operacional",desc:"Acesso apenas à escala e horários da(s) sua(s) área(s)."},
                     {id:"custom",icon:"⚙️",title:"Personalizado",desc:"Escolha as permissões manualmente."},
                   ].map(p=>{
                     const on = dpMgrForm.profile === p.id;
@@ -10829,7 +10829,7 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }
     const cpfDigits = (mgrForm.cpf??"").replace(/\D/g,"");
     if (cpfDigits.length < 11) { onUpdate("_toast","⚠️ CPF é obrigatório para gestores (11 dígitos)"); return; }
     // Líder must have at least one area
-    if (mgrForm.profile==="lider" && (mgrForm.areas??[]).length===0) { onUpdate("_toast","⚠️ Selecione pelo menos uma área para o Líder"); return; }
+    if (mgrForm.profile==="lider" && (mgrForm.areas??[]).length===0) { onUpdate("_toast","⚠️ Selecione pelo menos uma área para o Líder Operacional"); return; }
     // PIN = primeiros 4 dígitos do CPF no cadastro inicial
     const isNew = !editMgrId;
     const pin = isNew ? cpfDigits.slice(0,4) : (mgrForm.pin || cpfDigits.slice(0,4));
@@ -11002,7 +11002,7 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }
                       <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:2,flexWrap:"wrap"}}>
                         <span style={{color:"var(--text)",fontWeight:700,fontSize:isMobile?14:15}}>{m.name}</span>
                         {m.profile==="dp" && <span style={{background:"var(--blue-bg)",color:"var(--blue)",borderRadius:6,padding:"2px 8px",fontSize:10,fontWeight:700}}>📬 DP</span>}
-                        {m.profile==="lider" && <span style={{background:"#f59e0b22",color:"#f59e0b",borderRadius:6,padding:"2px 8px",fontSize:10,fontWeight:700}}>👔 Líder</span>}
+                        {m.profile==="lider" && <span style={{background:"#f59e0b22",color:"#f59e0b",borderRadius:6,padding:"2px 8px",fontSize:10,fontWeight:700}}>👔 Líder Op.</span>}
                       </div>
                       <div style={{color:"var(--text3)",fontSize:isMobile?11:12,marginBottom:4}}>CPF: {isPrivate(selRestaurant) ? "•••.•••.•••-••" : (m.cpf||"—")}</div>
                       {m.profile==="lider" && (m.areas??[]).length>0 && (
@@ -11541,8 +11541,8 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }
                 <label style={S.label}>Perfil do gestor</label>
                 <div style={{display:"flex",flexDirection:"column",gap:8}}>
                   {[
-                    {id:"dp",icon:"📬",title:"DP (Departamento Pessoal)",desc:"Acesso completo: gorjetas, escala, cargos, equipe, comunicados, FAQ, DP e notificações. Recebe mensagens do Fale com DP."},
-                    {id:"lider",icon:"👔",title:"Líder de Área",desc:"Acesso apenas à escala e horários da(s) sua(s) área(s)."},
+                    {id:"dp",icon:"📬",title:"Gestor Administrativo",desc:"Acesso completo: gorjetas, escala, cargos, equipe, comunicados, FAQ, DP e notificações. Recebe mensagens do Fale com DP."},
+                    {id:"lider",icon:"👔",title:"Líder Operacional",desc:"Acesso apenas à escala e horários da(s) sua(s) área(s)."},
                     {id:"custom",icon:"⚙️",title:"Personalizado",desc:"Escolha as permissões manualmente."},
                   ].map(p=>{
                     const on = mgrForm.profile === p.id;
@@ -11644,7 +11644,7 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }
       <div style={{ background:"var(--header-bg)", borderBottom:"1px solid var(--border)", padding:isMobile?"10px 12px":"14px 20px", display:"flex", justifyContent:"space-between", alignItems:"center", boxShadow:"0 1px 4px rgba(0,0,0,0.04)", gap:8 }}>
         <div style={{ display:"flex", alignItems:"center", gap:isMobile?6:8, minWidth:0 }}>
           <span style={{ fontSize:isMobile?14:18 }}>⭐</span>
-          <span style={{ color:"var(--text)", fontWeight:800, fontSize:isMobile?13:16 }}>{isMobile?"Admin":"Admin AppTip"}</span>
+          <span style={{ color:"var(--text)", fontWeight:800, fontSize:isMobile?13:16 }}>{isMobile?"Gestor":"Gestor AppTip"}</span>
           {!isMobile && <span style={{ color:"var(--text3)", fontSize:12 }}>· {currentUser?.name}</span>}
         </div>
         <div style={{display:"flex",gap:isMobile?4:6,alignItems:"center",flexShrink:0}}>
@@ -12257,7 +12257,7 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }
                     <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:2,flexWrap:"wrap"}}>
                       <span style={{color:"var(--text)",fontWeight:700,fontSize:isMobile?13:15}}>{m.name}</span>
                       {m.isDP && <span style={{background:"var(--blue-bg)",color:"var(--blue)",borderRadius:6,padding:"2px 8px",fontSize:isMobile?10:11,fontWeight:700}}>📬 DP</span>}
-                      {m.profile && m.profile !== "custom" && <span style={{background:"var(--bg2)",color:"var(--text3)",borderRadius:6,padding:"2px 8px",fontSize:isMobile?10:11,fontWeight:600}}>{m.profile === "lider" ? "👑 Líder" : m.profile === "padrao" ? "📋 Padrão" : m.profile}</span>}
+                      {m.profile && m.profile !== "custom" && <span style={{background:"var(--bg2)",color:"var(--text3)",borderRadius:6,padding:"2px 8px",fontSize:isMobile?10:11,fontWeight:600}}>{m.profile === "lider" ? "👑 Líder Op." : m.profile === "padrao" ? "📋 Padrão" : m.profile}</span>}
                     </div>
                     <div style={{color:"var(--text3)",fontSize:isMobile?11:12,marginBottom:6}}>CPF: {(m.restaurantIds??[]).some(rid=>isPrivate(rid)) ? maskCpfPriv(m.cpf, (m.restaurantIds??[])[0]) : (m.cpf||"—")}</div>
                     <div style={{display:"flex",gap:4,flexWrap:"wrap"}}>
@@ -12507,7 +12507,7 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }
               "Novo: Métricas anônimas comparando faltas do empregado com média da área",
               "Novo: Checklist de desenvolvimento por cargo com links para materiais de estudo",
               "Segurança: ocorrências negativas, gravidade, nomes de envolvidos e observações internas NÃO visíveis ao empregado",
-              "Acesso: Admin, Gestor e Líder de Área (líder só vê empregados da sua área)",
+              "Acesso: Gestor AppTip, Gestor Adm. e Líder Operacional (líder só vê empregados da sua área)",
             ]},
             { version:"5.15.4", date:"2026-04-17", items:[
               "Correção: tela de primeiro acesso do empregado (cadastro de PIN) agora tem botão '← Voltar ao login'",
@@ -12953,7 +12953,7 @@ function ManagerPortal({ manager, data, onUpdate, onBack, toggleTheme, theme, on
             <div style={{ display:"flex", alignItems:"center", gap:5 }}>
               <span style={{fontSize:14}}>📊</span>
               <span style={{color:"var(--text)",fontWeight:800,fontSize:14,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
-                {selRest ? selRest.name : "Gestor"}
+                {selRest ? selRest.name : "Gestor Adm."}
               </span>
             </div>
             <div style={{color:"var(--text3)",fontSize:10,marginTop:1}}>
@@ -13189,7 +13189,7 @@ function UnifiedLogin({ owners, managers, employees, restaurants, onLoginOwner, 
       const found = [];
 
       if (mgr) {
-        found.push({ label:"Gestor", icon:"📊", action:()=>{ setChoices(null); onLoginManager(mgr); } });
+        found.push({ label:"Gestor Adm.", icon:"📊", action:()=>{ setChoices(null); onLoginManager(mgr); } });
       }
 
       if (emp && !(emp.inactive && emp.inactiveFrom && emp.inactiveFrom <= today())) {
@@ -13231,7 +13231,7 @@ function UnifiedLogin({ owners, managers, employees, restaurants, onLoginOwner, 
         if (mgr) {
           // Dual-role — mostrar tela de escolha
           const found = [];
-          found.push({ label:"Gestor", icon:"📊", action:()=>{ setChoices(null); onLoginManager(mgr); } });
+          found.push({ label:"Gestor Adm.", icon:"📊", action:()=>{ setChoices(null); onLoginManager(mgr); } });
           const restDoEmp = restaurants.find(r=>r.id===emp.restaurantId);
           if (!(restDoEmp?.financeiro?.status === "inadimplente")) {
             found.push({ label:"Empregado", icon:"👤", action:()=>{ setChoices(null); localStorage.setItem("apptip_empid", emp.id); localStorage.setItem("apptip_userid", emp.id); onLoginEmployee(emp); } });
@@ -13272,8 +13272,8 @@ function UnifiedLogin({ owners, managers, employees, restaurants, onLoginOwner, 
               <div>
                 <div style={{color:"var(--text)",fontWeight:700,fontSize:16}}>{opt.label}</div>
                 <div style={{color:"var(--text3)",fontSize:13,marginTop:2}}>
-                  {opt.label==="Admin AppTip"&&"Gerenciar restaurantes e equipes"}
-                  {opt.label==="Gestor"&&"Gerenciar gorjetas, escala e equipe"}
+                  {opt.label==="Gestor AppTip"&&"Gerenciar restaurantes e equipes"}
+                  {opt.label==="Gestor Adm."&&"Gerenciar gorjetas, escala e equipe"}
                   {opt.label==="Empregado"&&"Ver meu extrato, escala e comunicados"}
                 </div>
               </div>
@@ -13490,7 +13490,7 @@ function Home({ onLogin }) {
     { icon:"📢", title:"Comunicados com IA", desc:"Envie avisos para toda a equipe ou áreas específicas. Assistente de IA ajuda a redigir. Acompanhe quem leu e confirmou." },
     { icon:"💬", title:"Canal com o DP", desc:"Canal direto, inclusive anônimo, para comunicação entre equipe e departamento pessoal. Sugestões, denúncias, atestados e dúvidas trabalhistas." },
 
-    { icon:"👔", title:"Perfis de gestor", desc:"DP com acesso completo ou Líder de Área com visão restrita. Permissões granulares, criação de gestores por DP e CPF obrigatório para segurança." },
+    { icon:"👔", title:"Perfis de gestor", desc:"Gestor Administrativo com acesso completo ou Líder Operacional com visão restrita. Permissões granulares, criação de gestores e CPF obrigatório para segurança." },
     { icon:"🛡️", title:"Privacidade de dados", desc:"Gestores controlam a visibilidade dos dados. Com o modo privacidade, a equipe de administradores não acessa valores de gorjetas, CPFs, mensagens do DP ou comunicados — garantindo sigilo total da operação." },
     { icon:"🔒", title:"Segurança e controle", desc:"Acesso por PIN e CPF, permissões por perfil, modo somente leitura, lixeira com restauração e auditoria completa. Cada pessoa vê apenas o que deve." },
     { icon:"📱", title:"100% no celular", desc:"Sem app para instalar. Acessa pelo navegador em qualquer smartphone. Gestor gerencia escala, horários e caixa de entrada direto pelo celular. Empregado com portal próprio e seguro." },
@@ -14368,8 +14368,8 @@ hr{border:none;border-top:1px solid var(--border);margin:24px 0}
         <p>O administrador define o perfil ao criar o gestor:</p>
         <table>
           <tr><th>Perfil</th><th>Descrição</th></tr>
-          <tr><td>📬 DP</td><td>Acesso completo: gorjetas, escala, cargos, equipe, comunicados, FAQ, DP e notificações. Pode criar outros gestores.</td></tr>
-          <tr><td>👔 Líder de Área</td><td>Acesso a escala e equipe apenas da(s) sua(s) área(s). Sem gorjetas, sem DP.</td></tr>
+          <tr><td>📬 Gestor Administrativo</td><td>Acesso completo: gorjetas, escala, cargos, equipe, comunicados, FAQ, DP e notificações. Pode criar outros gestores.</td></tr>
+          <tr><td>👔 Líder Operacional</td><td>Acesso a escala e equipe apenas da(s) sua(s) área(s). Sem gorjetas, sem DP.</td></tr>
           <tr><td>⚙️ Personalizado</td><td>Permissões individuais escolhidas pelo admin.</td></tr>
         </table>
       </div>
