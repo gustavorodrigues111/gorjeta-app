@@ -7317,23 +7317,23 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
       canTips && ["dashboard","Dashboard"],
       canTips && ["tips","Gorjetas"],
       canSched && ["schedule","Escala"],
-      (isOwner || tabVisible("horarios")) && ["horarios","Horários"],
       (isOwner || (perms.vt !== false && tabVisible("vt"))) && ["vt","Vale Transporte"],
     ].filter(Boolean) },
     { id:"equipe", label:"👥 Equipe", icon:"👥", tabs: [
       (isOwner || canTips || tabVisible("employees")) && ["employees","Empregados"],
       (isOwner || tabVisible("roles")) && ["roles","Cargos"],
       (isOwner || canTips || tabVisible("employees")) && ["reunioes","Reuniões"],
+      (isOwner || tabVisible("horarios")) && ["horarios","Horários"],
     ].filter(Boolean) },
     { id:"comunicacao", label:"📢 Comunicação", icon:"📢", tabs: [
       (isOwner || tabVisible("comunicados")) && ["comunicados","Comunicados"],
       (isOwner || tabVisible("faq")) && ["faq","FAQ"],
       (isOwner || tabVisible("dp")) && ["dp","Fale com DP"],
       isDP && ["notificacoes",`Caixa${inboxUnread>0?` (${inboxUnread})`:""}`],
-      isDP && ["dp_gestores","Gestores"],
     ].filter(Boolean) },
     { id:"config", label:"⚙️ Config", icon:"⚙️", tabs: [
       (canTips || isOwner) && ["config","Configurações"],
+      isDP && ["dp_gestores","Gestores"],
     ].filter(Boolean) },
   ].filter(g => g.tabs.length > 0);
 
