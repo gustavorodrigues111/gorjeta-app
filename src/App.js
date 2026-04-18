@@ -3,7 +3,7 @@ import { useState, useEffect, Component } from "react";
 import { db } from "./firebase";
 import { doc, getDoc, setDoc } from "firebase/firestore";
 
-const APP_VERSION = "5.27.0";
+const APP_VERSION = "5.28.0";
 
 const DEFAULT_ADMISSION = () => `${new Date().getFullYear()}-01-01`;
 const round2 = (v) => Math.round(v * 100) / 100;
@@ -4888,36 +4888,116 @@ Inclua apenas as ações solicitadas. Arrays vazios se não houver ação daquel
                     <span>{label}</span>
                   </div>;
                 })()}
-                {/* Resumo de atrasos — só gestor */}
+                {/* Presença & Pontualidade — últimos 6 meses */}
                 {(() => {
                   const now2 = new Date();
-                  const curMk = monthKey(now2.getFullYear(), now2.getMonth());
-                  const prevMk = monthKey(now2.getFullYear(), now2.getMonth() - 1);
-                  const curDelays = delays?.[rid]?.[curMk]?.[emp.id] ?? {};
-                  const prevDelays = delays?.[rid]?.[prevMk]?.[emp.id] ?? {};
-                  const curEntries = Object.values(curDelays).filter(v => v > 0);
-                  const prevEntries = Object.values(prevDelays).filter(v => v > 0);
-                  const curTotal = curEntries.reduce((s,v) => s+v, 0);
-                  const prevTotal = prevEntries.reduce((s,v) => s+v, 0);
-                  if (curEntries.length === 0 && prevEntries.length === 0) return null;
+                  const months6 = [];
+                  for (let i = 0; i < 6; i++) {
+                    const d = new Date(now2.getFullYear(), now2.getMonth() - i, 1);
+                    const mKey = monthKey(d.getFullYear(), d.getMonth());
+                    const label = d.toLocaleDateString("pt-BR", { month:"short" }).replace(".","");
+                    const empSched = schedules?.[rid]?.[mKey]?.[emp.id] ?? {};
+                    const empDel = delays?.[rid]?.[mKey]?.[emp.id] ?? {};
+                    const faltasI = Object.values(empSched).filter(s => s === DAY_FAULT_U).length;
+                    const faltasJ = Object.values(empSched).filter(s => s === DAY_FAULT_J).length;
+                    const delayDays = Object.values(empDel).filter(v => v > 0).length;
+                    const delayMin = Object.values(empDel).filter(v => v > 0).reduce((s,v) => s+v, 0);
+                    const hasDays = Object.keys(empSched).length > 0;
+                    months6.push({ mKey, label, faltasI, faltasJ, delayDays, delayMin, hasDays });
+                  }
+                  months6.reverse(); // cronológico: mais antigo primeiro
+                  const totFI = months6.reduce((s,m) => s+m.faltasI, 0);
+                  const totFJ = months6.reduce((s,m) => s+m.faltasJ, 0);
+                  const totDelDays = months6.reduce((s,m) => s+m.delayDays, 0);
+                  const totDelMin = months6.reduce((s,m) => s+m.delayMin, 0);
+                  const hasAny = totFI > 0 || totFJ > 0 || totDelDays > 0;
                   return (
-                    <div style={{...S.card,marginBottom:12,padding:"12px 14px",borderLeft:"4px solid #f59e0b"}}>
-                      <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:6}}>
-                        <span style={{fontSize:16}}>⏰</span>
-                        <span style={{color:"var(--text)",fontWeight:700,fontSize:13}}>Atrasos</span>
+                    <div style={{...S.card,marginBottom:12,padding:"14px"}}>
+                      <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:10}}>
+                        <span style={{fontSize:16}}>📊</span>
+                        <span style={{color:"var(--text)",fontWeight:700,fontSize:14}}>Presença & Pontualidade</span>
+                        <span style={{color:"var(--text3)",fontSize:11,marginLeft:"auto"}}>últimos 6 meses</span>
                       </div>
-                      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
-                        <div style={{padding:"8px 10px",borderRadius:8,background:"#f59e0b11",textAlign:"center"}}>
-                          <div style={{color:"#f59e0b",fontWeight:700,fontSize:18}}>{curEntries.length}</div>
-                          <div style={{color:"var(--text3)",fontSize:10}}>dias este mês</div>
-                          <div style={{color:"var(--text3)",fontSize:10}}>{curTotal} min ({(curTotal/60).toFixed(1)}h)</div>
+                      {/* Totais */}
+                      <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:8,marginBottom:12}}>
+                        <div style={{padding:"10px 8px",borderRadius:10,background:totFI>0?"#ef444411":"#10b98111",textAlign:"center"}}>
+                          <div style={{color:totFI>0?"#ef4444":"#10b981",fontWeight:700,fontSize:20}}>{totFI}</div>
+                          <div style={{color:"var(--text3)",fontSize:10}}>Faltas injust.</div>
                         </div>
-                        <div style={{padding:"8px 10px",borderRadius:8,background:"var(--bg1)",textAlign:"center"}}>
-                          <div style={{color:"var(--text2)",fontWeight:700,fontSize:18}}>{prevEntries.length}</div>
-                          <div style={{color:"var(--text3)",fontSize:10}}>dias mês anterior</div>
-                          <div style={{color:"var(--text3)",fontSize:10}}>{prevTotal} min ({(prevTotal/60).toFixed(1)}h)</div>
+                        <div style={{padding:"10px 8px",borderRadius:10,background:totFJ>0?"#f59e0b11":"#10b98111",textAlign:"center"}}>
+                          <div style={{color:totFJ>0?"#f59e0b":"#10b981",fontWeight:700,fontSize:20}}>{totFJ}</div>
+                          <div style={{color:"var(--text3)",fontSize:10}}>Faltas just.</div>
+                        </div>
+                        <div style={{padding:"10px 8px",borderRadius:10,background:totDelDays>0?"#f59e0b11":"#10b98111",textAlign:"center"}}>
+                          <div style={{color:totDelDays>0?"#f59e0b":"#10b981",fontWeight:700,fontSize:20}}>{totDelDays}</div>
+                          <div style={{color:"var(--text3)",fontSize:10}}>Dias c/ atraso</div>
+                          {totDelMin > 0 && <div style={{color:"var(--text3)",fontSize:9}}>{totDelMin}min ({(totDelMin/60).toFixed(1)}h)</div>}
                         </div>
                       </div>
+                      {/* Tabela mês a mês */}
+                      {hasAny && (
+                        <div style={{overflowX:"auto"}}>
+                          <table style={{width:"100%",borderCollapse:"collapse",fontSize:11,fontFamily:"'DM Mono',monospace"}}>
+                            <thead>
+                              <tr>
+                                <th style={{textAlign:"left",padding:"4px 6px",borderBottom:"1px solid var(--border)",color:"var(--text3)",fontSize:10,fontWeight:600}}>Mês</th>
+                                <th style={{textAlign:"center",padding:"4px 4px",borderBottom:"1px solid var(--border)",color:"#ef4444",fontSize:10,fontWeight:600}}>FI</th>
+                                <th style={{textAlign:"center",padding:"4px 4px",borderBottom:"1px solid var(--border)",color:"#f59e0b",fontSize:10,fontWeight:600}}>FJ</th>
+                                <th style={{textAlign:"center",padding:"4px 4px",borderBottom:"1px solid var(--border)",color:"#f59e0b",fontSize:10,fontWeight:600}}>Atrasos</th>
+                                <th style={{textAlign:"center",padding:"4px 4px",borderBottom:"1px solid var(--border)",color:"var(--text3)",fontSize:10,fontWeight:600}}>Min</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {months6.map(m => {
+                                if (!m.hasDays && m.delayDays === 0) return null;
+                                return (
+                                  <tr key={m.mKey}>
+                                    <td style={{padding:"4px 6px",borderBottom:"1px solid var(--border)22",textTransform:"capitalize",color:"var(--text2)",fontWeight:600}}>{m.label}</td>
+                                    <td style={{textAlign:"center",padding:"4px",borderBottom:"1px solid var(--border)22",color:m.faltasI>0?"#ef4444":"var(--text3)",fontWeight:m.faltasI>0?700:400}}>{m.faltasI}</td>
+                                    <td style={{textAlign:"center",padding:"4px",borderBottom:"1px solid var(--border)22",color:m.faltasJ>0?"#f59e0b":"var(--text3)",fontWeight:m.faltasJ>0?700:400}}>{m.faltasJ}</td>
+                                    <td style={{textAlign:"center",padding:"4px",borderBottom:"1px solid var(--border)22",color:m.delayDays>0?"#f59e0b":"var(--text3)",fontWeight:m.delayDays>0?700:400}}>{m.delayDays}</td>
+                                    <td style={{textAlign:"center",padding:"4px",borderBottom:"1px solid var(--border)22",color:"var(--text3)"}}>{m.delayMin>0?m.delayMin:"—"}</td>
+                                  </tr>
+                                );
+                              })}
+                            </tbody>
+                          </table>
+                        </div>
+                      )}
+                      {!hasAny && <div style={{textAlign:"center",color:"#10b981",fontSize:12,padding:"8px 0"}}>✅ Nenhuma falta ou atraso nos últimos 6 meses</div>}
+                    </div>
+                  );
+                })()}
+                {/* Histórico de feedbacks — só gestor */}
+                {(() => {
+                  const empFbsHist = (feedbacks??[]).filter(f => f.restaurantId === rid && f.employeeId === emp.id).sort((a,b) => (b.createdAt??"").localeCompare(a.createdAt??""));
+                  if (empFbsHist.length === 0) return null;
+                  return (
+                    <div style={{...S.card,marginBottom:12,padding:"14px"}}>
+                      <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:10}}>
+                        <span style={{fontSize:16}}>💬</span>
+                        <span style={{color:"var(--text)",fontWeight:700,fontSize:14}}>Feedbacks anteriores</span>
+                        <span style={{color:"var(--text3)",fontSize:11,marginLeft:"auto"}}>{empFbsHist.length} registro{empFbsHist.length!==1?"s":""}</span>
+                      </div>
+                      {empFbsHist.slice(0,4).map(fb => {
+                        const rLabel = fb.rating ? RATING_LABELS[fb.rating - 1] : "—";
+                        const rColor = fb.rating ? RATING_COLORS[fb.rating - 1] : "var(--text3)";
+                        const qLabel = fb.quarter ? `Q${fb.quarter}/${fb.year ?? ""}` : "";
+                        return (
+                          <div key={fb.id} style={{padding:"10px 0",borderBottom:"1px solid var(--border)22"}}>
+                            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:4}}>
+                              <div style={{display:"flex",alignItems:"center",gap:6}}>
+                                <span style={{fontSize:11,padding:"2px 8px",borderRadius:6,background:rColor+"18",color:rColor,fontWeight:700}}>{rLabel}</span>
+                                {qLabel && <span style={{color:"var(--text3)",fontSize:11}}>{qLabel}</span>}
+                              </div>
+                              <span style={{color:"var(--text3)",fontSize:10}}>{fb.createdAt ? new Date(fb.createdAt).toLocaleDateString("pt-BR") : ""} · {fb.createdBy ?? ""}</span>
+                            </div>
+                            {fb.strengths && <div style={{fontSize:11,color:"var(--text2)",marginBottom:2}}><strong style={{color:"#10b981"}}>+</strong> {fb.strengths}</div>}
+                            {fb.improvements && <div style={{fontSize:11,color:"var(--text2)",marginBottom:2}}><strong style={{color:"#f59e0b"}}>△</strong> {fb.improvements}</div>}
+                            {fb.internalNotes && <div style={{fontSize:11,color:"var(--text3)",fontStyle:"italic"}}>{fb.internalNotes}</div>}
+                          </div>
+                        );
+                      })}
                     </div>
                   );
                 })()}
