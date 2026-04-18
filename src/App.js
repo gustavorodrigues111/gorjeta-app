@@ -6339,7 +6339,10 @@ function EmpTrilhaView({ empId, employees, roles, schedules, incidents, feedback
         events.push({ date: d, label: lb, icon: ic });
       }
     });
-    // Feedbacks removidos da jornada do empregado — risco trabalhista
+    // Feedbacks — texto genérico, sem nota/avaliação
+    (feedbacks ?? []).filter(f => f.restaurantId === restaurantId && f.employeeId === empId && f.createdAt).forEach(f => {
+      events.push({ date: new Date(f.createdAt), label: "Conversa de desenvolvimento realizada", icon: "💬" });
+    });
     // Objetivos concluídos
     myGoalsAll.filter(g => g.status === "completed").forEach(g => {
       events.push({ date: new Date(g.createdAt), label: `Objetivo: ${g.title}`, icon: "🎯" });
