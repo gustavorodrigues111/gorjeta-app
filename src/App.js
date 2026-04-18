@@ -3,7 +3,7 @@ import { useState, useEffect, Component } from "react";
 import { db } from "./firebase";
 import { doc, getDoc, setDoc } from "firebase/firestore";
 
-const APP_VERSION = "5.30.0";
+const APP_VERSION = "5.31.0";
 
 const DEFAULT_ADMISSION = () => `${new Date().getFullYear()}-01-01`;
 const round2 = (v) => Math.round(v * 100) / 100;
@@ -4489,7 +4489,7 @@ Inclua apenas as ações solicitadas. Arrays vazios se não houver ação daquel
       {detailEmp && detailEmpObj && (() => {
         const emp = detailEmpObj;
         const role = detailRole;
-        const empIncidents = (incidents??[]).filter(i => i.restaurantId === rid && (i.employeeIds??[]).includes(emp.id));
+        const empIncidents = (incidents??[]).filter(i => i.restaurantId === rid && (i.employeeIds??[]).includes(emp.id) && !i.deletedAt);
         const empFeedbacks = (feedbacks??[]).filter(f => f.restaurantId === rid && f.employeeId === emp.id && !f.deletedAt);
         const negCount = empIncidents.filter(i => { const t = INCIDENT_TYPES.find(x=>x.id===i.type); return t?.negative; }).length;
         const posCount = empIncidents.filter(i => { const t = INCIDENT_TYPES.find(x=>x.id===i.type); return !t?.negative; }).length;
@@ -4781,7 +4781,7 @@ Inclua apenas as ações solicitadas. Arrays vazios se não houver ação daquel
                       y = doc.lastAutoTable.finalY + 8;
 
                       // Incidents in period
-                      const empIncs = (incidents??[]).filter(i => i.restaurantId===rid && (i.employeeIds??[]).includes(emp.id) && i.date>=fromISO && i.date<=toISO);
+                      const empIncs = (incidents??[]).filter(i => i.restaurantId===rid && (i.employeeIds??[]).includes(emp.id) && !i.deletedAt && i.date>=fromISO && i.date<=toISO);
                       if (empIncs.length > 0) {
                         if (y > 240) { doc.addPage(); y = 15; }
                         doc.setFontSize(12); doc.text("OCORRÊNCIAS", 14, y); y += 2;
@@ -5044,7 +5044,7 @@ Inclua apenas as ações solicitadas. Arrays vazios se não houver ação daquel
                   );
                 })()}
                 <GoalsManager empId={emp.id} employeeGoals={employeeGoals} roles={roles??restRoles} restaurantId={rid} onUpdate={onUpdate} currentUser={currentUser} isOwner={isOwner} schedules={schedules??{}} feedbacks={feedbacks??[]} employees={employees}/>
-                <EmpTimeline empId={emp.id} employees={employees} roles={roles??restRoles} schedules={schedules??{}} incidents={incidents??[]} feedbacks={feedbacks??[]} restaurantId={rid}/>
+                <EmpTimeline empId={emp.id} employees={employees} roles={roles??restRoles} schedules={schedules??{}} incidents={incidents??[]} feedbacks={feedbacks??[]} restaurantId={rid} onUpdate={onUpdate} currentUser={currentUser} isOwner={isOwner} canDeleteInc={!isLider}/>
               </div>
             )}
           </div>
@@ -5773,7 +5773,7 @@ const SEVERITY_OPTIONS = [
   { id:"grave", label:"Grave", color:"#e74c3c" },
 ];
 
-function EmpTimeline({ empId, employees, roles, schedules, incidents, feedbacks, restaurantId }) {
+function EmpTimeline({ empId, employees, roles, schedules, incidents, feedbacks, restaurantId, onUpdate, currentUser, isOwner, canDeleteInc }) {
   const [filter, setFilter] = useState("Todos");
   const emp = employees.find(e => e.id === empId);
   if (!emp) return null;
@@ -5798,10 +5798,10 @@ function EmpTimeline({ empId, employees, roles, schedules, incidents, feedbacks,
   });
 
   // Incidents — differentiate positive (green) vs negative (red)
-  (incidents ?? []).filter(inc => inc.restaurantId === restaurantId && (inc.employeeIds ?? []).includes(empId)).forEach(inc => {
+  (incidents ?? []).filter(inc => inc.restaurantId === restaurantId && (inc.employeeIds ?? []).includes(empId) && !inc.deletedAt).forEach(inc => {
     const t = INCIDENT_TYPES.find(it => it.id === inc.type);
     const isPositive = t && !t.negative;
-    events.push({ date: inc.date, type: "incident", cat: "Ocorrências", icon: isPositive ? "🌟" : "🚨", label: t?.label ?? inc.type, desc: inc.description || "", severity: inc.severity, positive: isPositive });
+    events.push({ date: inc.date, type: "incident", cat: "Ocorrências", icon: isPositive ? "🌟" : "🚨", label: t?.label ?? inc.type, desc: inc.description || "", severity: inc.severity, positive: isPositive, incId: inc.id });
   });
 
   // Feedbacks
@@ -5865,7 +5865,14 @@ function EmpTimeline({ empId, employees, roles, schedules, incidents, feedbacks,
                     {isPos && <span style={{fontSize:9,padding:"1px 6px",borderRadius:4,background:"#10b98122",color:"var(--green)",fontWeight:700}}>Positivo</span>}
                     {isNeg && <span style={{fontSize:9,padding:"1px 6px",borderRadius:4,background:"#e74c3c22",color:"var(--red)",fontWeight:700}}>Negativo</span>}
                   </div>
-                  <span style={{fontSize:10,color:"var(--text3)",fontFamily:"'DM Mono',monospace"}}>{new Date(ev.date+"T12:00:00").toLocaleDateString("pt-BR")}</span>
+                  <div style={{display:"flex",alignItems:"center",gap:6}}>
+                    <span style={{fontSize:10,color:"var(--text3)",fontFamily:"'DM Mono',monospace"}}>{new Date(ev.date+"T12:00:00").toLocaleDateString("pt-BR")}</span>
+                    {ev.type === "incident" && canDeleteInc && onUpdate && <button onClick={()=>{
+                      if (!window.confirm(`Excluir ocorrência "${ev.label}" de ${new Date(ev.date+"T12:00:00").toLocaleDateString("pt-BR")}?\n\nA ocorrência ficará na lixeira por 7 dias e poderá ser restaurada.`)) return;
+                      const updated = (incidents??[]).map(inc => inc.id === ev.incId ? {...inc, deletedAt: new Date().toISOString(), deletedBy: currentUser?.name || (isOwner ? "Admin AppTip" : "Gestor")} : inc);
+                      onUpdate("incidents", updated);
+                    }} style={{padding:"2px 6px",borderRadius:6,border:"1px solid var(--red)33",background:"transparent",color:"var(--red)",cursor:"pointer",fontSize:9,fontFamily:"'DM Mono',monospace"}}>✕</button>}
+                  </div>
                 </div>
                 {ev.severity && <span style={{fontSize:9,fontWeight:700,padding:"2px 6px",borderRadius:4,background:(SEVERITY_OPTIONS.find(s=>s.id===ev.severity)?.color??"#888")+"22",color:SEVERITY_OPTIONS.find(s=>s.id===ev.severity)?.color??"#888",marginRight:6}}>{SEVERITY_OPTIONS.find(s=>s.id===ev.severity)?.label??ev.severity}</span>}
                 {ev.desc && <p style={{color:"var(--text2)",fontSize:12,margin:ev.severity?"4px 0 0":0,lineHeight:1.5}}>{ev.desc}</p>}
@@ -5874,6 +5881,29 @@ function EmpTimeline({ empId, employees, roles, schedules, incidents, feedbacks,
           );
         })}
       </div>
+      {/* Lixeira de ocorrências — restaurar em até 7 dias */}
+      {canDeleteInc && onUpdate && (() => {
+        const deletedIncs = (incidents??[]).filter(inc => inc.restaurantId === restaurantId && (inc.employeeIds??[]).includes(empId) && inc.deletedAt && (Date.now() - new Date(inc.deletedAt).getTime()) < 7 * 86400000).sort((a,b) => (b.deletedAt??"").localeCompare(a.deletedAt??""));
+        if (deletedIncs.length === 0) return null;
+        return (
+          <div style={{marginTop:10,padding:"10px 12px",borderRadius:8,background:"var(--red)08",border:"1px solid var(--red)22"}}>
+            <div style={{fontSize:11,color:"var(--red)",fontWeight:700,marginBottom:6}}>🗑️ Ocorrências excluídas ({deletedIncs.length})</div>
+            {deletedIncs.map(inc => {
+              const daysLeft = Math.max(0, 7 - Math.floor((Date.now() - new Date(inc.deletedAt).getTime()) / 86400000));
+              const t = INCIDENT_TYPES.find(it => it.id === inc.type);
+              return (
+                <div key={inc.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"4px 0",fontSize:10}}>
+                  <span style={{color:"var(--text3)"}}>{t?.label ?? inc.type} — {new Date(inc.date+"T12:00:00").toLocaleDateString("pt-BR")} — excluído por {inc.deletedBy} ({daysLeft}d restantes)</span>
+                  <button onClick={()=>{
+                    const updated = (incidents??[]).map(i => i.id === inc.id ? (()=>{ const {deletedAt, deletedBy, ...rest} = i; return rest; })() : i);
+                    onUpdate("incidents", updated);
+                  }} style={{padding:"2px 8px",borderRadius:6,border:"1px solid var(--ac)44",background:"transparent",color:"var(--ac-text)",cursor:"pointer",fontSize:10,fontFamily:"'DM Mono',monospace"}}>Restaurar</button>
+                </div>
+              );
+            })}
+          </div>
+        );
+      })()}
     </div>
   );
 }
@@ -6769,8 +6799,9 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
   const [delayInputs, setDelayInputs] = useState({}); // { "day": minutes }
   // Schedule view mode: "vigente" shows effective (with local edits), "prevista" shows saved only
   const [schedViewMode, setSchedViewMode] = useState("vigente");
-  // Month close confirmation
+  // Month close / reopen confirmation
   const [showCloseConfirm, setShowCloseConfirm] = useState(false);
+  const [showReopenConfirm, setShowReopenConfirm] = useState(false);
   const [closeDelta, setCloseDelta] = useState(null);
   const [closeVtImpact, setCloseVtImpact] = useState(null);
   // Ponto summary for post-import dashboard
@@ -8580,15 +8611,8 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                     {mobileOnly ? "Fechar" : "Fechar Mes"}
                   </button>
                 )}
-                {monthClosed && isOwner && (
-                  <button onClick={()=>{
-                    if (!window.confirm("Reabrir este mes? As edicoes voltarao a ser permitidas.")) return;
-                    const newStatus = { ...(data?.scheduleStatus ?? {}) };
-                    if (!newStatus[rid]) newStatus[rid] = {};
-                    newStatus[rid][mk] = { ...(newStatus[rid][mk] ?? {}), status: "open", closedAt: null, closedBy: null };
-                    onUpdate("scheduleStatus", newStatus);
-                    onUpdate("_toast", "Mes reaberto");
-                  }}
+                {monthClosed && (isOwner || isDP) && (
+                  <button onClick={()=>setShowReopenConfirm(true)}
                     style={{...S.btnSecondary,fontSize:mobileOnly?11:12,color:"#f59e0b",borderColor:"#f59e0b44",whiteSpace:"nowrap"}}>
                     Reabrir
                   </button>
@@ -8646,6 +8670,41 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                         onUpdate("_toast", "Mes fechado e gorjetas ajustadas");
                       }} style={{...S.btnPrimary,fontSize:13}}>
                         Confirmar e fechar
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Reopen confirmation modal */}
+              {showReopenConfirm && (
+                <div style={{position:"fixed",top:0,left:0,right:0,bottom:0,background:"rgba(0,0,0,0.6)",zIndex:9999,display:"flex",alignItems:"center",justifyContent:"center",padding:16}} onClick={()=>setShowReopenConfirm(false)}>
+                  <div onClick={e=>e.stopPropagation()} style={{background:"var(--bg2)",borderRadius:16,padding:24,maxWidth:480,width:"100%",border:"1px solid #f59e0b44"}}>
+                    <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:16}}>
+                      <span style={{fontSize:24}}>⚠️</span>
+                      <h3 style={{color:"#f59e0b",margin:0,fontSize:16}}>Reabrir escala fechada</h3>
+                    </div>
+                    <p style={{color:"var(--text2)",fontSize:13,margin:"0 0 14px",lineHeight:1.6}}>
+                      Ao reabrir a escala de <strong>{monthLabel(year, month)}</strong>, as edições voltarão a ser permitidas. Considere as seguintes consequências:
+                    </p>
+                    <div style={{background:"#f59e0b08",border:"1px solid #f59e0b22",borderRadius:10,padding:14,marginBottom:16}}>
+                      <div style={{fontSize:12,color:"var(--text2)",lineHeight:1.8}}>
+                        <div style={{marginBottom:8,display:"flex",gap:8}}><span>📊</span><span><strong>Gorjetas não serão recalculadas automaticamente.</strong> Se a escala for alterada, será necessário recalcular manualmente na aba Gorjeta.</span></div>
+                        <div style={{marginBottom:8,display:"flex",gap:8}}><span>🚌</span><span><strong>Ajustes de VT já foram processados.</strong> Alterações na escala não desfazem ajustes de vale-transporte já aplicados ao fechar.</span></div>
+                        <div style={{display:"flex",gap:8}}><span>👁️</span><span><strong>Semanas já confirmadas continuam visíveis</strong> para empregados que têm acesso à gorjeta.</span></div>
+                      </div>
+                    </div>
+                    <div style={{display:"flex",gap:8,justifyContent:"flex-end"}}>
+                      <button onClick={()=>setShowReopenConfirm(false)} style={S.btnSecondary}>Cancelar</button>
+                      <button onClick={()=>{
+                        const newStatus = { ...(data?.scheduleStatus ?? {}) };
+                        if (!newStatus[rid]) newStatus[rid] = {};
+                        newStatus[rid][mk] = { ...(newStatus[rid][mk] ?? {}), status: "open", closedAt: null, closedBy: null };
+                        onUpdate("scheduleStatus", newStatus);
+                        setShowReopenConfirm(false);
+                        onUpdate("_toast", "Mês reaberto com sucesso");
+                      }} style={{...S.btnPrimary,fontSize:13,background:"#f59e0b",borderColor:"#f59e0b"}}>
+                        Reabrir mês
                       </button>
                     </div>
                   </div>
