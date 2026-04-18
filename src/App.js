@@ -3,7 +3,7 @@ import { useState, useEffect, Component } from "react";
 import { db } from "./firebase";
 import { doc, getDoc, setDoc } from "firebase/firestore";
 
-const APP_VERSION = "5.33.0";
+const APP_VERSION = "5.34.0";
 
 const DEFAULT_ADMISSION = () => `${new Date().getFullYear()}-01-01`;
 const round2 = (v) => Math.round(v * 100) / 100;
@@ -4219,6 +4219,7 @@ function EmployeeSpreadsheet({ restEmps, restRoles, rid, employees, onUpdate, re
   const [detailTab, setDetailTab] = useState("cadastro"); // cadastro | acoes | trilha
   const [showIncForm, setShowIncForm] = useState(false);
   const [showFbForm, setShowFbForm] = useState(false);
+  const [expandedJornada, setExpandedJornada] = useState(null); // id of expanded event
   const [showNewForm, setShowNewForm] = useState(false);
 
   async function handleAiEmpregados() {
@@ -4797,7 +4798,14 @@ Inclua apenas as ações solicitadas. Arrays vazios se não houver ação daquel
                 });
                 myFeedbacks.forEach(f => {
                   const isAval = f.meetingType === "avaliação" || (!f.meetingType && f.rating > 0);
-                  events.push({ date: new Date(f.meetingDate ? f.meetingDate+"T12:00:00" : f.createdAt), label: isAval ? "Conversa de avaliação" : "Conversa de alinhamento", icon: isAval ? "📋" : "💬" });
+                  events.push({ date: new Date(f.meetingDate ? f.meetingDate+"T12:00:00" : f.createdAt), label: isAval ? "Conversa de avaliação" : "Conversa de alinhamento", icon: isAval ? "📋" : "💬", type:"feedback", fb: f });
+                });
+                // Incidents
+                const empIncsAll = (incidents??[]).filter(i => i.restaurantId === rid && (i.employeeIds??[]).includes(emp.id) && !i.deletedAt);
+                empIncsAll.forEach(inc => {
+                  const incType = INCIDENT_TYPES.find(x => x.id === inc.type);
+                  const isNeg = incType?.negative;
+                  events.push({ date: new Date(inc.date+"T12:00:00"), label: incType?.label ?? inc.type, icon: isNeg ? "🔴" : "🟢", type:"incident", inc, incNeg: isNeg });
                 });
                 upcomingPlans.forEach(p => {
                   const isAval = p.type === "avaliação";
@@ -4966,97 +4974,10 @@ Inclua apenas as ações solicitadas. Arrays vazios se não houver ação daquel
                   </div>
                 )}
 
-                {/* ── 4. Reuniões anteriores + lixeira ── */}
-                {(() => {
-                  const empFbsHist = myFeedbacks;
-                  const deletedFbs = myFeedbacksAll.filter(f => f.deletedAt && (Date.now() - new Date(f.deletedAt).getTime()) < 90 * 86400000).sort((a,b) => (b.deletedAt??"").localeCompare(a.deletedAt??""));
-                  const canDeleteFb = !isLider;
-                  if (empFbsHist.length === 0 && deletedFbs.length === 0) return null;
-                  return (
-                    <div style={{...S.card,marginBottom:16,padding:"14px"}}>
-                      <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:10}}>
-                        <span style={{fontSize:16}}>💬</span>
-                        <span style={{color:"var(--text)",fontWeight:700,fontSize:14}}>Reuniões anteriores</span>
-                        <span style={{color:"var(--text3)",fontSize:11,marginLeft:"auto"}}>{empFbsHist.length} registro{empFbsHist.length!==1?"s":""}</span>
-                      </div>
-                      {empFbsHist.slice(0,6).map(fb => {
-                        const isAval = fb.meetingType === "avaliação" || (!fb.meetingType && fb.rating > 0);
-                        const rLabel = fb.rating ? RATING_LABELS[fb.rating - 1] : null;
-                        const rColor = fb.rating ? RATING_COLORS[fb.rating - 1] : "var(--text3)";
-                        const typeIcon = isAval ? "📋" : "💬";
-                        const typeLabel = isAval ? "Avaliação" : "Alinhamento";
-                        const typeColor = isAval ? "#8b5cf6" : "#3b82f6";
-                        const dateStr = fb.meetingDate ? new Date(fb.meetingDate+"T12:00:00").toLocaleDateString("pt-BR") : (fb.createdAt ? new Date(fb.createdAt).toLocaleDateString("pt-BR") : "");
-                        return (
-                          <div key={fb.id} style={{padding:"10px 0",borderBottom:"1px solid var(--border)22"}}>
-                            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:4}}>
-                              <div style={{display:"flex",alignItems:"center",gap:6}}>
-                                <span style={{fontSize:11,padding:"2px 8px",borderRadius:6,background:typeColor+"18",color:typeColor,fontWeight:700}}>{typeIcon} {typeLabel}</span>
-                                {rLabel && <span style={{fontSize:11,padding:"2px 8px",borderRadius:6,background:rColor+"18",color:rColor,fontWeight:700}}>{rLabel}</span>}
-                              </div>
-                              <div style={{display:"flex",alignItems:"center",gap:6}}>
-                                <span style={{color:"var(--text3)",fontSize:10}}>{dateStr} · {fb.createdBy ?? ""}</span>
-                                {canDeleteFb && <button onClick={()=>{
-                                  if (!window.confirm(`Excluir reunião de ${dateStr}?\n\nO registro ficará na lixeira por 90 dias e poderá ser restaurado.`)) return;
-                                  const updated = (feedbacks??[]).map(f => f.id === fb.id ? {...f, deletedAt: new Date().toISOString(), deletedBy: currentUser?.name || (isOwner ? "Admin AppTip" : "Gestor")} : f);
-                                  onUpdate("feedbacks", updated);
-                                }} style={{padding:"2px 6px",borderRadius:6,border:"1px solid var(--red)33",background:"transparent",color:"var(--red)",cursor:"pointer",fontSize:9,fontFamily:"'DM Mono',monospace"}}>✕</button>}
-                              </div>
-                            </div>
-                            {fb.notes && <div style={{fontSize:11,color:"var(--text2)",marginBottom:2}}>{fb.notes}</div>}
-                            {fb.strengths && <div style={{fontSize:11,color:"var(--text2)",marginBottom:2}}><strong style={{color:"#10b981"}}>+</strong> {fb.strengths}</div>}
-                            {fb.improvements && <div style={{fontSize:11,color:"var(--text2)",marginBottom:2}}><strong style={{color:"#f59e0b"}}>△</strong> {fb.improvements}</div>}
-                            {fb.internalNotes && <div style={{fontSize:11,color:"var(--text3)",fontStyle:"italic"}}>{fb.internalNotes}</div>}
-                          </div>
-                        );
-                      })}
-                      {canDeleteFb && deletedFbs.length > 0 && (
-                        <div style={{marginTop:10,padding:"10px 12px",borderRadius:8,background:"var(--red)08",border:"1px solid var(--red)22"}}>
-                          <div style={{fontSize:11,color:"var(--red)",fontWeight:700,marginBottom:6}}>🗑️ Lixeira ({deletedFbs.length})</div>
-                          {deletedFbs.map(fb => {
-                            const daysLeft = Math.max(0, 90 - Math.floor((Date.now() - new Date(fb.deletedAt).getTime()) / 86400000));
-                            const qLabel = fb.quarter ? `Q${fb.quarter}/${fb.year ?? ""}` : "";
-                            return (
-                              <div key={fb.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"4px 0",fontSize:10}}>
-                                <span style={{color:"var(--text3)"}}>{qLabel} — excluído por {fb.deletedBy} ({daysLeft}d restantes)</span>
-                                <button onClick={()=>{
-                                  const updated = (feedbacks??[]).map(f => f.id === fb.id ? (()=>{ const {deletedAt, deletedBy, ...rest} = f; return rest; })() : f);
-                                  onUpdate("feedbacks", updated);
-                                }} style={{padding:"2px 8px",borderRadius:6,border:"1px solid var(--ac)44",background:"transparent",color:"var(--ac-text)",cursor:"pointer",fontSize:10,fontFamily:"'DM Mono',monospace"}}>Restaurar</button>
-                              </div>
-                            );
-                          })}
-                        </div>
-                      )}
-                    </div>
-                  );
-                })()}
+                {/* ── 4. Objetivos ── */}
+                <GoalsManager empId={emp.id} employeeGoals={employeeGoals} roles={roles??restRoles} restaurantId={rid} onUpdate={onUpdate} currentUser={currentUser} isOwner={isOwner} schedules={schedules??{}} feedbacks={feedbacks??[]} employees={employees}/>
 
-                {/* ── 5. Jornada — timeline visual ── */}
-                {jornadaEvents.length > 0 && (
-                  <div style={{marginBottom:16}}>
-                    <h4 style={{color:"var(--text)",margin:"0 0 12px",fontSize:14}}>🗓️ Jornada</h4>
-                    <div style={{position:"relative",paddingLeft:24}}>
-                      <div style={{position:"absolute",left:7,top:4,bottom:4,width:2,background:"var(--border)",borderRadius:1}}/>
-                      {jornadaEvents.map((ev,i) => (
-                        <div key={i} style={{position:"relative",marginBottom:i<jornadaEvents.length-1?12:0,display:"flex",alignItems:"flex-start",gap:10}}>
-                          <div style={{position:"absolute",left:-20,top:3,width:12,height:12,borderRadius:6,background:ev.future?"#3b82f6":i===jornadaEvents.length-1?"var(--ac)":"var(--border)",border:"2px solid var(--bg)",flexShrink:0,zIndex:1}}/>
-                          <div style={{flex:1,minWidth:0}}>
-                            <div style={{display:"flex",alignItems:"center",gap:6}}>
-                              <span style={{fontSize:13}}>{ev.icon}</span>
-                              <span style={{color:ev.future?"#3b82f6":"var(--text)",fontSize:12,fontWeight:600,fontStyle:ev.future?"italic":"normal"}}>{ev.label}</span>
-                            </div>
-                            <div style={{color:"var(--text3)",fontSize:10,marginTop:1}}>
-                              {ev.date.toLocaleDateString("pt-BR",{day:"2-digit",month:"short",year:"numeric"})}
-                            </div>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                {/* ── 6. Presença & Pontualidade — 6 meses ── */}
+                {/* ── 5. Presença & Pontualidade — 6 meses ── */}
                 {(() => {
                   const hasAny = totFI > 0 || totFJ > 0 || totDelDays > 0;
                   return (
@@ -5113,11 +5034,116 @@ Inclua apenas as ações solicitadas. Arrays vazios se não houver ação daquel
                   );
                 })()}
 
-                {/* ── 7. Objetivos ── */}
-                <GoalsManager empId={emp.id} employeeGoals={employeeGoals} roles={roles??restRoles} restaurantId={rid} onUpdate={onUpdate} currentUser={currentUser} isOwner={isOwner} schedules={schedules??{}} feedbacks={feedbacks??[]} employees={employees}/>
-
-                {/* ── 8. Timeline de eventos ── */}
-                <EmpTimeline empId={emp.id} employees={employees} roles={roles??restRoles} schedules={schedules??{}} incidents={incidents??[]} feedbacks={feedbacks??[]} restaurantId={rid} onUpdate={onUpdate} currentUser={currentUser} isOwner={isOwner} canDeleteInc={!isLider}/>
+                {/* ── 6. Jornada — timeline clicável ── */}
+                {jornadaEvents.length > 0 && (
+                  <div style={{marginBottom:16}}>
+                    <h4 style={{color:"var(--text)",margin:"0 0 12px",fontSize:14}}>🗓️ Jornada</h4>
+                    <div style={{position:"relative",paddingLeft:24}}>
+                      <div style={{position:"absolute",left:7,top:4,bottom:4,width:2,background:"var(--border)",borderRadius:1}}/>
+                      {jornadaEvents.map((ev,i) => {
+                        const evId = ev.fb?.id || ev.inc?.id || `ev-${i}`;
+                        const isClickable = ev.type === "feedback" || ev.type === "incident";
+                        const isExpanded = expandedJornada === evId;
+                        const dotColor = ev.future ? "#3b82f6" : ev.type === "incident" ? (ev.incNeg ? "#ef4444" : "#10b981") : ev.type === "feedback" ? "#8b5cf6" : i === jornadaEvents.length-1 ? "var(--ac)" : "var(--border)";
+                        const canDeleteFb = !isLider;
+                        const canDeleteInc = !isLider;
+                        return (
+                          <div key={evId} style={{position:"relative",marginBottom:i<jornadaEvents.length-1?4:0}}>
+                            <div onClick={isClickable ? ()=>setExpandedJornada(isExpanded ? null : evId) : undefined} style={{display:"flex",alignItems:"flex-start",gap:10,cursor:isClickable?"pointer":"default",padding:"8px 0",borderRadius:8,transition:"background 0.15s"}} onMouseEnter={e=>{if(isClickable)e.currentTarget.style.background="var(--border)22"}} onMouseLeave={e=>{e.currentTarget.style.background="transparent"}}>
+                              <div style={{position:"absolute",left:-20,top:11,width:12,height:12,borderRadius:6,background:dotColor,border:"2px solid var(--bg)",flexShrink:0,zIndex:1}}/>
+                              <div style={{flex:1,minWidth:0}}>
+                                <div style={{display:"flex",alignItems:"center",gap:6}}>
+                                  <span style={{fontSize:13}}>{ev.icon}</span>
+                                  <span style={{color:ev.future?"#3b82f6":"var(--text)",fontSize:12,fontWeight:600,fontStyle:ev.future?"italic":"normal",flex:1}}>{ev.label}</span>
+                                  {isClickable && <span style={{color:"var(--text3)",fontSize:10,flexShrink:0}}>{isExpanded ? "▲" : "▼"}</span>}
+                                </div>
+                                <div style={{color:"var(--text3)",fontSize:10,marginTop:1}}>
+                                  {ev.date.toLocaleDateString("pt-BR",{day:"2-digit",month:"short",year:"numeric"})}
+                                  {ev.fb?.createdBy ? ` · ${ev.fb.createdBy}` : ""}
+                                </div>
+                              </div>
+                            </div>
+                            {/* Expanded feedback detail */}
+                            {isExpanded && ev.type === "feedback" && ev.fb && (
+                              <div style={{marginLeft:4,marginBottom:8,padding:"10px 14px",borderRadius:10,background:"var(--card-bg)",border:"1px solid var(--border)",borderLeft:`3px solid ${(ev.fb.meetingType==="avaliação"||(!ev.fb.meetingType&&ev.fb.rating>0))?"#8b5cf6":"#3b82f6"}`}}>
+                                {ev.fb.rating > 0 && <div style={{marginBottom:6}}><span style={{fontSize:11,padding:"2px 8px",borderRadius:6,background:(RATING_COLORS[ev.fb.rating-1]??"var(--text3)")+"18",color:RATING_COLORS[ev.fb.rating-1]??"var(--text3)",fontWeight:700}}>{RATING_LABELS[ev.fb.rating-1]}</span></div>}
+                                {ev.fb.notes && <div style={{fontSize:12,color:"var(--text2)",marginBottom:4}}>{ev.fb.notes}</div>}
+                                {ev.fb.strengths && <div style={{fontSize:12,color:"var(--text2)",marginBottom:4}}><strong style={{color:"#10b981"}}>Pontos positivos:</strong> {ev.fb.strengths}</div>}
+                                {ev.fb.improvements && <div style={{fontSize:12,color:"var(--text2)",marginBottom:4}}><strong style={{color:"#f59e0b"}}>Melhorias:</strong> {ev.fb.improvements}</div>}
+                                {ev.fb.internalNotes && <div style={{fontSize:11,color:"var(--text3)",fontStyle:"italic",marginBottom:4}}>📝 {ev.fb.internalNotes}</div>}
+                                {!ev.fb.notes && !ev.fb.strengths && !ev.fb.improvements && !ev.fb.internalNotes && !ev.fb.rating && <div style={{fontSize:11,color:"var(--text3)"}}>Sem anotações registradas</div>}
+                                {canDeleteFb && <div style={{marginTop:6,display:"flex",justifyContent:"flex-end"}}><button onClick={(e)=>{
+                                  e.stopPropagation();
+                                  const dateStr = ev.fb.meetingDate ? new Date(ev.fb.meetingDate+"T12:00:00").toLocaleDateString("pt-BR") : "";
+                                  if (!window.confirm(`Excluir reunião de ${dateStr}?\n\nO registro ficará na lixeira por 90 dias.`)) return;
+                                  const updated = (feedbacks??[]).map(f => f.id === ev.fb.id ? {...f, deletedAt: new Date().toISOString(), deletedBy: currentUser?.name || (isOwner ? "Admin AppTip" : "Gestor")} : f);
+                                  onUpdate("feedbacks", updated);
+                                  setExpandedJornada(null);
+                                }} style={{padding:"3px 10px",borderRadius:6,border:"1px solid var(--red)33",background:"transparent",color:"var(--red)",cursor:"pointer",fontSize:10,fontFamily:"'DM Mono',monospace"}}>🗑️ Excluir</button></div>}
+                              </div>
+                            )}
+                            {/* Expanded incident detail */}
+                            {isExpanded && ev.type === "incident" && ev.inc && (
+                              <div style={{marginLeft:4,marginBottom:8,padding:"10px 14px",borderRadius:10,background:"var(--card-bg)",border:"1px solid var(--border)",borderLeft:`3px solid ${ev.incNeg?"#ef4444":"#10b981"}`}}>
+                                {(() => {
+                                  const sev = SEVERITY_OPTIONS.find(s=>s.id===ev.inc.severity);
+                                  return sev ? <div style={{marginBottom:4}}><span style={{fontSize:11,padding:"2px 8px",borderRadius:6,background:ev.incNeg?"#ef444418":"#10b98118",color:ev.incNeg?"#ef4444":"#10b981",fontWeight:700}}>{sev.label}</span></div> : null;
+                                })()}
+                                {ev.inc.description && <div style={{fontSize:12,color:"var(--text2)",marginBottom:4}}>{ev.inc.description}</div>}
+                                {ev.inc.action && <div style={{fontSize:12,color:"var(--text2)",marginBottom:4}}><strong style={{color:"var(--ac)"}}>Ação:</strong> {ev.inc.action}</div>}
+                                <div style={{fontSize:10,color:"var(--text3)"}}>{ev.inc.createdBy ?? ""}</div>
+                                {canDeleteInc && <div style={{marginTop:6,display:"flex",justifyContent:"flex-end"}}><button onClick={(e)=>{
+                                  e.stopPropagation();
+                                  if (!window.confirm(`Excluir ocorrência?\n\nO registro ficará na lixeira por 90 dias.`)) return;
+                                  const updated = (incidents??[]).map(inc => inc.id === ev.inc.id ? {...inc, deletedAt: new Date().toISOString(), deletedBy: currentUser?.name || (isOwner ? "Admin AppTip" : "Gestor")} : inc);
+                                  onUpdate("incidents", updated);
+                                  setExpandedJornada(null);
+                                }} style={{padding:"3px 10px",borderRadius:6,border:"1px solid var(--red)33",background:"transparent",color:"var(--red)",cursor:"pointer",fontSize:10,fontFamily:"'DM Mono',monospace"}}>🗑️ Excluir</button></div>}
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                    {/* Lixeira de feedbacks e ocorrências */}
+                    {(() => {
+                      const deletedFbs = myFeedbacksAll.filter(f => f.deletedAt && (Date.now() - new Date(f.deletedAt).getTime()) < 90 * 86400000).sort((a,b) => (b.deletedAt??"").localeCompare(a.deletedAt??""));
+                      const deletedIncs = (incidents??[]).filter(i => i.restaurantId === rid && (i.employeeIds??[]).includes(emp.id) && i.deletedAt && (Date.now() - new Date(i.deletedAt).getTime()) < 90 * 86400000);
+                      if (deletedFbs.length === 0 && deletedIncs.length === 0) return null;
+                      return (
+                        <div style={{marginTop:8,padding:"10px 12px",borderRadius:8,background:"var(--red)08",border:"1px solid var(--red)22"}}>
+                          <div style={{fontSize:11,color:"var(--red)",fontWeight:700,marginBottom:6}}>🗑️ Lixeira ({deletedFbs.length + deletedIncs.length})</div>
+                          {deletedFbs.map(fb => {
+                            const daysLeft = Math.max(0, 90 - Math.floor((Date.now() - new Date(fb.deletedAt).getTime()) / 86400000));
+                            const dateStr = fb.meetingDate ? new Date(fb.meetingDate+"T12:00:00").toLocaleDateString("pt-BR") : "";
+                            return (
+                              <div key={fb.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"4px 0",fontSize:10}}>
+                                <span style={{color:"var(--text3)"}}>💬 Reunião {dateStr} — {fb.deletedBy} ({daysLeft}d)</span>
+                                <button onClick={()=>{
+                                  const updated = (feedbacks??[]).map(f => f.id === fb.id ? (()=>{ const {deletedAt, deletedBy, ...rest} = f; return rest; })() : f);
+                                  onUpdate("feedbacks", updated);
+                                }} style={{padding:"2px 8px",borderRadius:6,border:"1px solid var(--ac)44",background:"transparent",color:"var(--ac-text)",cursor:"pointer",fontSize:10,fontFamily:"'DM Mono',monospace"}}>Restaurar</button>
+                              </div>
+                            );
+                          })}
+                          {deletedIncs.map(inc => {
+                            const daysLeft = Math.max(0, 90 - Math.floor((Date.now() - new Date(inc.deletedAt).getTime()) / 86400000));
+                            const t = INCIDENT_TYPES.find(x=>x.id===inc.type);
+                            return (
+                              <div key={inc.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"4px 0",fontSize:10}}>
+                                <span style={{color:"var(--text3)"}}>{t?.negative?"🔴":"🟢"} {t?.label??inc.type} — {inc.deletedBy} ({daysLeft}d)</span>
+                                <button onClick={()=>{
+                                  const updated = (incidents??[]).map(i => i.id === inc.id ? (()=>{ const {deletedAt, deletedBy, ...rest} = i; return rest; })() : i);
+                                  onUpdate("incidents", updated);
+                                }} style={{padding:"2px 8px",borderRadius:6,border:"1px solid var(--ac)44",background:"transparent",color:"var(--ac-text)",cursor:"pointer",fontSize:10,fontFamily:"'DM Mono',monospace"}}>Restaurar</button>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      );
+                    })()}
+                  </div>
+                )}
               </div>
               );
             })()}
@@ -5847,145 +5873,8 @@ const SEVERITY_OPTIONS = [
   { id:"grave", label:"Grave", color:"#e74c3c" },
 ];
 
-function EmpTimeline({ empId, employees, roles, schedules, incidents, feedbacks, restaurantId, onUpdate, currentUser, isOwner, canDeleteInc }) {
-  const [filter, setFilter] = useState("Todos");
-  const emp = employees.find(e => e.id === empId);
-  if (!emp) return null;
+// EmpTimeline removed — replaced by interactive Jornada in trilha tab
 
-  const events = [];
-
-  // Admission event
-  if (emp.admission) {
-    events.push({ date: emp.admission, type: "admission", cat: "Promoções", icon: "🎉", label: "Admissão", desc: `Início na empresa` });
-  }
-
-  // Dismissal event
-  if (emp.demitidoEm) {
-    events.push({ date: emp.demitidoEm, type: "dismissal", cat: "Promoções", icon: "📋", label: "Desligamento", desc: `Demitido em ${new Date(emp.demitidoEm+"T12:00:00").toLocaleDateString("pt-BR")}` });
-  }
-
-  // Role history
-  (emp.roleHistory ?? []).forEach(rh => {
-    const fromRole = roles.find(r => r.id === rh.fromRoleId);
-    const toRole = roles.find(r => r.id === rh.toRoleId);
-    events.push({ date: rh.date, type: "promotion", cat: "Promoções", icon: "⬆️", label: "Mudança de cargo", desc: `${fromRole?.name ?? "—"} → ${toRole?.name ?? "—"}${rh.reason ? " · " + rh.reason : ""}` });
-  });
-
-  // Incidents — differentiate positive (green) vs negative (red)
-  (incidents ?? []).filter(inc => inc.restaurantId === restaurantId && (inc.employeeIds ?? []).includes(empId) && !inc.deletedAt).forEach(inc => {
-    const t = INCIDENT_TYPES.find(it => it.id === inc.type);
-    const isPositive = t && !t.negative;
-    events.push({ date: inc.date, type: "incident", cat: "Ocorrências", icon: isPositive ? "🌟" : "🚨", label: t?.label ?? inc.type, desc: inc.description || "", severity: inc.severity, positive: isPositive, incId: inc.id });
-  });
-
-  // Feedbacks
-  (feedbacks ?? []).filter(fb => fb.restaurantId === restaurantId && fb.employeeId === empId && !fb.deletedAt).forEach(fb => {
-    const isAval = fb.meetingType === "avaliação" || (!fb.meetingType && fb.rating > 0);
-    const fbDateStr = fb.meetingDate ?? fb.createdAt?.slice(0,10) ?? "2026-01-01";
-    const fbIcon = isAval ? "📋" : "💬";
-    const fbLabel = isAval ? "Conversa de avaliação" : "Conversa de alinhamento";
-    const fbDesc = isAval ? `${RATING_LABELS[fb.rating-1] ?? "—"}${fb.strengths ? " · " + fb.strengths.slice(0,60) : ""}` : (fb.notes ? fb.notes.slice(0,80) : "");
-    events.push({ date: fbDateStr, type: "feedback", cat: "Reuniões", icon: fbIcon, label: fbLabel, desc: fbDesc });
-  });
-
-  // Schedule events — aggregate per month
-  const ridSchedules = schedules?.[restaurantId] ?? {};
-  Object.entries(ridSchedules).forEach(([mk, monthData]) => {
-    const empDays = monthData?.[empId];
-    if (!empDays || typeof empDays !== "object") return;
-    const counts = {};
-    Object.values(empDays).forEach(status => {
-      if (status && typeof status === "string" && status !== "") {
-        counts[status] = (counts[status] || 0) + 1;
-      }
-    });
-    if (Object.keys(counts).length === 0) return;
-    const parts = [];
-    if (counts[DAY_FAULT_U]) parts.push(`${counts[DAY_FAULT_U]} falta${counts[DAY_FAULT_U]>1?"s":""} injustificada${counts[DAY_FAULT_U]>1?"s":""}`);
-    if (counts[DAY_FAULT_J]) parts.push(`${counts[DAY_FAULT_J]} falta${counts[DAY_FAULT_J]>1?"s":""} justificada${counts[DAY_FAULT_J]>1?"s":""}`);
-    if (counts[DAY_VACATION]) parts.push(`${counts[DAY_VACATION]} dia${counts[DAY_VACATION]>1?"s":""} de férias`);
-    if (counts[DAY_COMP]) parts.push(`${counts[DAY_COMP]} folga${counts[DAY_COMP]>1?"s":""} por compensação`);
-    if (counts[DAY_COMP_TRAB]) parts.push(`${counts[DAY_COMP_TRAB]} dia${counts[DAY_COMP_TRAB]>1?"s":""} trab. compensação`);
-    if (parts.length > 0) {
-      const [y, m] = mk.split("-");
-      const monthName = new Date(parseInt(y), parseInt(m)-1, 15).toLocaleDateString("pt-BR", {month:"long", year:"numeric"});
-      events.push({ date: `${mk}-15`, type: "schedule", cat: "Escala", icon: "📅", label: monthName.charAt(0).toUpperCase() + monthName.slice(1), desc: parts.join(", ") });
-    }
-  });
-
-  events.sort((a, b) => b.date.localeCompare(a.date));
-
-  const filters = ["Todos", "Escala", "Ocorrências", "Promoções", "Reuniões"];
-  const filtered = filter === "Todos" ? events : events.filter(e => e.cat === filter);
-
-  return (
-    <div>
-      <div style={{display:"flex",gap:6,marginBottom:16,flexWrap:"wrap"}}>
-        {filters.map(f => (
-          <button key={f} onClick={()=>setFilter(f)} style={{padding:"5px 12px",borderRadius:20,border:`1px solid ${filter===f?"var(--ac)":"var(--border)"}`,background:filter===f?"var(--ac-bg,#d4a01722)":"transparent",color:filter===f?"var(--ac)":"var(--text3)",cursor:"pointer",fontSize:12,fontFamily:"'DM Sans',sans-serif",fontWeight:filter===f?700:500}}>{f}</button>
-        ))}
-      </div>
-      {filtered.length === 0 && <p style={{color:"var(--text3)",textAlign:"center",fontSize:13,padding:20}}>Nenhum evento encontrado.</p>}
-      <div style={{position:"relative",paddingLeft:28}}>
-        {filtered.length > 0 && <div style={{position:"absolute",left:10,top:0,bottom:0,width:2,background:"var(--border)"}}/>}
-        {filtered.map((ev, i) => {
-          const isNeg = ev.type === "incident" && !ev.positive;
-          const isPos = ev.type === "incident" && ev.positive;
-          const borderColor = isNeg ? "#e74c3c44" : isPos ? "#10b98144" : "var(--border)";
-          const bgColor = isNeg ? "#e74c3c08" : isPos ? "#10b98108" : undefined;
-          const dotBorder = isNeg ? "#e74c3c" : isPos ? "#10b981" : "var(--border)";
-          return (
-            <div key={i} style={{position:"relative",marginBottom:16,paddingBottom:4}}>
-              <div style={{position:"absolute",left:-24,top:2,width:24,height:24,borderRadius:12,background:"var(--card-bg)",border:`2px solid ${dotBorder}`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:12}}>{ev.icon}</div>
-              <div style={{...S.card,padding:"12px 16px",marginLeft:8,border:`1px solid ${borderColor}`,background:bgColor}}>
-                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:8,flexWrap:"wrap",marginBottom:4}}>
-                  <div style={{display:"flex",alignItems:"center",gap:6}}>
-                    <span style={{fontSize:11,fontWeight:700,color:isNeg?"var(--red)":isPos?"var(--green)":"var(--text)",fontFamily:"'DM Sans',sans-serif"}}>{ev.label}</span>
-                    {isPos && <span style={{fontSize:9,padding:"1px 6px",borderRadius:4,background:"#10b98122",color:"var(--green)",fontWeight:700}}>Positivo</span>}
-                    {isNeg && <span style={{fontSize:9,padding:"1px 6px",borderRadius:4,background:"#e74c3c22",color:"var(--red)",fontWeight:700}}>Negativo</span>}
-                  </div>
-                  <div style={{display:"flex",alignItems:"center",gap:6}}>
-                    <span style={{fontSize:10,color:"var(--text3)",fontFamily:"'DM Mono',monospace"}}>{new Date(ev.date+"T12:00:00").toLocaleDateString("pt-BR")}</span>
-                    {ev.type === "incident" && canDeleteInc && onUpdate && <button onClick={()=>{
-                      if (!window.confirm(`Excluir ocorrência "${ev.label}" de ${new Date(ev.date+"T12:00:00").toLocaleDateString("pt-BR")}?\n\nA ocorrência ficará na lixeira por 90 dias e poderá ser restaurada.`)) return;
-                      const updated = (incidents??[]).map(inc => inc.id === ev.incId ? {...inc, deletedAt: new Date().toISOString(), deletedBy: currentUser?.name || (isOwner ? "Admin AppTip" : "Gestor")} : inc);
-                      onUpdate("incidents", updated);
-                    }} style={{padding:"2px 6px",borderRadius:6,border:"1px solid var(--red)33",background:"transparent",color:"var(--red)",cursor:"pointer",fontSize:9,fontFamily:"'DM Mono',monospace"}}>✕</button>}
-                  </div>
-                </div>
-                {ev.severity && <span style={{fontSize:9,fontWeight:700,padding:"2px 6px",borderRadius:4,background:(SEVERITY_OPTIONS.find(s=>s.id===ev.severity)?.color??"#888")+"22",color:SEVERITY_OPTIONS.find(s=>s.id===ev.severity)?.color??"#888",marginRight:6}}>{SEVERITY_OPTIONS.find(s=>s.id===ev.severity)?.label??ev.severity}</span>}
-                {ev.desc && <p style={{color:"var(--text2)",fontSize:12,margin:ev.severity?"4px 0 0":0,lineHeight:1.5}}>{ev.desc}</p>}
-              </div>
-            </div>
-          );
-        })}
-      </div>
-      {/* Lixeira de ocorrências — restaurar em até 7 dias */}
-      {canDeleteInc && onUpdate && (() => {
-        const deletedIncs = (incidents??[]).filter(inc => inc.restaurantId === restaurantId && (inc.employeeIds??[]).includes(empId) && inc.deletedAt && (Date.now() - new Date(inc.deletedAt).getTime()) < 90 * 86400000).sort((a,b) => (b.deletedAt??"").localeCompare(a.deletedAt??""));
-        if (deletedIncs.length === 0) return null;
-        return (
-          <div style={{marginTop:10,padding:"10px 12px",borderRadius:8,background:"var(--red)08",border:"1px solid var(--red)22"}}>
-            <div style={{fontSize:11,color:"var(--red)",fontWeight:700,marginBottom:6}}>🗑️ Ocorrências excluídas ({deletedIncs.length})</div>
-            {deletedIncs.map(inc => {
-              const daysLeft = Math.max(0, 90 - Math.floor((Date.now() - new Date(inc.deletedAt).getTime()) / 86400000));
-              const t = INCIDENT_TYPES.find(it => it.id === inc.type);
-              return (
-                <div key={inc.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"4px 0",fontSize:10}}>
-                  <span style={{color:"var(--text3)"}}>{t?.label ?? inc.type} — {new Date(inc.date+"T12:00:00").toLocaleDateString("pt-BR")} — excluído por {inc.deletedBy} ({daysLeft}d restantes)</span>
-                  <button onClick={()=>{
-                    const updated = (incidents??[]).map(i => i.id === inc.id ? (()=>{ const {deletedAt, deletedBy, ...rest} = i; return rest; })() : i);
-                    onUpdate("incidents", updated);
-                  }} style={{padding:"2px 8px",borderRadius:6,border:"1px solid var(--ac)44",background:"transparent",color:"var(--ac-text)",cursor:"pointer",fontSize:10,fontFamily:"'DM Mono',monospace"}}>Restaurar</button>
-                </div>
-              );
-            })}
-          </div>
-        );
-      })()}
-    </div>
-  );
-}
 
 function IncidentForm({ restaurantId, employees, onUpdate, incidents, currentUser, isOwner, preSelectedEmpId }) {
   const restEmps = employees.filter(e => e.restaurantId === restaurantId && !(e.inactive && e.inactiveFrom && e.inactiveFrom <= today()));
