@@ -5356,7 +5356,8 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
   const [showPontoImport, setShowPontoImport] = useState(false);
   const [pontoLoading, setPontoLoading] = useState(false);
   const [pontoError, setPontoError] = useState("");
-  const [pontoPreview, setPontoPreview] = useState(null); // { scheduleChanges:{empId:{date:status}}, incidents:[{empId,type,date,desc}] }
+  const [pontoPreview, setPontoPreview] = useState(null); // { scheduleChanges:{empId:{date:status}}, incidents:[{empId,type,date,desc}], unmatchedNames:[...] }
+  const [pontoResolutions, setPontoResolutions] = useState({}); // { _key: { action:"ignore"|"link"|"create", linkedEmpId, newRoleId } }
   // Local schedule edits — accumulated before saving as new version
   const [schedLocalEdits, setSchedLocalEdits] = useState(null); // null = no pending edits, object = pending edits overlay
   const schedDirty = schedLocalEdits !== null;
@@ -6781,7 +6782,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                 </button>
 
                 {/* Importar folha de ponto */}
-                <button onClick={()=>{setShowPontoImport(!showPontoImport);setPontoError("");setPontoPreview(null);}}
+                <button onClick={()=>{setShowPontoImport(!showPontoImport);setPontoError("");setPontoPreview(null);setPontoResolutions({});}}
                   style={{...S.btnSecondary,fontSize:mobileOnly?11:12,border:`1px solid ${showPontoImport?"var(--ac)":"var(--ac)44"}`,background:showPontoImport?"var(--ac)22":"transparent",color:"var(--ac)",whiteSpace:"nowrap"}}>
                   {mobileOnly?"📄 Ponto":"📄 Importar ponto"}
                 </button>
@@ -7023,6 +7024,9 @@ Analise o texto do PDF e retorne um JSON com:
   "incidents": [
     { "empId":"<id>", "type":"<tipo>", "date":"<YYYY-MM-DD>", "description":"<descrição>", "severity":"<leve|media|grave>" }
   ],
+  "unmatchedNames": [
+    { "name":"<nome como aparece no PDF>", "scheduleChanges":{ "<YYYY-MM-DD>":"<status>" }, "incidents":[{ "type":"<tipo>", "date":"<YYYY-MM-DD>", "description":"<descrição>", "severity":"<leve|media|grave>" }] }
+  ],
   "summary": "<resumo em português do que foi encontrado>"
 }
 
@@ -7031,11 +7035,12 @@ Regras:
 - Atrasos >15 min devem virar um incident com type "atraso" e a descrição incluindo os minutos. Atraso NÃO muda o status na escala (empregado trabalhou).
 - Faltas viram mudança de status na escala (faultu ou faultj) E um incident
 - Horas extras podem virar incident tipo "hora_extra" para registro
-- Se não conseguir identificar um empregado do PDF, ignore
+- Se não conseguir identificar um empregado do PDF pelo nome (completo ou parcial), inclua em unmatchedNames com os dados encontrados
 - Tente fazer o match pelo nome (completo ou parcial)
 - severity: "leve" para atrasos <30min, "media" para atrasos 30-60min ou 1 falta, "grave" para múltiplas faltas ou atrasos >60min
 - Os types de incident válidos são: "atraso", "faultu", "faultj", "hora_extra", "advertencia_verbal", "advertencia_escrita"
-- Retorne arrays vazios se não houver mudanças`,
+- Retorne arrays vazios se não houver mudanças
+- No summary, mencione quantos empregados não foram identificados, se houver`,
                           `Texto da folha de ponto:\n\n${fullText.slice(0, 8000)}`
                         );
 
@@ -7046,6 +7051,12 @@ Regras:
                             ...inc,
                             empName: schedEmps.find(e=>e.id===inc.empId)?.name ?? "Desconhecido"
                           })),
+                          unmatchedNames: (result.unmatchedNames ?? []).map((u, idx) => ({
+                            ...u,
+                            _key: `unm-${idx}`,
+                            scheduleChanges: u.scheduleChanges ?? {},
+                            incidents: u.incidents ?? []
+                          })),
                           summary: result.summary ?? "Análise concluída."
                         };
                         // Count changes
@@ -7053,6 +7064,14 @@ Regras:
                         Object.values(preview.scheduleChanges).forEach(days => { totalSchedChanges += Object.keys(days).length; });
                         preview.totalSchedChanges = totalSchedChanges;
                         setPontoPreview(preview);
+                        // Init resolutions for unmatched names
+                        if (preview.unmatchedNames.length > 0) {
+                          const init = {};
+                          preview.unmatchedNames.forEach(u => { init[u._key] = { action:"ignore", linkedEmpId:null, newRoleId:"" }; });
+                          setPontoResolutions(init);
+                        } else {
+                          setPontoResolutions({});
+                        }
                       } catch(err) {
                         console.error("[Ponto Import]", err);
                         setPontoError(err.message || "Erro ao processar PDF.");
@@ -7066,7 +7085,7 @@ Regras:
                         style={{...S.btnPrimary,fontSize:13,opacity:pontoLoading?0.6:1}}>
                         {pontoLoading ? "⏳ Analisando..." : "📎 Selecionar PDF da folha de ponto"}
                       </button>
-                      <button onClick={()=>{setShowPontoImport(false);setPontoError("");setPontoPreview(null);}} style={S.btnSecondary}>Cancelar</button>
+                      <button onClick={()=>{setShowPontoImport(false);setPontoError("");setPontoPreview(null);setPontoResolutions({});}} style={S.btnSecondary}>Cancelar</button>
                     </div>
                     {pontoError && <p style={{color:"var(--red)",fontSize:12,margin:"8px 0 0"}}>{pontoError}</p>}
                     <p style={{color:"var(--text3)",fontSize:11,margin:"8px 0 0"}}>O PDF precisa ter texto selecionável (não escaneado). A IA vai cruzar com a escala prevista de {monthLabel(year,month)}.</p>
@@ -7130,27 +7149,153 @@ Regras:
                       </div>
                     )}
 
-                    {pontoPreview.totalSchedChanges === 0 && pontoPreview.incidents.length === 0 && (
+                    {/* Unmatched names */}
+                    {pontoPreview.unmatchedNames?.length > 0 && (
+                      <div style={{marginBottom:12}}>
+                        <div style={{color:"#f59e0b",fontSize:12,fontWeight:700,marginBottom:6}}>⚠️ Empregados não identificados ({pontoPreview.unmatchedNames.length})</div>
+                        <p style={{color:"var(--text3)",fontSize:11,margin:"0 0 8px"}}>Esses nomes do PDF não foram encontrados no cadastro. Escolha o que fazer com cada um:</p>
+                        {pontoPreview.unmatchedNames.map(u => {
+                          const res = pontoResolutions[u._key] ?? { action:"ignore" };
+                          const schedCount = Object.keys(u.scheduleChanges).length;
+                          const incCount = u.incidents.length;
+                          return (
+                            <div key={u._key} style={{padding:"10px 14px",borderRadius:8,background:"#f59e0b09",border:"1px solid #f59e0b22",marginBottom:6}}>
+                              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
+                                <span style={{fontWeight:700,fontSize:13,color:"var(--text)"}}>{u.name}</span>
+                                <span style={{fontSize:10,color:"var(--text3)"}}>
+                                  {schedCount > 0 && `${schedCount} dia(s)`}{schedCount > 0 && incCount > 0 && " · "}{incCount > 0 && `${incCount} ocorrência(s)`}
+                                  {schedCount === 0 && incCount === 0 && "sem alterações"}
+                                </span>
+                              </div>
+                              {/* Action selector */}
+                              <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:res.action !== "ignore" ? 8 : 0}}>
+                                {["ignore","link","create"].map(act => {
+                                  const labels = {ignore:"Ignorar",link:"Vincular a existente",create:"Criar novo"};
+                                  const active = res.action === act;
+                                  return (
+                                    <button key={act} onClick={()=>setPontoResolutions(prev=>({...prev,[u._key]:{...prev[u._key],action:act}}))}
+                                      style={{padding:"4px 10px",borderRadius:6,fontSize:11,border:`1px solid ${active?"var(--ac)":"var(--border)"}`,background:active?"var(--ac)22":"transparent",color:active?"var(--ac)":"var(--text3)",cursor:"pointer",fontFamily:"'DM Sans',sans-serif"}}>
+                                      {labels[act]}
+                                    </button>
+                                  );
+                                })}
+                              </div>
+                              {/* Link to existing */}
+                              {res.action === "link" && (
+                                <select value={res.linkedEmpId||""} onChange={e=>setPontoResolutions(prev=>({...prev,[u._key]:{...prev[u._key],linkedEmpId:e.target.value}}))}
+                                  style={{...S.input,fontSize:12,padding:"6px 10px"}}>
+                                  <option value="">Selecione o empregado...</option>
+                                  {schedEmps.map(emp => <option key={emp.id} value={emp.id}>{emp.name} — {restRoles.find(r=>r.id===emp.roleId)?.name??"—"}</option>)}
+                                </select>
+                              )}
+                              {/* Create new — pick role */}
+                              {res.action === "create" && (
+                                <select value={res.newRoleId||""} onChange={e=>setPontoResolutions(prev=>({...prev,[u._key]:{...prev[u._key],newRoleId:e.target.value}}))}
+                                  style={{...S.input,fontSize:12,padding:"6px 10px"}}>
+                                  <option value="">Selecione o cargo...</option>
+                                  {restRoles.filter(r=>!r.inactive).map(r => <option key={r.id} value={r.id}>{r.name} — {r.area}</option>)}
+                                </select>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+
+                    {pontoPreview.totalSchedChanges === 0 && pontoPreview.incidents.length === 0 && (pontoPreview.unmatchedNames?.length??0) === 0 && (
                       <p style={{color:"var(--green)",fontSize:13,textAlign:"center",padding:16}}>✅ Nenhuma diferença encontrada entre o ponto e a escala prevista.</p>
                     )}
 
                     {/* Actions */}
                     <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
-                      {(pontoPreview.totalSchedChanges > 0 || pontoPreview.incidents.length > 0) && (
+                      {(pontoPreview.totalSchedChanges > 0 || pontoPreview.incidents.length > 0 || pontoPreview.unmatchedNames?.some(u => {const r = pontoResolutions[u._key]; return r && r.action !== "ignore";})) && (
                         <button onClick={()=>{
-                          // 1. Apply schedule changes as local edits
-                          if (pontoPreview.totalSchedChanges > 0) {
+                          // Validate unmatched resolutions
+                          const hasInvalidLink = pontoPreview.unmatchedNames?.some(u => {
+                            const r = pontoResolutions[u._key];
+                            return r?.action === "link" && !r.linkedEmpId;
+                          });
+                          const hasInvalidCreate = pontoPreview.unmatchedNames?.some(u => {
+                            const r = pontoResolutions[u._key];
+                            return r?.action === "create" && !r.newRoleId;
+                          });
+                          if (hasInvalidLink) { setPontoError("Selecione o empregado para vincular."); return; }
+                          if (hasInvalidCreate) { setPontoError("Selecione o cargo para criar o novo empregado."); return; }
+                          setPontoError("");
+
+                          // 0. Process unmatched resolutions — create new employees and collect extra changes
+                          let updatedEmployees = [...employees];
+                          const extraSchedChanges = {};
+                          const extraIncidents = [];
+                          let createdCount = 0;
+                          let linkedCount = 0;
+
+                          (pontoPreview.unmatchedNames ?? []).forEach(u => {
+                            const res = pontoResolutions[u._key];
+                            if (!res || res.action === "ignore") return;
+
+                            let targetEmpId = null;
+
+                            if (res.action === "link") {
+                              targetEmpId = res.linkedEmpId;
+                              linkedCount++;
+                            } else if (res.action === "create") {
+                              // Create new employee
+                              const restCode = restaurant.shortCode || "XXX";
+                              const seq = nextEmpSeq(updatedEmployees, restCode);
+                              const empCode = makeEmpCode(restCode, seq);
+                              const pin = String(seq).padStart(4, "0");
+                              const newEmp = {
+                                id: Date.now().toString() + Math.random().toString(36).slice(2,4),
+                                name: u.name,
+                                cpf: "",
+                                admission: today(),
+                                roleId: res.newRoleId,
+                                restaurantId: rid,
+                                empCode,
+                                pin
+                              };
+                              updatedEmployees = [...updatedEmployees, newEmp];
+                              targetEmpId = newEmp.id;
+                              createdCount++;
+                            }
+
+                            if (targetEmpId) {
+                              // Merge schedule changes
+                              if (Object.keys(u.scheduleChanges).length > 0) {
+                                extraSchedChanges[targetEmpId] = { ...(extraSchedChanges[targetEmpId]??{}), ...u.scheduleChanges };
+                              }
+                              // Merge incidents
+                              u.incidents.forEach(inc => {
+                                extraIncidents.push({ ...inc, empId: targetEmpId });
+                              });
+                            }
+                          });
+
+                          // Save new employees if any were created
+                          if (createdCount > 0) {
+                            onUpdate("employees", updatedEmployees);
+                          }
+
+                          // 1. Apply schedule changes as local edits (matched + unmatched)
+                          const allSchedChanges = { ...pontoPreview.scheduleChanges, ...extraSchedChanges };
+                          if (Object.keys(allSchedChanges).length > 0) {
                             setSchedLocalEdits(prev => {
                               const edits = prev ? {...prev} : {};
-                              Object.entries(pontoPreview.scheduleChanges).forEach(([eid, dayMap]) => {
+                              Object.entries(allSchedChanges).forEach(([eid, dayMap]) => {
                                 edits[eid] = { ...(edits[eid]??{}), ...dayMap };
                               });
                               return edits;
                             });
                           }
-                          // 2. Create incidents
-                          if (pontoPreview.incidents.length > 0) {
-                            const newIncs = pontoPreview.incidents.map(inc => ({
+
+                          // 2. Create incidents (matched + unmatched)
+                          const allNewIncidents = [
+                            ...pontoPreview.incidents,
+                            ...extraIncidents
+                          ];
+                          if (allNewIncidents.length > 0) {
+                            const newIncs = allNewIncidents.map(inc => ({
                               id: `${Date.now()}-${Math.random().toString(36).slice(2,6)}`,
                               restaurantId: rid,
                               employeeIds: [inc.empId],
@@ -7165,18 +7310,23 @@ Regras:
                             }));
                             onUpdate("incidents", [...(data?.incidents??[]), ...newIncs]);
                           }
+
                           const parts = [];
-                          if (pontoPreview.totalSchedChanges > 0) parts.push(`${pontoPreview.totalSchedChanges} dia(s) atualizados na escala`);
-                          if (pontoPreview.incidents.length > 0) parts.push(`${pontoPreview.incidents.length} ocorrência(s) registrada(s)`);
-                          onUpdate("_toast", `✅ Ponto importado — ${parts.join(" · ")}${pontoPreview.totalSchedChanges > 0 ? " — salve a escala para confirmar" : ""}`);
+                          const totalSched = Object.values(allSchedChanges).reduce((s,d) => s + Object.keys(d).length, 0);
+                          if (totalSched > 0) parts.push(`${totalSched} dia(s) atualizados na escala`);
+                          if (allNewIncidents.length > 0) parts.push(`${allNewIncidents.length} ocorrência(s) registrada(s)`);
+                          if (createdCount > 0) parts.push(`${createdCount} empregado(s) criado(s)`);
+                          if (linkedCount > 0) parts.push(`${linkedCount} empregado(s) vinculado(s)`);
+                          onUpdate("_toast", `✅ Ponto importado — ${parts.join(" · ")}${totalSched > 0 ? " — salve a escala para confirmar" : ""}`);
                           setPontoPreview(null);
+                          setPontoResolutions({});
                           setShowPontoImport(false);
                         }} style={{...S.btnPrimary,fontSize:13}}>
                           ✅ Aplicar alterações
                         </button>
                       )}
                       <button onClick={()=>setPontoPreview(null)} style={S.btnSecondary}>Reprocessar</button>
-                      <button onClick={()=>{setPontoPreview(null);setShowPontoImport(false);}} style={{...S.btnSecondary,color:"var(--red)",borderColor:"var(--red)44"}}>Cancelar</button>
+                      <button onClick={()=>{setPontoPreview(null);setPontoResolutions({});setShowPontoImport(false);}} style={{...S.btnSecondary,color:"var(--red)",borderColor:"var(--red)44"}}>Cancelar</button>
                     </div>
                   </div>
                 )}
