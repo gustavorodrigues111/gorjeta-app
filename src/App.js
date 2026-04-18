@@ -7549,7 +7549,8 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                   doc.setFontSize(7);
                   doc.setTextColor(185, 28, 28);
                   doc.setFont(undefined, "bold");
-                  doc.text("DEDUÇÃO TOTAL", bx12 + 3, y + 3.5);
+                  const taxPct = (restaurant.taxRate ?? 0.33) * 100;
+                  doc.text(`DEDUÇÃO TOTAL GORJETA (${taxPct.toFixed(0)}%)`, bx12 + 3, y + 3.5);
                   doc.setFontSize(9);
                   doc.text(f2(grandDed), bx12 + boxW - 3, y + 3.5, { align: "right" });
                   doc.setFont(undefined, "normal");
