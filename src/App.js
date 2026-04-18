@@ -4507,9 +4507,10 @@ Inclua apenas as ações solicitadas. Arrays vazios se não houver ação daquel
               ← Voltar para equipe
             </button>
 
-            {/* Tab pills — direto após o botão voltar */}
-            <div style={{display:"flex",gap:6,marginBottom:16,flexWrap:"wrap",alignItems:"center"}}>
-              <span style={{fontSize:15,fontWeight:700,color:"var(--text)",marginRight:8}}>{emp.name}</span>
+            {/* Nome da pessoa */}
+            <div style={{fontSize:15,fontWeight:700,color:"var(--text)",marginBottom:8}}>{emp.name}</div>
+            {/* Tab pills */}
+            <div style={{display:"flex",gap:6,marginBottom:16}}>
               <button onClick={()=>setDetailTab("cadastro")} style={dtPill("cadastro",detailTab==="cadastro")}>Cadastro</button>
               <button onClick={()=>setDetailTab("acoes")} style={dtPill("acoes",detailTab==="acoes")}>Ações</button>
               <button onClick={()=>setDetailTab("trilha")} style={dtPill("trilha",detailTab==="trilha")}>Trilha</button>
