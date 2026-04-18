@@ -7237,7 +7237,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                   const H = doc.internal.pageSize.getHeight();
                   const mx = 12; // margin x
                   const cw = W - mx * 2; // content width
-                  const f2 = v => `R$ ${(v??0).toLocaleString("pt-BR",{minimumFractionDigits:2})}`;
+                  const f2 = v => { const n = parseFloat(v) || 0; return `R$ ${n.toFixed(2).replace(".",",").replace(/\B(?=(\d{3})+(?!\d))/g,".")}`; };
                   const fmtDate = d => d && d !== "—" ? new Date(d+"T12:00:00").toLocaleDateString("pt-BR") : "—";
                   let y = 0;
 
@@ -7333,14 +7333,8 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                     grandBruto += mBruto; grandDed += mDed; grandLiq += mLiq;
                     tipSummaryRows.push([smk, `${monthTips.length}d`, f2(mBruto), f2(mDed), f2(mLiq)]);
                   });
-                  tipSummaryRows.push([
-                    { content: "TOTAL", styles: { fontStyle: "bold" } },
-                    { content: "", styles: {} },
-                    { content: f2(grandBruto), styles: { fontStyle: "bold" } },
-                    { content: f2(grandDed), styles: { fontStyle: "bold", textColor: [220,50,50] } },
-                    { content: f2(grandLiq), styles: { fontStyle: "bold", textColor: [16,185,129] } },
-                  ]);
 
+                  const valColW = (cw - 22 - 14) / 3; // equal width for Bruto/Dedução/Líquido
                   doc.autoTable({
                     startY: y,
                     head: [["Mês", "Dias", "Bruto", "Dedução", "Líquido"]],
@@ -7351,9 +7345,9 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                     columnStyles: {
                       0: { cellWidth: 22 },
                       1: { cellWidth: 14, halign: "center" },
-                      2: { halign: "right" },
-                      3: { halign: "right" },
-                      4: { halign: "right" },
+                      2: { cellWidth: valColW, halign: "right" },
+                      3: { cellWidth: valColW, halign: "right" },
+                      4: { cellWidth: valColW, halign: "right" },
                     },
                     alternateRowStyles: { fillColor: [245, 247, 250] },
                     margin: { left: mx, right: mx },
@@ -7373,9 +7367,11 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
 
                     if (lastTips.length <= 16) {
                       // Single compact table
+                      const ddColW = 22;
+                      const ddValW = (cw - ddColW) / 4;
                       doc.autoTable({
                         startY: y,
-                        head: [["Data", "Bruto", "Ded.", "Pen.", "Líquido"]],
+                        head: [["Data", "Bruto", "Dedução", "Penalidade", "Líquido"]],
                         body: lastTips.map(t => [
                           fmtDate(t.date),
                           f2(t.myShare), f2(t.myTax),
@@ -7384,7 +7380,13 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                         theme: "striped",
                         styles: { fontSize: 6.5, cellPadding: { top: 1, bottom: 1, left: 2, right: 2 } },
                         headStyles: { fillColor: [100,116,139], fontSize: 6.5, cellPadding: { top: 1.5, bottom: 1.5, left: 2, right: 2 } },
-                        columnStyles: { 1: { halign: "right" }, 2: { halign: "right" }, 3: { halign: "right" }, 4: { halign: "right" } },
+                        columnStyles: {
+                          0: { cellWidth: ddColW },
+                          1: { cellWidth: ddValW, halign: "right" },
+                          2: { cellWidth: ddValW, halign: "right" },
+                          3: { cellWidth: ddValW, halign: "right" },
+                          4: { cellWidth: ddValW, halign: "right" },
+                        },
                         alternateRowStyles: { fillColor: [248,249,250] },
                         margin: { left: mx, right: mx },
                       });
@@ -7395,18 +7397,21 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                       const col1 = lastTips.slice(0, half);
                       const col2 = lastTips.slice(half);
                       const colW = (cw - 4) / 2;
+                      const dcW = 20;
+                      const dvW = (colW - dcW) / 2;
                       const colStyles = { fontSize: 6.5, cellPadding: { top: 0.8, bottom: 0.8, left: 1.5, right: 1.5 } };
                       const colHead = { fillColor: [100,116,139], fontSize: 6.5, cellPadding: { top: 1.2, bottom: 1.2, left: 1.5, right: 1.5 } };
                       const mkBody = arr => arr.map(t => [fmtDate(t.date), f2(t.myShare), f2(t.myNet)]);
+                      const dColStyles = { 0: { cellWidth: dcW }, 1: { cellWidth: dvW, halign: "right" }, 2: { cellWidth: dvW, halign: "right" } };
 
                       doc.autoTable({
                         startY: y,
-                        head: [["Data", "Bruto", "Líq."]],
+                        head: [["Data", "Bruto", "Líquido"]],
                         body: mkBody(col1),
                         theme: "striped",
                         styles: colStyles,
                         headStyles: colHead,
-                        columnStyles: { 1: { halign: "right" }, 2: { halign: "right" } },
+                        columnStyles: dColStyles,
                         alternateRowStyles: { fillColor: [248,249,250] },
                         margin: { left: mx, right: W - mx - colW },
                         tableWidth: colW,
@@ -7415,12 +7420,12 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
 
                       doc.autoTable({
                         startY: y,
-                        head: [["Data", "Bruto", "Líq."]],
+                        head: [["Data", "Bruto", "Líquido"]],
                         body: mkBody(col2),
                         theme: "striped",
                         styles: colStyles,
                         headStyles: colHead,
-                        columnStyles: { 1: { halign: "right" }, 2: { halign: "right" } },
+                        columnStyles: dColStyles,
                         alternateRowStyles: { fillColor: [248,249,250] },
                         margin: { left: mx + colW + 4, right: mx },
                         tableWidth: colW,
@@ -7486,6 +7491,8 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                   }
 
                   const vtFinalReturn = Math.max(0, vtToReturn - pendingAdjust);
+                  const labelW = 30;
+                  const vtValW = (cw - labelW * 3) / 3;
                   const vtRows = [
                     ["VT diário", f2(dailyRate), "Dias planejados", String(plannedFullMonth), "Dias até demissão", String(workedUntilDismissal)],
                     ["VT pago (mês)", f2(vtPaidMonth), "VT devido", f2(vtOwed), pendingAdjust !== 0 ? "Ajuste ant." : "", pendingAdjust !== 0 ? f2(pendingAdjust) : ""],
@@ -7498,30 +7505,79 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                     theme: "plain",
                     styles: { fontSize: 7.5, cellPadding: { top: 1.5, bottom: 1.5, left: 2, right: 2 }, textColor: [60,60,60] },
                     columnStyles: {
-                      0: { fontStyle: "bold", textColor: [100,100,100], cellWidth: 24 },
-                      1: { cellWidth: (cw-24*3)/3, halign: "right" },
-                      2: { fontStyle: "bold", textColor: [100,100,100], cellWidth: 24 },
-                      3: { cellWidth: (cw-24*3)/3, halign: "right" },
-                      4: { fontStyle: "bold", textColor: [100,100,100], cellWidth: 24 },
-                      5: { cellWidth: (cw-24*3)/3, halign: "right" },
+                      0: { fontStyle: "bold", textColor: [100,100,100], cellWidth: labelW },
+                      1: { cellWidth: vtValW, halign: "right" },
+                      2: { fontStyle: "bold", textColor: [100,100,100], cellWidth: labelW },
+                      3: { cellWidth: vtValW, halign: "right" },
+                      4: { fontStyle: "bold", textColor: [100,100,100], cellWidth: labelW },
+                      5: { cellWidth: vtValW, halign: "right" },
                     },
                     margin: { left: mx, right: mx },
                   });
-                  y = doc.lastAutoTable.finalY + 2;
+                  y = doc.lastAutoTable.finalY + 5;
 
-                  // VT return highlight box
-                  const boxH = 8;
-                  doc.setFillColor(254, 243, 199); // warm yellow bg
-                  doc.roundedRect(mx, y, cw, boxH, 2, 2, "F");
+                  // ── Section 5: Summary highlight boxes ──
+                  doc.setDrawColor(220, 220, 220);
+                  doc.setLineWidth(0.3);
+                  doc.line(mx, y, W - mx, y);
+                  y += 4;
                   doc.setFontSize(9);
+                  doc.setTextColor(37, 99, 235);
                   doc.setFont(undefined, "bold");
-                  doc.setTextColor(180, 83, 9);
-                  doc.text("VT A RESTITUIR:", mx + 4, y + boxH/2 + 1);
-                  doc.setFontSize(11);
-                  doc.setTextColor(220, 50, 50);
-                  doc.text(f2(vtFinalReturn), W - mx - 4, y + boxH/2 + 1, { align: "right" });
+                  doc.text("RESUMO FINANCEIRO", mx, y);
                   doc.setFont(undefined, "normal");
-                  y += boxH + 8;
+                  y += 4;
+
+                  const boxH = 9;
+                  const boxGap = 3;
+                  const boxW = (cw - boxGap) / 2;
+
+                  // Row 1: Gorjeta Bruta + Dedução
+                  doc.setFillColor(219, 234, 254); // light blue
+                  doc.roundedRect(mx, y, boxW, boxH, 1.5, 1.5, "F");
+                  doc.setFontSize(7);
+                  doc.setTextColor(37, 99, 235);
+                  doc.setFont(undefined, "bold");
+                  doc.text("GORJETA BRUTA TOTAL", mx + 3, y + 3.5);
+                  doc.setFontSize(9);
+                  doc.text(f2(grandBruto), mx + boxW - 3, y + 3.5, { align: "right" });
+                  doc.setFont(undefined, "normal");
+
+                  const bx12 = mx + boxW + boxGap;
+                  doc.setFillColor(254, 226, 226); // light red
+                  doc.roundedRect(bx12, y, boxW, boxH, 1.5, 1.5, "F");
+                  doc.setFontSize(7);
+                  doc.setTextColor(185, 28, 28);
+                  doc.setFont(undefined, "bold");
+                  doc.text("DEDUÇÃO TOTAL", bx12 + 3, y + 3.5);
+                  doc.setFontSize(9);
+                  doc.text(f2(grandDed), bx12 + boxW - 3, y + 3.5, { align: "right" });
+                  doc.setFont(undefined, "normal");
+                  y += boxH + boxGap;
+
+                  // Row 2: Gorjeta Líquida + VT a Restituir
+                  doc.setFillColor(209, 250, 229); // light green
+                  doc.roundedRect(mx, y, boxW, boxH, 1.5, 1.5, "F");
+                  doc.setFontSize(7);
+                  doc.setTextColor(5, 150, 105);
+                  doc.setFont(undefined, "bold");
+                  doc.text("GORJETA LÍQUIDA TOTAL", mx + 3, y + 3.5);
+                  doc.setFontSize(9);
+                  doc.text(f2(grandLiq), mx + boxW - 3, y + 3.5, { align: "right" });
+                  doc.setFont(undefined, "normal");
+
+                  const bx22 = mx + boxW + boxGap;
+                  doc.setFillColor(254, 243, 199); // warm yellow
+                  doc.roundedRect(bx22, y, boxW, boxH, 1.5, 1.5, "F");
+                  doc.setFontSize(7);
+                  doc.setTextColor(180, 83, 9);
+                  doc.setFont(undefined, "bold");
+                  doc.text("VT A RESTITUIR", bx22 + 3, y + 3.5);
+                  doc.setFontSize(9);
+                  doc.setTextColor(220, 50, 50);
+                  doc.text(f2(vtFinalReturn), bx22 + boxW - 3, y + 3.5, { align: "right" });
+                  doc.setFont(undefined, "normal");
+                  y += boxH + 6;
 
                   // ── Footer: accent bar + text ──
                   doc.setFillColor(37, 99, 235);
