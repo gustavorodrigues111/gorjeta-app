@@ -7217,7 +7217,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
 
                 {/* Importar folha de ponto */}
                 <button onClick={()=>{setShowPontoImport(!showPontoImport);setPontoError("");setPontoPreview(null);setPontoResolutions({});}}
-                  style={{...S.btnSecondary,fontSize:mobileOnly?11:12,border:`1px solid ${showPontoImport?"var(--ac)":"var(--ac)44"}`,background:showPontoImport?"var(--ac)22":"transparent",color:"var(--ac)",whiteSpace:"nowrap"}}>
+                  style={{...S.btnSecondary,fontSize:mobileOnly?11:12,border:`1px solid ${showPontoImport?"var(--ac)":"var(--ac)"}`,background:showPontoImport?"var(--ac)22":"transparent",color:"var(--ac)",whiteSpace:"nowrap"}}>
                   {mobileOnly?"📄 Ponto":"📄 Importar ponto"}
                 </button>
 
