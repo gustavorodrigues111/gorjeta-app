@@ -7426,7 +7426,22 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                         for (let p = 1; p <= pdfDoc.numPages; p++) {
                           const page = await pdfDoc.getPage(p);
                           const content = await page.getTextContent();
-                          fullText += content.items.map(it=>it.str).join(" ") + "\n";
+                          // Group items by Y position to reconstruct lines
+                          const lineMap = {};
+                          for (const item of content.items) {
+                            if (!item.str.trim()) continue;
+                            // transform[5] is the Y position (inverted: higher = top)
+                            const y = Math.round(item.transform[5]);
+                            if (!lineMap[y]) lineMap[y] = [];
+                            lineMap[y].push({ x: item.transform[4], text: item.str });
+                          }
+                          // Sort Y positions descending (top to bottom in PDF)
+                          const sortedYs = Object.keys(lineMap).map(Number).sort((a, b) => b - a);
+                          for (const y of sortedYs) {
+                            // Sort items left to right within the line
+                            const items = lineMap[y].sort((a, b) => a.x - b.x);
+                            fullText += items.map(it => it.text).join(" ") + "\n";
+                          }
                         }
                         if (!fullText.trim() || fullText.trim().length < 20) {
                           setPontoError("PDF parece ser uma imagem escaneada (sem texto selecionável). Use PDFs com texto digital.");
