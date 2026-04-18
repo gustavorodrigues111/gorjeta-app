@@ -4507,37 +4507,9 @@ Inclua apenas as ações solicitadas. Arrays vazios se não houver ação daquel
               ← Voltar para equipe
             </button>
 
-            {/* Header card */}
-            <div style={{background:"var(--bg2)",border:"1px solid var(--border)",borderRadius:14,padding:16,marginBottom:16}}>
-              <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",flexWrap:"wrap",gap:12}}>
-                <div>
-                  <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
-                    <span style={{fontSize:18,fontWeight:700,color:"var(--text)"}}>{emp.name}</span>
-                    <span style={{fontSize:10,padding:"2px 8px",borderRadius:6,background:badge.bg,color:badge.color,fontWeight:700}}>{badge.label}</span>
-                    {emp.isProducao && <span style={{fontSize:10,padding:"2px 8px",borderRadius:6,background:"#ec489922",color:"#ec4899",fontWeight:700}}>Produção</span>}
-                    {emp.isFreela && <span style={{fontSize:10,padding:"2px 8px",borderRadius:6,background:"#06b6d422",color:"#06b6d4",fontWeight:700}}>Freela</span>}
-                  </div>
-                  <div style={{fontSize:12,color:"var(--text3)",marginTop:4}}>{role?.name ?? "Sem cargo"} · {role?.area ?? "Sem área"} · {emp.empCode ?? "—"}</div>
-                </div>
-                <div style={{display:"flex",gap:10,flexWrap:"wrap"}}>
-                  <div style={{textAlign:"center",padding:"6px 12px",background:"var(--bg3)",borderRadius:10}}>
-                    <div style={{fontSize:16,fontWeight:700,color:"var(--red)"}}>{negCount}</div>
-                    <div style={{fontSize:9,color:"var(--text3)"}}>Ocorrências</div>
-                  </div>
-                  <div style={{textAlign:"center",padding:"6px 12px",background:"var(--bg3)",borderRadius:10}}>
-                    <div style={{fontSize:16,fontWeight:700,color:"var(--green)"}}>{posCount}</div>
-                    <div style={{fontSize:9,color:"var(--text3)"}}>Elogios</div>
-                  </div>
-                  <div style={{textAlign:"center",padding:"6px 12px",background:"var(--bg3)",borderRadius:10}}>
-                    <div style={{fontSize:16,fontWeight:700,color:"#f59e0b"}}>{avgStars}</div>
-                    <div style={{fontSize:9,color:"var(--text3)"}}>Avaliação</div>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            {/* Tab pills */}
-            <div style={{display:"flex",gap:6,marginBottom:16,flexWrap:"wrap"}}>
+            {/* Tab pills — direto após o botão voltar */}
+            <div style={{display:"flex",gap:6,marginBottom:16,flexWrap:"wrap",alignItems:"center"}}>
+              <span style={{fontSize:15,fontWeight:700,color:"var(--text)",marginRight:8}}>{emp.name}</span>
               <button onClick={()=>setDetailTab("cadastro")} style={dtPill("cadastro",detailTab==="cadastro")}>Cadastro</button>
               <button onClick={()=>setDetailTab("acoes")} style={dtPill("acoes",detailTab==="acoes")}>Ações</button>
               <button onClick={()=>setDetailTab("trilha")} style={dtPill("trilha",detailTab==="trilha")}>Trilha</button>
@@ -4599,7 +4571,35 @@ Inclua apenas as ações solicitadas. Arrays vazios se não houver ação daquel
 
             {/* ── TAB: Ações ── */}
             {detailTab === "acoes" && (
-              <div style={{background:"var(--card-bg)",border:"1px solid var(--border)",borderRadius:12,padding:16}}>
+              <div>
+                {/* Resumo da pessoa */}
+                <div style={{background:"var(--bg2)",border:"1px solid var(--border)",borderRadius:12,padding:14,marginBottom:12,display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:10}}>
+                  <div>
+                    <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
+                      <span style={{fontWeight:700,color:"var(--text)",fontSize:15}}>{emp.name}</span>
+                      <span style={{fontSize:10,padding:"2px 8px",borderRadius:6,background:badge.bg,color:badge.color,fontWeight:700}}>{badge.label}</span>
+                      {emp.isProducao && <span style={{fontSize:10,padding:"2px 8px",borderRadius:6,background:"#ec489922",color:"#ec4899",fontWeight:700}}>Produção</span>}
+                      {emp.isFreela && <span style={{fontSize:10,padding:"2px 8px",borderRadius:6,background:"#06b6d422",color:"#06b6d4",fontWeight:700}}>Freela</span>}
+                    </div>
+                    <div style={{fontSize:12,color:"var(--text3)",marginTop:3}}>{role?.name ?? "Sem cargo"} · {role?.area ?? "Sem área"} · {emp.empCode ?? "—"}</div>
+                  </div>
+                  <div style={{display:"flex",gap:8}}>
+                    <div style={{textAlign:"center",padding:"4px 10px",background:"var(--bg3)",borderRadius:8}}>
+                      <div style={{fontSize:14,fontWeight:700,color:"var(--red)"}}>{negCount}</div>
+                      <div style={{fontSize:8,color:"var(--text3)"}}>Ocorrências</div>
+                    </div>
+                    <div style={{textAlign:"center",padding:"4px 10px",background:"var(--bg3)",borderRadius:8}}>
+                      <div style={{fontSize:14,fontWeight:700,color:"var(--green)"}}>{posCount}</div>
+                      <div style={{fontSize:8,color:"var(--text3)"}}>Elogios</div>
+                    </div>
+                    <div style={{textAlign:"center",padding:"4px 10px",background:"var(--bg3)",borderRadius:8}}>
+                      <div style={{fontSize:14,fontWeight:700,color:"#f59e0b"}}>{avgStars}</div>
+                      <div style={{fontSize:8,color:"var(--text3)"}}>Avaliação</div>
+                    </div>
+                  </div>
+                </div>
+                {/* Ações */}
+                <div style={{background:"var(--card-bg)",border:"1px solid var(--border)",borderRadius:12,padding:16}}>
                 <div style={{display:"flex",flexDirection:"column",gap:10}}>
                   {/* Promoção */}
                   {!isDemitido && !isInactive && (
@@ -4721,6 +4721,7 @@ Inclua apenas as ações solicitadas. Arrays vazios se não houver ação daquel
                     </button>
                   )}
                 </div>
+              </div>
               </div>
             )}
 
