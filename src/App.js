@@ -3,7 +3,7 @@ import { useState, useEffect, Component } from "react";
 import { db } from "./firebase";
 import { doc, getDoc, setDoc } from "firebase/firestore";
 
-const APP_VERSION = "5.40.0";
+const APP_VERSION = "5.41.0";
 
 const DEFAULT_ADMISSION = () => `${new Date().getFullYear()}-01-01`;
 const round2 = (v) => Math.round(v * 100) / 100;
@@ -6356,6 +6356,8 @@ function MeetingPlannerSection({ restaurantId, employees, roles, areas, meetingP
   const [lidParticipants, setLidParticipants] = useState([]);
   // Execution mode (live meeting)
   const [livePautaId, setLivePautaId] = useState(null);
+  const [livePlanId, setLivePlanId] = useState(null);
+  const [livePlanNotes, setLivePlanNotes] = useState("");
   // Pautas
   const [pautaTitle, setPautaTitle] = useState("");
   const [pautaType, setPautaType] = useState("semanal");
@@ -6409,10 +6411,18 @@ function MeetingPlannerSection({ restaurantId, employees, roles, areas, meetingP
     const areaEmps = employees.filter(e => { const r = roles.find(rl => rl.id === e.roleId); return r?.area === area; }).map(e => e.id);
     if (selectedAreas.includes(area)) {
       setSelectedAreas(prev => prev.filter(a => a !== area));
-      setSelectedEmps(prev => prev.filter(id => !areaEmps.includes(id)));
+      // For avaliação, just clear selection if the deselected area contained the selected emp
+      if (planType === "avaliação") {
+        setSelectedEmps(prev => prev.filter(id => !areaEmps.includes(id)));
+      } else {
+        setSelectedEmps(prev => prev.filter(id => !areaEmps.includes(id)));
+      }
     } else {
       setSelectedAreas(prev => [...prev, area]);
-      setSelectedEmps(prev => [...new Set([...prev, ...areaEmps])]);
+      // For avaliação, don't auto-select — user must pick one employee manually
+      if (planType !== "avaliação") {
+        setSelectedEmps(prev => [...new Set([...prev, ...areaEmps])]);
+      }
     }
   };
 
@@ -6752,6 +6762,48 @@ function MeetingPlannerSection({ restaurantId, employees, roles, areas, meetingP
     if (idx < 0) return;
     all[idx] = { ...all[idx], items: all[idx].items.map(it => it.id === itemId ? { ...it, notes } : it) };
     onUpdate("meetingAgendas", all);
+  }
+
+  // ── Live team meeting (plans - avaliação/alinhamento) ──
+  function handleStartLivePlan(planId) {
+    const all = [...(allMeetingPlans ?? [])];
+    const idx = all.findIndex(p => p.id === planId);
+    if (idx >= 0) { all[idx] = { ...all[idx], status: "em_andamento", startedAt: all[idx].startedAt ?? new Date().toISOString() }; onUpdate("meetingPlans", all); }
+    setLivePlanId(planId);
+    setLivePlanNotes("");
+  }
+  function handleTogglePlanItem(planId, listKey, itemIdx) {
+    const all = [...(allMeetingPlans ?? [])];
+    const idx = all.findIndex(p => p.id === planId);
+    if (idx < 0) return;
+    const items = [...(all[idx][listKey] ?? [])];
+    if (items[itemIdx]) items[itemIdx] = { ...items[itemIdx], done: !items[itemIdx].done };
+    all[idx] = { ...all[idx], [listKey]: items };
+    onUpdate("meetingPlans", all);
+  }
+  function handleUpdatePlanItemNotes(planId, listKey, itemIdx, notes) {
+    const all = [...(allMeetingPlans ?? [])];
+    const idx = all.findIndex(p => p.id === planId);
+    if (idx < 0) return;
+    const items = [...(all[idx][listKey] ?? [])];
+    if (items[itemIdx]) items[itemIdx] = { ...items[itemIdx], notes };
+    all[idx] = { ...all[idx], [listKey]: items };
+    onUpdate("meetingPlans", all);
+  }
+  function handleEndLivePlan(planId) {
+    const all = [...(allMeetingPlans ?? [])];
+    const idx = all.findIndex(p => p.id === planId);
+    if (idx >= 0) {
+      all[idx] = { ...all[idx], status: "encerrada", endedAt: new Date().toISOString(), meetingNotes: livePlanNotes || all[idx].meetingNotes || "" };
+      onUpdate("meetingPlans", all);
+    }
+    setLivePlanId(null);
+    setLivePlanNotes("");
+  }
+  function handleReopenPlan(planId) {
+    const all = [...(allMeetingPlans ?? [])];
+    const idx = all.findIndex(p => p.id === planId);
+    if (idx >= 0) { const { status, endedAt, ...rest } = all[idx]; all[idx] = { ...rest, status: "aberta" }; onUpdate("meetingPlans", all); }
   }
 
   const typeColor = planType === "avaliação" ? "#8b5cf6" : "#3b82f6";
@@ -7106,7 +7158,7 @@ function MeetingPlannerSection({ restaurantId, employees, roles, areas, meetingP
           )}
 
           {/* ── Reuniões de equipe (plans) ── */}
-          {Object.keys(grouped).length > 0 && (
+          {Object.keys(grouped).length > 0 && !livePlanId && (
             <div style={{marginBottom:20}}>
               <h4 style={{color:"var(--text)",fontSize:14,fontWeight:700,margin:"0 0 12px"}}>👥 Reuniões com equipe</h4>
               {Object.entries(grouped).sort(([a],[b])=>b.localeCompare(a)).map(([mk, plans]) => {
@@ -7182,6 +7234,27 @@ function MeetingPlannerSection({ restaurantId, employees, roles, areas, meetingP
                               {plan.topics.map((t,i) => <span key={i} style={{fontSize:10,color:"var(--text3)"}}>{t.done?"✓ ":"○ "}{t.text}{i<plan.topics.length-1?" · ":""}</span>)}
                             </div>
                           )}
+                          {/* Action buttons */}
+                          <div style={{display:"flex",gap:6,marginTop:10,flexWrap:"wrap"}}>
+                            {(!plan.status || plan.status === "aberta") && (
+                              <button onClick={()=>handleStartLivePlan(plan.id)} style={{...S.btnPrimary,fontSize:11,padding:"6px 14px",background:pColor,borderColor:pColor}}>
+                                ▶ Iniciar conversa ao vivo
+                              </button>
+                            )}
+                            {plan.status === "em_andamento" && (
+                              <button onClick={()=>{setLivePlanId(plan.id);setLivePlanNotes(plan.meetingNotes??"");}} style={{...S.btnPrimary,fontSize:11,padding:"6px 14px",background:"#f59e0b",borderColor:"#f59e0b"}}>
+                                ▶ Continuar conversa
+                              </button>
+                            )}
+                            {plan.status === "encerrada" && (
+                              <button onClick={()=>handleReopenPlan(plan.id)} style={{...S.btnSecondary,fontSize:10,padding:"5px 10px",color:pColor,borderColor:pColor+"44"}}>
+                                Reabrir
+                              </button>
+                            )}
+                            {plan.status === "encerrada" && (
+                              <span style={{fontSize:10,color:"#10b981",fontWeight:600,display:"flex",alignItems:"center",gap:4}}>✓ Encerrada{plan.endedAt ? ` em ${new Date(plan.endedAt).toLocaleDateString("pt-BR")}` : ""}</span>
+                            )}
+                          </div>
                         </div>
                       );
                     })}
@@ -7190,6 +7263,69 @@ function MeetingPlannerSection({ restaurantId, employees, roles, areas, meetingP
               })}
             </div>
           )}
+
+          {/* ── Live team meeting execution (avaliação/alinhamento) ── */}
+          {livePlanId && (() => {
+            const livePlan = activePlans.find(p => p.id === livePlanId);
+            if (!livePlan) return null;
+            const lColor = livePlan.type === "avaliação" ? "#8b5cf6" : "#3b82f6";
+            const lIcon = livePlan.type === "avaliação" ? "📋" : "💬";
+            const empNames = (livePlan.employeeIds ?? []).map(eid => { const e = employees.find(emp => emp.id === eid); return e?.name ?? eid; });
+
+            // Collect all checklist sections
+            const sections = livePlan.type === "avaliação" ? [
+              { key: "pontosFortes", label: "💪 Pontos fortes", color: "#10b981", items: livePlan.pontosFortes ?? [] },
+              { key: "pontosMelhorar", label: "📈 A melhorar", color: "#f59e0b", items: livePlan.pontosMelhorar ?? [] },
+              { key: "notasInternas", label: "📝 Notas internas", color: "#6366f1", items: livePlan.notasInternas ?? [] },
+            ] : [
+              { key: "topics", label: "📋 Temas a tratar", color: "#3b82f6", items: livePlan.topics ?? [] },
+            ];
+            const totalItems = sections.reduce((s,sec) => s + sec.items.length, 0);
+            const doneItems = sections.reduce((s,sec) => s + sec.items.filter(it => it.done).length, 0);
+
+            return (
+              <div style={{...S.card,padding:0,marginBottom:20,border:`2px solid ${lColor}44`,overflow:"hidden"}}>
+                <div style={{padding:"16px 18px",background:lColor+"08",borderBottom:`1px solid ${lColor}22`}}>
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:4}}>
+                    <div style={{display:"flex",alignItems:"center",gap:8}}>
+                      <span style={{fontSize:18}}>{lIcon}</span>
+                      <span style={{color:"var(--text)",fontWeight:700,fontSize:15}}>Conversa de {livePlan.type}</span>
+                      <span style={{fontSize:10,padding:"2px 8px",borderRadius:6,background:lColor+"18",color:lColor,fontWeight:600}}>AO VIVO</span>
+                    </div>
+                    <button onClick={()=>handleEndLivePlan(livePlanId)} style={{...S.btnPrimary,fontSize:12,padding:"8px 16px",background:"#10b981",borderColor:"#10b981"}}>✓ Encerrar</button>
+                  </div>
+                  <div style={{fontSize:11,color:"var(--text3)"}}>
+                    {empNames.join(", ")} — {livePlan.plannedDate ? new Date(livePlan.plannedDate+"T12:00:00").toLocaleDateString("pt-BR") : ""}
+                    {totalItems > 0 && <span style={{marginLeft:8,fontWeight:600}}>{doneItems}/{totalItems} itens</span>}
+                  </div>
+                </div>
+                <div style={{padding:"16px 18px"}}>
+                  {sections.map(sec => (
+                    <div key={sec.key} style={{marginBottom:16}}>
+                      <div style={{fontSize:12,fontWeight:700,color:sec.color,marginBottom:8}}>{sec.label}</div>
+                      {sec.items.length === 0 && <div style={{fontSize:11,color:"var(--text3)",fontStyle:"italic"}}>Nenhum item cadastrado</div>}
+                      {sec.items.map((item, idx) => (
+                        <div key={idx} style={{display:"flex",gap:8,alignItems:"flex-start",marginBottom:8,padding:"8px 10px",borderRadius:8,border:`1px solid ${item.done?sec.color+"33":"var(--border)"}`,background:item.done?sec.color+"06":"transparent"}}>
+                          <button onClick={()=>handleTogglePlanItem(livePlanId, sec.key, idx)} style={{marginTop:2,width:20,height:20,minWidth:20,borderRadius:6,border:`2px solid ${item.done?sec.color:"var(--border)"}`,background:item.done?sec.color:"transparent",color:"#fff",cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",fontSize:11,fontWeight:700,flexShrink:0}}>
+                            {item.done?"✓":""}
+                          </button>
+                          <div style={{flex:1,minWidth:0}}>
+                            <div style={{fontSize:12,color:item.done?"var(--text3)":"var(--text)",textDecoration:item.done?"line-through":"none"}}>{item.text}</div>
+                            <textarea value={item.notes??""} onChange={e=>handleUpdatePlanItemNotes(livePlanId, sec.key, idx, e.target.value)} rows={1} placeholder="Anotações..." style={{...S.input,fontSize:11,padding:"4px 8px",resize:"vertical",width:"100%",boxSizing:"border-box",marginTop:4}}/>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ))}
+                  {/* General notes */}
+                  <div style={{marginTop:8,borderTop:"1px solid var(--border)",paddingTop:12}}>
+                    <div style={{fontSize:12,fontWeight:700,color:"var(--text)",marginBottom:6}}>Anotações gerais</div>
+                    <textarea value={livePlanNotes} onChange={e=>setLivePlanNotes(e.target.value)} rows={3} placeholder="Observações da conversa..." style={{...S.input,fontSize:12,padding:"8px 10px",resize:"vertical",width:"100%",boxSizing:"border-box"}}/>
+                  </div>
+                </div>
+              </div>
+            );
+          })()}
 
           {/* ── Live meeting execution ── */}
           {livePautaId && (() => {
@@ -7294,7 +7430,7 @@ function MeetingPlannerSection({ restaurantId, employees, roles, areas, meetingP
           })()}
 
           {/* ── Reuniões de liderança (pautas) ── */}
-          {allPautas.length > 0 && !livePautaId && (
+          {allPautas.length > 0 && !livePautaId && !livePlanId && (
             <div style={{marginBottom:20}}>
               <h4 style={{color:"var(--text)",fontSize:14,fontWeight:700,margin:"0 0 12px"}}>🤝 Reuniões de liderança</h4>
               {allPautas.sort((a,b)=>(b.createdAt??"").localeCompare(a.createdAt??"")).map(pauta => {
