@@ -9168,6 +9168,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
   const canTips  = perms.tips     || isOwner;
   const canSched = perms.schedule || isOwner;
   const isDP     = perms.isDP === true;
+  const currentIsMasterDP = (currentUser?.masterRestaurantIds ?? []).includes(rid) || isOwner;
 
   // Abas opcionais — admin autoriza via tabsConfig, gestor escolhe via tabsGestor
   const adminAutoriza = (key) => restaurant.tabsConfig?.[key] !== false;
@@ -12147,21 +12148,23 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
           const myId = currentUser?.id;
           // eslint-disable-next-line no-unused-vars
           const myRestIds = currentUser?.restaurantIds ?? [];
+          const currentIsMasterDP = (currentUser?.masterRestaurantIds ?? []).includes(rid) || isOwner;
           const restMgrs = managers.filter(m => (m.restaurantIds??[]).includes(rid) && m.id !== myId);
-          const canEdit = (m) => m.createdBy === myId;
+          const canEdit = (m) => currentIsMasterDP;
+          const mastersInRest = managers.filter(m => (m.restaurantIds??[]).includes(rid) && m.profile === "dp" && (m.masterRestaurantIds??[]).includes(rid));
 
           return (
             <div style={{padding:"24px",maxWidth:700,margin:"0 auto"}}>
               <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20}}>
                 <div>
                   <h3 style={{color:"var(--text)",fontSize:16,fontWeight:700,margin:"0 0 4px"}}>Gestores do restaurante</h3>
-                  <p style={{color:"var(--text3)",fontSize:12,margin:0}}>Crie e gerencie gestores para este restaurante</p>
+                  <p style={{color:"var(--text3)",fontSize:12,margin:0}}>{currentIsMasterDP ? "Crie e gerencie gestores para este restaurante" : "Visualize os gestores deste restaurante"}</p>
                 </div>
-                <button onClick={()=>{
+                {currentIsMasterDP && <button onClick={()=>{
                   setDpMgrEdit(null);
-                  setDpMgrForm({name:"",cpf:"",pin:"",restaurantIds:[rid],perms:{tips:true,schedule:true},isDP:false,profile:"custom",areas:[]});
+                  setDpMgrForm({name:"",cpf:"",pin:"",restaurantIds:[rid],perms:{tips:true,schedule:true},isDP:false,profile:"custom",areas:[],masterRestaurantIds:[]});
                   setDpMgrModal(true);
-                }} style={{...S.btnPrimary,width:"auto",padding:"10px 20px"}}>+ Novo Gestor</button>
+                }} style={{...S.btnPrimary,width:"auto",padding:"10px 20px"}}>+ Novo Gestor</button>}
               </div>
 
               {restMgrs.length === 0 && (
@@ -12174,10 +12177,14 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
               {restMgrs.map(m => {
                 const profileLabel = m.profile==="dp"?"📬 Gestor Adm.":m.profile==="lider"?"👔 Líder Op.":"⚙️ Custom";
                 const mine = canEdit(m);
+                const isLastMaster = (m.masterRestaurantIds??[]).includes(rid) && mastersInRest.length <= 1;
                 return (
                   <div key={m.id} style={{...S.card,marginBottom:10,display:"flex",justifyContent:"space-between",alignItems:"center",gap:12}}>
                     <div>
-                      <div style={{color:"var(--text)",fontWeight:700,fontSize:14}}>{m.name}</div>
+                      <div style={{display:"flex",alignItems:"center",gap:6}}>
+                        <span style={{color:"var(--text)",fontWeight:700,fontSize:14}}>{m.name}</span>
+                        {(m.masterRestaurantIds??[]).includes(rid) && <span style={{background:"#d4a01722",color:"#d4a017",borderRadius:6,padding:"2px 8px",fontSize:10,fontWeight:700}}>🔑 Master</span>}
+                      </div>
                       <div style={{color:"var(--text3)",fontSize:11}}>
                         {profileLabel}
                         {m.profile==="lider" && (m.areas??[]).length>0 && ` · ${m.areas.join(", ")}`}
@@ -12197,14 +12204,15 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                         }} title="Resetar PIN para os 4 primeiros dígitos do CPF" style={{...S.btnSecondary,fontSize:11,padding:"5px 10px"}}>🔑 Resetar PIN</button>
                         <button onClick={()=>{
                           setDpMgrEdit(m.id);
-                          setDpMgrForm({name:m.name,cpf:m.cpf??"",pin:m.pin??"",restaurantIds:m.restaurantIds??[],perms:m.perms??{tips:true,schedule:true},isDP:m.isDP??false,profile:m.profile??"custom",areas:m.areas??[]});
+                          setDpMgrForm({name:m.name,cpf:m.cpf??"",pin:m.pin??"",restaurantIds:m.restaurantIds??[],perms:m.perms??{tips:true,schedule:true},isDP:m.isDP??false,profile:m.profile??"custom",areas:m.areas??[],masterRestaurantIds:m.masterRestaurantIds??[]});
                           setDpMgrModal(true);
                         }} style={{...S.btnSecondary,fontSize:11,padding:"5px 12px"}}>Editar</button>
                         <button onClick={()=>{
+                          if (isLastMaster) { onUpdate("_toast","⚠️ Este é o último Master do restaurante. Nomeie outro Master antes de excluir."); return; }
                           if(!window.confirm(`Excluir gestor "${m.name}"?`)) return;
                           onUpdate("managers",managers.filter(x=>x.id!==m.id));
                           onUpdate("_toast",`🗑️ ${m.name} excluído`);
-                        }} style={{...S.btnSecondary,fontSize:11,padding:"5px 10px",color:"var(--red)",borderColor:"var(--red)44"}}>✕</button>
+                        }} style={{...S.btnSecondary,fontSize:11,padding:"5px 10px",color:isLastMaster?"var(--text3)":"var(--red)",borderColor:isLastMaster?"var(--border)":"var(--red)44"}}>✕</button>
                       </div>
                     )}
                   </div>
@@ -12272,6 +12280,20 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                   })}
                 </div>
               </div>
+
+              {/* Master toggle — só para Gestor Adm. e visível para AppTip/master */}
+              {dpMgrForm.profile === "dp" && currentIsMasterDP && (
+                <div style={{borderTop:"1px solid var(--border)",paddingTop:12}}>
+                  <button onClick={()=>{const ids=dpMgrForm.masterRestaurantIds??[];setDpMgrForm({...dpMgrForm,masterRestaurantIds:ids.includes(rid)?ids.filter(x=>x!==rid):[...ids,rid]});}}
+                    style={{width:"100%",padding:"12px 14px",borderRadius:10,border:`1px solid ${(dpMgrForm.masterRestaurantIds??[]).includes(rid)?"#d4a017":"var(--border)"}`,background:(dpMgrForm.masterRestaurantIds??[]).includes(rid)?"#d4a01715":"transparent",color:(dpMgrForm.masterRestaurantIds??[]).includes(rid)?"#d4a017":"var(--text3)",cursor:"pointer",fontFamily:"'DM Sans',sans-serif",fontSize:13,textAlign:"left",display:"flex",alignItems:"center",gap:10}}>
+                    <span style={{fontSize:18}}>🔑</span>
+                    <div>
+                      <div style={{fontWeight:700}}>{(dpMgrForm.masterRestaurantIds??[]).includes(rid)?"✓ Master do Restaurante":"○ Master do Restaurante"}</div>
+                      <div style={{fontSize:11,opacity:0.7,marginTop:2}}>Pode criar, editar e excluir outros gestores deste restaurante</div>
+                    </div>
+                  </button>
+                </div>
+              )}
 
               {/* Áreas Líder */}
               {dpMgrForm.profile === "lider" && (
@@ -12346,10 +12368,14 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                 const managers = data?.managers ?? [];
                 const isNew = !dpMgrEdit;
                 const pin = isNew ? cpfDigits.slice(0,4) : (dpMgrForm.pin || cpfDigits.slice(0,4));
-                const m = { ...dpMgrForm, pin, id: dpMgrEdit ?? Date.now().toString(), createdBy: currentUser?.id, ...(isNew ? {mustChangePin:true} : {}) };
+                // Auto-master: primeiro gestor adm. do restaurante vira master
+                const existingDPs = managers.filter(x => x.profile === "dp" && (x.restaurantIds??[]).includes(rid));
+                const autoMaster = isNew && dpMgrForm.profile === "dp" && existingDPs.length === 0;
+                const masterIds = autoMaster ? [...new Set([...(dpMgrForm.masterRestaurantIds??[]),rid])] : (dpMgrForm.masterRestaurantIds??[]);
+                const m = { ...dpMgrForm, pin, id: dpMgrEdit ?? Date.now().toString(), createdBy: currentUser?.id, masterRestaurantIds: masterIds, ...(isNew ? {mustChangePin:true} : {}) };
                 onUpdate("managers", dpMgrEdit ? managers.map(x=>x.id===dpMgrEdit?{...x,...m}:x) : [...managers,m]);
                 setDpMgrModal(false);
-                onUpdate("_toast", dpMgrEdit?"✅ Gestor atualizado":"✅ Gestor criado");
+                onUpdate("_toast", dpMgrEdit?"✅ Gestor atualizado": autoMaster?"✅ Gestor criado como Master (primeiro do restaurante)":"✅ Gestor criado");
               }} style={S.btnPrimary}>{dpMgrEdit?"Salvar":"Criar Gestor"}</button>
             </div>
           </Modal>
@@ -12802,7 +12828,7 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }
   const setEditMgrId = v => setEditIds(p=>({...p,mgr:v}));
   const setEditOwnerId = v => setEditIds(p=>({...p,owner:v}));
   const [restForm, setRestForm]             = useState({ name:"",shortCode:"",cnpj:"",address:"",whatsappFin:"",whatsappOp:"",serviceStartDate:"" });
-  const [mgrForm, setMgrForm]               = useState({ name:"",cpf:"",pin:"",restaurantIds:[],perms:{tips:true,schedule:true},isDP:false,profile:"custom",areas:[] });
+  const [mgrForm, setMgrForm]               = useState({ name:"",cpf:"",pin:"",restaurantIds:[],perms:{tips:true,schedule:true},isDP:false,profile:"custom",areas:[],masterRestaurantIds:[] });
   const [ownerForm, setOwnerForm]           = useState({ name:"",cpf:"",pin:"" });
   const [viewOnly, setViewOnly]             = useState(false);
   // View-only guard — shadow onUpdate to block writes when locked
@@ -12833,9 +12859,22 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }
     // PIN = primeiros 4 dígitos do CPF no cadastro inicial
     const isNew = !editMgrId;
     const pin = isNew ? cpfDigits.slice(0,4) : (mgrForm.pin || cpfDigits.slice(0,4));
-    const m = { ...mgrForm, pin, id: editMgrId ?? Date.now().toString(), ...(isNew ? {mustChangePin:true} : {}) };
+    // Auto-master: primeiro gestor adm. de cada restaurante selecionado vira master
+    const restIds = mgrForm.restaurantIds ?? [];
+    let masterIds = [...(mgrForm.masterRestaurantIds ?? [])];
+    let autoMaster = false;
+    if (isNew && mgrForm.profile === "dp") {
+      restIds.forEach(rId => {
+        if (!managers.some(x => x.profile === "dp" && (x.restaurantIds??[]).includes(rId)) && !masterIds.includes(rId)) {
+          masterIds.push(rId);
+          autoMaster = true;
+        }
+      });
+    }
+    const m = { ...mgrForm, pin, id: editMgrId ?? Date.now().toString(), masterRestaurantIds: masterIds, ...(isNew ? {mustChangePin:true} : {}) };
     onUpdate("managers", editMgrId ? managers.map(x=>x.id===editMgrId?m:x) : [...managers,m]);
     setShowMgrModal(false);
+    if (autoMaster) onUpdate("_toast","✅ Gestor criado como Master (primeiro do restaurante)");
   }
   function saveOwner() {
     if (!ownerForm.name.trim()||!ownerForm.pin.trim()) return;
@@ -12978,7 +13017,7 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }
               </div>
               <button onClick={()=>{
                 setEditMgrId(null);
-                setMgrForm({name:"",cpf:"",pin:"",restaurantIds:[selRestaurant],perms:{tips:true,schedule:true},isDP:false,profile:"custom",areas:[]});
+                setMgrForm({name:"",cpf:"",pin:"",restaurantIds:[selRestaurant],perms:{tips:true,schedule:true},isDP:false,profile:"custom",areas:[],masterRestaurantIds:[]});
                 setShowMgrModal(true);
               }} style={{...S.btnPrimary,width:"auto",padding:isMobile?"8px 14px":"10px 20px",fontSize:isMobile?12:14,whiteSpace:"nowrap"}}>+ Novo Gestor</button>
             </div>
@@ -12989,7 +13028,7 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }
                 <p style={{color:"var(--text3)",fontSize:14,marginBottom:16}}>Nenhum gestor atribuído a este restaurante.</p>
                 <button onClick={()=>{
                   setEditMgrId(null);
-                  setMgrForm({name:"",cpf:"",pin:"",restaurantIds:[selRestaurant],perms:{tips:true,schedule:true},isDP:false,profile:"custom",areas:[]});
+                  setMgrForm({name:"",cpf:"",pin:"",restaurantIds:[selRestaurant],perms:{tips:true,schedule:true},isDP:false,profile:"custom",areas:[],masterRestaurantIds:[]});
                   setShowMgrModal(true);
                 }} style={{...S.btnPrimary,width:"auto",padding:"10px 24px"}}>Adicionar primeiro gestor</button>
               </div>
@@ -13003,6 +13042,7 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }
                       <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:2,flexWrap:"wrap"}}>
                         <span style={{color:"var(--text)",fontWeight:700,fontSize:isMobile?14:15}}>{m.name}</span>
                         {m.profile==="dp" && <span style={{background:"var(--blue-bg)",color:"var(--blue)",borderRadius:6,padding:"2px 8px",fontSize:10,fontWeight:700}}>📬 Gestor Adm.</span>}
+                        {(m.masterRestaurantIds??[]).includes(selRestaurant) && <span style={{background:"#d4a01722",color:"#d4a017",borderRadius:6,padding:"2px 8px",fontSize:10,fontWeight:700}}>🔑 Master</span>}
                         {m.profile==="lider" && <span style={{background:"#f59e0b22",color:"#f59e0b",borderRadius:6,padding:"2px 8px",fontSize:10,fontWeight:700}}>👔 Líder Op.</span>}
                       </div>
                       <div style={{color:"var(--text3)",fontSize:isMobile?11:12,marginBottom:4}}>CPF: {isPrivate(selRestaurant) ? "•••.•••.•••-••" : (m.cpf||"—")}</div>
@@ -13030,8 +13070,13 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }
                         onUpdate("managers", managers.map(x=>x.id===m.id?{...x,pin:newPin,mustChangePin:true}:x));
                         onUpdate("_toast", `🔑 PIN de ${m.name} resetado para ${newPin}`);
                       }} title="Resetar PIN para os 4 primeiros dígitos do CPF" style={{...S.btnSecondary,fontSize:isMobile?11:12,flex:isMobile?1:undefined,textAlign:"center",padding:isMobile?"6px 8px":undefined}}>{isMobile?"🔑 PIN":"🔑 Resetar PIN"}</button>
-                      <button onClick={()=>{setEditMgrId(m.id);setMgrForm({name:m.name,cpf:m.cpf??"",pin:m.pin??"",restaurantIds:m.restaurantIds??[],perms:m.perms??{tips:true,schedule:true},isDP:m.isDP??false,profile:m.profile??"custom",areas:m.areas??[]});setShowMgrModal(true);}} style={{...S.btnSecondary,fontSize:isMobile?11:12,flex:isMobile?1:undefined,textAlign:"center",padding:isMobile?"6px 8px":undefined}}>Editar</button>
+                      <button onClick={()=>{setEditMgrId(m.id);setMgrForm({name:m.name,cpf:m.cpf??"",pin:m.pin??"",restaurantIds:m.restaurantIds??[],perms:m.perms??{tips:true,schedule:true},isDP:m.isDP??false,profile:m.profile??"custom",areas:m.areas??[],masterRestaurantIds:m.masterRestaurantIds??[]});setShowMgrModal(true);}} style={{...S.btnSecondary,fontSize:isMobile?11:12,flex:isMobile?1:undefined,textAlign:"center",padding:isMobile?"6px 8px":undefined}}>Editar</button>
                       <button onClick={()=>{
+                        // Proteger último master do restaurante
+                        if ((m.masterRestaurantIds??[]).includes(selRestaurant)) {
+                          const mastersHere = managers.filter(x => x.profile === "dp" && (x.masterRestaurantIds??[]).includes(selRestaurant) && x.id !== m.id);
+                          if (mastersHere.length === 0) { onUpdate("_toast","⚠️ Este é o último Master do restaurante. Nomeie outro Master antes de remover."); return; }
+                        }
                         if(!window.confirm(`Remover ${m.name} deste restaurante?`)) return;
                         const newIds = (m.restaurantIds??[]).filter(rid=>rid!==selRestaurant);
                         if(newIds.length === 0) {
@@ -13568,6 +13613,20 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }
                   })}
                 </div>
               </div>
+
+              {/* Master toggle — só para Gestor Adm. (AppTip sempre pode) */}
+              {mgrForm.profile === "dp" && (
+                <div style={{borderTop:"1px solid var(--border)",paddingTop:12}}>
+                  <button onClick={()=>{const ids=mgrForm.masterRestaurantIds??[];setMgrForm({...mgrForm,masterRestaurantIds:ids.includes(selRestaurant)?ids.filter(x=>x!==selRestaurant):[...ids,selRestaurant]});}}
+                    style={{width:"100%",padding:"12px 14px",borderRadius:10,border:`1px solid ${(mgrForm.masterRestaurantIds??[]).includes(selRestaurant)?"#d4a017":"var(--border)"}`,background:(mgrForm.masterRestaurantIds??[]).includes(selRestaurant)?"#d4a01715":"transparent",color:(mgrForm.masterRestaurantIds??[]).includes(selRestaurant)?"#d4a017":"var(--text3)",cursor:"pointer",fontFamily:"'DM Sans',sans-serif",fontSize:13,textAlign:"left",display:"flex",alignItems:"center",gap:10}}>
+                    <span style={{fontSize:18}}>🔑</span>
+                    <div>
+                      <div style={{fontWeight:700}}>{(mgrForm.masterRestaurantIds??[]).includes(selRestaurant)?"✓ Master deste Restaurante":"○ Master deste Restaurante"}</div>
+                      <div style={{fontSize:11,opacity:0.7,marginTop:2}}>Pode criar, editar e excluir outros gestores deste restaurante</div>
+                    </div>
+                  </button>
+                </div>
+              )}
 
               {/* Area restriction for Líder */}
               {mgrForm.profile === "lider" && (
@@ -14883,6 +14942,24 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }
                 </div>
               </button>
             </div>
+
+            {/* Master toggle — por restaurante */}
+            {mgrForm.profile === "dp" && (mgrForm.restaurantIds??[]).length > 0 && (
+              <div style={{borderTop:"1px solid var(--border)",paddingTop:12}}>
+                <label style={{display:"block",color:"var(--text)",fontWeight:700,fontSize:13,marginBottom:8}}>🔑 Master por restaurante</label>
+                <p style={{color:"var(--text3)",fontSize:11,margin:"0 0 8px"}}>Pode criar, editar e excluir outros gestores nos restaurantes selecionados.</p>
+                <div style={{display:"flex",flexDirection:"column",gap:6}}>
+                  {(mgrForm.restaurantIds??[]).map(rId => {
+                    const rest = restaurants.find(r=>r.id===rId);
+                    const on = (mgrForm.masterRestaurantIds??[]).includes(rId);
+                    return <button key={rId} onClick={()=>{const ids=mgrForm.masterRestaurantIds??[];setMgrForm({...mgrForm,masterRestaurantIds:on?ids.filter(x=>x!==rId):[...ids,rId]});}}
+                      style={{padding:"10px 14px",borderRadius:10,border:`1px solid ${on?"#d4a017":"var(--border)"}`,background:on?"#d4a01715":"transparent",color:on?"#d4a017":"var(--text3)",cursor:"pointer",fontFamily:"'DM Sans',sans-serif",fontSize:13,textAlign:"left"}}>
+                      {on?"🔑 ":"○ "}{rest?.name ?? rId}
+                    </button>;
+                  })}
+                </div>
+              </div>
+            )}
 
             <button onClick={saveMgr} style={S.btnPrimary}>{editMgrId?"Salvar":"Criar Gestor"}</button>
           </div>
