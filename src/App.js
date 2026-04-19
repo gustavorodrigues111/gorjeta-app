@@ -3,7 +3,7 @@ import { useState, useEffect, Component } from "react";
 import { db } from "./firebase";
 import { doc, getDoc, setDoc } from "firebase/firestore";
 
-const APP_VERSION = "5.36.0";
+const APP_VERSION = "5.37.0";
 
 const DEFAULT_ADMISSION = () => `${new Date().getFullYear()}-01-01`;
 const round2 = (v) => Math.round(v * 100) / 100;
@@ -616,6 +616,7 @@ const K = {
   meetingIdeas:        "v4:meetingIdeas",         // [{id, restaurantId, title, description, area, createdBy, createdAt, priority:bool, status:"nova"|"na_pauta"|"descartada"}]
   meetingAgendas:      "v4:meetingAgendas",       // [{id, restaurantId, title, templateType, date, items:[], createdBy, createdAt, status:"aberta"|"em_andamento"|"encerrada"}]
   meetingActions:      "v4:meetingActions",       // [{id, restaurantId, pautaId, text, responsible, deadline, done:bool, createdAt}]
+  meetingOccurrences:  "v4:meetingOccurrences",   // [{id, restaurantId, title, description, type:"cliente"|"estrutura"|"operacao"|"outro", areas:[], createdBy, createdAt, status:"nova"|"na_pauta"|"resolvida"|"descartada"}]
 };
 
 // ── Version retention ──
@@ -6315,30 +6316,11 @@ const AGENDA_TEMPLATES = [
     "Novas ações e responsáveis",
     "Encerramento e próximos passos",
   ]},
-  { id:"mensal", label:"Reunião Mensal de Planejamento", icon:"📊", items:[
-    "Resultados do mês — metas atingidas e não atingidas",
-    "Análise de indicadores (turnover, absenteísmo, avaliações)",
-    "Pontos críticos por área",
-    "Planejamento do próximo mês — metas e prioridades",
-    "Ações e prazos definidos",
-    "Encerramento",
-  ]},
-  { id:"rapido", label:"Reunião de Alinhamento Rápido", icon:"⚡", items:[
-    "Pauta livre — pontos urgentes",
-    "Decisões tomadas",
-    "Próximos passos",
-  ]},
-  { id:"feedback", label:"Feedback de Área", icon:"💬", items:[
-    "Desempenho geral da equipe no período",
-    "Destaques positivos e elogios",
-    "Ocorrências e pontos de atenção",
-    "Plano de ação para melhorias",
-  ]},
 ];
 
 function MeetingPlannerSection({ restaurantId, employees, roles, areas, meetingPlans, allMeetingPlans, feedbacks, onUpdate, currentUser, isOwner, mobileOnly, isLider, managerAreas, data }) {
   // Sub-tab state
-  const [subTab, setSubTab] = useState("reunioes"); // reunioes | ideias | relatorio
+  const [subTab, setSubTab] = useState("reunioes"); // reunioes | ideias | ocorrencias | relatorio
   // Reuniões (existing) — showForm: false | "equipe" | "lideranca"
   const [showForm, setShowForm] = useState(false);
   const [planType, setPlanType] = useState("alinhamento");
@@ -6353,6 +6335,16 @@ function MeetingPlannerSection({ restaurantId, employees, roles, areas, meetingP
   const [ideaTitle, setIdeaTitle] = useState("");
   const [ideaDesc, setIdeaDesc] = useState("");
   const [ideaAreas, setIdeaAreas] = useState([]);
+  // Ocorrências
+  const [showOccForm, setShowOccForm] = useState(false);
+  const [occTitle, setOccTitle] = useState("");
+  const [occDesc, setOccDesc] = useState("");
+  const [occType, setOccType] = useState("cliente");
+  const [occAreas, setOccAreas] = useState([]);
+  // Liderança participants
+  const [lidParticipants, setLidParticipants] = useState([]);
+  // Execution mode (live meeting)
+  const [livePautaId, setLivePautaId] = useState(null);
   // Pautas
   const [pautaTitle, setPautaTitle] = useState("");
   const [pautaType, setPautaType] = useState("semanal");
@@ -6372,6 +6364,8 @@ function MeetingPlannerSection({ restaurantId, employees, roles, areas, meetingP
   const allIdeas = (data?.meetingIdeas ?? []).filter(i => i.restaurantId === restaurantId);
   const allPautas = (data?.meetingAgendas ?? []).filter(p => p.restaurantId === restaurantId);
   const allActions = (data?.meetingActions ?? []).filter(a => a.restaurantId === restaurantId);
+  const allOccurrences = (data?.meetingOccurrences ?? []).filter(o => o.restaurantId === restaurantId);
+  const OCC_TYPES = [["cliente","🧑‍🍳","Cliente"],["estrutura","🏗️","Estrutura"],["operacao","⚙️","Operação"],["outro","📝","Outro"]];
 
   // Wrapper for reading data
   const getData = (key) => data?.[key] ?? [];
@@ -6389,6 +6383,9 @@ function MeetingPlannerSection({ restaurantId, employees, roles, areas, meetingP
   const filteredIdeas = (isLider && !showAllAreas && managerAreas?.length > 0)
     ? allIdeas.filter(i => { const ia = i.areas ?? (i.area ? [i.area] : []); return ia.length === 0 || ia.some(a => managerAreas.includes(a)); })
     : allIdeas;
+  const filteredOccurrences = (isLider && !showAllAreas && managerAreas?.length > 0)
+    ? allOccurrences.filter(o => { const oa = o.areas ?? []; return oa.length === 0 || oa.some(a => managerAreas.includes(a)); })
+    : allOccurrences;
 
   const toggleArea = (area) => {
     const areaEmps = employees.filter(e => { const r = roles.find(rl => rl.id === e.roleId); return r?.area === area; }).map(e => e.id);
@@ -6497,6 +6494,7 @@ function MeetingPlannerSection({ restaurantId, employees, roles, areas, meetingP
     setPautaItems(prev => prev.filter(i => i.id !== itemId));
     const item = pautaItems.find(i => i.id === itemId);
     if (item?.fromIdea) setPautaPickIdeas(prev => prev.filter(id => id !== item.fromIdea));
+    if (item?.fromOccurrence) setPautaPickIdeas(prev => prev.filter(id => id !== item.fromOccurrence));
   }
 
   function handleMovePautaItem(idx, dir) {
@@ -6517,6 +6515,7 @@ function MeetingPlannerSection({ restaurantId, employees, roles, areas, meetingP
       templateType: pautaType,
       date: pautaDate || today(),
       items: pautaItems.map(it => ({ ...it })),
+      participants: lidParticipants.length > 0 ? [...lidParticipants] : [],
       createdBy: currentUser?.name ?? (isOwner ? "Gestor AppTip" : "Gestor Adm."),
       createdAt: new Date().toISOString(),
       status: "aberta", // aberta | em_andamento | encerrada
@@ -6529,8 +6528,15 @@ function MeetingPlannerSection({ restaurantId, employees, roles, areas, meetingP
       ideaIds.forEach(iid => { const idx = allIdeasData.findIndex(i => i.id === iid); if (idx >= 0) allIdeasData[idx] = { ...allIdeasData[idx], status: "na_pauta" }; });
       onUpdate("meetingIdeas", allIdeasData);
     }
+    // Mark occurrences as included
+    const occIds = pautaItems.filter(i => i.fromOccurrence).map(i => i.fromOccurrence);
+    if (occIds.length > 0) {
+      const allOccData = [...getData("meetingOccurrences")];
+      occIds.forEach(oid => { const idx = allOccData.findIndex(o => o.id === oid); if (idx >= 0) allOccData[idx] = { ...allOccData[idx], status: "na_pauta" }; });
+      onUpdate("meetingOccurrences", allOccData);
+    }
     onUpdate("meetingAgendas", [...getData("meetingAgendas"), pauta]);
-    setPautaTitle(""); setPautaType("semanal"); setPautaDate(""); setPautaItems([]); setPautaNewItem(""); setPautaPickIdeas([]); setShowForm(false);
+    setPautaTitle(""); setPautaType("semanal"); setPautaDate(""); setPautaItems([]); setPautaNewItem(""); setPautaPickIdeas([]); setLidParticipants([]); setShowForm(false);
   }
 
   // Checklist ao vivo
@@ -6578,6 +6584,73 @@ function MeetingPlannerSection({ restaurantId, employees, roles, areas, meetingP
     onUpdate("meetingActions", getData("meetingActions").filter(a => a.pautaId !== pautaId));
   }
 
+  // ── Ocorrências ──
+  function handleCreateOccurrence() {
+    if (!occTitle.trim()) { window.alert("Informe o título da ocorrência."); return; }
+    const occ = {
+      id: `occ-${Date.now()}-${Math.random().toString(36).slice(2,6)}`,
+      restaurantId,
+      title: occTitle.trim(),
+      description: occDesc.trim(),
+      type: occType,
+      areas: occAreas.length > 0 ? [...occAreas] : [],
+      createdBy: currentUser?.name ?? (isOwner ? "Gestor AppTip" : "Gestor Adm."),
+      createdAt: new Date().toISOString(),
+      status: "nova", // nova | na_pauta | resolvida | descartada
+    };
+    onUpdate("meetingOccurrences", [...getData("meetingOccurrences"), occ]);
+    setOccTitle(""); setOccDesc(""); setOccType("cliente"); setOccAreas([]); setShowOccForm(false);
+  }
+
+  function handleUpdateOccStatus(occId, status) {
+    const all = [...getData("meetingOccurrences")];
+    const idx = all.findIndex(o => o.id === occId);
+    if (idx >= 0) { all[idx] = { ...all[idx], status }; onUpdate("meetingOccurrences", all); }
+  }
+
+  function handleDeleteOccurrence(occId) {
+    if (!window.confirm("Excluir esta ocorrência?")) return;
+    onUpdate("meetingOccurrences", getData("meetingOccurrences").filter(o => o.id !== occId));
+  }
+
+  function handleAddOccToPauta(occ) {
+    if (pautaPickIdeas.includes(occ.id)) return;
+    setPautaPickIdeas(prev => [...prev, occ.id]);
+    const occTypeLabel = OCC_TYPES.find(([t])=>t===occ.type)?.[2] ?? occ.type;
+    setPautaItems(prev => [...prev, { id: `occ-${occ.id}`, text: `[${occTypeLabel}] ${occ.title}${occ.description ? ` — ${occ.description}` : ""}`, fromOccurrence: occ.id, fromIdea: null, status: "pendente", decision: "" }]);
+  }
+
+  // ── Live meeting (execution mode) ──
+  function handleStartLiveMeeting(pautaId) {
+    handleUpdatePautaStatus(pautaId, "em_andamento");
+    setLivePautaId(pautaId);
+  }
+
+  function handleEndLiveMeeting(pautaId) {
+    handleUpdatePautaStatus(pautaId, "encerrada");
+    // Mark occurrence items as resolved
+    const pauta = allPautas.find(p => p.id === pautaId);
+    if (pauta) {
+      const occIds = (pauta.items ?? []).filter(it => it.fromOccurrence).map(it => it.fromOccurrence);
+      if (occIds.length > 0) {
+        const allOcc = [...getData("meetingOccurrences")];
+        occIds.forEach(oid => { const idx = allOcc.findIndex(o => o.id === oid); if (idx >= 0 && allOcc[idx].status === "na_pauta") allOcc[idx] = { ...allOcc[idx], status: "resolvida" }; });
+        onUpdate("meetingOccurrences", allOcc);
+      }
+    }
+    setLivePautaId(null);
+  }
+
+
+  // Update pauta item notes (for live meeting)
+  function handleUpdatePautaItemNotes(pautaId, itemId, notes) {
+    const all = [...getData("meetingAgendas")];
+    const idx = all.findIndex(p => p.id === pautaId);
+    if (idx < 0) return;
+    all[idx] = { ...all[idx], items: all[idx].items.map(it => it.id === itemId ? { ...it, notes } : it) };
+    onUpdate("meetingAgendas", all);
+  }
+
   const typeColor = planType === "avaliação" ? "#8b5cf6" : "#3b82f6";
 
   // Group plans by month
@@ -6592,9 +6665,11 @@ function MeetingPlannerSection({ restaurantId, employees, roles, areas, meetingP
   const pendingActions = allActions.filter(a => !a.done);
 
   // Sub-tabs config
+  const newOccCount = filteredOccurrences.filter(o=>o.status==="nova").length;
   const subTabs = [
     ["reunioes",`📅 Reuniões${pendingActions.length>0?` (${pendingActions.length})`:""}`],
     ["ideias",`💡 Ideias${filteredIdeas.filter(i=>i.status==="nova").length>0?` (${filteredIdeas.filter(i=>i.status==="nova").length})`:""}`],
+    ["ocorrencias",`🚨 Ocorrências${newOccCount>0?` (${newOccCount})`:""}`],
     ["relatorio","📄 Relatório"],
   ];
 
@@ -6718,17 +6793,12 @@ function MeetingPlannerSection({ restaurantId, employees, roles, areas, meetingP
             <div style={{...S.card,padding:"18px 20px",marginBottom:20,border:"1px solid #10b98122"}}>
               <h4 style={{color:"var(--text)",margin:"0 0 14px",fontSize:15,fontWeight:700}}>🤝 Reunião de liderança</h4>
 
-              {/* Template selector */}
-              <label style={S.label}>Tipo de reunião</label>
-              <div style={{display:"flex",gap:6,marginBottom:14,flexWrap:"wrap"}}>
-                {AGENDA_TEMPLATES.map(tpl => (
-                  <button key={tpl.id} onClick={()=>{setPautaType(tpl.id);handleApplyTemplate(tpl.id);}} style={{
-                    padding:mobileOnly?"6px 10px":"8px 14px",borderRadius:10,border:`2px solid ${pautaType===tpl.id?"#10b981":"var(--border)"}`,
-                    background:pautaType===tpl.id?"#10b98114":"transparent",color:pautaType===tpl.id?"#10b981":"var(--text3)",
-                    cursor:"pointer",fontSize:mobileOnly?10:12,fontFamily:"'DM Sans',sans-serif",fontWeight:pautaType===tpl.id?700:400
-                  }}>{tpl.icon} {mobileOnly?tpl.label.split(" ").slice(0,2).join(" "):tpl.label}</button>
-                ))}
-              </div>
+              {/* Apply template button */}
+              {pautaItems.length === 0 && (
+                <button onClick={()=>{setPautaType("semanal");handleApplyTemplate("semanal");}} style={{...S.btnSecondary,fontSize:12,padding:"8px 14px",marginBottom:14,borderColor:"#10b98144",color:"#10b981"}}>
+                  📋 Usar template da reunião semanal
+                </button>
+              )}
 
               <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:12}}>
                 <div>
@@ -6741,6 +6811,22 @@ function MeetingPlannerSection({ restaurantId, employees, roles, areas, meetingP
                 </div>
               </div>
 
+              {/* Participants */}
+              <label style={S.label}>Participantes</label>
+              <div style={{display:"flex",gap:4,flexWrap:"wrap",marginBottom:10}}>
+                {(data?.managers ?? []).filter(mg => mg.restaurants?.includes(restaurantId)).map(mg => {
+                  const active = lidParticipants.includes(mg.id);
+                  return (
+                    <button key={mg.id} onClick={()=>setLidParticipants(prev=>prev.includes(mg.id)?prev.filter(x=>x!==mg.id):[...prev,mg.id])} style={{
+                      padding:"5px 12px",borderRadius:8,border:`1px solid ${active?"#10b981":"var(--border)"}`,
+                      background:active?"#10b98118":"transparent",color:active?"#10b981":"var(--text3)",
+                      cursor:"pointer",fontSize:11,fontFamily:"'DM Mono',monospace",fontWeight:active?600:400
+                    }}>{active?"✓ ":""}{mg.name}{mg.areas?.length>0?` (${mg.areas.join(", ")})`:""}</button>
+                  );
+                })}
+              </div>
+              {lidParticipants.length > 0 && <div style={{fontSize:11,color:"var(--text3)",marginBottom:12}}>{lidParticipants.length} participante{lidParticipants.length!==1?"s":""}</div>}
+
               {/* Items list */}
               <label style={S.label}>Itens da pauta</label>
               <div style={{marginBottom:12}}>
@@ -6749,6 +6835,7 @@ function MeetingPlannerSection({ restaurantId, employees, roles, areas, meetingP
                     <span style={{color:"var(--text3)",fontSize:10,fontWeight:700,minWidth:20}}>{idx+1}.</span>
                     <span style={{flex:1,fontSize:12,color:"var(--text)"}}>{item.text}</span>
                     {item.fromIdea && <span style={{fontSize:9,padding:"1px 5px",borderRadius:4,background:"#f59e0b18",color:"#f59e0b"}}>💡</span>}
+                    {item.fromOccurrence && <span style={{fontSize:9,padding:"1px 5px",borderRadius:4,background:"#ef444418",color:"#ef4444"}}>🚨</span>}
                     <button onClick={()=>handleMovePautaItem(idx,-1)} disabled={idx===0} style={{padding:"2px 5px",border:"none",background:"transparent",color:idx===0?"var(--border)":"var(--text3)",cursor:idx===0?"default":"pointer",fontSize:10}}>▲</button>
                     <button onClick={()=>handleMovePautaItem(idx,1)} disabled={idx===pautaItems.length-1} style={{padding:"2px 5px",border:"none",background:"transparent",color:idx===pautaItems.length-1?"var(--border)":"var(--text3)",cursor:idx===pautaItems.length-1?"default":"pointer",fontSize:10}}>▼</button>
                     <button onClick={()=>handleRemovePautaItem(item.id)} style={{padding:"2px 5px",border:"none",background:"transparent",color:"var(--red)",cursor:"pointer",fontSize:10}}>✕</button>
@@ -6773,6 +6860,24 @@ function MeetingPlannerSection({ restaurantId, employees, roles, areas, meetingP
                         cursor:"pointer",fontSize:11,fontFamily:"'DM Sans',sans-serif"
                       }}>💡 {idea.title}</button>
                     ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Pull occurrences */}
+              {filteredOccurrences.filter(o=>o.status==="nova" && !pautaPickIdeas.includes(o.id)).length > 0 && (
+                <div style={{marginBottom:14}}>
+                  <label style={{...S.label,display:"flex",alignItems:"center",gap:4}}>🚨 Puxar ocorrências</label>
+                  <div style={{display:"flex",gap:4,flexWrap:"wrap"}}>
+                    {filteredOccurrences.filter(o=>o.status==="nova" && !pautaPickIdeas.includes(o.id)).map(occ => {
+                      const occT = OCC_TYPES.find(([t])=>t===occ.type);
+                      return (
+                        <button key={occ.id} onClick={()=>handleAddOccToPauta(occ)} style={{
+                          padding:"5px 10px",borderRadius:8,border:"1px solid #ef444444",background:"#ef444408",color:"var(--text2)",
+                          cursor:"pointer",fontSize:11,fontFamily:"'DM Sans',sans-serif"
+                        }}>{occT?.[1]??""} {occ.title}</button>
+                      );
+                    })}
                   </div>
                 </div>
               )}
@@ -6837,31 +6942,111 @@ function MeetingPlannerSection({ restaurantId, employees, roles, areas, meetingP
             </div>
           )}
 
+          {/* ── Live meeting execution ── */}
+          {livePautaId && (() => {
+            const livePauta = allPautas.find(p => p.id === livePautaId);
+            if (!livePauta) return null;
+            const liveActions = allActions.filter(a => a.pautaId === livePautaId);
+            const liveDone = (livePauta.items ?? []).filter(it => it.status === "discutido" || it.status === "acao_definida").length;
+            const liveTotal = (livePauta.items ?? []).length;
+            const managers = data?.managers ?? [];
+            const pParts = (livePauta.participants ?? []).map(pid => managers.find(m => m.id === pid)).filter(Boolean);
+            return (
+              <div style={{...S.card,padding:0,marginBottom:20,border:"2px solid #f59e0b44",overflow:"hidden"}}>
+                <div style={{background:"#f59e0b08",padding:"14px 16px",borderBottom:"1px solid #f59e0b22"}}>
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                    <div>
+                      <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:4}}>
+                        <span style={{fontSize:10,padding:"3px 8px",borderRadius:6,background:"#f59e0b22",color:"#f59e0b",fontWeight:700,letterSpacing:0.5,textTransform:"uppercase"}}>Ao vivo</span>
+                        <span style={{color:"var(--text)",fontWeight:700,fontSize:15}}>{livePauta.title}</span>
+                      </div>
+                      <div style={{fontSize:11,color:"var(--text3)"}}>{liveDone}/{liveTotal} itens concluídos</div>
+                      {pParts.length > 0 && <div style={{fontSize:10,color:"var(--text3)",marginTop:2}}>👥 {pParts.map(p=>p.name).join(", ")}</div>}
+                    </div>
+                    <button onClick={()=>handleEndLiveMeeting(livePautaId)} style={{...S.btnPrimary,fontSize:12,padding:"8px 16px",background:"#10b981",borderColor:"#10b981"}}>✓ Encerrar reunião</button>
+                  </div>
+                </div>
+                <div style={{padding:"14px 16px"}}>
+                  {(livePauta.items ?? []).map((item, idx) => {
+                    const itemStatusOpts = [["pendente","○","var(--text3)"],["discutido","✓","#10b981"],["acao_definida","⚡","#f59e0b"]];
+                    return (
+                      <div key={item.id} style={{padding:"12px 14px",marginBottom:8,borderRadius:10,background:item.status==="discutido"?"#10b98108":item.status==="acao_definida"?"#f59e0b08":"var(--bg2)",border:`1px solid ${item.status==="discutido"?"#10b98133":item.status==="acao_definida"?"#f59e0b33":"var(--border)"}`}}>
+                        <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:6}}>
+                          <span style={{fontSize:11,color:"var(--text3)",fontWeight:700,minWidth:22}}>{idx+1}.</span>
+                          <span style={{flex:1,fontSize:13,color:"var(--text)",fontWeight:600,textDecoration:item.status==="discutido"?"line-through":"none"}}>{item.text}</span>
+                          {item.fromIdea && <span style={{fontSize:9,padding:"1px 5px",borderRadius:4,background:"#f59e0b18",color:"#f59e0b"}}>💡</span>}
+                          {item.fromOccurrence && <span style={{fontSize:9,padding:"1px 5px",borderRadius:4,background:"#ef444418",color:"#ef4444"}}>🚨</span>}
+                        </div>
+                        <div style={{display:"flex",gap:4,marginBottom:6,marginLeft:30}}>
+                          {itemStatusOpts.map(([s,icon,col]) => (
+                            <button key={s} onClick={()=>handleUpdatePautaItem(livePautaId,item.id,{status:s})} style={{
+                              padding:"4px 10px",borderRadius:6,border:`1px solid ${item.status===s?col:"var(--border)"}`,
+                              background:item.status===s?col+"18":"transparent",color:item.status===s?col:"var(--text3)",
+                              cursor:"pointer",fontSize:11,fontFamily:"'DM Sans',sans-serif",fontWeight:item.status===s?700:400
+                            }}>{icon} {s==="pendente"?"Pendente":s==="discutido"?"Discutido":"Ação definida"}</button>
+                          ))}
+                        </div>
+                        <div style={{marginLeft:30}}>
+                          <textarea value={item.notes??""} onChange={e=>handleUpdatePautaItemNotes(livePautaId,item.id,e.target.value)} rows={1} placeholder="Anotações..." style={{...S.input,fontSize:11,padding:"6px 8px",resize:"vertical",width:"100%",boxSizing:"border-box"}}/>
+                        </div>
+                        {item.status === "acao_definida" && (
+                          <div style={{marginTop:6,marginLeft:30}}>
+                            <input value={item.decision??""} onChange={e=>handleUpdatePautaItem(livePautaId,item.id,{decision:e.target.value})} placeholder="Decisão / ação definida..." style={{...S.input,fontSize:11,padding:"5px 8px"}}/>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+
+                  <div style={{marginTop:16,borderTop:"1px solid var(--border)",paddingTop:14}}>
+                    <h4 style={{color:"var(--text)",fontSize:13,fontWeight:700,margin:"0 0 10px"}}>📌 Ações definidas</h4>
+                    {liveActions.map(action => (
+                      <div key={action.id} style={{display:"flex",alignItems:"center",gap:8,marginBottom:6,padding:"8px 10px",borderRadius:8,background:action.done?"#10b98106":"var(--bg2)",border:`1px solid ${action.done?"#10b98122":"var(--border)"}`}}>
+                        <button onClick={()=>handleToggleAction(action.id)} style={{padding:"2px 6px",borderRadius:4,border:`1px solid ${action.done?"#10b981":"var(--border)"}`,background:action.done?"#10b98122":"transparent",color:action.done?"#10b981":"var(--text3)",cursor:"pointer",fontSize:11}}>{action.done?"✓":"○"}</button>
+                        <div style={{flex:1,minWidth:0}}>
+                          <div style={{fontSize:12,color:action.done?"var(--text3)":"var(--text)",textDecoration:action.done?"line-through":"none"}}>{action.text}</div>
+                          <div style={{fontSize:10,color:"var(--text3)"}}>
+                            {action.responsible && `👤 ${action.responsible}`}
+                            {action.responsible && action.deadline && " · "}
+                            {action.deadline && `📅 ${new Date(action.deadline+"T12:00:00").toLocaleDateString("pt-BR")}`}
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                    <AddActionInline pautaId={livePautaId} onAdd={handleAddAction}/>
+                  </div>
+                </div>
+              </div>
+            );
+          })()}
+
           {/* ── Reuniões de liderança (pautas) ── */}
-          {allPautas.length > 0 && (
+          {allPautas.length > 0 && !livePautaId && (
             <div style={{marginBottom:20}}>
               <h4 style={{color:"var(--text)",fontSize:14,fontWeight:700,margin:"0 0 12px"}}>🤝 Reuniões de liderança</h4>
               {allPautas.sort((a,b)=>(b.createdAt??"").localeCompare(a.createdAt??"")).map(pauta => {
-                const tpl = AGENDA_TEMPLATES.find(t => t.id === pauta.templateType);
                 const pautaActions = allActions.filter(a => a.pautaId === pauta.id);
                 const isActive = activePautaId === pauta.id;
                 const statusColors = { aberta:"#3b82f6", em_andamento:"#f59e0b", encerrada:"#10b981" };
-                const statusLabels = { aberta:"Aberta", em_andamento:"Em andamento", encerrada:"Encerrada" };
+                const statusLabels = { aberta:"Agendada", em_andamento:"Em andamento", encerrada:"Encerrada" };
                 const doneItems = pauta.items?.filter(it => it.status === "discutido" || it.status === "acao_definida").length ?? 0;
                 const totalItems = pauta.items?.length ?? 0;
+                const managers = data?.managers ?? [];
+                const pParts = (pauta.participants ?? []).map(pid => managers.find(m => m.id === pid)).filter(Boolean);
 
                 return (
                   <div key={pauta.id} style={{...S.card,padding:0,marginBottom:12,border:`1px solid ${statusColors[pauta.status]??"var(--border)"}22`,overflow:"hidden"}}>
                     <div onClick={()=>setActivePautaId(isActive?null:pauta.id)} style={{padding:"14px 16px",cursor:"pointer",display:"flex",justifyContent:"space-between",alignItems:"center",background:isActive?"var(--bg2)":"transparent"}}>
                       <div>
                         <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:2}}>
-                          <span style={{fontSize:14}}>{tpl?.icon ?? "📋"}</span>
+                          <span style={{fontSize:14}}>📋</span>
                           <span style={{color:"var(--text)",fontWeight:700,fontSize:14}}>{pauta.title}</span>
                         </div>
-                        <div style={{display:"flex",alignItems:"center",gap:8,fontSize:10,color:"var(--text3)"}}>
+                        <div style={{display:"flex",alignItems:"center",gap:8,fontSize:10,color:"var(--text3)",flexWrap:"wrap"}}>
                           <span style={{padding:"2px 6px",borderRadius:4,background:(statusColors[pauta.status]??"#888")+"18",color:statusColors[pauta.status]??"#888",fontWeight:600}}>{statusLabels[pauta.status]??"—"}</span>
                           <span>{new Date(pauta.date+"T12:00:00").toLocaleDateString("pt-BR")}</span>
                           <span>{doneItems}/{totalItems} itens</span>
+                          {pParts.length > 0 && <span>👥 {pParts.length}</span>}
                           {pautaActions.filter(a=>!a.done).length > 0 && <span style={{color:"#f59e0b",fontWeight:600}}>{pautaActions.filter(a=>!a.done).length} ação pendente</span>}
                         </div>
                       </div>
@@ -6870,43 +7055,62 @@ function MeetingPlannerSection({ restaurantId, employees, roles, areas, meetingP
 
                     {isActive && (
                       <div style={{borderTop:"1px solid var(--border)",padding:"14px 16px"}}>
-                        <div style={{display:"flex",gap:6,marginBottom:14}}>
-                          {(["aberta","em_andamento","encerrada"]).map(st => (
-                            <button key={st} onClick={()=>handleUpdatePautaStatus(pauta.id,st)} style={{
-                              padding:"5px 12px",borderRadius:8,border:`1px solid ${pauta.status===st?(statusColors[st]??"#888"):"var(--border)"}`,
-                              background:pauta.status===st?(statusColors[st]??"#888")+"14":"transparent",
-                              color:pauta.status===st?(statusColors[st]??"#888"):"var(--text3)",
-                              cursor:"pointer",fontSize:11,fontFamily:"'DM Sans',sans-serif",fontWeight:pauta.status===st?700:400
-                            }}>{statusLabels[st]}</button>
-                          ))}
+                        {/* Participants */}
+                        {pParts.length > 0 && (
+                          <div style={{marginBottom:12}}>
+                            <div style={{fontSize:11,color:"var(--text3)",fontWeight:600,marginBottom:4}}>Participantes</div>
+                            <div style={{display:"flex",gap:4,flexWrap:"wrap"}}>
+                              {pParts.map(p => (
+                                <span key={p.id} style={{fontSize:10,padding:"3px 8px",borderRadius:6,background:"#10b98112",border:"1px solid #10b98122",color:"#10b981"}}>{p.name}{p.areas?.length>0?` (${p.areas.join(", ")})`:""}</span>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Start / status buttons */}
+                        <div style={{display:"flex",gap:6,marginBottom:14,flexWrap:"wrap"}}>
+                          {pauta.status === "aberta" && (
+                            <button onClick={()=>handleStartLiveMeeting(pauta.id)} style={{...S.btnPrimary,fontSize:12,padding:"8px 16px",background:"#f59e0b",borderColor:"#f59e0b"}}>
+                              ▶ Iniciar reunião ao vivo
+                            </button>
+                          )}
+                          {pauta.status === "em_andamento" && (
+                            <button onClick={()=>setLivePautaId(pauta.id)} style={{...S.btnPrimary,fontSize:12,padding:"8px 16px",background:"#f59e0b",borderColor:"#f59e0b"}}>
+                              ▶ Continuar reunião
+                            </button>
+                          )}
+                          {pauta.status !== "encerrada" && pauta.status !== "em_andamento" && (
+                            <button onClick={()=>handleUpdatePautaStatus(pauta.id,"encerrada")} style={{...S.btnSecondary,fontSize:11,padding:"6px 12px",color:"#10b981",borderColor:"#10b98144"}}>
+                              ✓ Marcar como encerrada
+                            </button>
+                          )}
+                          {pauta.status === "encerrada" && (
+                            <button onClick={()=>handleUpdatePautaStatus(pauta.id,"aberta")} style={{...S.btnSecondary,fontSize:11,padding:"6px 12px",color:"#3b82f6",borderColor:"#3b82f644"}}>
+                              Reabrir
+                            </button>
+                          )}
                         </div>
 
+                        {/* Items summary */}
                         {(pauta.items ?? []).map((item, idx) => {
-                          const itemStatusOpts = [["pendente","○","var(--text3)"],["discutido","✓","#10b981"],["acao_definida","⚡","#f59e0b"]];
-                          const curOpt = itemStatusOpts.find(([s])=>s===item.status) ?? itemStatusOpts[0];
+                          const sIcon = item.status==="discutido"?"✓":item.status==="acao_definida"?"⚡":"○";
+                          const sCol = item.status==="discutido"?"#10b981":item.status==="acao_definida"?"#f59e0b":"var(--text3)";
                           return (
-                            <div key={item.id} style={{padding:"10px 12px",marginBottom:6,borderRadius:8,background:item.status==="discutido"?"#10b98106":item.status==="acao_definida"?"#f59e0b06":"var(--bg2)",border:`1px solid ${curOpt[2]}22`}}>
-                              <div style={{display:"flex",alignItems:"center",gap:8}}>
+                            <div key={item.id} style={{padding:"8px 10px",marginBottom:4,borderRadius:8,background:item.status==="discutido"?"#10b98106":item.status==="acao_definida"?"#f59e0b06":"var(--bg2)",border:`1px solid ${sCol}22`}}>
+                              <div style={{display:"flex",alignItems:"center",gap:6}}>
                                 <span style={{fontSize:10,color:"var(--text3)",fontWeight:700,minWidth:18}}>{idx+1}.</span>
+                                <span style={{color:sCol,fontSize:11}}>{sIcon}</span>
                                 <span style={{flex:1,fontSize:12,color:"var(--text)",textDecoration:item.status==="discutido"?"line-through":"none"}}>{item.text}</span>
-                                <div style={{display:"flex",gap:2}}>
-                                  {itemStatusOpts.map(([s,icon,col]) => (
-                                    <button key={s} onClick={()=>handleUpdatePautaItem(pauta.id,item.id,{status:s})} title={s} style={{
-                                      padding:"3px 6px",borderRadius:4,border:`1px solid ${item.status===s?col:"transparent"}`,
-                                      background:item.status===s?col+"18":"transparent",color:col,cursor:"pointer",fontSize:11,fontWeight:item.status===s?700:400
-                                    }}>{icon}</button>
-                                  ))}
-                                </div>
+                                {item.fromIdea && <span style={{fontSize:9,padding:"1px 5px",borderRadius:4,background:"#f59e0b18",color:"#f59e0b"}}>💡</span>}
+                                {item.fromOccurrence && <span style={{fontSize:9,padding:"1px 5px",borderRadius:4,background:"#ef444418",color:"#ef4444"}}>🚨</span>}
                               </div>
-                              {item.status === "acao_definida" && (
-                                <div style={{marginTop:6,marginLeft:26}}>
-                                  <input value={item.decision??""} onChange={e=>handleUpdatePautaItem(pauta.id,item.id,{decision:e.target.value})} placeholder="Decisão tomada / ação definida..." style={{...S.input,fontSize:11,padding:"5px 8px"}}/>
-                                </div>
-                              )}
+                              {item.notes && <div style={{fontSize:10,color:"var(--text3)",marginTop:4,marginLeft:36,fontStyle:"italic"}}>{item.notes}</div>}
+                              {item.decision && <div style={{fontSize:10,color:"#f59e0b",marginTop:2,marginLeft:36}}>⚡ {item.decision}</div>}
                             </div>
                           );
                         })}
 
+                        {/* Actions */}
                         <div style={{marginTop:16,borderTop:"1px solid var(--border)",paddingTop:14}}>
                           <h4 style={{color:"var(--text)",fontSize:13,fontWeight:700,margin:"0 0 10px"}}>📌 Ações pós-reunião</h4>
                           {pautaActions.map(action => (
@@ -6937,7 +7141,7 @@ function MeetingPlannerSection({ restaurantId, employees, roles, areas, meetingP
           )}
 
           {/* Empty state when no plans and no pautas */}
-          {Object.keys(grouped).length === 0 && allPautas.length === 0 && !showForm && (
+          {Object.keys(grouped).length === 0 && allPautas.length === 0 && !showForm && !livePautaId && (
             <div style={{...S.card,textAlign:"center",padding:40}}>
               <div style={{fontSize:36,marginBottom:12}}>📅</div>
               <p style={{color:"var(--text3)",fontSize:14}}>Nenhuma reunião planejada ainda.</p>
@@ -7024,6 +7228,122 @@ function MeetingPlannerSection({ restaurantId, employees, roles, areas, meetingP
                   </div>
                 </div>
               ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ═══ SUB-TAB: OCORRÊNCIAS ═══ */}
+      {subTab === "ocorrencias" && (
+        <div>
+          <button onClick={()=>setShowOccForm(!showOccForm)} style={{...S.btnPrimary,marginBottom:16,fontSize:13,padding:"10px 20px",background:showOccForm?"var(--red)":"#ef4444",borderColor:showOccForm?"var(--red)":"#ef4444"}}>
+            {showOccForm ? "✕ Cancelar" : "+ Nova ocorrência"}
+          </button>
+
+          {showOccForm && (
+            <div style={{...S.card,padding:"18px 20px",marginBottom:20,border:"1px solid #ef444422"}}>
+              <h4 style={{color:"var(--text)",margin:"0 0 14px",fontSize:15,fontWeight:700}}>Nova ocorrência</h4>
+              <div style={{marginBottom:12}}>
+                <label style={S.label}>Tipo</label>
+                <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+                  {OCC_TYPES.map(([val,icon,lbl]) => (
+                    <button key={val} onClick={()=>setOccType(val)} style={{
+                      padding:"6px 14px",borderRadius:8,border:`2px solid ${occType===val?"#ef4444":"var(--border)"}`,
+                      background:occType===val?"#ef444414":"transparent",color:occType===val?"#ef4444":"var(--text3)",
+                      cursor:"pointer",fontSize:12,fontFamily:"'DM Sans',sans-serif",fontWeight:occType===val?700:400
+                    }}>{icon} {lbl}</button>
+                  ))}
+                </div>
+              </div>
+              <div style={{marginBottom:12}}>
+                <label style={S.label}>Título</label>
+                <input value={occTitle} onChange={e=>setOccTitle(e.target.value)} placeholder="Ex: Reclamação de cliente sobre demora" style={S.input}/>
+              </div>
+              <div style={{marginBottom:12}}>
+                <label style={S.label}>Descrição <span style={{fontWeight:400,color:"var(--text3)"}}>(opcional)</span></label>
+                <textarea value={occDesc} onChange={e=>setOccDesc(e.target.value)} rows={2} placeholder="Detalhes..." style={{...S.input,resize:"vertical"}}/>
+              </div>
+              <div style={{marginBottom:14}}>
+                <label style={S.label}>Áreas envolvidas <span style={{fontWeight:400,color:"var(--text3)"}}>(opcional)</span></label>
+                <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+                  {filteredAreas.map(a => {
+                    const col = AREA_COLORS[a] ?? "#888";
+                    const active = occAreas.includes(a);
+                    return <button key={a} onClick={()=>setOccAreas(prev=>prev.includes(a)?prev.filter(x=>x!==a):[...prev,a])} style={{padding:"5px 12px",borderRadius:8,border:`1px solid ${active?col:"var(--border)"}`,background:active?col+"18":"transparent",color:active?col:"var(--text3)",cursor:"pointer",fontSize:11,fontFamily:"'DM Sans',sans-serif",fontWeight:active?600:400}}>{active?"✓ ":""}{a}</button>;
+                  })}
+                  {occAreas.length > 0 && <button onClick={()=>setOccAreas([])} style={{padding:"5px 12px",borderRadius:8,border:"1px solid var(--border)",background:"transparent",color:"var(--text3)",cursor:"pointer",fontSize:11,fontFamily:"'DM Sans',sans-serif"}}>Limpar</button>}
+                </div>
+              </div>
+              <button onClick={handleCreateOccurrence} style={{...S.btnPrimary,width:"auto",padding:"10px 24px",background:"#ef4444",borderColor:"#ef4444"}}>Salvar ocorrência</button>
+            </div>
+          )}
+
+          {filteredOccurrences.filter(o=>o.status==="nova").length === 0 && !showOccForm && (
+            <div style={{...S.card,textAlign:"center",padding:40}}>
+              <div style={{fontSize:36,marginBottom:12}}>🚨</div>
+              <p style={{color:"var(--text3)",fontSize:14}}>Nenhuma ocorrência registrada.</p>
+              <p style={{color:"var(--text3)",fontSize:12}}>Registre ocorrências de clientes, estrutura ou operação para discutir nas reuniões.</p>
+            </div>
+          )}
+
+          {filteredOccurrences.filter(o=>o.status==="nova").sort((a,b)=>(b.createdAt??"").localeCompare(a.createdAt??"")).map(occ => {
+            const occT = OCC_TYPES.find(([t])=>t===occ.type);
+            const occAreaList = occ.areas ?? [];
+            return (
+              <div key={occ.id} style={{...S.card,padding:"12px 16px",marginBottom:8,border:"1px solid #ef444422"}}>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:8}}>
+                  <div style={{flex:1,minWidth:0}}>
+                    <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:4,flexWrap:"wrap"}}>
+                      <span style={{fontSize:10,padding:"2px 6px",borderRadius:4,background:"#ef444418",color:"#ef4444",fontWeight:600}}>{occT?.[1]} {occT?.[2]}</span>
+                      {occAreaList.map(a => { const col = AREA_COLORS[a] ?? "#888"; return <span key={a} style={{fontSize:10,padding:"2px 6px",borderRadius:4,background:col+"18",color:col}}>{a}</span>; })}
+                    </div>
+                    <div style={{color:"var(--text)",fontWeight:600,fontSize:13}}>{occ.title}</div>
+                    {occ.description && <div style={{color:"var(--text3)",fontSize:11,marginTop:2}}>{occ.description}</div>}
+                    <div style={{color:"var(--text3)",fontSize:10,marginTop:4}}>{occ.createdBy} · {new Date(occ.createdAt).toLocaleDateString("pt-BR")}</div>
+                  </div>
+                  <div style={{display:"flex",gap:4,flexShrink:0}}>
+                    <button onClick={()=>handleUpdateOccStatus(occ.id,"resolvida")} title="Marcar como resolvida" style={{padding:"4px 8px",borderRadius:6,border:"1px solid #10b98144",background:"transparent",color:"#10b981",cursor:"pointer",fontSize:11}}>✓</button>
+                    <button onClick={()=>handleUpdateOccStatus(occ.id,"descartada")} title="Descartar" style={{padding:"4px 8px",borderRadius:6,border:"1px solid var(--border)",background:"transparent",color:"var(--text3)",cursor:"pointer",fontSize:10}}>✕</button>
+                    <button onClick={()=>handleDeleteOccurrence(occ.id)} style={{padding:"4px 8px",borderRadius:6,border:"1px solid var(--red)33",background:"transparent",color:"var(--red)",cursor:"pointer",fontSize:10}}>🗑️</button>
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+
+          {/* Occurrences in pauta */}
+          {filteredOccurrences.filter(o=>o.status==="na_pauta").length > 0 && (
+            <div style={{marginTop:16}}>
+              <h4 style={{color:"var(--text3)",fontSize:12,fontWeight:600,margin:"0 0 8px"}}>Incluídas em pauta</h4>
+              {filteredOccurrences.filter(o=>o.status==="na_pauta").map(occ => {
+                const occT = OCC_TYPES.find(([t])=>t===occ.type);
+                return (
+                  <div key={occ.id} style={{padding:"8px 14px",marginBottom:4,borderRadius:8,background:"var(--bg2)",border:"1px solid var(--border)"}}>
+                    <div style={{display:"flex",alignItems:"center",gap:6}}>
+                      <span style={{color:"#f59e0b",fontSize:10}}>📋</span>
+                      <span style={{color:"var(--text3)",fontSize:12}}>{occT?.[1]} {occ.title}</span>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          {/* Resolved occurrences */}
+          {filteredOccurrences.filter(o=>o.status==="resolvida").length > 0 && (
+            <div style={{marginTop:16}}>
+              <h4 style={{color:"var(--text3)",fontSize:12,fontWeight:600,margin:"0 0 8px"}}>Resolvidas</h4>
+              {filteredOccurrences.filter(o=>o.status==="resolvida").map(occ => {
+                const occT = OCC_TYPES.find(([t])=>t===occ.type);
+                return (
+                  <div key={occ.id} style={{padding:"8px 14px",marginBottom:4,borderRadius:8,background:"#10b98106",border:"1px solid #10b98122"}}>
+                    <div style={{display:"flex",alignItems:"center",gap:6}}>
+                      <span style={{color:"#10b981",fontSize:10}}>✓</span>
+                      <span style={{color:"var(--text3)",fontSize:12,textDecoration:"line-through"}}>{occT?.[1]} {occ.title}</span>
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           )}
         </div>
@@ -15296,6 +15616,7 @@ export default function App() {
   const [meetingIdeas,        setMeetingIdeas]        = useState([]);
   const [meetingAgendas,      setMeetingAgendas]      = useState([]);
   const [meetingActions,      setMeetingActions]      = useState([]);
+  const [meetingOccurrences,  setMeetingOccurrences]  = useState([]);
 
   useEffect(() => {
     const savedId = currentUserId;
@@ -15323,7 +15644,7 @@ export default function App() {
       setLoadProgress("Preparando o sistema...");
 
       const keys = keyNames;
-      const map = { owners:setOwners, managers:setManagers, restaurants:setRestaurants, employees:setEmployees, roles:setRoles, tips:setTips, splits:setSplits, schedules:setSchedules, communications:setCommunications, commAcks:setCommAcks, faq:setFaq, dpMessages:setDpMessages, workSchedules:setWorkSchedules, notifications:setNotifications, noTipDays:setNoTipDays, trash:setTrash, schedTemplates:setSchedTemplates, schedDrafts:setSchedDrafts, scheduleVersions:setScheduleVersions, tipVersions:setTipVersions, vtConfig:setVtConfig, vtMonthly:setVtMonthly, vtPayments:setVtPayments, incidents:setIncidents, feedbacks:setFeedbacks, devChecklists:setDevChecklists, scheduleAdjustments:setScheduleAdjustments, scheduleStatus:setScheduleStatus, schedulePrevista:setSchedulePrevista, employeeGoals:setEmployeeGoals, delays:setDelays, tipApprovals:setTipApprovals, meetingPlans:setMeetingPlans, meetingIdeas:setMeetingIdeas, meetingAgendas:setMeetingAgendas, meetingActions:setMeetingActions };
+      const map = { owners:setOwners, managers:setManagers, restaurants:setRestaurants, employees:setEmployees, roles:setRoles, tips:setTips, splits:setSplits, schedules:setSchedules, communications:setCommunications, commAcks:setCommAcks, faq:setFaq, dpMessages:setDpMessages, workSchedules:setWorkSchedules, notifications:setNotifications, noTipDays:setNoTipDays, trash:setTrash, schedTemplates:setSchedTemplates, schedDrafts:setSchedDrafts, scheduleVersions:setScheduleVersions, tipVersions:setTipVersions, vtConfig:setVtConfig, vtMonthly:setVtMonthly, vtPayments:setVtPayments, incidents:setIncidents, feedbacks:setFeedbacks, devChecklists:setDevChecklists, scheduleAdjustments:setScheduleAdjustments, scheduleStatus:setScheduleStatus, schedulePrevista:setSchedulePrevista, employeeGoals:setEmployeeGoals, delays:setDelays, tipApprovals:setTipApprovals, meetingPlans:setMeetingPlans, meetingIdeas:setMeetingIdeas, meetingAgendas:setMeetingAgendas, meetingActions:setMeetingActions, meetingOccurrences:setMeetingOccurrences };
       const loaded_data = {};
       let successCount = 0;
       keys.forEach((k, i) => {
@@ -15471,11 +15792,11 @@ export default function App() {
     return () => { clearTimeout(slowTimer); clearTimeout(verySlowTimer); };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const data = { owners, managers, restaurants, employees, roles, tips, splits, schedules, communications, commAcks, faq, dpMessages, workSchedules, notifications, noTipDays, trash, schedTemplates, schedDrafts, scheduleVersions, tipVersions, vtConfig, vtMonthly, vtPayments, incidents, feedbacks, devChecklists, scheduleAdjustments, scheduleStatus, schedulePrevista, employeeGoals, delays, tipApprovals, meetingPlans, meetingIdeas, meetingAgendas, meetingActions };
+  const data = { owners, managers, restaurants, employees, roles, tips, splits, schedules, communications, commAcks, faq, dpMessages, workSchedules, notifications, noTipDays, trash, schedTemplates, schedDrafts, scheduleVersions, tipVersions, vtConfig, vtMonthly, vtPayments, incidents, feedbacks, devChecklists, scheduleAdjustments, scheduleStatus, schedulePrevista, employeeGoals, delays, tipApprovals, meetingPlans, meetingIdeas, meetingAgendas, meetingActions, meetingOccurrences };
 
   async function handleUpdate(field, value) {
     if (field === "_toast") { setToast(value); return; }
-    const setters = { owners:setOwners, managers:setManagers, restaurants:setRestaurants, employees:setEmployees, roles:setRoles, tips:setTips, splits:setSplits, schedules:setSchedules, communications:setCommunications, commAcks:setCommAcks, faq:setFaq, dpMessages:setDpMessages, workSchedules:setWorkSchedules, notifications:setNotifications, noTipDays:setNoTipDays, trash:setTrash, schedTemplates:setSchedTemplates, schedDrafts:setSchedDrafts, scheduleVersions:setScheduleVersions, tipVersions:setTipVersions, vtConfig:setVtConfig, vtMonthly:setVtMonthly, vtPayments:setVtPayments, incidents:setIncidents, feedbacks:setFeedbacks, devChecklists:setDevChecklists, scheduleAdjustments:setScheduleAdjustments, scheduleStatus:setScheduleStatus, schedulePrevista:setSchedulePrevista, employeeGoals:setEmployeeGoals, delays:setDelays, tipApprovals:setTipApprovals, meetingPlans:setMeetingPlans, meetingIdeas:setMeetingIdeas, meetingAgendas:setMeetingAgendas, meetingActions:setMeetingActions };
+    const setters = { owners:setOwners, managers:setManagers, restaurants:setRestaurants, employees:setEmployees, roles:setRoles, tips:setTips, splits:setSplits, schedules:setSchedules, communications:setCommunications, commAcks:setCommAcks, faq:setFaq, dpMessages:setDpMessages, workSchedules:setWorkSchedules, notifications:setNotifications, noTipDays:setNoTipDays, trash:setTrash, schedTemplates:setSchedTemplates, schedDrafts:setSchedDrafts, scheduleVersions:setScheduleVersions, tipVersions:setTipVersions, vtConfig:setVtConfig, vtMonthly:setVtMonthly, vtPayments:setVtPayments, incidents:setIncidents, feedbacks:setFeedbacks, devChecklists:setDevChecklists, scheduleAdjustments:setScheduleAdjustments, scheduleStatus:setScheduleStatus, schedulePrevista:setSchedulePrevista, employeeGoals:setEmployeeGoals, delays:setDelays, tipApprovals:setTipApprovals, meetingPlans:setMeetingPlans, meetingIdeas:setMeetingIdeas, meetingAgendas:setMeetingAgendas, meetingActions:setMeetingActions, meetingOccurrences:setMeetingOccurrences };
     const keys    = { owners:K.owners, managers:K.managers, restaurants:K.restaurants, employees:K.employees, roles:K.roles, tips:K.tips, splits:K.splits, schedules:K.schedules, communications:K.communications, commAcks:K.commAcks, faq:K.faq, dpMessages:K.dpMessages, workSchedules:K.workSchedules, notifications:K.notifications, noTipDays:K.noTipDays, trash:K.trash, schedTemplates:K.schedTemplates, schedDrafts:K.schedDrafts, scheduleVersions:K.scheduleVersions, tipVersions:K.tipVersions, vtConfig:K.vtConfig, vtMonthly:K.vtMonthly, vtPayments:K.vtPayments, incidents:K.incidents, feedbacks:K.feedbacks, devChecklists:K.devChecklists, scheduleAdjustments:K.scheduleAdjustments, scheduleStatus:K.scheduleStatus, schedulePrevista:K.schedulePrevista, employeeGoals:K.employeeGoals, delays:K.delays, tipApprovals:K.tipApprovals, meetingPlans:K.meetingPlans, meetingIdeas:K.meetingIdeas, meetingAgendas:K.meetingAgendas, meetingActions:K.meetingActions };
     // Support functional updates to prevent stale-state race conditions:
     // When value is a function, it receives the latest state (like setState(prev => ...))
