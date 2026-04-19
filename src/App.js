@@ -4203,7 +4203,7 @@ Inclua apenas as ações solicitadas. Arrays vazios se não houver ação daquel
 
 
 
-function EmployeeSpreadsheet({ restEmps, restRoles, rid, employees, onUpdate, restCode: restCode_, isOwner, restaurant, notifications, privacyMask, onGenerateDismissalReport, incidents, feedbacks, devChecklists, schedules, currentUser, isLider, mobileOnly: mobileOnlyProp, roles, vtPayments, vtConfig, scheduleStatus, employeeGoals, delays, meetingPlans, meetingOccurrences }) {
+function EmployeeSpreadsheet({ restEmps, restRoles, rid, employees, onUpdate, restCode: restCode_, isOwner, restaurant, notifications, privacyMask, onGenerateDismissalReport, incidents, feedbacks, devChecklists, schedules, currentUser, isLider, mobileOnly: mobileOnlyProp, roles, vtPayments, vtConfig, scheduleStatus, employeeGoals, delays, meetingPlans, meetingOccurrences, resetSignal }) {
   const mobileOnly = mobileOnlyProp ?? false; // eslint-disable-line no-unused-vars
   const PLANOS = [
     { id:"p10",  empMax:10  },
@@ -4229,6 +4229,8 @@ function EmployeeSpreadsheet({ restEmps, restRoles, rid, employees, onUpdate, re
   const [dismissalCheckEmp, setDismissalCheckEmp] = useState(null);
   const [detailEmp, setDetailEmp] = useState(null); // empId for detail view
   const [detailTab, setDetailTab] = useState("cadastro"); // cadastro | acoes | trilha
+  // Reset detail view when parent signals (e.g. re-clicking "Equipe" tab)
+  useEffect(() => { if (resetSignal > 0) { setDetailEmp(null); setDetailTab("cadastro"); } }, [resetSignal]); // eslint-disable-line react-hooks/exhaustive-deps
   // showIncForm removido — ocorrências cadastradas pela aba Reuniões
   // showFbForm removed — meetings now created only in Reuniões tab
   const [expandedJornada, setExpandedJornada] = useState(null); // id of expanded event
@@ -9220,6 +9222,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
   const defaultGroup = isLider ? "equipe" : "operacao";
   const [tabGroup, setTabGroup] = useState(defaultGroup);
   const [tab, setTab] = useState(isLider ? "employees" : "dashboard");
+  const [empResetSignal, setEmpResetSignal] = useState(0);
   const activeGroup = TAB_GROUPS_FINAL.find(g => g.id === tabGroup) ?? TAB_GROUPS_FINAL[0];
 
   function switchGroup(gid) {
@@ -9349,6 +9352,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
               }
               setSchedLocalEdits(null);
             }
+            if (id === tab && id === "employees") setEmpResetSignal(s => s + 1);
             setTab(id);
           }}
             style={{ padding:"11px 16px", background:"none", border:"none", borderBottom:`2px solid ${tab===id?ac:"transparent"}`, color:tab===id?ac:"var(--text3)", cursor:"pointer", fontSize:13, fontFamily:"'DM Sans',sans-serif", fontWeight:tab===id?700:500, whiteSpace:"nowrap", flexShrink:0 }}>
@@ -10091,6 +10095,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
               restRoles={restRoles} rid={rid}
               employees={employees} onUpdate={onUpdate} restCode={restaurant.shortCode}
               isOwner={isOwner} restaurant={restaurant}
+              resetSignal={empResetSignal}
               notifications={data?.notifications??[]}
               privacyMask={privacyMask}
               incidents={data?.incidents??[]} feedbacks={data?.feedbacks??[]}
