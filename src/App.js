@@ -6907,11 +6907,11 @@ function MeetingPlannerSection({ restaurantId, employees, roles, areas, meetingP
                 <div style={{marginBottom:14,padding:14,borderRadius:10,border:"1px solid #8b5cf622",background:"#8b5cf604"}}>
                   <div style={{fontSize:12,fontWeight:700,color:"var(--text)",marginBottom:10}}>Pauta da avaliação</div>
                   <div style={{display:"flex",gap:4,marginBottom:10}}>
-                    {[["fortes","💪 Pontos fortes","#10b981"],["melhorar","📈 A melhorar","#f59e0b"],["notas","📝 Notas internas","#6366f1"]].map(([sec,lbl,col]) => (
+                    {[["fortes","💪 Fortes","#10b981"],["melhorar","📈 Melhorar","#f59e0b"],["notas","📝 Notas","#6366f1"]].map(([sec,lbl,col]) => (
                       <button key={sec} onClick={()=>setAvalSection(sec)} style={{
-                        flex:1,padding:"6px 8px",borderRadius:8,border:`1px solid ${avalSection===sec?col:"var(--border)"}`,
+                        flex:1,padding:"6px 6px",borderRadius:8,border:`1px solid ${avalSection===sec?col:"var(--border)"}`,
                         background:avalSection===sec?col+"14":"transparent",color:avalSection===sec?col:"var(--text3)",
-                        cursor:"pointer",fontSize:10,fontFamily:"'DM Sans',sans-serif",fontWeight:avalSection===sec?700:400
+                        cursor:"pointer",fontSize:11,fontFamily:"'DM Sans',sans-serif",fontWeight:avalSection===sec?700:400,minWidth:0
                       }}>{lbl}</button>
                     ))}
                   </div>
