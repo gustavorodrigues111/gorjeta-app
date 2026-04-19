@@ -12662,6 +12662,114 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
 }
 
 //
+// ARCHITECTURE MAP TAB
+//
+function ArchitectureTab({ isMobile }) {
+  const ac = "var(--ac)";
+  const [archSec, setArchSec] = useState("overview");
+  const [openNodes, setOpenNodes] = useState({});
+  const toggleN = (id) => setOpenNodes(p => ({...p, [id]: !p[id]}));
+  const isOpen = (id) => !!openNodes[id];
+  const sty = {
+    nav: { display:"flex", gap:6, flexWrap:"wrap", marginBottom:16 },
+    navBtn: (active) => ({ background: active ? ac : "var(--card-bg)", color: active ? "#fff" : "var(--text2)", border: active ? "none" : "1px solid var(--border)", padding:"7px 14px", borderRadius:8, cursor:"pointer", fontSize:12, fontWeight:600 }),
+    card: { ...S.card, marginBottom:10, padding:isMobile?12:16 },
+    cardTitle: { fontSize:14, fontWeight:700, color:"var(--text)", marginBottom:6, display:"flex", alignItems:"center", gap:8 },
+    cardDesc: { fontSize:12, color:"var(--text2)", lineHeight:1.6 },
+    tag: { display:"inline-block", background:`${ac}22`, color:ac, padding:"2px 8px", borderRadius:6, fontSize:10, fontWeight:700, marginTop:6 },
+    grid: { display:"grid", gridTemplateColumns: isMobile ? "1fr" : "repeat(auto-fill, minmax(280px, 1fr))", gap:10 },
+    treeNode: (color) => ({ display:"flex", alignItems:"center", gap:8, padding:"8px 12px", borderRadius:8, cursor:"pointer", border:`1px solid ${color}33`, background:`${color}08`, marginBottom:4 }),
+    treeChild: { marginLeft:24, paddingLeft:14, borderLeft:"2px solid var(--border)" },
+    leaf: { padding:"5px 12px", marginBottom:3, borderRadius:6, fontSize:12, display:"flex", alignItems:"flex-start", gap:8, background:"var(--card-bg)", border:"1px solid var(--border)" },
+    tbl: { width:"100%", borderCollapse:"collapse", fontSize:12 },
+    th: { background:"var(--card-bg)", padding:"8px 10px", textAlign:"left", fontWeight:600, color:"var(--text3)", fontSize:11, borderBottom:"1px solid var(--border)" },
+    td: { padding:"6px 10px", borderBottom:"1px solid var(--border)", color:"var(--text2)" },
+    code: { background:"var(--card-bg)", padding:"1px 5px", borderRadius:3, fontSize:11, fontFamily:"'DM Mono',monospace", color:ac },
+    flow: { display:"flex", alignItems:"center", gap:6, flexWrap:"wrap", marginBottom:10, padding:12, background:"var(--card-bg)", borderRadius:8, border:"1px solid var(--border)" },
+    flowBox: (hl) => ({ background: hl ? ac : "var(--bg)", color: hl ? "#fff" : "var(--text2)", padding:"6px 12px", borderRadius:6, fontSize:12, fontWeight:500, whiteSpace:"nowrap" }),
+    flowArrow: { color:ac, fontSize:16 },
+    secTitle: { fontSize:15, fontWeight:700, color:"var(--text)", margin:"18px 0 8px", display:"flex", alignItems:"center", gap:8 },
+  };
+  const SECTIONS = [["overview","🏠 Visão Geral"],["portals","🚪 Portais"],["data","🗄️ Dados"],["tabs","📑 Abas"],["access","🔐 Permissões"],["flows","🔄 Fluxos"],["planning","🗺️ Planejamento"]];
+  const TreeNode = ({id, icon, label, desc, color, children}) => (<div><div style={sty.treeNode(color||"var(--border)")} onClick={()=>toggleN(id)}><span style={{fontSize:16}}>{icon}</span><span style={{fontWeight:600,fontSize:13,color:"var(--text)"}}>{label}</span><span style={{fontSize:11,color:"var(--text3)",marginLeft:"auto"}}>{desc}</span><span style={{fontSize:10,color:"var(--text3)",transition:"transform 0.2s",transform:isOpen(id)?"rotate(90deg)":"rotate(0)"}}>{children?"▶":""}</span></div>{isOpen(id) && children && <div style={sty.treeChild}>{children}</div>}</div>);
+  const Leaf = ({icon, label, desc}) => (<div style={sty.leaf}><span>{icon}</span><div><span style={{fontWeight:500,color:"var(--text)"}}>{label}</span><br/><span style={{color:"var(--text3)",fontSize:11}}>{desc}</span></div></div>);
+  const Flow = ({steps}) => (<div style={sty.flow}>{steps.map((s,i) => (<React.Fragment key={i}>{i>0 && <span style={sty.flowArrow}>→</span>}<div style={sty.flowBox(i===steps.length-1)}>{s}</div></React.Fragment>))}</div>);
+
+  return (
+    <div>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}><h3 style={{color:ac,fontSize:16,fontWeight:700,margin:0}}>🗺️ Mapa da Arquitetura</h3><span style={{color:"var(--text3)",fontSize:11}}>v{APP_VERSION}</span></div>
+      <div style={sty.nav}>{SECTIONS.map(([id,label])=>(<button key={id} style={sty.navBtn(archSec===id)} onClick={()=>setArchSec(id)}>{label}</button>))}</div>
+
+      {archSec === "overview" && (<div>
+        <p style={{fontSize:13,color:"var(--text2)",marginBottom:14,lineHeight:1.6}}>O AppTip é um app React de página única (~17.000 linhas) com Firebase Firestore. Todos os dados são carregados ao iniciar e gerenciados pela função central <span style={sty.code}>handleUpdate(campo, valor)</span>.</p>
+        <Flow steps={["👤 Usuário","🔐 Login (CPF/Código)","⚛️ React App","🔥 Firebase Firestore"]} />
+        <div style={sty.secTitle}>🛠️ Stack Tecnológica</div>
+        <div style={sty.grid}>
+          <div style={sty.card}><div style={sty.cardTitle}>📱 Frontend</div><div style={sty.cardDesc}>React 18 com hooks. Arquivo único App.js. Tema claro/escuro.</div><span style={sty.tag}>React + Hooks</span></div>
+          <div style={sty.card}><div style={sty.cardTitle}>🔥 Banco de Dados</div><div style={sty.cardDesc}>Firebase Firestore, coleção appdata. Cache IndexedDB + localStorage.</div><span style={sty.tag}>Firestore</span></div>
+          <div style={sty.card}><div style={sty.cardTitle}>🤖 IA</div><div style={sty.cardDesc}>API Groq (Llama 3.3-70B) para FAQ, horários e ponto.</div><span style={sty.tag}>Groq / Llama</span></div>
+          <div style={sty.card}><div style={sty.cardTitle}>🔒 Segurança</div><div style={sty.cardDesc}>App Check (reCAPTCHA v3). CPF + PIN. Rate limiting.</div><span style={sty.tag}>App Check</span></div>
+          <div style={sty.card}><div style={sty.cardTitle}>💾 Salvamento</div><div style={sty.cardDesc}>handleUpdate() → estado + Firebase. Bloqueio offline (master).</div><span style={sty.tag}>handleUpdate</span></div>
+          <div style={sty.card}><div style={sty.cardTitle}>📊 Versionamento</div><div style={sty.cardDesc}>Gorjetas e escalas (30 versões). Snapshots debounce 30s.</div><span style={sty.tag}>30 versões</span></div>
+        </div>
+        <div style={sty.secTitle}>👥 Perfis de Usuário</div>
+        <div style={sty.grid}>
+          <div style={{...sty.card,borderColor:"#a855f7"}}><div style={sty.cardTitle}>⭐ Gestor AppTip</div><div style={sty.cardDesc}>Admin SaaS. Acesso total. isMaster para lixeira, offline.</div><span style={sty.tag}>view = "super"</span></div>
+          <div style={{...sty.card,borderColor:"#3b82f6"}}><div style={sty.cardTitle}>👔 Gestor Adm.</div><div style={sty.cardDesc}>Gerente do restaurante. isDP para mensagens.</div><span style={sty.tag}>view = "manager"</span></div>
+          <div style={{...sty.card,borderColor:"#22c55e"}}><div style={sty.cardTitle}>🎯 Líder Op.</div><div style={sty.cardDesc}>Dashboard, Escala, Horários, Equipe, Reuniões.</div><span style={sty.tag}>profile = "lider"</span></div>
+          <div style={{...sty.card,borderColor:"#f59e0b"}}><div style={sty.cardTitle}>👷 Empregado</div><div style={sty.cardDesc}>Escala, gorjetas, trilha, comunicados, FAQ, DP.</div><span style={sty.tag}>view = "employee"</span></div>
+        </div>
+      </div>)}
+
+      {archSec === "portals" && (<div>
+        <p style={{fontSize:13,color:"var(--text2)",marginBottom:14,lineHeight:1.6}}>Cada tipo de usuário entra num portal diferente. Owner e Manager delegam ao RestaurantPanel.</p>
+        <TreeNode id="app" icon="🏠" label="App()" desc="Raiz" color="#78716c"><TreeNode id="owner" icon="⭐" label="OwnerPortal" desc="Multi-restaurante" color="#a855f7"><Leaf icon="💰" label="Financeiro Geral" desc="Todos os restaurantes e cobranças" /><Leaf icon="👔" label="Gestores" desc="CRUD de gestores" /><Leaf icon="⭐" label="Admins" desc="Somente master" /><Leaf icon="📬" label="Caixa" desc="Notificações" /><Leaf icon="🗑️" label="Lixeira" desc="Exclusão definitiva" /><Leaf icon="📋" label="Versões" desc="Changelog" /><Leaf icon="🗺️" label="Arquitetura" desc="Este mapa!" /><TreeNode id="owner-rest" icon="🍽️" label="Restaurante → RestaurantPanel" desc="isOwner=true" color="#22c55e"><Leaf icon="📊" label="Operacional" desc="Abas do restaurante" /><Leaf icon="👔" label="Gestores" desc="Associados" /><Leaf icon="💰" label="Financeiro" desc="Cobrança/plano" /></TreeNode></TreeNode><TreeNode id="mgr" icon="👔" label="ManagerPortal" desc="Gestor" color="#3b82f6"><Leaf icon="🍽️" label="Seletor" desc="Multi-restaurante" /><Leaf icon="📊" label="RestaurantPanel" desc="isOwner=false" /></TreeNode><TreeNode id="emp" icon="👷" label="EmployeePortal" desc="Barra inferior" color="#f59e0b"><Leaf icon="📢" label="Avisos" desc="Obrigatório ler" /><Leaf icon="📅" label="Escala" desc="Calendário" /><Leaf icon="💸" label="Gorjeta" desc="Se habilitado" /><Leaf icon="📈" label="Trilha" desc="Jornada, metas" /><Leaf icon="🕐" label="Horários" desc="Se habilitado" /><Leaf icon="❓" label="FAQ" desc="Se habilitado" /><Leaf icon="💬" label="Fale DP" desc="Se habilitado" /></TreeNode><TreeNode id="pub" icon="📄" label="Páginas públicas" desc="Sem login" color="#78716c"><Leaf icon="🏠" label="Home" desc="Landing" /><Leaf icon="🧾" label="Fatura" desc="/fatura/:id" /><Leaf icon="📖" label="Guia" desc="/guia-gestor" /></TreeNode></TreeNode>
+      </div>)}
+
+      {archSec === "data" && (<div>
+        <p style={{fontSize:13,color:"var(--text2)",marginBottom:14,lineHeight:1.6}}>Coleção <span style={sty.code}>appdata</span> do Firestore. Chave <span style={sty.code}>v4:nome</span>, valor <span style={sty.code}>{"{ value: ... }"}</span>.</p>
+        {[{title:"📋 Principais",rows:[["owners","Admins AppTip"],["managers","Gestores"],["restaurants","Restaurantes"],["employees","Empregados"],["roles","Cargos"]]},{title:"💰 Gorjetas",rows:[["tips","Por dia"],["splits","% por área"],["tipVersions","30 snapshots"],["tipApprovals","Aprovação semanal"],["noTipDays","Sem gorjeta"]]},{title:"📅 Escala",rows:[["schedules","Mensais"],["workSchedules","Horário contratado"],["schedTemplates","Templates"],["scheduleVersions","30 snapshots"],["scheduleStatus","Status mês"],["schedulePrevista","Snapshot"],["delays","Atrasos"]]},{title:"🚌 VT",rows:[["vtConfig","Taxa diária"],["vtMonthly","Ajustes"],["vtPayments","Pagamentos"]]},{title:"👥 Pessoas",rows:[["incidents","Ocorrências"],["feedbacks","Avaliações"],["employeeGoals","Objetivos"],["devChecklists","Checklists"]]},{title:"🤝 Reuniões",rows:[["meetingPlans","Planejamento"],["meetingAgendas","Pautas"],["meetingIdeas","Ideias"],["meetingActions","Ações"],["meetingOccurrences","Ocorrências"],["meetingPendencias","Pendências"]]},{title:"📢 Comunicação",rows:[["communications","Comunicados"],["commAcks","Ciências"],["faq","FAQ"],["dpMessages","Mensagens DP"],["notifications","Notificações"]]},{title:"🗑️ Sistema",rows:[["trash","Lixeira (30 dias)"]]}
+        ].map((g,gi) => (<div key={gi}><div style={sty.secTitle}>{g.title}</div><table style={sty.tbl}><thead><tr><th style={sty.th}>Campo</th><th style={sty.th}>Descrição</th></tr></thead><tbody>{g.rows.map(([f,d],ri) => (<tr key={ri}><td style={sty.td}><span style={sty.code}>{f}</span></td><td style={sty.td}>{d}</td></tr>))}</tbody></table></div>))}
+      </div>)}
+
+      {archSec === "tabs" && (<div>
+        <p style={{fontSize:13,color:"var(--text2)",marginBottom:14,lineHeight:1.6}}>RestaurantPanel — 4 grupos de abas.</p>
+        <TreeNode id="t-op" icon="💰" label="Operação" desc="Financeiro" color="#f59e0b"><Leaf icon="📊" label="Dashboard" desc="Resumo mensal" /><Leaf icon="💰" label="Gorjetas" desc="Grade diária" /><Leaf icon="🚌" label="VT" desc="Cálculo e pagamento" /></TreeNode>
+        <TreeNode id="t-pp" icon="👥" label="Pessoas" desc="Equipe, escala, reuniões" color="#22c55e"><TreeNode id="t-eq" icon="👥" label="Equipe" desc="Maior componente" color="#22c55e"><Leaf icon="📋" label="Lista" desc="Cards, filtro" /><Leaf icon="📝" label="Cadastro" desc="Dados, cargo" /><Leaf icon="⚡" label="Ações" desc="Ocorrências, feedbacks" /><Leaf icon="📈" label="Trilha" desc="Timeline, badges" /></TreeNode><Leaf icon="🏷️" label="Cargos" desc="Área e pontos" /><Leaf icon="🕐" label="Horários" desc="Contratado + IA" /><Leaf icon="📅" label="Escala" desc="Grade, ponto, fechamento" /><TreeNode id="t-re" icon="🤝" label="Reuniões" desc="Completo" color="#22c55e"><Leaf icon="📝" label="Planejamento" desc="Tipos" /><Leaf icon="📋" label="Pautas" desc="Templates" /><Leaf icon="💡" label="Ideias" desc="Banco" /><Leaf icon="🔔" label="Ocorrências" desc="Operacionais" /><Leaf icon="⚡" label="Ações" desc="Pós-reunião" /><Leaf icon="⏳" label="Pendências" desc="Anteriores" /><Leaf icon="🎯" label="Ao vivo" desc="Execução" /><Leaf icon="📄" label="Relatório" desc="PDF" /></TreeNode></TreeNode>
+        <TreeNode id="t-co" icon="📢" label="Comunicação" desc="Avisos, FAQ, DP" color="#3b82f6"><Leaf icon="📢" label="Comunicados" desc="Criar, segmentar" /><Leaf icon="❓" label="FAQ" desc="Com IA" /><Leaf icon="💬" label="Fale DP" desc="Diretas/anônimas" /><Leaf icon="📬" label="Caixa" desc="Somente DP" /></TreeNode>
+        <TreeNode id="t-cf" icon="⚙️" label="Config" desc="Settings" color="#78716c"><Leaf icon="⚙️" label="Configurações" desc="Taxa, divisão" /><Leaf icon="👔" label="Gestores" desc="Sub-gestores" /></TreeNode>
+      </div>)}
+
+      {archSec === "access" && (<div>
+        <p style={{fontSize:13,color:"var(--text2)",marginBottom:14,lineHeight:1.6}}>Quem pode ver e editar.</p>
+        <div style={{display:"flex",gap:16,marginBottom:12,flexWrap:"wrap",fontSize:11,color:"var(--text3)"}}><span>🟢 Total</span><span>🟡 Condicional</span><span>🔵 Leitura</span><span>⚫ Sem acesso</span></div>
+        <div style={{overflowX:"auto"}}><table style={sty.tbl}><thead><tr><th style={sty.th}>Func.</th><th style={sty.th}>⭐ Master</th><th style={sty.th}>👔 Gest.</th><th style={sty.th}>🎯 Líder</th><th style={sty.th}>👷 Emp.</th></tr></thead><tbody>{[["Gorjetas","🟢","🟡","⚫","🔵"],["Escala","🟢","🟡","🟡","🔵"],["Equipe","🟢","🟢","🔵","⚫"],["VT","🟢","🟡","⚫","⚫"],["Reuniões","🟢","🟢","🟡","⚫"],["Comunicados","🟢","🟢","⚫","🔵"],["Fale DP","🟢","🟢","⚫","🟡"],["Ocorrências","🟢","🟢","⚫","🔵"],["Financeiro","🟢","⚫","⚫","⚫"],["Lixeira","🟡","⚫","⚫","⚫"],["Offline","🟡","⚫","⚫","⚫"]].map(([f,...c],ri) => (<tr key={ri}><td style={{...sty.td,fontWeight:500}}>{f}</td>{c.map((v,ci)=>(<td key={ci} style={{...sty.td,textAlign:"center"}}>{v}</td>))}</tr>))}</tbody></table></div>
+        <div style={sty.secTitle}>🔑 Flags</div>
+        <div style={sty.grid}><div style={sty.card}><div style={sty.cardTitle}>isMaster</div><div style={sty.cardDesc}>Lixeira, admins, offline.</div></div><div style={sty.card}><div style={sty.cardTitle}>isDP</div><div style={sty.cardDesc}>Mensagens, sub-gestores.</div></div><div style={sty.card}><div style={sty.cardTitle}>isOwner</div><div style={sty.cardDesc}>true=Owner, false=Manager.</div></div><div style={sty.card}><div style={sty.cardTitle}>privacyMode</div><div style={sty.cardDesc}>Mascara dados do Owner.</div></div><div style={sty.card}><div style={sty.cardTitle}>profile: "lider"</div><div style={sty.cardDesc}>Restringe a áreas.</div></div><div style={sty.card}><div style={sty.cardTitle}>tabsConfig/tabsGestor</div><div style={sty.cardDesc}>Duas camadas de visibilidade.</div></div></div>
+      </div>)}
+
+      {archSec === "flows" && (<div>
+        <div style={sty.secTitle}>🔐 Login</div><Flow steps={["CPF/Código","Busca owners→managers→employees","PIN","Portal"]} />
+        <div style={sty.secTitle}>💰 Gorjeta</div><Flow steps={["Pool total","Divide por área","Divide por pontos","Imposto 33%","Líquida"]} />
+        <div style={sty.secTitle}>📅 Escala</div><Flow steps={["Mês aberto","Preenche","Importa ponto","Compara","Fecha","Snapshot"]} />
+        <div style={sty.secTitle}>🚌 VT</div><Flow steps={["Taxa diária","Dias × taxa","Ajustes","Pago","Snapshot"]} />
+        <div style={sty.secTitle}>🤝 Reunião</div><Flow steps={["Planeja","Pauta","Ao vivo","Ações","PDF"]} />
+        <div style={sty.secTitle}>👷 Empregado</div><Flow steps={["Admissão","Escala+gorjetas","Feedbacks","Promoção","Demissão→PDF"]} />
+        <div style={sty.secTitle}>💾 Dados</div><Flow steps={["Botão","onUpdate","Offline?","setState","Firestore","Toast"]} />
+      </div>)}
+
+      {archSec === "planning" && (<div>
+        <div style={sty.secTitle}>📐 Como adicionar</div>
+        <div style={sty.grid}><div style={{...sty.card,borderColor:"#22c55e"}}><div style={sty.cardTitle}>1️⃣ Campo de dados</div><div style={sty.cardDesc}>K, useState, load(), data, setters.</div><span style={sty.tag}>~6 edições</span></div><div style={{...sty.card,borderColor:"#3b82f6"}}><div style={sty.cardTitle}>2️⃣ Nova aba</div><div style={sty.cardDesc}>Array de abas, componente.</div><span style={sty.tag}>~3 edições</span></div><div style={{...sty.card,borderColor:"#f59e0b"}}><div style={sty.cardTitle}>3️⃣ Sub-aba Equipe</div><div style={sty.cardDesc}>Pill + bloco condicional.</div><span style={sty.tag}>~2 edições</span></div><div style={{...sty.card,borderColor:"#a855f7"}}><div style={sty.cardTitle}>4️⃣ Aba empregado</div><div style={sty.cardDesc}>Portal, componente, tabs.</div><span style={sty.tag}>~4 edições</span></div><div style={{...sty.card,borderColor:"#ec4899"}}><div style={sty.cardTitle}>5️⃣ Tipo reunião</div><div style={sty.cardDesc}>MEETING_TYPES + template.</div><span style={sty.tag}>~2 edições</span></div><div style={{...sty.card,borderColor:"#14b8a6"}}><div style={sty.cardTitle}>6️⃣ Relatório PDF</div><div style={sty.cardDesc}>Função + botão.</div><span style={sty.tag}>Novo</span></div></div>
+        <div style={sty.secTitle}>⚠️ Atenção</div>
+        <div style={sty.grid}><div style={{...sty.card,borderColor:"#ef4444"}}><div style={sty.cardTitle}>🔴 Arquivo único</div><div style={sty.cardDesc}>~17.000 linhas. CI=true detecta erros.</div></div><div style={{...sty.card,borderColor:"#ef4444"}}><div style={sty.cardTitle}>🔴 Dados globais</div><div style={sty.cardDesc}>Tudo carrega no startup.</div></div><div style={{...sty.card,borderColor:"#f59e0b"}}><div style={sty.cardTitle}>🟡 Permissões</div><div style={sty.cardDesc}>Cada componente verifica flags.</div></div><div style={{...sty.card,borderColor:"#f59e0b"}}><div style={sty.cardTitle}>🟡 Mobile</div><div style={sty.cardDesc}>Algumas abas bloqueiam.</div></div></div>
+        <div style={sty.secTitle}>💡 Expansão</div>
+        <div style={sty.grid}><div style={sty.card}><div style={sty.cardTitle}>📊 Analytics</div><div style={sty.cardDesc}>Gráficos, KPIs.</div></div><div style={sty.card}><div style={sty.cardTitle}>📱 PWA</div><div style={sty.cardDesc}>Push notifications.</div></div><div style={sty.card}><div style={sty.cardTitle}>🔔 Tempo real</div><div style={sty.cardDesc}>onSnapshot.</div></div><div style={sty.card}><div style={sty.cardTitle}>📋 Relatórios</div><div style={sty.cardDesc}>Gorjetas, atrasos.</div></div><div style={sty.card}><div style={sty.cardTitle}>🤖 Mais IA</div><div style={sty.cardDesc}>Padrões, sugestões.</div></div><div style={sty.card}><div style={sty.cardTitle}>🔗 Integrações</div><div style={sty.cardDesc}>WhatsApp, calendário.</div></div></div>
+      </div>)}
+    </div>
+  );
+}
+
 // SUPER MANAGER PORTAL
 //
 function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }) {
@@ -14655,332 +14763,7 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }
           );
         })()}
 
-        {tab === "arquitetura" && (() => {
-          const [archSec, setArchSec] = React.useState("overview"); // eslint-disable-line react-hooks/rules-of-hooks
-          const [openNodes, setOpenNodes] = React.useState({}); // eslint-disable-line react-hooks/rules-of-hooks
-          const toggleN = (id) => setOpenNodes(p => ({...p, [id]: !p[id]}));
-          const isOpen = (id) => !!openNodes[id];
-
-          const sty = {
-            nav: { display:"flex", gap:6, flexWrap:"wrap", marginBottom:16 },
-            navBtn: (active) => ({ background: active ? ac : "var(--card-bg)", color: active ? "#fff" : "var(--text2)", border: active ? "none" : "1px solid var(--border)", padding:"7px 14px", borderRadius:8, cursor:"pointer", fontSize:12, fontWeight:600 }),
-            card: { ...S.card, marginBottom:10, padding:isMobile?12:16 },
-            cardTitle: { fontSize:14, fontWeight:700, color:"var(--text)", marginBottom:6, display:"flex", alignItems:"center", gap:8 },
-            cardDesc: { fontSize:12, color:"var(--text2)", lineHeight:1.6 },
-            tag: { display:"inline-block", background:`${ac}22`, color:ac, padding:"2px 8px", borderRadius:6, fontSize:10, fontWeight:700, marginTop:6 },
-            grid: { display:"grid", gridTemplateColumns: isMobile ? "1fr" : "repeat(auto-fill, minmax(280px, 1fr))", gap:10 },
-            treeNode: (color) => ({ display:"flex", alignItems:"center", gap:8, padding:"8px 12px", borderRadius:8, cursor:"pointer", border:`1px solid ${color}33`, background:`${color}08`, marginBottom:4 }),
-            treeChild: { marginLeft:24, paddingLeft:14, borderLeft:"2px solid var(--border)" },
-            leaf: { padding:"5px 12px", marginBottom:3, borderRadius:6, fontSize:12, display:"flex", alignItems:"flex-start", gap:8, background:"var(--card-bg)", border:"1px solid var(--border)" },
-            tbl: { width:"100%", borderCollapse:"collapse", fontSize:12 },
-            th: { background:"var(--card-bg)", padding:"8px 10px", textAlign:"left", fontWeight:600, color:"var(--text3)", fontSize:11, borderBottom:"1px solid var(--border)" },
-            td: { padding:"6px 10px", borderBottom:"1px solid var(--border)", color:"var(--text2)" },
-            code: { background:"var(--card-bg)", padding:"1px 5px", borderRadius:3, fontSize:11, fontFamily:"'DM Mono',monospace", color:ac },
-            flow: { display:"flex", alignItems:"center", gap:6, flexWrap:"wrap", marginBottom:10, padding:12, background:"var(--card-bg)", borderRadius:8, border:"1px solid var(--border)" },
-            flowBox: (hl) => ({ background: hl ? ac : "var(--bg)", color: hl ? "#fff" : "var(--text2)", padding:"6px 12px", borderRadius:6, fontSize:12, fontWeight:500, whiteSpace:"nowrap" }),
-            flowArrow: { color:ac, fontSize:16 },
-            secTitle: { fontSize:15, fontWeight:700, color:"var(--text)", margin:"18px 0 8px", display:"flex", alignItems:"center", gap:8 },
-          };
-
-          const SECTIONS = [
-            ["overview","🏠 Visão Geral"],["portals","🚪 Portais"],["data","🗄️ Dados"],["tabs","📑 Abas"],["access","🔐 Permissões"],["flows","🔄 Fluxos"],["planning","🗺️ Planejamento"],
-          ];
-
-          const TreeNode = ({id, icon, label, desc, color, children}) => (
-            <div>
-              <div style={sty.treeNode(color||"var(--border)")} onClick={()=>toggleN(id)}>
-                <span style={{fontSize:16}}>{icon}</span>
-                <span style={{fontWeight:600,fontSize:13,color:"var(--text)"}}>{label}</span>
-                <span style={{fontSize:11,color:"var(--text3)",marginLeft:"auto"}}>{desc}</span>
-                <span style={{fontSize:10,color:"var(--text3)",transition:"transform 0.2s",transform:isOpen(id)?"rotate(90deg)":"rotate(0)"}}>{children?"▶":""}</span>
-              </div>
-              {isOpen(id) && children && <div style={sty.treeChild}>{children}</div>}
-            </div>
-          );
-          const Leaf = ({icon, label, desc}) => (
-            <div style={sty.leaf}><span>{icon}</span><div><span style={{fontWeight:500,color:"var(--text)"}}>{label}</span><br/><span style={{color:"var(--text3)",fontSize:11}}>{desc}</span></div></div>
-          );
-          const Flow = ({steps}) => (
-            <div style={sty.flow}>
-              {steps.map((s,i) => (<React.Fragment key={i}>{i>0 && <span style={sty.flowArrow}>→</span>}<div style={sty.flowBox(i===steps.length-1)}>{s}</div></React.Fragment>))}
-            </div>
-          );
-
-          return (
-            <div>
-              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
-                <h3 style={{color:ac,fontSize:16,fontWeight:700,margin:0}}>🗺️ Mapa da Arquitetura</h3>
-                <span style={{color:"var(--text3)",fontSize:11}}>v{APP_VERSION}</span>
-              </div>
-              <div style={sty.nav}>
-                {SECTIONS.map(([id,label])=>(
-                  <button key={id} style={sty.navBtn(archSec===id)} onClick={()=>setArchSec(id)}>{label}</button>
-                ))}
-              </div>
-
-              {/* ========== VISÃO GERAL ========== */}
-              {archSec === "overview" && (<div>
-                <p style={{fontSize:13,color:"var(--text2)",marginBottom:14,lineHeight:1.6}}>O AppTip é um app React de página única (~17.000 linhas) com Firebase Firestore. Todos os dados são carregados ao iniciar e gerenciados pela função central <span style={sty.code}>handleUpdate(campo, valor)</span>.</p>
-                <Flow steps={["👤 Usuário","🔐 Login (CPF/Código)","⚛️ React App","🔥 Firebase Firestore"]} />
-                <div style={sty.secTitle}>🛠️ Stack Tecnológica</div>
-                <div style={sty.grid}>
-                  <div style={sty.card}><div style={sty.cardTitle}>📱 Frontend</div><div style={sty.cardDesc}>React 18 com hooks. Arquivo único App.js. CSS inline com tema claro/escuro.</div><span style={sty.tag}>React + Hooks</span></div>
-                  <div style={sty.card}><div style={sty.cardTitle}>🔥 Banco de Dados</div><div style={sty.cardDesc}>Firebase Firestore, coleção única appdata. Cache local via IndexedDB + localStorage.</div><span style={sty.tag}>Firestore</span></div>
-                  <div style={sty.card}><div style={sty.cardTitle}>🤖 IA</div><div style={sty.cardDesc}>API Groq (Llama 3.3-70B) para FAQ, horários e importação de ponto.</div><span style={sty.tag}>Groq / Llama</span></div>
-                  <div style={sty.card}><div style={sty.cardTitle}>🔒 Segurança</div><div style={sty.cardDesc}>App Check (reCAPTCHA v3). Login por CPF + PIN. Rate limiting.</div><span style={sty.tag}>App Check</span></div>
-                  <div style={sty.card}><div style={sty.cardTitle}>💾 Salvamento</div><div style={sty.cardDesc}>handleUpdate() atualiza estado + Firebase. Bloqueio offline (master).</div><span style={sty.tag}>handleUpdate</span></div>
-                  <div style={sty.card}><div style={sty.cardTitle}>📊 Versionamento</div><div style={sty.cardDesc}>Histórico de gorjetas e escalas (30 versões). Snapshots com debounce 30s.</div><span style={sty.tag}>30 versões</span></div>
-                </div>
-                <div style={sty.secTitle}>👥 Perfis de Usuário</div>
-                <div style={sty.grid}>
-                  <div style={{...sty.card,borderColor:"#a855f7"}}><div style={sty.cardTitle}>⭐ Gestor AppTip (Owner)</div><div style={sty.cardDesc}>Admin do SaaS. Acesso total. Flag isMaster para lixeira, offline, etc.</div><span style={sty.tag}>view = "super"</span></div>
-                  <div style={{...sty.card,borderColor:"#3b82f6"}}><div style={sty.cardTitle}>👔 Gestor Administrativo</div><div style={sty.cardDesc}>Gerente do restaurante. Acesso completo. Flag isDP para mensagens.</div><span style={sty.tag}>view = "manager"</span></div>
-                  <div style={{...sty.card,borderColor:"#22c55e"}}><div style={sty.cardTitle}>🎯 Líder Operacional</div><div style={sty.cardDesc}>Líder por áreas. Vê: Dashboard, Escala, Horários, Equipe, Reuniões.</div><span style={sty.tag}>profile = "lider"</span></div>
-                  <div style={{...sty.card,borderColor:"#f59e0b"}}><div style={sty.cardTitle}>👷 Empregado</div><div style={sty.cardDesc}>Portal próprio: escala, gorjetas, trilha, comunicados, FAQ, DP.</div><span style={sty.tag}>view = "employee"</span></div>
-                </div>
-              </div>)}
-
-              {/* ========== PORTAIS ========== */}
-              {archSec === "portals" && (<div>
-                <p style={{fontSize:13,color:"var(--text2)",marginBottom:14,lineHeight:1.6}}>Cada tipo de usuário entra num portal diferente. O OwnerPortal e o ManagerPortal delegam ao RestaurantPanel.</p>
-                <TreeNode id="app" icon="🏠" label="App()" desc="Raiz — login, tema, dados" color="#78716c">
-                  <TreeNode id="owner" icon="⭐" label="OwnerPortal" desc="Multi-restaurante + financeiro" color="#a855f7">
-                    <Leaf icon="💰" label="Financeiro Geral" desc="Visão de todos os restaurantes e cobranças" />
-                    <Leaf icon="👔" label="Gestores" desc="CRUD de gestores de todos os restaurantes" />
-                    <Leaf icon="⭐" label="Admins AppTip" desc="Gerenciar admins (somente master)" />
-                    <Leaf icon="📬" label="Caixa" desc="Notificações e mensagens" />
-                    <Leaf icon="🗑️" label="Lixeira" desc="Exclusão definitiva (master)" />
-                    <Leaf icon="📋" label="Versões" desc="Changelog do sistema" />
-                    <Leaf icon="🗺️" label="Arquitetura" desc="Este mapa!" />
-                    <TreeNode id="owner-rest" icon="🍽️" label="Restaurante → RestaurantPanel" desc="isOwner=true" color="#22c55e">
-                      <Leaf icon="📊" label="Operacional" desc="Todas as abas do restaurante" />
-                      <Leaf icon="👔" label="Gestores do restaurante" desc="Gestores associados" />
-                      <Leaf icon="💰" label="Financeiro" desc="Cobrança e plano" />
-                    </TreeNode>
-                  </TreeNode>
-                  <TreeNode id="manager" icon="👔" label="ManagerPortal" desc="Gestor do restaurante" color="#3b82f6">
-                    <Leaf icon="🍽️" label="Seletor de restaurante" desc="Se gerencia mais de 1" />
-                    <Leaf icon="📊" label="RestaurantPanel" desc="isOwner=false — painel operacional" />
-                  </TreeNode>
-                  <TreeNode id="employee" icon="👷" label="EmployeePortal" desc="Barra inferior de navegação" color="#f59e0b">
-                    <Leaf icon="📢" label="Avisos" desc="Obrigatório ler antes de acessar outras abas" />
-                    <Leaf icon="📅" label="Escala" desc="Calendário mensal" />
-                    <Leaf icon="💸" label="Gorjeta" desc="Se showTipsToEmployee + semanas aprovadas" />
-                    <Leaf icon="📈" label="Trilha" desc="Jornada, metas, badges, feedback" />
-                    <Leaf icon="🕐" label="Horários" desc="Se habilitado" />
-                    <Leaf icon="❓" label="FAQ" desc="Se habilitado" />
-                    <Leaf icon="💬" label="Fale com DP" desc="Se habilitado" />
-                  </TreeNode>
-                  <TreeNode id="public" icon="📄" label="Páginas públicas" desc="Sem login" color="#78716c">
-                    <Leaf icon="🏠" label="Home" desc="Landing page" />
-                    <Leaf icon="🧾" label="FaturaPage" desc="/fatura/:id" />
-                    <Leaf icon="📖" label="GuiaGestor" desc="/guia-gestor" />
-                    <Leaf icon="⚙️" label="FirstSetup" desc="Setup inicial" />
-                  </TreeNode>
-                </TreeNode>
-              </div>)}
-
-              {/* ========== DADOS ========== */}
-              {archSec === "data" && (<div>
-                <p style={{fontSize:13,color:"var(--text2)",marginBottom:14,lineHeight:1.6}}>Todos os dados ficam na coleção <span style={sty.code}>appdata</span> do Firestore. Cada documento tem chave <span style={sty.code}>v4:nome</span> e valor <span style={sty.code}>{"{ value: ... }"}</span>.</p>
-                {[
-                  { title:"📋 Dados Principais", rows:[
-                    ["owners","Contas de admins AppTip (nome, CPF, PIN, isMaster)"],
-                    ["managers","Gestores de restaurante (permissões, perfil, áreas)"],
-                    ["restaurants","Restaurantes (nome, código, plano, configurações)"],
-                    ["employees","Empregados (cargo, admissão, status, contatos)"],
-                    ["roles","Cargos (área, pontos para divisão de gorjeta)"],
-                  ]},
-                  { title:"💰 Gorjetas & Financeiro", rows:[
-                    ["tips","Registros individuais de gorjeta por dia"],
-                    ["splits","Percentuais por área (Bar, Cozinha, Salão, Limpeza)"],
-                    ["tipVersions","Histórico de versões (30 snapshots)"],
-                    ["tipApprovals","Aprovação semanal pelo gestor"],
-                    ["noTipDays","Dias sem gorjeta (restaurante fechado)"],
-                  ]},
-                  { title:"📅 Escala & Horários", rows:[
-                    ["schedules","Escalas mensais {rest → mês → emp → dia → status}"],
-                    ["workSchedules","Horário contratado de cada empregado"],
-                    ["schedTemplates","Templates de escala reutilizáveis"],
-                    ["schedDrafts","Rascunhos de escala em andamento"],
-                    ["scheduleVersions","Histórico de alterações (30 snapshots)"],
-                    ["scheduleStatus","Status do mês (aberto/revisão/fechado)"],
-                    ["schedulePrevista","Snapshot congelado da escala prevista"],
-                    ["delays","Atrasos em minutos por dia"],
-                  ]},
-                  { title:"🚌 Vale Transporte", rows:[
-                    ["vtConfig","Taxa diária de VT por empregado"],
-                    ["vtMonthly","Ajustes manuais mensais"],
-                    ["vtPayments","Pagamentos (data, snapshot, total)"],
-                  ]},
-                  { title:"👥 Pessoas & Desenvolvimento", rows:[
-                    ["incidents","Ocorrências (positivas/negativas)"],
-                    ["feedbacks","Avaliações de desempenho trimestrais"],
-                    ["employeeGoals","Objetivos de desenvolvimento"],
-                    ["devChecklists","Checklists por cargo"],
-                  ]},
-                  { title:"🤝 Reuniões", rows:[
-                    ["meetingPlans","Planejamento (tipo, participantes, data)"],
-                    ["meetingAgendas","Pautas com checklist"],
-                    ["meetingIdeas","Banco de ideias"],
-                    ["meetingActions","Ações pós-reunião"],
-                    ["meetingOccurrences","Ocorrências operacionais"],
-                    ["meetingPendencias","Pendências de reuniões anteriores"],
-                  ]},
-                  { title:"📢 Comunicação", rows:[
-                    ["communications","Comunicados/avisos"],
-                    ["commAcks","Ciências de leitura"],
-                    ["faq","Perguntas frequentes"],
-                    ["dpMessages","Mensagens empregado ↔ DP"],
-                    ["notifications","Notificações do sistema"],
-                  ]},
-                  { title:"🗑️ Sistema", rows:[
-                    ["trash","Lixeira geral (30 dias)"],
-                  ]},
-                ].map((group,gi) => (
-                  <div key={gi}>
-                    <div style={sty.secTitle}>{group.title}</div>
-                    <table style={sty.tbl}>
-                      <thead><tr><th style={sty.th}>Campo</th><th style={sty.th}>O que guarda</th></tr></thead>
-                      <tbody>{group.rows.map(([field,desc],ri) => (
-                        <tr key={ri}><td style={sty.td}><span style={sty.code}>{field}</span></td><td style={sty.td}>{desc}</td></tr>
-                      ))}</tbody>
-                    </table>
-                  </div>
-                ))}
-              </div>)}
-
-              {/* ========== ABAS ========== */}
-              {archSec === "tabs" && (<div>
-                <p style={{fontSize:13,color:"var(--text2)",marginBottom:14,lineHeight:1.6}}>O RestaurantPanel organiza as abas em 4 grupos. Usado pelo Owner e pelo Manager.</p>
-                <TreeNode id="t-op" icon="💰" label="Operação" desc="Financeiro do dia-a-dia" color="#f59e0b">
-                  <Leaf icon="📊" label="Dashboard" desc="Resumo mensal: equipe, gorjetas, comunicados, feedbacks" />
-                  <Leaf icon="💰" label="Gorjetas" desc="Grade diária, cálculo por área/pontos, aprovação semanal" />
-                  <Leaf icon="🚌" label="Vale Transporte" desc="Cálculo, pagamento, ajustes, snapshot" />
-                </TreeNode>
-                <TreeNode id="t-pp" icon="👥" label="Pessoas e Planejamento" desc="Equipe, escala, reuniões" color="#22c55e">
-                  <TreeNode id="t-equipe" icon="👥" label="Equipe (EmployeeSpreadsheet)" desc="Maior componente" color="#22c55e">
-                    <Leaf icon="📋" label="Lista de empregados" desc="Cards compactos, filtro, busca" />
-                    <Leaf icon="📝" label="Detalhe → Cadastro" desc="Dados pessoais, cargo, promoção, demissão" />
-                    <Leaf icon="⚡" label="Detalhe → Ações" desc="Ocorrências, feedbacks, reuniões, objetivos" />
-                    <Leaf icon="📈" label="Detalhe → Trilha" desc="Timeline jornada, badges, metas" />
-                  </TreeNode>
-                  <Leaf icon="🏷️" label="Cargos" desc="CRUD de cargos com área e pontos" />
-                  <Leaf icon="🕐" label="Horários" desc="Horário contratado, geração IA" />
-                  <Leaf icon="📅" label="Escala" desc="Grade mensal, templates, importação ponto, fechamento" />
-                  <TreeNode id="t-reunioes" icon="🤝" label="Reuniões" desc="Sistema completo" color="#22c55e">
-                    <Leaf icon="📝" label="Planejamento" desc="Planejar reuniões, participantes" />
-                    <Leaf icon="📋" label="Pautas" desc="Templates, checklist, ocorrências auto" />
-                    <Leaf icon="💡" label="Ideias" desc="Banco de ideias com prioridade" />
-                    <Leaf icon="🔔" label="Ocorrências" desc="Ocorrências operacionais" />
-                    <Leaf icon="⚡" label="Ações" desc="Pós-reunião com responsável e prazo" />
-                    <Leaf icon="⏳" label="Pendências" desc="De reuniões anteriores" />
-                    <Leaf icon="🎯" label="Ao vivo" desc="Execução da pauta em tempo real" />
-                    <Leaf icon="📄" label="Relatório PDF" desc="Exportar ata" />
-                  </TreeNode>
-                </TreeNode>
-                <TreeNode id="t-com" icon="📢" label="Comunicação" desc="Avisos, FAQ, DP" color="#3b82f6">
-                  <Leaf icon="📢" label="Comunicados" desc="Criar avisos, segmentar, acompanhar ciências" />
-                  <Leaf icon="❓" label="FAQ" desc="Perguntas frequentes com IA" />
-                  <Leaf icon="💬" label="Fale com DP" desc="Mensagens diretas ou anônimas" />
-                  <Leaf icon="📬" label="Caixa" desc="Somente gestor DP" />
-                </TreeNode>
-                <TreeNode id="t-cfg" icon="⚙️" label="Configuração" desc="Settings" color="#78716c">
-                  <Leaf icon="⚙️" label="Configurações" desc="Taxa, divisão, visibilidade, privacidade" />
-                  <Leaf icon="👔" label="Gestores" desc="Somente DP — sub-gestores" />
-                </TreeNode>
-              </div>)}
-
-              {/* ========== PERMISSÕES ========== */}
-              {archSec === "access" && (<div>
-                <p style={{fontSize:13,color:"var(--text2)",marginBottom:14,lineHeight:1.6}}>Quem pode ver e editar cada tipo de dado.</p>
-                <div style={{display:"flex",gap:16,marginBottom:12,flexWrap:"wrap",fontSize:11,color:"var(--text3)"}}>
-                  <span>🟢 Total</span><span>🟡 Condicional</span><span>🔵 Leitura</span><span>⚫ Sem acesso</span>
-                </div>
-                <div style={{overflowX:"auto"}}>
-                <table style={sty.tbl}>
-                  <thead><tr><th style={sty.th}>Funcionalidade</th><th style={sty.th}>⭐ Master</th><th style={sty.th}>👔 Gest. Adm.</th><th style={sty.th}>🎯 Líder</th><th style={sty.th}>👷 Empregado</th></tr></thead>
-                  <tbody>
-                    {[
-                      ["Gorjetas","🟢 Total","🟡 Se perms","⚫ —","🔵 Se habilitado"],
-                      ["Escala","🟢 Total","🟡 Se perms","🟡 Suas áreas","🔵 Própria"],
-                      ["Equipe","🟢 Total","🟢 Total","🔵 Suas áreas","⚫ —"],
-                      ["Cargos","🟢 Total","🟡 Se autorizado","⚫ —","⚫ —"],
-                      ["VT","🟢 Total","🟡 Se autorizado","⚫ —","⚫ —"],
-                      ["Reuniões","🟢 Total","🟢 Total","🟡 Suas áreas","⚫ —"],
-                      ["Comunicados","🟢 Total","🟢 CRUD","⚫ —","🔵 Ler"],
-                      ["Fale com DP","🟢 Admin","🟢 Responder","⚫ —","🟡 Enviar"],
-                      ["Ocorrências","🟢 Total","🟢 Total","⚫ —","🔵 Trilha"],
-                      ["Feedbacks","🟢 Total","🟢 Total","⚫ —","🔵 Trilha"],
-                      ["Financeiro","🟢 Total","⚫ —","⚫ —","⚫ —"],
-                      ["Lixeira def.","🟡 Master","⚫ —","⚫ —","⚫ —"],
-                      ["Modo offline","🟡 Master","⚫ —","⚫ —","⚫ —"],
-                    ].map(([feat,...cols],ri) => (
-                      <tr key={ri}><td style={{...sty.td,fontWeight:500}}>{feat}</td>{cols.map((c,ci)=>(<td key={ci} style={{...sty.td,textAlign:"center"}}>{c}</td>))}</tr>
-                    ))}
-                  </tbody>
-                </table>
-                </div>
-                <div style={sty.secTitle}>🔑 Flags importantes</div>
-                <div style={sty.grid}>
-                  <div style={sty.card}><div style={sty.cardTitle}>isMaster</div><div style={sty.cardDesc}>Lixeira definitiva, gerenciar admins, offline com bloqueio de escrita.</div></div>
-                  <div style={sty.card}><div style={sty.cardTitle}>isDP</div><div style={sty.cardDesc}>Visualizar mensagens DP, criar sub-gestores, aba Caixa.</div></div>
-                  <div style={sty.card}><div style={sty.cardTitle}>isOwner</div><div style={sty.cardDesc}>Prop do RestaurantPanel. true=Owner, false=Manager.</div></div>
-                  <div style={sty.card}><div style={sty.cardTitle}>privacyMode</div><div style={sty.cardDesc}>Mascara gorjetas, CPFs e mensagens DP na visão do Owner.</div></div>
-                  <div style={sty.card}><div style={sty.cardTitle}>profile: "lider"</div><div style={sty.cardDesc}>Restringe manager a Dashboard, Escala, Horários, Equipe, Reuniões.</div></div>
-                  <div style={sty.card}><div style={sty.cardTitle}>tabsConfig / tabsGestor</div><div style={sty.cardDesc}>Duas camadas: admin define possível, gestor define visível ao empregado.</div></div>
-                </div>
-              </div>)}
-
-              {/* ========== FLUXOS ========== */}
-              {archSec === "flows" && (<div>
-                <div style={sty.secTitle}>🔐 Login</div>
-                <Flow steps={["CPF ou Código","Busca owners→managers→employees","Verifica PIN","Redireciona portal"]} />
-                <div style={sty.secTitle}>💰 Gorjeta do dia</div>
-                <Flow steps={["Informa pool total","Divide por área (splits %)","Divide por pontos","Calcula imposto (33%)","Gorjeta líquida"]} />
-                <div style={sty.secTitle}>📅 Ciclo mensal da escala</div>
-                <Flow steps={["Mês aberto","Preenche escala","Importa ponto (PDF)","Compara ponto vs escala","Fecha mês","Snapshot congelado"]} />
-                <div style={sty.secTitle}>🚌 Ciclo do VT</div>
-                <Flow steps={["Taxa diária","Dias trabalhados × taxa","Ajustes","Marca pago","Snapshot"]} />
-                <div style={sty.secTitle}>🤝 Ciclo de reunião</div>
-                <Flow steps={["Planeja","Monta pauta","Executa ao vivo","Ações + pendências","Relatório PDF"]} />
-                <div style={sty.secTitle}>👷 Ciclo do empregado</div>
-                <Flow steps={["Admissão","Escala + gorjetas","Feedbacks","Promoção","Objetivos","Demissão → PDF"]} />
-                <div style={sty.secTitle}>💾 Fluxo de dados</div>
-                <Flow steps={["Clica botão","onUpdate(campo, valor)","Verifica offline?","setState","save() → Firestore","Toast"]} />
-              </div>)}
-
-              {/* ========== PLANEJAMENTO ========== */}
-              {archSec === "planning" && (<div>
-                <div style={sty.secTitle}>📐 Como adicionar funcionalidades</div>
-                <div style={sty.grid}>
-                  <div style={{...sty.card,borderColor:"#22c55e"}}><div style={sty.cardTitle}>1️⃣ Novo campo de dados</div><div style={sty.cardDesc}>Adicionar chave em K, useState, load(), objeto data, setters/keys do handleUpdate, cacheSet.</div><span style={sty.tag}>~6 pontos de edição</span></div>
-                  <div style={{...sty.card,borderColor:"#3b82f6"}}><div style={sty.cardTitle}>2️⃣ Nova aba no RestaurantPanel</div><div style={sty.cardDesc}>Adicionar no array de abas do grupo, criar componente, bloco tab === "novaAba".</div><span style={sty.tag}>~3 pontos de edição</span></div>
-                  <div style={{...sty.card,borderColor:"#f59e0b"}}><div style={sty.cardTitle}>3️⃣ Nova sub-aba no Equipe</div><div style={sty.cardDesc}>Adicionar pill no detalhe do empregado, criar bloco condicional.</div><span style={sty.tag}>~2 pontos de edição</span></div>
-                  <div style={{...sty.card,borderColor:"#a855f7"}}><div style={sty.cardTitle}>4️⃣ Nova aba do empregado</div><div style={sty.cardDesc}>Adicionar tab no EmployeePortal, componente, tabsConfig + tabsGestor.</div><span style={sty.tag}>~4 pontos de edição</span></div>
-                  <div style={{...sty.card,borderColor:"#ec4899"}}><div style={sty.cardTitle}>5️⃣ Novo tipo de reunião</div><div style={sty.cardDesc}>Adicionar em MEETING_TYPES + template de pauta específico.</div><span style={sty.tag}>~2 pontos de edição</span></div>
-                  <div style={{...sty.card,borderColor:"#14b8a6"}}><div style={sty.cardTitle}>6️⃣ Novo relatório PDF</div><div style={sty.cardDesc}>Criar função geradora + botão de exportação no componente.</div><span style={sty.tag}>Componente novo</span></div>
-                </div>
-                <div style={sty.secTitle}>⚠️ Pontos de atenção</div>
-                <div style={sty.grid}>
-                  <div style={{...sty.card,borderColor:"#ef4444"}}><div style={sty.cardTitle}>🔴 Arquivo único</div><div style={sty.cardDesc}>Todo o código está em App.js (~17.000 linhas). Build com CI=true detecta erros.</div></div>
-                  <div style={{...sty.card,borderColor:"#ef4444"}}><div style={sty.cardTitle}>🔴 Dados globais</div><div style={sty.cardDesc}>Todos os dados carregam no startup. Novos campos aumentam tempo de carregamento.</div></div>
-                  <div style={{...sty.card,borderColor:"#f59e0b"}}><div style={sty.cardTitle}>🟡 Permissões manuais</div><div style={sty.cardDesc}>Cada componente verifica isOwner, isMaster, isDP, perms manualmente.</div></div>
-                  <div style={{...sty.card,borderColor:"#f59e0b"}}><div style={sty.cardTitle}>🟡 Mobile vs Desktop</div><div style={sty.cardDesc}>Algumas abas bloqueiam mobile. Considere se novas features precisam funcionar no celular.</div></div>
-                </div>
-                <div style={sty.secTitle}>💡 Áreas com potencial de expansão</div>
-                <div style={sty.grid}>
-                  <div style={sty.card}><div style={sty.cardTitle}>📊 Analytics / Dashboards</div><div style={sty.cardDesc}>Gráficos de tendência, comparativo entre meses, KPIs.</div></div>
-                  <div style={sty.card}><div style={sty.cardTitle}>📱 PWA / Notificações</div><div style={sty.cardDesc}>Push notifications para empregados. O app já é responsivo.</div></div>
-                  <div style={sty.card}><div style={sty.cardTitle}>🔔 Tempo real</div><div style={sty.cardDesc}>Firebase onSnapshot para atualizações instantâneas.</div></div>
-                  <div style={sty.card}><div style={sty.cardTitle}>📋 Mais relatórios</div><div style={sty.cardDesc}>Gorjetas mensal, atrasos, financeiro, reuniões por período.</div></div>
-                  <div style={sty.card}><div style={sty.cardTitle}>🤖 Mais IA</div><div style={sty.cardDesc}>Padrões de atrasos, sugestão de feedback, previsão VT.</div></div>
-                  <div style={sty.card}><div style={sty.cardTitle}>🔗 Integrações</div><div style={sty.cardDesc}>Folha de pagamento, WhatsApp, calendário, outros pontos.</div></div>
-                </div>
-              </div>)}
-            </div>
-          );
-        })()}
+        {tab === "arquitetura" && <ArchitectureTab isMobile={isMobile} />}
       </div>
 
       {/* Modals */}
