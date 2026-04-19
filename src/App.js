@@ -6930,8 +6930,8 @@ function MeetingPlannerSection({ restaurantId, employees, roles, areas, meetingP
                           </div>
                         ))}
                         <div style={{display:"flex",gap:6,marginTop:6}}>
-                          <input value={avalNewItem} onChange={e=>setAvalNewItem(e.target.value)} onKeyDown={e=>{if(e.key==="Enter"&&avalNewItem.trim()){setItems(prev=>[...prev,avalNewItem.trim()]);setAvalNewItem("");}}} placeholder={avalSection==="fortes"?"Ex: Pontualidade, liderança...":avalSection==="melhorar"?"Ex: Comunicação, organização...":"Ex: Observação interna..."} style={{...S.input,flex:1,fontSize:11,padding:"5px 8px"}}/>
-                          <button onClick={()=>{if(avalNewItem.trim()){setItems(prev=>[...prev,avalNewItem.trim()]);setAvalNewItem("");}}} style={{...S.btnPrimary,fontSize:11,padding:"5px 12px",background:secColor,borderColor:secColor}}>+</button>
+                          <input value={avalNewItem} onChange={e=>setAvalNewItem(e.target.value)} onKeyDown={e=>{if(e.key==="Enter"&&avalNewItem.trim()){setItems(prev=>[...prev,avalNewItem.trim()]);setAvalNewItem("");}}} placeholder={avalSection==="fortes"?"Ex: Pontualidade, liderança...":avalSection==="melhorar"?"Ex: Comunicação, organização...":"Ex: Observação interna..."} style={{...S.input,flex:1,fontSize:12,padding:"8px 10px",minWidth:0}}/>
+                          <button onClick={()=>{if(avalNewItem.trim()){setItems(prev=>[...prev,avalNewItem.trim()]);setAvalNewItem("");}}} style={{background:secColor,color:"#fff",border:"none",borderRadius:8,cursor:"pointer",fontSize:14,fontWeight:700,width:36,minWidth:36,maxWidth:36,height:36,display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>+</button>
                         </div>
                       </div>
                     );
@@ -6958,7 +6958,7 @@ function MeetingPlannerSection({ restaurantId, employees, roles, areas, meetingP
                   ))}
                   <div style={{display:"flex",gap:4,marginTop:6,alignItems:"center"}}>
                     <input value={alinhNewTopic} onChange={e=>setAlinhNewTopic(e.target.value)} onKeyDown={e=>{if(e.key==="Enter"&&alinhNewTopic.trim()){setAlinhTopics(prev=>[...prev,alinhNewTopic.trim()]);setAlinhNewTopic("");}}} placeholder="Ex: Escala do próximo mês, treinamento..." style={{...S.input,flex:1,fontSize:12,padding:"8px 10px",minWidth:0}}/>
-                    <button onClick={()=>{if(alinhNewTopic.trim()){setAlinhTopics(prev=>[...prev,alinhNewTopic.trim()]);setAlinhNewTopic("");}}} style={{...S.btnPrimary,fontSize:13,padding:"7px 10px",lineHeight:1,minWidth:32,maxWidth:32}}>+</button>
+                    <button onClick={()=>{if(alinhNewTopic.trim()){setAlinhTopics(prev=>[...prev,alinhNewTopic.trim()]);setAlinhNewTopic("");}}} style={{background:ac,color:"#fff",border:"none",borderRadius:8,cursor:"pointer",fontSize:14,fontWeight:700,width:36,minWidth:36,maxWidth:36,height:36,display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>+</button>
                   </div>
                 </div>
               )}
