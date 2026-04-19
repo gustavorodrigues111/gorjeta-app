@@ -6938,9 +6938,9 @@ function MeetingPlannerSection({ restaurantId, employees, roles, areas, meetingP
                       <button onClick={()=>setAlinhTopics(prev=>prev.filter((_,i)=>i!==idx))} style={{padding:"2px 6px",borderRadius:4,border:"1px solid var(--border)",background:"transparent",color:"var(--text3)",cursor:"pointer",fontSize:9}}>✕</button>
                     </div>
                   ))}
-                  <div style={{display:"flex",gap:6,marginTop:6}}>
-                    <input value={alinhNewTopic} onChange={e=>setAlinhNewTopic(e.target.value)} onKeyDown={e=>{if(e.key==="Enter"&&alinhNewTopic.trim()){setAlinhTopics(prev=>[...prev,alinhNewTopic.trim()]);setAlinhNewTopic("");}}} placeholder="Ex: Escala do próximo mês, treinamento..." style={{...S.input,flex:1,fontSize:11,padding:"5px 8px"}}/>
-                    <button onClick={()=>{if(alinhNewTopic.trim()){setAlinhTopics(prev=>[...prev,alinhNewTopic.trim()]);setAlinhNewTopic("");}}} style={{...S.btnPrimary,fontSize:11,padding:"5px 12px"}}>+</button>
+                  <div style={{display:"flex",gap:4,marginTop:6,alignItems:"center"}}>
+                    <input value={alinhNewTopic} onChange={e=>setAlinhNewTopic(e.target.value)} onKeyDown={e=>{if(e.key==="Enter"&&alinhNewTopic.trim()){setAlinhTopics(prev=>[...prev,alinhNewTopic.trim()]);setAlinhNewTopic("");}}} placeholder="Ex: Escala do próximo mês, treinamento..." style={{...S.input,flex:1,fontSize:12,padding:"8px 10px",minWidth:0}}/>
+                    <button onClick={()=>{if(alinhNewTopic.trim()){setAlinhTopics(prev=>[...prev,alinhNewTopic.trim()]);setAlinhNewTopic("");}}} style={{...S.btnPrimary,fontSize:13,padding:"7px 10px",lineHeight:1,minWidth:32,maxWidth:32}}>+</button>
                   </div>
                 </div>
               )}
