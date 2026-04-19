@@ -7047,7 +7047,7 @@ function MeetingPlannerSection({ restaurantId, employees, roles, areas, meetingP
 
               {/* Pull employee incidents */}
               {(() => {
-                const recentIncidents = (data?.incidents ?? []).filter(i => i.restaurantId === restaurantId && !pautaPickIdeas.includes(i.id)).sort((a,b)=>(b.createdAt??"").localeCompare(a.createdAt??"")).slice(0, 20);
+                const recentIncidents = (data?.incidents ?? []).filter(i => i.restaurantId === restaurantId && !i.deletedAt && !pautaPickIdeas.includes(i.id)).sort((a,b)=>(b.createdAt??"").localeCompare(a.createdAt??"")).slice(0, 20);
                 return recentIncidents.length > 0 ? (
                   <div style={{marginBottom:14}}>
                     <label style={{...S.label,display:"flex",alignItems:"center",gap:4}}>👤 Puxar ocorrências de empregados</label>
