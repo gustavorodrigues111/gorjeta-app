@@ -3,7 +3,7 @@ import { useState, useEffect, Component } from "react";
 import { db } from "./firebase";
 import { doc, getDoc, setDoc } from "firebase/firestore";
 
-const APP_VERSION = "5.38.0";
+const APP_VERSION = "5.39.0";
 
 const DEFAULT_ADMISSION = () => `${new Date().getFullYear()}-01-01`;
 const round2 = (v) => Math.round(v * 100) / 100;
@@ -6328,6 +6328,15 @@ function MeetingPlannerSection({ restaurantId, employees, roles, areas, meetingP
   const [planNote, setPlanNote] = useState("");
   const [selectedAreas, setSelectedAreas] = useState([]);
   const [selectedEmps, setSelectedEmps] = useState([]);
+  // Avaliação individual checklist
+  const [avalPontosFortes, setAvalPontosFortes] = useState([]);
+  const [avalPontosMelhorar, setAvalPontosMelhorar] = useState([]);
+  const [avalNotas, setAvalNotas] = useState([]);
+  const [avalNewItem, setAvalNewItem] = useState("");
+  const [avalSection, setAvalSection] = useState("fortes"); // fortes | melhorar | notas
+  // Alinhamento topics checklist
+  const [alinhTopics, setAlinhTopics] = useState([]);
+  const [alinhNewTopic, setAlinhNewTopic] = useState("");
   // Area filter for Líder
   const [showAllAreas, setShowAllAreas] = useState(false);
   // Ideias
@@ -6341,6 +6350,8 @@ function MeetingPlannerSection({ restaurantId, employees, roles, areas, meetingP
   const [occDesc, setOccDesc] = useState("");
   const [occType, setOccType] = useState("cliente");
   const [occAreas, setOccAreas] = useState([]);
+  const [occEmployeeIds, setOccEmployeeIds] = useState([]);
+  const [occSubtype, setOccSubtype] = useState("");
   // Liderança participants
   const [lidParticipants, setLidParticipants] = useState([]);
   // Execution mode (live meeting)
@@ -6366,7 +6377,8 @@ function MeetingPlannerSection({ restaurantId, employees, roles, areas, meetingP
   const allActions = (data?.meetingActions ?? []).filter(a => a.restaurantId === restaurantId);
   const allOccurrences = (data?.meetingOccurrences ?? []).filter(o => o.restaurantId === restaurantId);
   const allPendencias = (data?.meetingPendencias ?? []).filter(p => p.restaurantId === restaurantId);
-  const OCC_TYPES = [["cliente","🧑‍🍳","Cliente"],["estrutura","🏗️","Estrutura"],["operacao","⚙️","Operação"],["outro","📝","Outro"]];
+  const OCC_TYPES = [["cliente","🧑‍🍳","Cliente"],["estrutura","🏗️","Estrutura"],["operacao","⚙️","Operação"],["pessoal","👤","Pessoal"],["outro","📝","Outro"]];
+  const PESSOAL_SUBTYPES = [["advertencia_verbal","Advertência verbal"],["advertencia_escrita","Advertência escrita"],["desentendimento","Desentendimento"],["dano_material","Dano material"],["indisciplina","Indisciplina"],["elogio_formal","Elogio formal"],["destaque_positivo","Destaque positivo"],["outro_pessoal","Outro"]];
 
   // Wrapper for reading data
   const getData = (key) => data?.[key] ?? [];
@@ -6405,7 +6417,8 @@ function MeetingPlannerSection({ restaurantId, employees, roles, areas, meetingP
 
   function handleCreatePlan() {
     if (!planDate) { window.alert("Informe a data prevista."); return; }
-    if (selectedEmps.length === 0) { window.alert("Selecione ao menos um participante."); return; }
+    if (planType === "avaliação" && selectedEmps.length !== 1) { window.alert("Selecione exatamente um empregado para avaliação individual."); return; }
+    if (planType !== "avaliação" && selectedEmps.length === 0) { window.alert("Selecione ao menos um participante."); return; }
     const plan = {
       id: `${Date.now()}-${Math.random().toString(36).slice(2,6)}`,
       restaurantId,
@@ -6416,9 +6429,21 @@ function MeetingPlannerSection({ restaurantId, employees, roles, areas, meetingP
       createdBy: isOwner ? "Gestor AppTip" : (currentUser?.name ?? "Gestor Adm."),
       createdAt: new Date().toISOString(),
       completedFeedbackIds: {},
+      // Avaliação: structured checklist
+      ...(planType === "avaliação" ? {
+        pontosFortes: avalPontosFortes.map(t => ({ text: t, done: false })),
+        pontosMelhorar: avalPontosMelhorar.map(t => ({ text: t, done: false })),
+        notasInternas: avalNotas.map(t => ({ text: t, done: false })),
+      } : {}),
+      // Alinhamento: topics checklist
+      ...(planType === "alinhamento" ? {
+        topics: alinhTopics.map(t => ({ text: t, done: false })),
+      } : {}),
     };
     onUpdate("meetingPlans", [...(allMeetingPlans ?? []), plan]);
     setPlanDate(""); setPlanNote(""); setSelectedAreas([]); setSelectedEmps([]); setShowForm(false);
+    setAvalPontosFortes([]); setAvalPontosMelhorar([]); setAvalNotas([]); setAvalNewItem(""); setAvalSection("fortes");
+    setAlinhTopics([]); setAlinhNewTopic("");
   }
 
   function handleDeletePlan(planId) {
@@ -6601,19 +6626,22 @@ function MeetingPlannerSection({ restaurantId, employees, roles, areas, meetingP
   // ── Ocorrências ──
   function handleCreateOccurrence() {
     if (!occTitle.trim()) { window.alert("Informe o título da ocorrência."); return; }
+    if (occType === "pessoal" && occEmployeeIds.length === 0) { window.alert("Selecione ao menos um empregado para ocorrência pessoal."); return; }
     const occ = {
       id: `occ-${Date.now()}-${Math.random().toString(36).slice(2,6)}`,
       restaurantId,
       title: occTitle.trim(),
       description: occDesc.trim(),
       type: occType,
+      subtype: occType === "pessoal" ? occSubtype : "",
       areas: occAreas.length > 0 ? [...occAreas] : [],
+      employeeIds: occEmployeeIds.length > 0 ? [...occEmployeeIds] : [],
       createdBy: currentUser?.name ?? (isOwner ? "Gestor AppTip" : "Gestor Adm."),
       createdAt: new Date().toISOString(),
       status: "nova", // nova | na_pauta | resolvida | descartada
     };
     onUpdate("meetingOccurrences", [...getData("meetingOccurrences"), occ]);
-    setOccTitle(""); setOccDesc(""); setOccType("cliente"); setOccAreas([]); setShowOccForm(false);
+    setOccTitle(""); setOccDesc(""); setOccType("cliente"); setOccAreas([]); setOccEmployeeIds([]); setOccSubtype(""); setShowOccForm(false);
   }
 
   function handleUpdateOccStatus(occId, status) {
@@ -6794,13 +6822,20 @@ function MeetingPlannerSection({ restaurantId, employees, roles, areas, meetingP
               <h4 style={{color:"var(--text)",margin:"0 0 14px",fontSize:15,fontWeight:700}}>👥 Reunião com equipe</h4>
               <div style={{display:"flex",gap:6,marginBottom:14}}>
                 {[["alinhamento","💬 Alinhamento","#3b82f6"],["avaliação","📋 Avaliação","#8b5cf6"]].map(([val,lbl,col]) => (
-                  <button key={val} onClick={()=>setPlanType(val)} style={{
+                  <button key={val} onClick={()=>{setPlanType(val);setSelectedEmps([]);setSelectedAreas([]);}} style={{
                     flex:1,padding:"10px",borderRadius:10,border:`2px solid ${planType===val?col:"var(--border)"}`,
                     background:planType===val?col+"14":"transparent",color:planType===val?col:"var(--text3)",
                     cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:12,fontWeight:planType===val?700:400
                   }}>{lbl}</button>
                 ))}
               </div>
+
+              {planType === "avaliação" && (
+                <div style={{padding:"8px 12px",borderRadius:8,background:"#8b5cf608",border:"1px solid #8b5cf622",marginBottom:14,fontSize:11,color:"#8b5cf6"}}>
+                  📋 Avaliação individual — selecione 1 empregado e monte a pauta com pontos fortes, a melhorar e notas.
+                </div>
+              )}
+
               <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:12}}>
                 <div>
                   <label style={S.label}>Data prevista</label>
@@ -6808,10 +6843,12 @@ function MeetingPlannerSection({ restaurantId, employees, roles, areas, meetingP
                 </div>
                 <div>
                   <label style={S.label}>Observação <span style={{fontWeight:400,color:"var(--text3)"}}>(opcional)</span></label>
-                  <input value={planNote} onChange={e=>setPlanNote(e.target.value)} placeholder="Ex: Fechamento trimestral" style={S.input}/>
+                  <input value={planNote} onChange={e=>setPlanNote(e.target.value)} placeholder={planType==="avaliação"?"Ex: Avaliação trimestral Q1":"Ex: Fechamento trimestral"} style={S.input}/>
                 </div>
               </div>
-              <label style={S.label}>Participantes</label>
+
+              {/* Participant selection */}
+              <label style={S.label}>{planType === "avaliação" ? "Empregado" : "Participantes"}</label>
               <div style={{display:"flex",gap:6,marginBottom:10,flexWrap:"wrap"}}>
                 {filteredAreas.map(area => {
                   const active = selectedAreas.includes(area);
@@ -6833,7 +6870,10 @@ function MeetingPlannerSection({ restaurantId, employees, roles, areas, meetingP
                   }).map(emp => {
                     const active = selectedEmps.includes(emp.id);
                     return (
-                      <button key={emp.id} onClick={()=>toggleEmp(emp.id)} style={{
+                      <button key={emp.id} onClick={()=>{
+                        if (planType === "avaliação") { setSelectedEmps(active ? [] : [emp.id]); }
+                        else { toggleEmp(emp.id); }
+                      }} style={{
                         padding:"4px 10px",borderRadius:8,border:`1px solid ${active?"var(--ac)":"var(--border)"}`,
                         background:active?"var(--ac-bg,#d4a01711)":"transparent",color:active?"var(--ac)":"var(--text3)",
                         cursor:"pointer",fontSize:11,fontFamily:"'DM Mono',monospace",fontWeight:active?600:400
@@ -6843,6 +6883,68 @@ function MeetingPlannerSection({ restaurantId, employees, roles, areas, meetingP
                 </div>
               )}
               {selectedEmps.length > 0 && <div style={{fontSize:11,color:"var(--text3)",marginBottom:10}}>{selectedEmps.length} participante{selectedEmps.length!==1?"s":""} selecionado{selectedEmps.length!==1?"s":""}</div>}
+
+              {/* ── Avaliação: 3 seções checklist ── */}
+              {planType === "avaliação" && selectedEmps.length === 1 && (
+                <div style={{marginBottom:14,padding:14,borderRadius:10,border:"1px solid #8b5cf622",background:"#8b5cf604"}}>
+                  <div style={{fontSize:12,fontWeight:700,color:"var(--text)",marginBottom:10}}>Pauta da avaliação</div>
+                  <div style={{display:"flex",gap:4,marginBottom:10}}>
+                    {[["fortes","💪 Pontos fortes","#10b981"],["melhorar","📈 A melhorar","#f59e0b"],["notas","📝 Notas internas","#6366f1"]].map(([sec,lbl,col]) => (
+                      <button key={sec} onClick={()=>setAvalSection(sec)} style={{
+                        flex:1,padding:"6px 8px",borderRadius:8,border:`1px solid ${avalSection===sec?col:"var(--border)"}`,
+                        background:avalSection===sec?col+"14":"transparent",color:avalSection===sec?col:"var(--text3)",
+                        cursor:"pointer",fontSize:10,fontFamily:"'DM Sans',sans-serif",fontWeight:avalSection===sec?700:400
+                      }}>{lbl}</button>
+                    ))}
+                  </div>
+                  {/* Items for current section */}
+                  {(() => {
+                    const items = avalSection === "fortes" ? avalPontosFortes : avalSection === "melhorar" ? avalPontosMelhorar : avalNotas;
+                    const setItems = avalSection === "fortes" ? setAvalPontosFortes : avalSection === "melhorar" ? setAvalPontosMelhorar : setAvalNotas;
+                    const secColor = avalSection === "fortes" ? "#10b981" : avalSection === "melhorar" ? "#f59e0b" : "#6366f1";
+                    return (
+                      <div>
+                        {items.map((item, idx) => (
+                          <div key={idx} style={{display:"flex",alignItems:"center",gap:6,marginBottom:4}}>
+                            <span style={{fontSize:10,color:secColor}}>•</span>
+                            <span style={{flex:1,fontSize:12,color:"var(--text)"}}>{item}</span>
+                            <button onClick={()=>setItems(prev=>prev.filter((_,i)=>i!==idx))} style={{padding:"2px 6px",borderRadius:4,border:"1px solid var(--border)",background:"transparent",color:"var(--text3)",cursor:"pointer",fontSize:9}}>✕</button>
+                          </div>
+                        ))}
+                        <div style={{display:"flex",gap:6,marginTop:6}}>
+                          <input value={avalNewItem} onChange={e=>setAvalNewItem(e.target.value)} onKeyDown={e=>{if(e.key==="Enter"&&avalNewItem.trim()){setItems(prev=>[...prev,avalNewItem.trim()]);setAvalNewItem("");}}} placeholder={avalSection==="fortes"?"Ex: Pontualidade, liderança...":avalSection==="melhorar"?"Ex: Comunicação, organização...":"Ex: Observação interna..."} style={{...S.input,flex:1,fontSize:11,padding:"5px 8px"}}/>
+                          <button onClick={()=>{if(avalNewItem.trim()){setItems(prev=>[...prev,avalNewItem.trim()]);setAvalNewItem("");}}} style={{...S.btnPrimary,fontSize:11,padding:"5px 12px",background:secColor,borderColor:secColor}}>+</button>
+                        </div>
+                      </div>
+                    );
+                  })()}
+                  {/* Summary */}
+                  <div style={{display:"flex",gap:10,marginTop:10,fontSize:10,color:"var(--text3)"}}>
+                    <span style={{color:"#10b981"}}>💪 {avalPontosFortes.length}</span>
+                    <span style={{color:"#f59e0b"}}>📈 {avalPontosMelhorar.length}</span>
+                    <span style={{color:"#6366f1"}}>📝 {avalNotas.length}</span>
+                  </div>
+                </div>
+              )}
+
+              {/* ── Alinhamento: topics checklist ── */}
+              {planType === "alinhamento" && (
+                <div style={{marginBottom:14,padding:14,borderRadius:10,border:"1px solid #3b82f622",background:"#3b82f604"}}>
+                  <div style={{fontSize:12,fontWeight:700,color:"var(--text)",marginBottom:10}}>Temas a tratar</div>
+                  {alinhTopics.map((topic, idx) => (
+                    <div key={idx} style={{display:"flex",alignItems:"center",gap:6,marginBottom:4}}>
+                      <span style={{fontSize:10,color:"#3b82f6",fontWeight:700,minWidth:18}}>{idx+1}.</span>
+                      <span style={{flex:1,fontSize:12,color:"var(--text)"}}>{topic}</span>
+                      <button onClick={()=>setAlinhTopics(prev=>prev.filter((_,i)=>i!==idx))} style={{padding:"2px 6px",borderRadius:4,border:"1px solid var(--border)",background:"transparent",color:"var(--text3)",cursor:"pointer",fontSize:9}}>✕</button>
+                    </div>
+                  ))}
+                  <div style={{display:"flex",gap:6,marginTop:6}}>
+                    <input value={alinhNewTopic} onChange={e=>setAlinhNewTopic(e.target.value)} onKeyDown={e=>{if(e.key==="Enter"&&alinhNewTopic.trim()){setAlinhTopics(prev=>[...prev,alinhNewTopic.trim()]);setAlinhNewTopic("");}}} placeholder="Ex: Escala do próximo mês, treinamento..." style={{...S.input,flex:1,fontSize:11,padding:"5px 8px"}}/>
+                    <button onClick={()=>{if(alinhNewTopic.trim()){setAlinhTopics(prev=>[...prev,alinhNewTopic.trim()]);setAlinhNewTopic("");}}} style={{...S.btnPrimary,fontSize:11,padding:"5px 12px"}}>+</button>
+                  </div>
+                </div>
+              )}
+
               <button onClick={handleCreatePlan} style={{...S.btnPrimary,width:"auto",padding:"10px 24px",background:typeColor,borderColor:typeColor}}>Criar reunião</button>
             </div>
           )}
@@ -7032,6 +7134,36 @@ function MeetingPlannerSection({ restaurantId, employees, roles, areas, meetingP
                               );
                             })}
                           </div>
+                          {/* Avaliação checklist summary */}
+                          {plan.type === "avaliação" && (plan.pontosFortes?.length > 0 || plan.pontosMelhorar?.length > 0 || plan.notasInternas?.length > 0) && (
+                            <div style={{marginTop:10,padding:"8px 10px",borderRadius:8,background:"#8b5cf606",border:"1px solid #8b5cf611"}}>
+                              {(plan.pontosFortes ?? []).length > 0 && (
+                                <div style={{marginBottom:4}}>
+                                  <span style={{fontSize:10,color:"#10b981",fontWeight:600}}>💪 Pontos fortes:</span>
+                                  {plan.pontosFortes.map((p,i) => <span key={i} style={{fontSize:10,color:"var(--text3)",marginLeft:4}}>{p.done?"✓ ":"○ "}{p.text}{i<plan.pontosFortes.length-1?", ":""}</span>)}
+                                </div>
+                              )}
+                              {(plan.pontosMelhorar ?? []).length > 0 && (
+                                <div style={{marginBottom:4}}>
+                                  <span style={{fontSize:10,color:"#f59e0b",fontWeight:600}}>📈 A melhorar:</span>
+                                  {plan.pontosMelhorar.map((p,i) => <span key={i} style={{fontSize:10,color:"var(--text3)",marginLeft:4}}>{p.done?"✓ ":"○ "}{p.text}{i<plan.pontosMelhorar.length-1?", ":""}</span>)}
+                                </div>
+                              )}
+                              {(plan.notasInternas ?? []).length > 0 && (
+                                <div>
+                                  <span style={{fontSize:10,color:"#6366f1",fontWeight:600}}>📝 Notas:</span>
+                                  {plan.notasInternas.map((p,i) => <span key={i} style={{fontSize:10,color:"var(--text3)",marginLeft:4}}>{p.done?"✓ ":"○ "}{p.text}{i<plan.notasInternas.length-1?", ":""}</span>)}
+                                </div>
+                              )}
+                            </div>
+                          )}
+                          {/* Alinhamento topics summary */}
+                          {plan.type === "alinhamento" && (plan.topics ?? []).length > 0 && (
+                            <div style={{marginTop:10,padding:"8px 10px",borderRadius:8,background:"#3b82f606",border:"1px solid #3b82f611"}}>
+                              <span style={{fontSize:10,color:"#3b82f6",fontWeight:600}}>Temas: </span>
+                              {plan.topics.map((t,i) => <span key={i} style={{fontSize:10,color:"var(--text3)"}}>{t.done?"✓ ":"○ "}{t.text}{i<plan.topics.length-1?" · ":""}</span>)}
+                            </div>
+                          )}
                         </div>
                       );
                     })}
@@ -7391,7 +7523,7 @@ function MeetingPlannerSection({ restaurantId, employees, roles, areas, meetingP
                 <label style={S.label}>Tipo</label>
                 <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
                   {OCC_TYPES.map(([val,icon,lbl]) => (
-                    <button key={val} onClick={()=>setOccType(val)} style={{
+                    <button key={val} onClick={()=>{setOccType(val);if(val!=="pessoal"){setOccSubtype("");setOccEmployeeIds([]);}}} style={{
                       padding:"6px 14px",borderRadius:8,border:`2px solid ${occType===val?"#ef4444":"var(--border)"}`,
                       background:occType===val?"#ef444414":"transparent",color:occType===val?"#ef4444":"var(--text3)",
                       cursor:"pointer",fontSize:12,fontFamily:"'DM Sans',sans-serif",fontWeight:occType===val?700:400
@@ -7399,9 +7531,43 @@ function MeetingPlannerSection({ restaurantId, employees, roles, areas, meetingP
                   ))}
                 </div>
               </div>
+
+              {/* Pessoal subtype selector */}
+              {occType === "pessoal" && (
+                <div style={{marginBottom:12}}>
+                  <label style={S.label}>Subtipo</label>
+                  <div style={{display:"flex",gap:4,flexWrap:"wrap"}}>
+                    {PESSOAL_SUBTYPES.map(([val,lbl]) => (
+                      <button key={val} onClick={()=>setOccSubtype(val)} style={{
+                        padding:"4px 10px",borderRadius:6,border:`1px solid ${occSubtype===val?"#8b5cf6":"var(--border)"}`,
+                        background:occSubtype===val?"#8b5cf614":"transparent",color:occSubtype===val?"#8b5cf6":"var(--text3)",
+                        cursor:"pointer",fontSize:11,fontFamily:"'DM Sans',sans-serif",fontWeight:occSubtype===val?600:400
+                      }}>{lbl}</button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Employee selector (mandatory for pessoal, optional for others) */}
+              <div style={{marginBottom:12}}>
+                <label style={S.label}>{occType === "pessoal" ? "Empregados envolvidos" : "Empregados envolvidos"} <span style={{fontWeight:400,color:"var(--text3)"}}>{occType === "pessoal" ? "(obrigatório)" : "(opcional)"}</span></label>
+                <div style={{display:"flex",gap:4,flexWrap:"wrap",maxHeight:120,overflowY:"auto"}}>
+                  {(employees ?? []).filter(e => e.restaurantId === restaurantId && !e.inactive).map(emp => {
+                    const active = occEmployeeIds.includes(emp.id);
+                    return (
+                      <button key={emp.id} onClick={()=>setOccEmployeeIds(prev=>prev.includes(emp.id)?prev.filter(x=>x!==emp.id):[...prev,emp.id])} style={{
+                        padding:"3px 8px",borderRadius:6,border:`1px solid ${active?"#8b5cf6":"var(--border)"}`,
+                        background:active?"#8b5cf614":"transparent",color:active?"#8b5cf6":"var(--text3)",
+                        cursor:"pointer",fontSize:10,fontFamily:"'DM Sans',sans-serif",fontWeight:active?600:400
+                      }}>{active?"✓ ":""}{emp.name?.split(" ")[0]}</button>
+                    );
+                  })}
+                </div>
+              </div>
+
               <div style={{marginBottom:12}}>
                 <label style={S.label}>Título</label>
-                <input value={occTitle} onChange={e=>setOccTitle(e.target.value)} placeholder="Ex: Reclamação de cliente sobre demora" style={S.input}/>
+                <input value={occTitle} onChange={e=>setOccTitle(e.target.value)} placeholder={occType==="pessoal"?"Ex: Advertência por atraso":"Ex: Reclamação de cliente sobre demora"} style={S.input}/>
               </div>
               <div style={{marginBottom:12}}>
                 <label style={S.label}>Descrição <span style={{fontWeight:400,color:"var(--text3)"}}>(opcional)</span></label>
@@ -7426,7 +7592,7 @@ function MeetingPlannerSection({ restaurantId, employees, roles, areas, meetingP
             <div style={{...S.card,textAlign:"center",padding:40}}>
               <div style={{fontSize:36,marginBottom:12}}>🚨</div>
               <p style={{color:"var(--text3)",fontSize:14}}>Nenhuma ocorrência registrada.</p>
-              <p style={{color:"var(--text3)",fontSize:12}}>Registre ocorrências de clientes, estrutura ou operação para discutir nas reuniões.</p>
+              <p style={{color:"var(--text3)",fontSize:12}}>Registre ocorrências gerais ou de pessoal para discutir nas reuniões.</p>
             </div>
           )}
 
@@ -7440,9 +7606,15 @@ function MeetingPlannerSection({ restaurantId, employees, roles, areas, meetingP
                     <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:4,flexWrap:"wrap"}}>
                       {occ.priority && <span style={{fontSize:10,padding:"2px 6px",borderRadius:4,background:"#f59e0b22",color:"#f59e0b",fontWeight:700}}>⚡ Prioridade</span>}
                       <span style={{fontSize:10,padding:"2px 6px",borderRadius:4,background:"#ef444418",color:"#ef4444",fontWeight:600}}>{occT?.[1]} {occT?.[2]}</span>
+                      {occ.subtype && <span style={{fontSize:10,padding:"2px 6px",borderRadius:4,background:"#8b5cf618",color:"#8b5cf6"}}>{PESSOAL_SUBTYPES.find(([s])=>s===occ.subtype)?.[1] ?? occ.subtype}</span>}
                       {occAreaList.map(a => { const col = AREA_COLORS[a] ?? "#888"; return <span key={a} style={{fontSize:10,padding:"2px 6px",borderRadius:4,background:col+"18",color:col}}>{a}</span>; })}
                     </div>
                     <div style={{color:"var(--text)",fontWeight:600,fontSize:13}}>{occ.title}</div>
+                    {(occ.employeeIds ?? []).length > 0 && (
+                      <div style={{display:"flex",gap:4,flexWrap:"wrap",marginTop:4}}>
+                        {occ.employeeIds.map(eid => { const emp = employees.find(e=>e.id===eid); return emp ? <span key={eid} style={{fontSize:9,padding:"2px 6px",borderRadius:4,background:"#8b5cf612",color:"#8b5cf6",border:"1px solid #8b5cf622"}}>👤 {emp.name?.split(" ")[0]}</span> : null; })}
+                      </div>
+                    )}
                     {occ.description && <div style={{color:"var(--text3)",fontSize:11,marginTop:2}}>{occ.description}</div>}
                     <div style={{color:"var(--text3)",fontSize:10,marginTop:4}}>{occ.createdBy} · {new Date(occ.createdAt).toLocaleDateString("pt-BR")}</div>
                   </div>
@@ -8568,11 +8740,9 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
   // Líder Operacional: acesso restrito a Dashboard + Escala + Horários + Equipe
   // ── Grouped tabs ──
   const TAB_GROUPS = isLider ? [
-    { id:"equipe", label:"👥 Equipe", icon:"👥", tabs: [
-      ["employees","Pessoas"],
+    { id:"equipe", label:"👥 Pessoas", icon:"👥", tabs: [
+      ["employees","Equipe"],
       ["reunioes","Reuniões"],
-    ].filter(Boolean) },
-    { id:"operacao", label:"📅 Operação", icon:"📅", tabs: [
       canSched && ["schedule","Escala"],
       ["horarios","Horários"],
     ].filter(Boolean) },
@@ -8580,14 +8750,14 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
     { id:"operacao", label:"💰 Operação", icon:"💰", tabs: [
       canTips && ["dashboard","Dashboard"],
       canTips && ["tips","Gorjetas"],
-      canSched && ["schedule","Escala"],
       (isOwner || (perms.vt !== false && tabVisible("vt"))) && ["vt","Vale Transporte"],
     ].filter(Boolean) },
-    { id:"equipe", label:"👥 Equipe", icon:"👥", tabs: [
+    { id:"equipe", label:"👥 Pessoas e Planejamento", icon:"👥", tabs: [
+      (isOwner || canTips || tabVisible("employees")) && ["employees","Equipe"],
       (isOwner || tabVisible("roles")) && ["roles","Cargos"],
-      (isOwner || canTips || tabVisible("employees")) && ["employees","Pessoas"],
-      (isOwner || canTips || tabVisible("employees")) && ["reunioes","Reuniões"],
       (isOwner || tabVisible("horarios")) && ["horarios","Horários"],
+      canSched && ["schedule","Escala"],
+      (isOwner || canTips || tabVisible("employees")) && ["reunioes","Reuniões"],
     ].filter(Boolean) },
     { id:"comunicacao", label:"📢 Comunicação", icon:"📢", tabs: [
       (isOwner || tabVisible("comunicados")) && ["comunicados","Comunicados"],
