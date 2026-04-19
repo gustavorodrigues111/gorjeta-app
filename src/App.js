@@ -3,7 +3,7 @@ import { useState, useEffect, Component } from "react";
 import { db } from "./firebase";
 import { doc, getDoc, setDoc } from "firebase/firestore";
 
-const APP_VERSION = "5.41.0";
+const APP_VERSION = "5.42.0";
 
 const DEFAULT_ADMISSION = () => `${new Date().getFullYear()}-01-01`;
 const round2 = (v) => Math.round(v * 100) / 100;
@@ -4222,7 +4222,7 @@ function EmployeeSpreadsheet({ restEmps, restRoles, rid, employees, onUpdate, re
   const [dismissalCheckEmp, setDismissalCheckEmp] = useState(null);
   const [detailEmp, setDetailEmp] = useState(null); // empId for detail view
   const [detailTab, setDetailTab] = useState("cadastro"); // cadastro | acoes | trilha
-  const [showIncForm, setShowIncForm] = useState(false);
+  // showIncForm removido — ocorrências cadastradas pela aba Reuniões
   // showFbForm removed — meetings now created only in Reuniões tab
   const [expandedJornada, setExpandedJornada] = useState(null); // id of expanded event
   const [showNewForm, setShowNewForm] = useState(false);
@@ -4508,7 +4508,7 @@ Inclua apenas as ações solicitadas. Arrays vazios se não houver ação daquel
         return (
           <div>
             {/* Back */}
-            <button onClick={()=>{setDetailEmp(null);setDetailTab("cadastro");setShowIncForm(false);}} style={{background:"none",border:"none",color:"var(--accent)",cursor:"pointer",fontSize:13,fontFamily:"'DM Mono',monospace",padding:"4px 0",marginBottom:12,display:"flex",alignItems:"center",gap:4}}>
+            <button onClick={()=>{setDetailEmp(null);setDetailTab("cadastro");}} style={{background:"none",border:"none",color:"var(--accent)",cursor:"pointer",fontSize:13,fontFamily:"'DM Mono',monospace",padding:"4px 0",marginBottom:12,display:"flex",alignItems:"center",gap:4}}>
               ← Voltar para equipe
             </button>
 
@@ -4880,9 +4880,6 @@ Inclua apenas as ações solicitadas. Arrays vazios se não houver ação daquel
 
                 {/* ── Action buttons ── */}
                 <div style={{display:"flex",gap:8,marginBottom:16,flexWrap:"wrap"}}>
-                  <button onClick={()=>{setShowIncForm(!showIncForm);}} style={{padding:"8px 16px",borderRadius:10,border:`1px solid ${showIncForm?"var(--accent)":"var(--border)"}`,background:showIncForm?"var(--accent)11":"transparent",color:showIncForm?"var(--accent)":"var(--text3)",cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:12}}>
-                    📋 Ocorrência
-                  </button>
                   <button onClick={async()=>{
                     const dateFrom = window.prompt("Data início (DD/MM/AAAA):", emp.admission ? new Date(emp.admission+"T12:00:00").toLocaleDateString("pt-BR") : "01/01/2026");
                     if (!dateFrom) return;
@@ -4924,7 +4921,7 @@ Inclua apenas as ações solicitadas. Arrays vazios se não houver ação daquel
                     📄 PDF
                   </button>
                 </div>
-                {showIncForm && <div style={{marginBottom:16}}><IncidentForm restaurantId={rid} employees={restEmps.filter(e=>!e.inactive)} onUpdate={onUpdate} incidents={incidents??[]} currentUser={currentUser} isOwner={isOwner} preSelectedEmpId={emp.id}/></div>}
+                {/* IncidentForm removido — ocorrências cadastradas pela aba Reuniões */}
 
                 {/* Meeting alert removed — info now in Jornada timeline */}
 
@@ -6014,7 +6011,7 @@ const SEVERITY_OPTIONS = [
 // EmpTimeline removed — replaced by interactive Jornada in trilha tab
 
 
-function IncidentForm({ restaurantId, employees, onUpdate, incidents, currentUser, isOwner, preSelectedEmpId }) {
+function IncidentForm({ restaurantId, employees, onUpdate, incidents, currentUser, isOwner, preSelectedEmpId }) { // eslint-disable-line no-unused-vars
   const restEmps = employees.filter(e => e.restaurantId === restaurantId && !(e.inactive && e.inactiveFrom && e.inactiveFrom <= today()));
   const [selectedEmps, setSelectedEmps] = useState(preSelectedEmpId ? [preSelectedEmpId] : []);
   const [type, setType] = useState("");
