@@ -3,7 +3,7 @@ import { useState, useEffect, Component } from "react";
 import { db } from "./firebase";
 import { doc, getDoc, setDoc } from "firebase/firestore";
 
-const APP_VERSION = "5.35.0";
+const APP_VERSION = "5.36.0";
 
 const DEFAULT_ADMISSION = () => `${new Date().getFullYear()}-01-01`;
 const round2 = (v) => Math.round(v * 100) / 100;
@@ -6338,8 +6338,8 @@ const AGENDA_TEMPLATES = [
 
 function MeetingPlannerSection({ restaurantId, employees, roles, areas, meetingPlans, allMeetingPlans, feedbacks, onUpdate, currentUser, isOwner, mobileOnly, isLider, managerAreas, data }) {
   // Sub-tab state
-  const [subTab, setSubTab] = useState("reunioes"); // reunioes | ideias | pautas | relatorio
-  // Reuniões (existing)
+  const [subTab, setSubTab] = useState("reunioes"); // reunioes | ideias | relatorio
+  // Reuniões (existing) — showForm: false | "equipe" | "lideranca"
   const [showForm, setShowForm] = useState(false);
   const [planType, setPlanType] = useState("alinhamento");
   const [planDate, setPlanDate] = useState("");
@@ -6354,7 +6354,6 @@ function MeetingPlannerSection({ restaurantId, employees, roles, areas, meetingP
   const [ideaDesc, setIdeaDesc] = useState("");
   const [ideaAreas, setIdeaAreas] = useState([]);
   // Pautas
-  const [showPautaForm, setShowPautaForm] = useState(false);
   const [pautaTitle, setPautaTitle] = useState("");
   const [pautaType, setPautaType] = useState("semanal");
   const [pautaDate, setPautaDate] = useState("");
@@ -6531,7 +6530,7 @@ function MeetingPlannerSection({ restaurantId, employees, roles, areas, meetingP
       onUpdate("meetingIdeas", allIdeasData);
     }
     onUpdate("meetingAgendas", [...getData("meetingAgendas"), pauta]);
-    setPautaTitle(""); setPautaType("semanal"); setPautaDate(""); setPautaItems([]); setPautaNewItem(""); setPautaPickIdeas([]); setShowPautaForm(false);
+    setPautaTitle(""); setPautaType("semanal"); setPautaDate(""); setPautaItems([]); setPautaNewItem(""); setPautaPickIdeas([]); setShowForm(false);
   }
 
   // Checklist ao vivo
@@ -6594,9 +6593,8 @@ function MeetingPlannerSection({ restaurantId, employees, roles, areas, meetingP
 
   // Sub-tabs config
   const subTabs = [
-    ["reunioes","📅 Reuniões"],
+    ["reunioes",`📅 Reuniões${pendingActions.length>0?` (${pendingActions.length})`:""}`],
     ["ideias",`💡 Ideias${filteredIdeas.filter(i=>i.status==="nova").length>0?` (${filteredIdeas.filter(i=>i.status==="nova").length})`:""}`],
-    ["pautas",`📋 Pautas${pendingActions.length>0?` · ${pendingActions.length} ação${pendingActions.length!==1?"ões":""}`:""}`],
     ["relatorio","📄 Relatório"],
   ];
 
@@ -6628,24 +6626,38 @@ function MeetingPlannerSection({ restaurantId, employees, roles, areas, meetingP
       </div>
 
       {/* Pending actions reminder */}
-      {pendingActions.length > 0 && subTab !== "pautas" && (
-        <div onClick={()=>setSubTab("pautas")} style={{padding:"10px 14px",borderRadius:10,border:"1px solid #f59e0b33",background:"#f59e0b08",marginBottom:12,cursor:"pointer",display:"flex",alignItems:"center",gap:8}}>
+      {pendingActions.length > 0 && subTab !== "reunioes" && (
+        <div onClick={()=>setSubTab("reunioes")} style={{padding:"10px 14px",borderRadius:10,border:"1px solid #f59e0b33",background:"#f59e0b08",marginBottom:12,cursor:"pointer",display:"flex",alignItems:"center",gap:8}}>
           <span style={{fontSize:14}}>⚠️</span>
           <span style={{fontSize:12,color:"#f59e0b",fontWeight:600}}>{pendingActions.length} ação{pendingActions.length!==1?"ões":""} pendente{pendingActions.length!==1?"s":""}</span>
           <span style={{fontSize:10,color:"var(--text3)"}}>— clique para ver</span>
         </div>
       )}
 
-      {/* ═══ SUB-TAB: REUNIÕES ═══ */}
+      {/* ═══ SUB-TAB: REUNIÕES (equipe + liderança merged) ═══ */}
       {subTab === "reunioes" && (
         <div>
-          <button onClick={()=>setShowForm(!showForm)} style={{...S.btnPrimary,marginBottom:16,fontSize:13,padding:"10px 20px",background:showForm?"var(--red)":"#3b82f6",borderColor:showForm?"var(--red)":"#3b82f6"}}>
-            {showForm ? "✕ Cancelar" : "+ Planejar reunião"}
-          </button>
-
+          {/* Action buttons */}
+          {!showForm && (
+            <div style={{display:"flex",gap:8,marginBottom:16,flexWrap:"wrap"}}>
+              <button onClick={()=>setShowForm("equipe")} style={{...S.btnPrimary,fontSize:13,padding:"10px 20px",background:"#3b82f6",borderColor:"#3b82f6"}}>
+                + Reunião com equipe
+              </button>
+              <button onClick={()=>{setShowForm("lideranca");setPautaItems([]);setPautaPickIdeas([]);setPautaTitle("");setPautaDate("");}} style={{...S.btnPrimary,fontSize:13,padding:"10px 20px",background:"#10b981",borderColor:"#10b981"}}>
+                + Reunião de liderança
+              </button>
+            </div>
+          )}
           {showForm && (
+            <div style={{marginBottom:4}}>
+              <button onClick={()=>setShowForm(false)} style={{...S.btnSecondary,fontSize:12,padding:"6px 14px",color:"var(--red)",borderColor:"var(--red)44",marginBottom:12}}>✕ Cancelar</button>
+            </div>
+          )}
+
+          {/* ── Form: Reunião com equipe (alinhamento / avaliação) ── */}
+          {showForm === "equipe" && (
             <div style={{...S.card,padding:"18px 20px",marginBottom:20,border:`1px solid ${typeColor}22`}}>
-              <h4 style={{color:"var(--text)",margin:"0 0 14px",fontSize:15,fontWeight:700}}>Nova reunião</h4>
+              <h4 style={{color:"var(--text)",margin:"0 0 14px",fontSize:15,fontWeight:700}}>👥 Reunião com equipe</h4>
               <div style={{display:"flex",gap:6,marginBottom:14}}>
                 {[["alinhamento","💬 Alinhamento","#3b82f6"],["avaliação","📋 Avaliação","#8b5cf6"]].map(([val,lbl,col]) => (
                   <button key={val} onClick={()=>setPlanType(val)} style={{
@@ -6701,62 +6713,237 @@ function MeetingPlannerSection({ restaurantId, employees, roles, areas, meetingP
             </div>
           )}
 
-          {Object.keys(grouped).length === 0 && !showForm && (
+          {/* ── Form: Reunião de liderança (pauta com template) ── */}
+          {showForm === "lideranca" && (
+            <div style={{...S.card,padding:"18px 20px",marginBottom:20,border:"1px solid #10b98122"}}>
+              <h4 style={{color:"var(--text)",margin:"0 0 14px",fontSize:15,fontWeight:700}}>🤝 Reunião de liderança</h4>
+
+              {/* Template selector */}
+              <label style={S.label}>Tipo de reunião</label>
+              <div style={{display:"flex",gap:6,marginBottom:14,flexWrap:"wrap"}}>
+                {AGENDA_TEMPLATES.map(tpl => (
+                  <button key={tpl.id} onClick={()=>{setPautaType(tpl.id);handleApplyTemplate(tpl.id);}} style={{
+                    padding:mobileOnly?"6px 10px":"8px 14px",borderRadius:10,border:`2px solid ${pautaType===tpl.id?"#10b981":"var(--border)"}`,
+                    background:pautaType===tpl.id?"#10b98114":"transparent",color:pautaType===tpl.id?"#10b981":"var(--text3)",
+                    cursor:"pointer",fontSize:mobileOnly?10:12,fontFamily:"'DM Sans',sans-serif",fontWeight:pautaType===tpl.id?700:400
+                  }}>{tpl.icon} {mobileOnly?tpl.label.split(" ").slice(0,2).join(" "):tpl.label}</button>
+                ))}
+              </div>
+
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:12}}>
+                <div>
+                  <label style={S.label}>Título da pauta</label>
+                  <input value={pautaTitle} onChange={e=>setPautaTitle(e.target.value)} placeholder="Ex: Reunião semanal 14/04" style={S.input}/>
+                </div>
+                <div>
+                  <label style={S.label}>Data</label>
+                  <input type="date" value={pautaDate} onChange={e=>setPautaDate(e.target.value)} style={S.input}/>
+                </div>
+              </div>
+
+              {/* Items list */}
+              <label style={S.label}>Itens da pauta</label>
+              <div style={{marginBottom:12}}>
+                {pautaItems.map((item, idx) => (
+                  <div key={item.id} style={{display:"flex",alignItems:"center",gap:6,marginBottom:4,padding:"6px 10px",borderRadius:8,background:"var(--bg2)",border:"1px solid var(--border)"}}>
+                    <span style={{color:"var(--text3)",fontSize:10,fontWeight:700,minWidth:20}}>{idx+1}.</span>
+                    <span style={{flex:1,fontSize:12,color:"var(--text)"}}>{item.text}</span>
+                    {item.fromIdea && <span style={{fontSize:9,padding:"1px 5px",borderRadius:4,background:"#f59e0b18",color:"#f59e0b"}}>💡</span>}
+                    <button onClick={()=>handleMovePautaItem(idx,-1)} disabled={idx===0} style={{padding:"2px 5px",border:"none",background:"transparent",color:idx===0?"var(--border)":"var(--text3)",cursor:idx===0?"default":"pointer",fontSize:10}}>▲</button>
+                    <button onClick={()=>handleMovePautaItem(idx,1)} disabled={idx===pautaItems.length-1} style={{padding:"2px 5px",border:"none",background:"transparent",color:idx===pautaItems.length-1?"var(--border)":"var(--text3)",cursor:idx===pautaItems.length-1?"default":"pointer",fontSize:10}}>▼</button>
+                    <button onClick={()=>handleRemovePautaItem(item.id)} style={{padding:"2px 5px",border:"none",background:"transparent",color:"var(--red)",cursor:"pointer",fontSize:10}}>✕</button>
+                  </div>
+                ))}
+              </div>
+
+              {/* Add custom item */}
+              <div style={{display:"flex",gap:6,marginBottom:12}}>
+                <input value={pautaNewItem} onChange={e=>setPautaNewItem(e.target.value)} onKeyDown={e=>{if(e.key==="Enter")handleAddPautaItem();}} placeholder="Adicionar item..." style={{...S.input,flex:1}}/>
+                <button onClick={handleAddPautaItem} style={{...S.btnSecondary,fontSize:12,padding:"8px 14px",whiteSpace:"nowrap"}}>+ Adicionar</button>
+              </div>
+
+              {/* Pull ideas */}
+              {filteredIdeas.filter(i=>i.status==="nova" && !pautaPickIdeas.includes(i.id)).length > 0 && (
+                <div style={{marginBottom:14}}>
+                  <label style={{...S.label,display:"flex",alignItems:"center",gap:4}}>💡 Puxar ideias do banco</label>
+                  <div style={{display:"flex",gap:4,flexWrap:"wrap"}}>
+                    {filteredIdeas.filter(i=>i.status==="nova" && !pautaPickIdeas.includes(i.id)).map(idea => (
+                      <button key={idea.id} onClick={()=>handleAddIdeaToPauta(idea)} style={{
+                        padding:"5px 10px",borderRadius:8,border:"1px solid #f59e0b44",background:"#f59e0b08",color:"var(--text2)",
+                        cursor:"pointer",fontSize:11,fontFamily:"'DM Sans',sans-serif"
+                      }}>💡 {idea.title}</button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              <button onClick={handleSavePauta} style={{...S.btnPrimary,width:"auto",padding:"10px 24px",background:"#10b981",borderColor:"#10b981"}}>Salvar pauta</button>
+            </div>
+          )}
+
+          {/* ── Reuniões de equipe (plans) ── */}
+          {Object.keys(grouped).length > 0 && (
+            <div style={{marginBottom:20}}>
+              <h4 style={{color:"var(--text)",fontSize:14,fontWeight:700,margin:"0 0 12px"}}>👥 Reuniões com equipe</h4>
+              {Object.entries(grouped).sort(([a],[b])=>b.localeCompare(a)).map(([mk, plans]) => {
+                const [y,m] = mk.split("-");
+                const monthName = new Date(parseInt(y), parseInt(m)-1, 15).toLocaleDateString("pt-BR", {month:"long", year:"numeric"});
+                return (
+                  <div key={mk} style={{marginBottom:16}}>
+                    <div style={{fontSize:12,fontWeight:600,color:"var(--text3)",marginBottom:6,textTransform:"capitalize"}}>{monthName}</div>
+                    {plans.map(plan => {
+                      const pColor = plan.type === "avaliação" ? "#8b5cf6" : "#3b82f6";
+                      const pIcon = plan.type === "avaliação" ? "📋" : "💬";
+                      const totalEmps = (plan.employeeIds ?? []).length;
+                      const doneCount = (plan.employeeIds ?? []).filter(eid => getEmpStatus(plan, eid) === "realizada").length;
+                      const lateCount = (plan.employeeIds ?? []).filter(eid => getEmpStatus(plan, eid) === "atrasada").length;
+                      const dateStr = plan.plannedDate ? new Date(plan.plannedDate+"T12:00:00").toLocaleDateString("pt-BR") : "—";
+                      const isPast = plan.plannedDate < today();
+                      return (
+                        <div key={plan.id} style={{...S.card,padding:"14px 16px",marginBottom:8,border:`1px solid ${isPast && doneCount < totalEmps ? "#f59e0b33" : pColor+"22"}`}}>
+                          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
+                            <div style={{display:"flex",alignItems:"center",gap:8}}>
+                              <span style={{fontSize:16}}>{pIcon}</span>
+                              <span style={{color:pColor,fontWeight:700,fontSize:13}}>Conversa de {plan.type}</span>
+                              <span style={{color:"var(--text3)",fontSize:11}}>— {dateStr}</span>
+                            </div>
+                            <div style={{display:"flex",alignItems:"center",gap:6}}>
+                              <span style={{fontSize:10,color:doneCount===totalEmps?"#10b981":lateCount>0?"#f59e0b":"var(--text3)",fontWeight:700}}>
+                                {doneCount}/{totalEmps} {doneCount===totalEmps?"✓":""}
+                              </span>
+                              <button onClick={()=>handleDeletePlan(plan.id)} style={{padding:"2px 6px",borderRadius:6,border:"1px solid var(--red)33",background:"transparent",color:"var(--red)",cursor:"pointer",fontSize:9,fontFamily:"'DM Mono',monospace"}}>✕</button>
+                            </div>
+                          </div>
+                          {plan.note && <div style={{fontSize:11,color:"var(--text3)",marginBottom:8,fontStyle:"italic"}}>{plan.note}</div>}
+                          <div style={{display:"flex",gap:4,flexWrap:"wrap"}}>
+                            {(plan.employeeIds ?? []).map(eid => {
+                              const emp = employees.find(e => e.id === eid);
+                              const status = getEmpStatus(plan, eid);
+                              const sColor = status === "realizada" ? "#10b981" : status === "atrasada" ? "#f59e0b" : "var(--text3)";
+                              const sIcon = status === "realizada" ? "✓" : status === "atrasada" ? "⏰" : "○";
+                              return (
+                                <span key={eid} style={{fontSize:10,padding:"3px 8px",borderRadius:6,border:`1px solid ${sColor}33`,background:sColor+"08",color:sColor,fontWeight:status==="realizada"?700:400}}>
+                                  {sIcon} {emp?.name?.split(" ")[0] ?? eid}
+                                </span>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          {/* ── Reuniões de liderança (pautas) ── */}
+          {allPautas.length > 0 && (
+            <div style={{marginBottom:20}}>
+              <h4 style={{color:"var(--text)",fontSize:14,fontWeight:700,margin:"0 0 12px"}}>🤝 Reuniões de liderança</h4>
+              {allPautas.sort((a,b)=>(b.createdAt??"").localeCompare(a.createdAt??"")).map(pauta => {
+                const tpl = AGENDA_TEMPLATES.find(t => t.id === pauta.templateType);
+                const pautaActions = allActions.filter(a => a.pautaId === pauta.id);
+                const isActive = activePautaId === pauta.id;
+                const statusColors = { aberta:"#3b82f6", em_andamento:"#f59e0b", encerrada:"#10b981" };
+                const statusLabels = { aberta:"Aberta", em_andamento:"Em andamento", encerrada:"Encerrada" };
+                const doneItems = pauta.items?.filter(it => it.status === "discutido" || it.status === "acao_definida").length ?? 0;
+                const totalItems = pauta.items?.length ?? 0;
+
+                return (
+                  <div key={pauta.id} style={{...S.card,padding:0,marginBottom:12,border:`1px solid ${statusColors[pauta.status]??"var(--border)"}22`,overflow:"hidden"}}>
+                    <div onClick={()=>setActivePautaId(isActive?null:pauta.id)} style={{padding:"14px 16px",cursor:"pointer",display:"flex",justifyContent:"space-between",alignItems:"center",background:isActive?"var(--bg2)":"transparent"}}>
+                      <div>
+                        <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:2}}>
+                          <span style={{fontSize:14}}>{tpl?.icon ?? "📋"}</span>
+                          <span style={{color:"var(--text)",fontWeight:700,fontSize:14}}>{pauta.title}</span>
+                        </div>
+                        <div style={{display:"flex",alignItems:"center",gap:8,fontSize:10,color:"var(--text3)"}}>
+                          <span style={{padding:"2px 6px",borderRadius:4,background:(statusColors[pauta.status]??"#888")+"18",color:statusColors[pauta.status]??"#888",fontWeight:600}}>{statusLabels[pauta.status]??"—"}</span>
+                          <span>{new Date(pauta.date+"T12:00:00").toLocaleDateString("pt-BR")}</span>
+                          <span>{doneItems}/{totalItems} itens</span>
+                          {pautaActions.filter(a=>!a.done).length > 0 && <span style={{color:"#f59e0b",fontWeight:600}}>{pautaActions.filter(a=>!a.done).length} ação pendente</span>}
+                        </div>
+                      </div>
+                      <span style={{color:"var(--text3)",fontSize:12}}>{isActive?"▲":"▼"}</span>
+                    </div>
+
+                    {isActive && (
+                      <div style={{borderTop:"1px solid var(--border)",padding:"14px 16px"}}>
+                        <div style={{display:"flex",gap:6,marginBottom:14}}>
+                          {(["aberta","em_andamento","encerrada"]).map(st => (
+                            <button key={st} onClick={()=>handleUpdatePautaStatus(pauta.id,st)} style={{
+                              padding:"5px 12px",borderRadius:8,border:`1px solid ${pauta.status===st?(statusColors[st]??"#888"):"var(--border)"}`,
+                              background:pauta.status===st?(statusColors[st]??"#888")+"14":"transparent",
+                              color:pauta.status===st?(statusColors[st]??"#888"):"var(--text3)",
+                              cursor:"pointer",fontSize:11,fontFamily:"'DM Sans',sans-serif",fontWeight:pauta.status===st?700:400
+                            }}>{statusLabels[st]}</button>
+                          ))}
+                        </div>
+
+                        {(pauta.items ?? []).map((item, idx) => {
+                          const itemStatusOpts = [["pendente","○","var(--text3)"],["discutido","✓","#10b981"],["acao_definida","⚡","#f59e0b"]];
+                          const curOpt = itemStatusOpts.find(([s])=>s===item.status) ?? itemStatusOpts[0];
+                          return (
+                            <div key={item.id} style={{padding:"10px 12px",marginBottom:6,borderRadius:8,background:item.status==="discutido"?"#10b98106":item.status==="acao_definida"?"#f59e0b06":"var(--bg2)",border:`1px solid ${curOpt[2]}22`}}>
+                              <div style={{display:"flex",alignItems:"center",gap:8}}>
+                                <span style={{fontSize:10,color:"var(--text3)",fontWeight:700,minWidth:18}}>{idx+1}.</span>
+                                <span style={{flex:1,fontSize:12,color:"var(--text)",textDecoration:item.status==="discutido"?"line-through":"none"}}>{item.text}</span>
+                                <div style={{display:"flex",gap:2}}>
+                                  {itemStatusOpts.map(([s,icon,col]) => (
+                                    <button key={s} onClick={()=>handleUpdatePautaItem(pauta.id,item.id,{status:s})} title={s} style={{
+                                      padding:"3px 6px",borderRadius:4,border:`1px solid ${item.status===s?col:"transparent"}`,
+                                      background:item.status===s?col+"18":"transparent",color:col,cursor:"pointer",fontSize:11,fontWeight:item.status===s?700:400
+                                    }}>{icon}</button>
+                                  ))}
+                                </div>
+                              </div>
+                              {item.status === "acao_definida" && (
+                                <div style={{marginTop:6,marginLeft:26}}>
+                                  <input value={item.decision??""} onChange={e=>handleUpdatePautaItem(pauta.id,item.id,{decision:e.target.value})} placeholder="Decisão tomada / ação definida..." style={{...S.input,fontSize:11,padding:"5px 8px"}}/>
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })}
+
+                        <div style={{marginTop:16,borderTop:"1px solid var(--border)",paddingTop:14}}>
+                          <h4 style={{color:"var(--text)",fontSize:13,fontWeight:700,margin:"0 0 10px"}}>📌 Ações pós-reunião</h4>
+                          {pautaActions.map(action => (
+                            <div key={action.id} style={{display:"flex",alignItems:"center",gap:8,marginBottom:6,padding:"8px 10px",borderRadius:8,background:action.done?"#10b98106":"var(--bg2)",border:`1px solid ${action.done?"#10b98122":"var(--border)"}`}}>
+                              <button onClick={()=>handleToggleAction(action.id)} style={{padding:"2px 6px",borderRadius:4,border:`1px solid ${action.done?"#10b981":"var(--border)"}`,background:action.done?"#10b98122":"transparent",color:action.done?"#10b981":"var(--text3)",cursor:"pointer",fontSize:11}}>{action.done?"✓":"○"}</button>
+                              <div style={{flex:1,minWidth:0}}>
+                                <div style={{fontSize:12,color:action.done?"var(--text3)":"var(--text)",textDecoration:action.done?"line-through":"none"}}>{action.text}</div>
+                                <div style={{fontSize:10,color:"var(--text3)"}}>
+                                  {action.responsible && `👤 ${action.responsible}`}
+                                  {action.responsible && action.deadline && " · "}
+                                  {action.deadline && `📅 ${new Date(action.deadline+"T12:00:00").toLocaleDateString("pt-BR")}`}
+                                </div>
+                              </div>
+                            </div>
+                          ))}
+                          <AddActionInline pautaId={pauta.id} onAdd={handleAddAction}/>
+                        </div>
+
+                        <div style={{marginTop:14,textAlign:"right"}}>
+                          <button onClick={()=>handleDeletePauta(pauta.id)} style={{fontSize:11,padding:"5px 12px",borderRadius:6,border:"1px solid var(--red)33",background:"transparent",color:"var(--red)",cursor:"pointer"}}>🗑️ Excluir pauta</button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          {/* Empty state when no plans and no pautas */}
+          {Object.keys(grouped).length === 0 && allPautas.length === 0 && !showForm && (
             <div style={{...S.card,textAlign:"center",padding:40}}>
               <div style={{fontSize:36,marginBottom:12}}>📅</div>
               <p style={{color:"var(--text3)",fontSize:14}}>Nenhuma reunião planejada ainda.</p>
-              <p style={{color:"var(--text3)",fontSize:12}}>Clique em "+ Planejar reunião" para começar.</p>
+              <p style={{color:"var(--text3)",fontSize:12}}>Planeje reuniões com a equipe ou de liderança.</p>
             </div>
           )}
-          {Object.entries(grouped).sort(([a],[b])=>b.localeCompare(a)).map(([mk, plans]) => {
-            const [y,m] = mk.split("-");
-            const monthName = new Date(parseInt(y), parseInt(m)-1, 15).toLocaleDateString("pt-BR", {month:"long", year:"numeric"});
-            return (
-              <div key={mk} style={{marginBottom:20}}>
-                <h4 style={{color:"var(--text)",fontSize:14,fontWeight:700,margin:"0 0 10px",textTransform:"capitalize"}}>{monthName}</h4>
-                {plans.map(plan => {
-                  const pColor = plan.type === "avaliação" ? "#8b5cf6" : "#3b82f6";
-                  const pIcon = plan.type === "avaliação" ? "📋" : "💬";
-                  const totalEmps = (plan.employeeIds ?? []).length;
-                  const doneCount = (plan.employeeIds ?? []).filter(eid => getEmpStatus(plan, eid) === "realizada").length;
-                  const lateCount = (plan.employeeIds ?? []).filter(eid => getEmpStatus(plan, eid) === "atrasada").length;
-                  const dateStr = plan.plannedDate ? new Date(plan.plannedDate+"T12:00:00").toLocaleDateString("pt-BR") : "—";
-                  const isPast = plan.plannedDate < today();
-                  return (
-                    <div key={plan.id} style={{...S.card,padding:"14px 16px",marginBottom:8,border:`1px solid ${isPast && doneCount < totalEmps ? "#f59e0b33" : pColor+"22"}`}}>
-                      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
-                        <div style={{display:"flex",alignItems:"center",gap:8}}>
-                          <span style={{fontSize:16}}>{pIcon}</span>
-                          <span style={{color:pColor,fontWeight:700,fontSize:13}}>Conversa de {plan.type}</span>
-                          <span style={{color:"var(--text3)",fontSize:11}}>— {dateStr}</span>
-                        </div>
-                        <div style={{display:"flex",alignItems:"center",gap:6}}>
-                          <span style={{fontSize:10,color:doneCount===totalEmps?"#10b981":lateCount>0?"#f59e0b":"var(--text3)",fontWeight:700}}>
-                            {doneCount}/{totalEmps} {doneCount===totalEmps?"✓":""}
-                          </span>
-                          <button onClick={()=>handleDeletePlan(plan.id)} style={{padding:"2px 6px",borderRadius:6,border:"1px solid var(--red)33",background:"transparent",color:"var(--red)",cursor:"pointer",fontSize:9,fontFamily:"'DM Mono',monospace"}}>✕</button>
-                        </div>
-                      </div>
-                      {plan.note && <div style={{fontSize:11,color:"var(--text3)",marginBottom:8,fontStyle:"italic"}}>{plan.note}</div>}
-                      <div style={{display:"flex",gap:4,flexWrap:"wrap"}}>
-                        {(plan.employeeIds ?? []).map(eid => {
-                          const emp = employees.find(e => e.id === eid);
-                          const status = getEmpStatus(plan, eid);
-                          const sColor = status === "realizada" ? "#10b981" : status === "atrasada" ? "#f59e0b" : "var(--text3)";
-                          const sIcon = status === "realizada" ? "✓" : status === "atrasada" ? "⏰" : "○";
-                          return (
-                            <span key={eid} style={{fontSize:10,padding:"3px 8px",borderRadius:6,border:`1px solid ${sColor}33`,background:sColor+"08",color:sColor,fontWeight:status==="realizada"?700:400}}>
-                              {sIcon} {emp?.name?.split(" ")[0] ?? eid}
-                            </span>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            );
-          })}
         </div>
       )}
 
@@ -6839,194 +7026,6 @@ function MeetingPlannerSection({ restaurantId, employees, roles, areas, meetingP
               ))}
             </div>
           )}
-        </div>
-      )}
-
-      {/* ═══ SUB-TAB: PAUTAS ═══ */}
-      {subTab === "pautas" && (
-        <div>
-          <button onClick={()=>{setShowPautaForm(!showPautaForm);if(!showPautaForm){setPautaItems([]);setPautaPickIdeas([]);setPautaTitle("");setPautaDate("");}}} style={{...S.btnPrimary,marginBottom:16,fontSize:13,padding:"10px 20px",background:showPautaForm?"var(--red)":"#10b981",borderColor:showPautaForm?"var(--red)":"#10b981"}}>
-            {showPautaForm ? "✕ Cancelar" : "+ Nova pauta"}
-          </button>
-
-          {showPautaForm && (
-            <div style={{...S.card,padding:"18px 20px",marginBottom:20,border:"1px solid #10b98122"}}>
-              <h4 style={{color:"var(--text)",margin:"0 0 14px",fontSize:15,fontWeight:700}}>Montar pauta de reunião</h4>
-
-              {/* Template selector */}
-              <label style={S.label}>Modelo</label>
-              <div style={{display:"flex",gap:6,marginBottom:14,flexWrap:"wrap"}}>
-                {AGENDA_TEMPLATES.map(tpl => (
-                  <button key={tpl.id} onClick={()=>{setPautaType(tpl.id);handleApplyTemplate(tpl.id);}} style={{
-                    padding:mobileOnly?"6px 10px":"8px 14px",borderRadius:10,border:`2px solid ${pautaType===tpl.id?"#10b981":"var(--border)"}`,
-                    background:pautaType===tpl.id?"#10b98114":"transparent",color:pautaType===tpl.id?"#10b981":"var(--text3)",
-                    cursor:"pointer",fontSize:mobileOnly?10:12,fontFamily:"'DM Sans',sans-serif",fontWeight:pautaType===tpl.id?700:400
-                  }}>{tpl.icon} {mobileOnly?tpl.label.split(" ").slice(0,2).join(" "):tpl.label}</button>
-                ))}
-              </div>
-
-              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:12}}>
-                <div>
-                  <label style={S.label}>Título da pauta</label>
-                  <input value={pautaTitle} onChange={e=>setPautaTitle(e.target.value)} placeholder="Ex: Reunião semanal 14/04" style={S.input}/>
-                </div>
-                <div>
-                  <label style={S.label}>Data</label>
-                  <input type="date" value={pautaDate} onChange={e=>setPautaDate(e.target.value)} style={S.input}/>
-                </div>
-              </div>
-
-              {/* Items list */}
-              <label style={S.label}>Itens da pauta</label>
-              <div style={{marginBottom:12}}>
-                {pautaItems.map((item, idx) => (
-                  <div key={item.id} style={{display:"flex",alignItems:"center",gap:6,marginBottom:4,padding:"6px 10px",borderRadius:8,background:"var(--bg2)",border:"1px solid var(--border)"}}>
-                    <span style={{color:"var(--text3)",fontSize:10,fontWeight:700,minWidth:20}}>{idx+1}.</span>
-                    <span style={{flex:1,fontSize:12,color:"var(--text)"}}>{item.text}</span>
-                    {item.fromIdea && <span style={{fontSize:9,padding:"1px 5px",borderRadius:4,background:"#f59e0b18",color:"#f59e0b"}}>💡</span>}
-                    <button onClick={()=>handleMovePautaItem(idx,-1)} disabled={idx===0} style={{padding:"2px 5px",border:"none",background:"transparent",color:idx===0?"var(--border)":"var(--text3)",cursor:idx===0?"default":"pointer",fontSize:10}}>▲</button>
-                    <button onClick={()=>handleMovePautaItem(idx,1)} disabled={idx===pautaItems.length-1} style={{padding:"2px 5px",border:"none",background:"transparent",color:idx===pautaItems.length-1?"var(--border)":"var(--text3)",cursor:idx===pautaItems.length-1?"default":"pointer",fontSize:10}}>▼</button>
-                    <button onClick={()=>handleRemovePautaItem(item.id)} style={{padding:"2px 5px",border:"none",background:"transparent",color:"var(--red)",cursor:"pointer",fontSize:10}}>✕</button>
-                  </div>
-                ))}
-              </div>
-
-              {/* Add custom item */}
-              <div style={{display:"flex",gap:6,marginBottom:12}}>
-                <input value={pautaNewItem} onChange={e=>setPautaNewItem(e.target.value)} onKeyDown={e=>{if(e.key==="Enter")handleAddPautaItem();}} placeholder="Adicionar item..." style={{...S.input,flex:1}}/>
-                <button onClick={handleAddPautaItem} style={{...S.btnSecondary,fontSize:12,padding:"8px 14px",whiteSpace:"nowrap"}}>+ Adicionar</button>
-              </div>
-
-              {/* Pull ideas */}
-              {filteredIdeas.filter(i=>i.status==="nova" && !pautaPickIdeas.includes(i.id)).length > 0 && (
-                <div style={{marginBottom:14}}>
-                  <label style={{...S.label,display:"flex",alignItems:"center",gap:4}}>💡 Puxar ideias do banco</label>
-                  <div style={{display:"flex",gap:4,flexWrap:"wrap"}}>
-                    {filteredIdeas.filter(i=>i.status==="nova" && !pautaPickIdeas.includes(i.id)).map(idea => (
-                      <button key={idea.id} onClick={()=>handleAddIdeaToPauta(idea)} style={{
-                        padding:"5px 10px",borderRadius:8,border:"1px solid #f59e0b44",background:"#f59e0b08",color:"var(--text2)",
-                        cursor:"pointer",fontSize:11,fontFamily:"'DM Sans',sans-serif"
-                      }}>💡 {idea.title}</button>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              <button onClick={handleSavePauta} style={{...S.btnPrimary,width:"auto",padding:"10px 24px",background:"#10b981",borderColor:"#10b981"}}>Salvar pauta</button>
-            </div>
-          )}
-
-          {/* Existing pautas */}
-          {allPautas.length === 0 && !showPautaForm && (
-            <div style={{...S.card,textAlign:"center",padding:40}}>
-              <div style={{fontSize:36,marginBottom:12}}>📋</div>
-              <p style={{color:"var(--text3)",fontSize:14}}>Nenhuma pauta criada.</p>
-              <p style={{color:"var(--text3)",fontSize:12}}>Monte pautas para suas reuniões de liderança.</p>
-            </div>
-          )}
-
-          {allPautas.sort((a,b)=>(b.createdAt??"").localeCompare(a.createdAt??"")).map(pauta => {
-            const tpl = AGENDA_TEMPLATES.find(t => t.id === pauta.templateType);
-            const pautaActions = allActions.filter(a => a.pautaId === pauta.id);
-            const isActive = activePautaId === pauta.id;
-            const statusColors = { aberta:"#3b82f6", em_andamento:"#f59e0b", encerrada:"#10b981" };
-            const statusLabels = { aberta:"Aberta", em_andamento:"Em andamento", encerrada:"Encerrada" };
-            const doneItems = pauta.items?.filter(it => it.status === "discutido" || it.status === "acao_definida").length ?? 0;
-            const totalItems = pauta.items?.length ?? 0;
-
-            return (
-              <div key={pauta.id} style={{...S.card,padding:0,marginBottom:12,border:`1px solid ${statusColors[pauta.status]??"var(--border)"}22`,overflow:"hidden"}}>
-                {/* Header */}
-                <div onClick={()=>setActivePautaId(isActive?null:pauta.id)} style={{padding:"14px 16px",cursor:"pointer",display:"flex",justifyContent:"space-between",alignItems:"center",background:isActive?"var(--bg2)":"transparent"}}>
-                  <div>
-                    <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:2}}>
-                      <span style={{fontSize:14}}>{tpl?.icon ?? "📋"}</span>
-                      <span style={{color:"var(--text)",fontWeight:700,fontSize:14}}>{pauta.title}</span>
-                    </div>
-                    <div style={{display:"flex",alignItems:"center",gap:8,fontSize:10,color:"var(--text3)"}}>
-                      <span style={{padding:"2px 6px",borderRadius:4,background:(statusColors[pauta.status]??"#888")+"18",color:statusColors[pauta.status]??"#888",fontWeight:600}}>{statusLabels[pauta.status]??"—"}</span>
-                      <span>{new Date(pauta.date+"T12:00:00").toLocaleDateString("pt-BR")}</span>
-                      <span>{doneItems}/{totalItems} itens</span>
-                      {pautaActions.filter(a=>!a.done).length > 0 && <span style={{color:"#f59e0b",fontWeight:600}}>{pautaActions.filter(a=>!a.done).length} ação pendente</span>}
-                    </div>
-                  </div>
-                  <div style={{display:"flex",gap:6,alignItems:"center"}}>
-                    <span style={{color:"var(--text3)",fontSize:12}}>{isActive?"▲":"▼"}</span>
-                  </div>
-                </div>
-
-                {/* Expanded content — checklist ao vivo */}
-                {isActive && (
-                  <div style={{borderTop:"1px solid var(--border)",padding:"14px 16px"}}>
-                    {/* Status controls */}
-                    <div style={{display:"flex",gap:6,marginBottom:14}}>
-                      {(["aberta","em_andamento","encerrada"]).map(st => (
-                        <button key={st} onClick={()=>handleUpdatePautaStatus(pauta.id,st)} style={{
-                          padding:"5px 12px",borderRadius:8,border:`1px solid ${pauta.status===st?(statusColors[st]??"#888"):"var(--border)"}`,
-                          background:pauta.status===st?(statusColors[st]??"#888")+"14":"transparent",
-                          color:pauta.status===st?(statusColors[st]??"#888"):"var(--text3)",
-                          cursor:"pointer",fontSize:11,fontFamily:"'DM Sans',sans-serif",fontWeight:pauta.status===st?700:400
-                        }}>{statusLabels[st]}</button>
-                      ))}
-                    </div>
-
-                    {/* Items checklist */}
-                    {(pauta.items ?? []).map((item, idx) => {
-                      const itemStatusOpts = [["pendente","○","var(--text3)"],["discutido","✓","#10b981"],["acao_definida","⚡","#f59e0b"]];
-                      const curOpt = itemStatusOpts.find(([s])=>s===item.status) ?? itemStatusOpts[0];
-                      return (
-                        <div key={item.id} style={{padding:"10px 12px",marginBottom:6,borderRadius:8,background:item.status==="discutido"?"#10b98106":item.status==="acao_definida"?"#f59e0b06":"var(--bg2)",border:`1px solid ${curOpt[2]}22`}}>
-                          <div style={{display:"flex",alignItems:"center",gap:8}}>
-                            <span style={{fontSize:10,color:"var(--text3)",fontWeight:700,minWidth:18}}>{idx+1}.</span>
-                            <span style={{flex:1,fontSize:12,color:"var(--text)",textDecoration:item.status==="discutido"?"line-through":"none"}}>{item.text}</span>
-                            <div style={{display:"flex",gap:2}}>
-                              {itemStatusOpts.map(([s,icon,col]) => (
-                                <button key={s} onClick={()=>handleUpdatePautaItem(pauta.id,item.id,{status:s})} title={s} style={{
-                                  padding:"3px 6px",borderRadius:4,border:`1px solid ${item.status===s?col:"transparent"}`,
-                                  background:item.status===s?col+"18":"transparent",color:col,cursor:"pointer",fontSize:11,fontWeight:item.status===s?700:400
-                                }}>{icon}</button>
-                              ))}
-                            </div>
-                          </div>
-                          {/* Decision field for acao_definida */}
-                          {item.status === "acao_definida" && (
-                            <div style={{marginTop:6,marginLeft:26}}>
-                              <input value={item.decision??""} onChange={e=>handleUpdatePautaItem(pauta.id,item.id,{decision:e.target.value})} placeholder="Decisão tomada / ação definida..." style={{...S.input,fontSize:11,padding:"5px 8px"}}/>
-                            </div>
-                          )}
-                        </div>
-                      );
-                    })}
-
-                    {/* Ações pós-reunião */}
-                    <div style={{marginTop:16,borderTop:"1px solid var(--border)",paddingTop:14}}>
-                      <h4 style={{color:"var(--text)",fontSize:13,fontWeight:700,margin:"0 0 10px"}}>📌 Ações pós-reunião</h4>
-                      {pautaActions.map(action => (
-                        <div key={action.id} style={{display:"flex",alignItems:"center",gap:8,marginBottom:6,padding:"8px 10px",borderRadius:8,background:action.done?"#10b98106":"var(--bg2)",border:`1px solid ${action.done?"#10b98122":"var(--border)"}`}}>
-                          <button onClick={()=>handleToggleAction(action.id)} style={{padding:"2px 6px",borderRadius:4,border:`1px solid ${action.done?"#10b981":"var(--border)"}`,background:action.done?"#10b98122":"transparent",color:action.done?"#10b981":"var(--text3)",cursor:"pointer",fontSize:11}}>{action.done?"✓":"○"}</button>
-                          <div style={{flex:1,minWidth:0}}>
-                            <div style={{fontSize:12,color:action.done?"var(--text3)":"var(--text)",textDecoration:action.done?"line-through":"none"}}>{action.text}</div>
-                            <div style={{fontSize:10,color:"var(--text3)"}}>
-                              {action.responsible && `👤 ${action.responsible}`}
-                              {action.responsible && action.deadline && " · "}
-                              {action.deadline && `📅 ${new Date(action.deadline+"T12:00:00").toLocaleDateString("pt-BR")}`}
-                            </div>
-                          </div>
-                        </div>
-                      ))}
-                      {/* Add action form */}
-                      <AddActionInline pautaId={pauta.id} onAdd={handleAddAction}/>
-                    </div>
-
-                    {/* Delete pauta */}
-                    <div style={{marginTop:14,textAlign:"right"}}>
-                      <button onClick={()=>handleDeletePauta(pauta.id)} style={{fontSize:11,padding:"5px 12px",borderRadius:6,border:"1px solid var(--red)33",background:"transparent",color:"var(--red)",cursor:"pointer"}}>🗑️ Excluir pauta</button>
-                    </div>
-                  </div>
-                )}
-              </div>
-            );
-          })}
         </div>
       )}
 
