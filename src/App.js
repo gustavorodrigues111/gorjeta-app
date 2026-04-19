@@ -6465,6 +6465,12 @@ function MeetingPlannerSection({ restaurantId, employees, roles, areas, meetingP
     if (idx >= 0) { all[idx] = { ...all[idx], priority: !all[idx].priority }; onUpdate("meetingIdeas", all); }
   }
 
+  function handleUpdateIdeaStatus(ideaId, status) {
+    const all = [...getData("meetingIdeas")];
+    const idx = all.findIndex(i => i.id === ideaId);
+    if (idx >= 0) { all[idx] = { ...all[idx], status }; onUpdate("meetingIdeas", all); }
+  }
+
   function deleteIdea(ideaId) {
     if (!window.confirm("Excluir esta ideia?")) return;
     onUpdate("meetingIdeas", getData("meetingIdeas").filter(i => i.id !== ideaId));
@@ -6608,6 +6614,12 @@ function MeetingPlannerSection({ restaurantId, employees, roles, areas, meetingP
     if (idx >= 0) { all[idx] = { ...all[idx], status }; onUpdate("meetingOccurrences", all); }
   }
 
+  function toggleOccPriority(occId) {
+    const all = [...getData("meetingOccurrences")];
+    const idx = all.findIndex(o => o.id === occId);
+    if (idx >= 0) { all[idx] = { ...all[idx], priority: !all[idx].priority }; onUpdate("meetingOccurrences", all); }
+  }
+
   function handleDeleteOccurrence(occId) {
     if (!window.confirm("Excluir esta ocorrência?")) return;
     onUpdate("meetingOccurrences", getData("meetingOccurrences").filter(o => o.id !== occId));
@@ -6628,14 +6640,22 @@ function MeetingPlannerSection({ restaurantId, employees, roles, areas, meetingP
 
   function handleEndLiveMeeting(pautaId) {
     handleUpdatePautaStatus(pautaId, "encerrada");
-    // Mark occurrence items as resolved
     const pauta = allPautas.find(p => p.id === pautaId);
     if (pauta) {
-      const occIds = (pauta.items ?? []).filter(it => it.fromOccurrence).map(it => it.fromOccurrence);
+      const discussedItems = (pauta.items ?? []).filter(it => it.status === "discutido" || it.status === "acao_definida");
+      // Mark discussed occurrence items as resolved
+      const occIds = discussedItems.filter(it => it.fromOccurrence).map(it => it.fromOccurrence);
       if (occIds.length > 0) {
         const allOcc = [...getData("meetingOccurrences")];
-        occIds.forEach(oid => { const idx = allOcc.findIndex(o => o.id === oid); if (idx >= 0 && allOcc[idx].status === "na_pauta") allOcc[idx] = { ...allOcc[idx], status: "resolvida" }; });
+        occIds.forEach(oid => { const idx = allOcc.findIndex(o => o.id === oid); if (idx >= 0 && (allOcc[idx].status === "na_pauta" || allOcc[idx].status === "nova")) allOcc[idx] = { ...allOcc[idx], status: "resolvida" }; });
         onUpdate("meetingOccurrences", allOcc);
+      }
+      // Mark discussed idea items as resolved
+      const ideaIds = discussedItems.filter(it => it.fromIdea).map(it => it.fromIdea);
+      if (ideaIds.length > 0) {
+        const allIdeasData = [...getData("meetingIdeas")];
+        ideaIds.forEach(iid => { const idx = allIdeasData.findIndex(i => i.id === iid); if (idx >= 0 && (allIdeasData[idx].status === "na_pauta" || allIdeasData[idx].status === "nova")) allIdeasData[idx] = { ...allIdeasData[idx], status: "resolvida" }; });
+        onUpdate("meetingIdeas", allIdeasData);
       }
     }
     setLivePautaId(null);
@@ -6977,7 +6997,7 @@ function MeetingPlannerSection({ restaurantId, employees, roles, areas, meetingP
                           {item.fromIdea && <span style={{fontSize:9,padding:"1px 5px",borderRadius:4,background:"#f59e0b18",color:"#f59e0b"}}>💡</span>}
                           {item.fromOccurrence && <span style={{fontSize:9,padding:"1px 5px",borderRadius:4,background:"#ef444418",color:"#ef4444"}}>🚨</span>}
                         </div>
-                        <div style={{display:"flex",gap:4,marginBottom:6,marginLeft:30}}>
+                        <div style={{display:"flex",gap:4,marginBottom:6,marginLeft:30,flexWrap:"wrap"}}>
                           {itemStatusOpts.map(([s,icon,col]) => (
                             <button key={s} onClick={()=>handleUpdatePautaItem(livePautaId,item.id,{status:s})} style={{
                               padding:"4px 10px",borderRadius:6,border:`1px solid ${item.status===s?col:"var(--border)"}`,
@@ -6985,6 +7005,12 @@ function MeetingPlannerSection({ restaurantId, employees, roles, areas, meetingP
                               cursor:"pointer",fontSize:11,fontFamily:"'DM Sans',sans-serif",fontWeight:item.status===s?700:400
                             }}>{icon} {s==="pendente"?"Pendente":s==="discutido"?"Discutido":"Ação definida"}</button>
                           ))}
+                          {item.fromIdea && (() => { const srcIdea = allIdeas.find(i=>i.id===item.fromIdea); return srcIdea && srcIdea.status !== "resolvida" ? (
+                            <button onClick={()=>handleUpdateIdeaStatus(item.fromIdea,"resolvida")} style={{padding:"4px 10px",borderRadius:6,border:"1px solid #10b98144",background:"#10b98108",color:"#10b981",cursor:"pointer",fontSize:11,fontFamily:"'DM Sans',sans-serif"}}>💡 Marcar ideia resolvida</button>
+                          ) : srcIdea?.status === "resolvida" ? <span style={{fontSize:10,color:"#10b981",padding:"4px 8px"}}>💡 ✓ Ideia resolvida</span> : null; })()}
+                          {item.fromOccurrence && (() => { const srcOcc = allOccurrences.find(o=>o.id===item.fromOccurrence); return srcOcc && srcOcc.status !== "resolvida" ? (
+                            <button onClick={()=>handleUpdateOccStatus(item.fromOccurrence,"resolvida")} style={{padding:"4px 10px",borderRadius:6,border:"1px solid #10b98144",background:"#10b98108",color:"#10b981",cursor:"pointer",fontSize:11,fontFamily:"'DM Sans',sans-serif"}}>🚨 Marcar ocorrência resolvida</button>
+                          ) : srcOcc?.status === "resolvida" ? <span style={{fontSize:10,color:"#10b981",padding:"4px 8px"}}>🚨 ✓ Ocorrência resolvida</span> : null; })()}
                         </div>
                         <div style={{marginLeft:30}}>
                           <textarea value={item.notes??""} onChange={e=>handleUpdatePautaItemNotes(livePautaId,item.id,e.target.value)} rows={1} placeholder="Anotações..." style={{...S.input,fontSize:11,padding:"6px 8px",resize:"vertical",width:"100%",boxSizing:"border-box"}}/>
@@ -7209,6 +7235,7 @@ function MeetingPlannerSection({ restaurantId, employees, roles, areas, meetingP
                   </div>
                   <div style={{display:"flex",gap:4,flexShrink:0}}>
                     <button onClick={()=>toggleIdeaPriority(idea.id)} title={idea.priority?"Remover prioridade":"Marcar como prioridade"} style={{padding:"4px 8px",borderRadius:6,border:"1px solid #f59e0b44",background:idea.priority?"#f59e0b22":"transparent",color:"#f59e0b",cursor:"pointer",fontSize:12}}>⚡</button>
+                    <button onClick={()=>handleUpdateIdeaStatus(idea.id,"resolvida")} title="Marcar como resolvida/implantada" style={{padding:"4px 8px",borderRadius:6,border:"1px solid #10b98144",background:"transparent",color:"#10b981",cursor:"pointer",fontSize:11}}>✓</button>
                     <button onClick={()=>deleteIdea(idea.id)} style={{padding:"4px 8px",borderRadius:6,border:"1px solid var(--red)33",background:"transparent",color:"var(--red)",cursor:"pointer",fontSize:10}}>✕</button>
                   </div>
                 </div>
@@ -7223,8 +7250,25 @@ function MeetingPlannerSection({ restaurantId, employees, roles, areas, meetingP
               {filteredIdeas.filter(i=>i.status==="na_pauta").map(idea => (
                 <div key={idea.id} style={{padding:"8px 14px",marginBottom:4,borderRadius:8,background:"var(--bg2)",border:"1px solid var(--border)"}}>
                   <div style={{display:"flex",alignItems:"center",gap:6}}>
+                    <span style={{color:"#f59e0b",fontSize:10}}>📋</span>
+                    <span style={{flex:1,color:"var(--text3)",fontSize:12}}>{idea.title}</span>
+                    <button onClick={()=>handleUpdateIdeaStatus(idea.id,"resolvida")} title="Marcar como resolvida/implantada" style={{padding:"2px 8px",borderRadius:4,border:"1px solid #10b98144",background:"transparent",color:"#10b981",cursor:"pointer",fontSize:10}}>✓ Resolvida</button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Resolved ideas */}
+          {filteredIdeas.filter(i=>i.status==="resolvida").length > 0 && (
+            <div style={{marginTop:16}}>
+              <h4 style={{color:"var(--text3)",fontSize:12,fontWeight:600,margin:"0 0 8px"}}>Resolvidas / Implantadas</h4>
+              {filteredIdeas.filter(i=>i.status==="resolvida").map(idea => (
+                <div key={idea.id} style={{padding:"8px 14px",marginBottom:4,borderRadius:8,background:"#10b98106",border:"1px solid #10b98122"}}>
+                  <div style={{display:"flex",alignItems:"center",gap:6}}>
                     <span style={{color:"#10b981",fontSize:10}}>✓</span>
-                    <span style={{color:"var(--text3)",fontSize:12,textDecoration:"line-through"}}>{idea.title}</span>
+                    <span style={{flex:1,color:"var(--text3)",fontSize:12,textDecoration:"line-through"}}>{idea.title}</span>
+                    <button onClick={()=>handleUpdateIdeaStatus(idea.id,"nova")} title="Reabrir" style={{padding:"2px 8px",borderRadius:4,border:"1px solid var(--border)",background:"transparent",color:"var(--text3)",cursor:"pointer",fontSize:10}}>↩ Reabrir</button>
                   </div>
                 </div>
               ))}
@@ -7286,14 +7330,15 @@ function MeetingPlannerSection({ restaurantId, employees, roles, areas, meetingP
             </div>
           )}
 
-          {filteredOccurrences.filter(o=>o.status==="nova").sort((a,b)=>(b.createdAt??"").localeCompare(a.createdAt??"")).map(occ => {
+          {filteredOccurrences.filter(o=>o.status==="nova").sort((a,b)=>(b.priority?1:0)-(a.priority?1:0)||(b.createdAt??"").localeCompare(a.createdAt??"")).map(occ => {
             const occT = OCC_TYPES.find(([t])=>t===occ.type);
             const occAreaList = occ.areas ?? [];
             return (
-              <div key={occ.id} style={{...S.card,padding:"12px 16px",marginBottom:8,border:"1px solid #ef444422"}}>
+              <div key={occ.id} style={{...S.card,padding:"12px 16px",marginBottom:8,border:`1px solid ${occ.priority?"#f59e0b33":"#ef444422"}`,background:occ.priority?"#f59e0b05":"var(--card-bg)"}}>
                 <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:8}}>
                   <div style={{flex:1,minWidth:0}}>
                     <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:4,flexWrap:"wrap"}}>
+                      {occ.priority && <span style={{fontSize:10,padding:"2px 6px",borderRadius:4,background:"#f59e0b22",color:"#f59e0b",fontWeight:700}}>⚡ Prioridade</span>}
                       <span style={{fontSize:10,padding:"2px 6px",borderRadius:4,background:"#ef444418",color:"#ef4444",fontWeight:600}}>{occT?.[1]} {occT?.[2]}</span>
                       {occAreaList.map(a => { const col = AREA_COLORS[a] ?? "#888"; return <span key={a} style={{fontSize:10,padding:"2px 6px",borderRadius:4,background:col+"18",color:col}}>{a}</span>; })}
                     </div>
@@ -7302,6 +7347,7 @@ function MeetingPlannerSection({ restaurantId, employees, roles, areas, meetingP
                     <div style={{color:"var(--text3)",fontSize:10,marginTop:4}}>{occ.createdBy} · {new Date(occ.createdAt).toLocaleDateString("pt-BR")}</div>
                   </div>
                   <div style={{display:"flex",gap:4,flexShrink:0}}>
+                    <button onClick={()=>toggleOccPriority(occ.id)} title={occ.priority?"Remover prioridade":"Marcar como prioridade"} style={{padding:"4px 8px",borderRadius:6,border:"1px solid #f59e0b44",background:occ.priority?"#f59e0b22":"transparent",color:"#f59e0b",cursor:"pointer",fontSize:12}}>⚡</button>
                     <button onClick={()=>handleUpdateOccStatus(occ.id,"resolvida")} title="Marcar como resolvida" style={{padding:"4px 8px",borderRadius:6,border:"1px solid #10b98144",background:"transparent",color:"#10b981",cursor:"pointer",fontSize:11}}>✓</button>
                     <button onClick={()=>handleUpdateOccStatus(occ.id,"descartada")} title="Descartar" style={{padding:"4px 8px",borderRadius:6,border:"1px solid var(--border)",background:"transparent",color:"var(--text3)",cursor:"pointer",fontSize:10}}>✕</button>
                     <button onClick={()=>handleDeleteOccurrence(occ.id)} style={{padding:"4px 8px",borderRadius:6,border:"1px solid var(--red)33",background:"transparent",color:"var(--red)",cursor:"pointer",fontSize:10}}>🗑️</button>
@@ -7339,7 +7385,8 @@ function MeetingPlannerSection({ restaurantId, employees, roles, areas, meetingP
                   <div key={occ.id} style={{padding:"8px 14px",marginBottom:4,borderRadius:8,background:"#10b98106",border:"1px solid #10b98122"}}>
                     <div style={{display:"flex",alignItems:"center",gap:6}}>
                       <span style={{color:"#10b981",fontSize:10}}>✓</span>
-                      <span style={{color:"var(--text3)",fontSize:12,textDecoration:"line-through"}}>{occT?.[1]} {occ.title}</span>
+                      <span style={{flex:1,color:"var(--text3)",fontSize:12,textDecoration:"line-through"}}>{occT?.[1]} {occ.title}</span>
+                      <button onClick={()=>handleUpdateOccStatus(occ.id,"nova")} title="Reabrir" style={{padding:"2px 8px",borderRadius:4,border:"1px solid var(--border)",background:"transparent",color:"var(--text3)",cursor:"pointer",fontSize:10}}>↩ Reabrir</button>
                     </div>
                   </div>
                 );
