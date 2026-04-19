@@ -613,6 +613,9 @@ const K = {
   delays:              "v4:delays",               // {[rid]: {[mk]: {[empId]: {[day]: minutes}}}}
   tipApprovals:        "v4:tipApprovals",         // {[rid]: {[weekMonday]: {approvedAt, approvedBy, approvedByName}}}
   meetingPlans:        "v4:meetingPlans",         // [{id, restaurantId, type:"alinhamento"|"avaliação", employeeIds:[], plannedDate, note, createdBy, createdAt, completedFeedbackIds:{[empId]:fbId}}]
+  meetingIdeas:        "v4:meetingIdeas",         // [{id, restaurantId, title, description, area, createdBy, createdAt, priority:bool, status:"nova"|"na_pauta"|"descartada"}]
+  meetingAgendas:      "v4:meetingAgendas",       // [{id, restaurantId, title, templateType, date, items:[], createdBy, createdAt, status:"aberta"|"em_andamento"|"encerrada"}]
+  meetingActions:      "v4:meetingActions",       // [{id, restaurantId, pautaId, text, responsible, deadline, done:bool, createdAt}]
 };
 
 // ── Version retention ──
@@ -6302,13 +6305,91 @@ function GoalsManager({ empId, employeeGoals, roles, restaurantId, onUpdate, cur
   );
 }
 
-function MeetingPlannerSection({ restaurantId, employees, roles, areas, meetingPlans, allMeetingPlans, feedbacks, onUpdate, currentUser, isOwner, mobileOnly }) {
+// ── Meeting agenda templates ──
+const AGENDA_TEMPLATES = [
+  { id:"semanal", label:"Reunião Semanal de Lideranças", icon:"📋", items:[
+    "Abertura e alinhamento geral",
+    "Revisão de ações pendentes da semana anterior",
+    "Indicadores da semana (faltas, atrasos, ocorrências)",
+    "Pontos por área — destaques e problemas",
+    "Novas ações e responsáveis",
+    "Encerramento e próximos passos",
+  ]},
+  { id:"mensal", label:"Reunião Mensal de Planejamento", icon:"📊", items:[
+    "Resultados do mês — metas atingidas e não atingidas",
+    "Análise de indicadores (turnover, absenteísmo, avaliações)",
+    "Pontos críticos por área",
+    "Planejamento do próximo mês — metas e prioridades",
+    "Ações e prazos definidos",
+    "Encerramento",
+  ]},
+  { id:"rapido", label:"Reunião de Alinhamento Rápido", icon:"⚡", items:[
+    "Pauta livre — pontos urgentes",
+    "Decisões tomadas",
+    "Próximos passos",
+  ]},
+  { id:"feedback", label:"Feedback de Área", icon:"💬", items:[
+    "Desempenho geral da equipe no período",
+    "Destaques positivos e elogios",
+    "Ocorrências e pontos de atenção",
+    "Plano de ação para melhorias",
+  ]},
+];
+
+function MeetingPlannerSection({ restaurantId, employees, roles, areas, meetingPlans, allMeetingPlans, feedbacks, onUpdate, currentUser, isOwner, mobileOnly, isLider, managerAreas, data }) {
+  // Sub-tab state
+  const [subTab, setSubTab] = useState("reunioes"); // reunioes | ideias | pautas | relatorio
+  // Reuniões (existing)
   const [showForm, setShowForm] = useState(false);
   const [planType, setPlanType] = useState("alinhamento");
   const [planDate, setPlanDate] = useState("");
   const [planNote, setPlanNote] = useState("");
   const [selectedAreas, setSelectedAreas] = useState([]);
   const [selectedEmps, setSelectedEmps] = useState([]);
+  // Area filter for Líder
+  const [showAllAreas, setShowAllAreas] = useState(false);
+  // Ideias
+  const [showIdeaForm, setShowIdeaForm] = useState(false);
+  const [ideaTitle, setIdeaTitle] = useState("");
+  const [ideaDesc, setIdeaDesc] = useState("");
+  const [ideaArea, setIdeaArea] = useState("");
+  // Pautas
+  const [showPautaForm, setShowPautaForm] = useState(false);
+  const [pautaTitle, setPautaTitle] = useState("");
+  const [pautaType, setPautaType] = useState("semanal");
+  const [pautaDate, setPautaDate] = useState("");
+  const [pautaItems, setPautaItems] = useState([]);
+  const [pautaNewItem, setPautaNewItem] = useState("");
+  const [pautaPickIdeas, setPautaPickIdeas] = useState([]);
+  const [activePautaId, setActivePautaId] = useState(null);
+  // Ações pós-reunião
+  // Relatório
+  const [relFrom, setRelFrom] = useState("");
+  const [relTo, setRelTo] = useState("");
+  const [relFilterArea, setRelFilterArea] = useState("Todos");
+  const [relFilterLider, setRelFilterLider] = useState("Todos");
+
+  // Data keys
+  const allIdeas = (data?.meetingIdeas ?? []).filter(i => i.restaurantId === restaurantId);
+  const allPautas = (data?.meetingAgendas ?? []).filter(p => p.restaurantId === restaurantId);
+  const allActions = (data?.meetingActions ?? []).filter(a => a.restaurantId === restaurantId);
+
+  // Wrapper for reading data
+  const getData = (key) => data?.[key] ?? [];
+
+  // Area filter logic for Líder Operacional
+  const filteredAreas = (isLider && !showAllAreas && managerAreas?.length > 0)
+    ? areas.filter(a => managerAreas.includes(a))
+    : areas;
+  const filteredEmployees = (isLider && !showAllAreas && managerAreas?.length > 0)
+    ? employees.filter(e => { const r = roles.find(rl => rl.id === e.roleId); return r && managerAreas.includes(r.area); })
+    : employees;
+  const filteredPlans = (isLider && !showAllAreas && managerAreas?.length > 0)
+    ? meetingPlans.filter(p => (p.employeeIds ?? []).some(eid => filteredEmployees.find(e => e.id === eid)))
+    : meetingPlans;
+  const filteredIdeas = (isLider && !showAllAreas && managerAreas?.length > 0)
+    ? allIdeas.filter(i => !i.area || managerAreas.includes(i.area))
+    : allIdeas;
 
   const toggleArea = (area) => {
     const areaEmps = employees.filter(e => { const r = roles.find(rl => rl.id === e.roleId); return r?.area === area; }).map(e => e.id);
@@ -6348,10 +6429,8 @@ function MeetingPlannerSection({ restaurantId, employees, roles, areas, meetingP
     onUpdate("meetingPlans", (allMeetingPlans ?? []).filter(p => p.id !== planId));
   }
 
-  // Determine status for each employee in a plan
   function getEmpStatus(plan, empId) {
     if (plan.completedFeedbackIds?.[empId]) return "realizada";
-    // Check if there's a matching feedback (same employee, same type, date within ±7 days)
     const fb = (feedbacks ?? []).find(f => {
       if (f.employeeId !== empId || f.deletedAt) return false;
       const fbType = f.meetingType || (f.rating > 0 ? "avaliação" : "alinhamento");
@@ -6366,142 +6445,782 @@ function MeetingPlannerSection({ restaurantId, employees, roles, areas, meetingP
     return "pendente";
   }
 
+  // ── Ideias ──
+  function handleCreateIdea() {
+    if (!ideaTitle.trim()) { window.alert("Informe o título da ideia."); return; }
+    const idea = {
+      id: `idea-${Date.now()}-${Math.random().toString(36).slice(2,6)}`,
+      restaurantId,
+      title: ideaTitle.trim(),
+      description: ideaDesc.trim(),
+      area: ideaArea || null,
+      createdBy: currentUser?.name ?? (isOwner ? "Gestor AppTip" : "Gestor Adm."),
+      createdAt: new Date().toISOString(),
+      priority: false,
+      status: "nova", // nova | na_pauta | descartada
+    };
+    onUpdate("meetingIdeas", [...getData("meetingIdeas"), idea]);
+    setIdeaTitle(""); setIdeaDesc(""); setIdeaArea(""); setShowIdeaForm(false);
+  }
+
+  function toggleIdeaPriority(ideaId) {
+    const all = [...getData("meetingIdeas")];
+    const idx = all.findIndex(i => i.id === ideaId);
+    if (idx >= 0) { all[idx] = { ...all[idx], priority: !all[idx].priority }; onUpdate("meetingIdeas", all); }
+  }
+
+  function deleteIdea(ideaId) {
+    if (!window.confirm("Excluir esta ideia?")) return;
+    onUpdate("meetingIdeas", getData("meetingIdeas").filter(i => i.id !== ideaId));
+  }
+
+  // ── Pautas ──
+  function handleApplyTemplate(templateId) {
+    const tpl = AGENDA_TEMPLATES.find(t => t.id === templateId);
+    if (!tpl) return;
+    setPautaTitle(tpl.label);
+    setPautaItems(tpl.items.map((text, i) => ({ id: `tpl-${i}`, text, fromIdea: null, status: "pendente", decision: "" })));
+  }
+
+  function handleAddPautaItem() {
+    if (!pautaNewItem.trim()) return;
+    setPautaItems(prev => [...prev, { id: `item-${Date.now()}`, text: pautaNewItem.trim(), fromIdea: null, status: "pendente", decision: "" }]);
+    setPautaNewItem("");
+  }
+
+  function handleAddIdeaToPauta(idea) {
+    if (pautaPickIdeas.includes(idea.id)) return;
+    setPautaPickIdeas(prev => [...prev, idea.id]);
+    setPautaItems(prev => [...prev, { id: `idea-${idea.id}`, text: idea.title + (idea.description ? ` — ${idea.description}` : ""), fromIdea: idea.id, status: "pendente", decision: "" }]);
+  }
+
+  function handleRemovePautaItem(itemId) {
+    setPautaItems(prev => prev.filter(i => i.id !== itemId));
+    const item = pautaItems.find(i => i.id === itemId);
+    if (item?.fromIdea) setPautaPickIdeas(prev => prev.filter(id => id !== item.fromIdea));
+  }
+
+  function handleMovePautaItem(idx, dir) {
+    const newItems = [...pautaItems];
+    const newIdx = idx + dir;
+    if (newIdx < 0 || newIdx >= newItems.length) return;
+    [newItems[idx], newItems[newIdx]] = [newItems[newIdx], newItems[idx]];
+    setPautaItems(newItems);
+  }
+
+  function handleSavePauta() {
+    if (!pautaTitle.trim()) { window.alert("Informe o título da pauta."); return; }
+    if (pautaItems.length === 0) { window.alert("Adicione ao menos um item à pauta."); return; }
+    const pauta = {
+      id: `pauta-${Date.now()}-${Math.random().toString(36).slice(2,6)}`,
+      restaurantId,
+      title: pautaTitle.trim(),
+      templateType: pautaType,
+      date: pautaDate || today(),
+      items: pautaItems.map(it => ({ ...it })),
+      createdBy: currentUser?.name ?? (isOwner ? "Gestor AppTip" : "Gestor Adm."),
+      createdAt: new Date().toISOString(),
+      status: "aberta", // aberta | em_andamento | encerrada
+      actions: [], // ações pós-reunião
+    };
+    // Mark ideas as included
+    const ideaIds = pautaItems.filter(i => i.fromIdea).map(i => i.fromIdea);
+    if (ideaIds.length > 0) {
+      const allIdeasData = [...getData("meetingIdeas")];
+      ideaIds.forEach(iid => { const idx = allIdeasData.findIndex(i => i.id === iid); if (idx >= 0) allIdeasData[idx] = { ...allIdeasData[idx], status: "na_pauta" }; });
+      onUpdate("meetingIdeas", allIdeasData);
+    }
+    onUpdate("meetingAgendas", [...getData("meetingAgendas"), pauta]);
+    setPautaTitle(""); setPautaType("semanal"); setPautaDate(""); setPautaItems([]); setPautaNewItem(""); setPautaPickIdeas([]); setShowPautaForm(false);
+  }
+
+  // Checklist ao vivo
+  function handleUpdatePautaItem(pautaId, itemId, updates) {
+    const all = [...getData("meetingAgendas")];
+    const idx = all.findIndex(p => p.id === pautaId);
+    if (idx < 0) return;
+    all[idx] = { ...all[idx], items: all[idx].items.map(it => it.id === itemId ? { ...it, ...updates } : it) };
+    onUpdate("meetingAgendas", all);
+  }
+
+  function handleUpdatePautaStatus(pautaId, status) {
+    const all = [...getData("meetingAgendas")];
+    const idx = all.findIndex(p => p.id === pautaId);
+    if (idx < 0) return;
+    all[idx] = { ...all[idx], status };
+    onUpdate("meetingAgendas", all);
+  }
+
+  // Ações pós-reunião
+  function handleAddAction(pautaId, actionText, responsible, deadline) {
+    if (!actionText.trim()) return;
+    const action = {
+      id: `act-${Date.now()}-${Math.random().toString(36).slice(2,6)}`,
+      restaurantId,
+      pautaId,
+      text: actionText.trim(),
+      responsible: responsible || "",
+      deadline: deadline || "",
+      done: false,
+      createdAt: new Date().toISOString(),
+    };
+    onUpdate("meetingActions", [...getData("meetingActions"), action]);
+  }
+
+  function handleToggleAction(actionId) {
+    const all = [...getData("meetingActions")];
+    const idx = all.findIndex(a => a.id === actionId);
+    if (idx >= 0) { all[idx] = { ...all[idx], done: !all[idx].done }; onUpdate("meetingActions", all); }
+  }
+
+  function handleDeletePauta(pautaId) {
+    if (!window.confirm("Excluir esta pauta e suas ações?")) return;
+    onUpdate("meetingAgendas", getData("meetingAgendas").filter(p => p.id !== pautaId));
+    onUpdate("meetingActions", getData("meetingActions").filter(a => a.pautaId !== pautaId));
+  }
+
   const typeColor = planType === "avaliação" ? "#8b5cf6" : "#3b82f6";
 
   // Group plans by month
   const grouped = {};
-  meetingPlans.forEach(p => {
+  filteredPlans.forEach(p => {
     const mk = p.plannedDate?.slice(0,7) ?? "sem-data";
     if (!grouped[mk]) grouped[mk] = [];
     grouped[mk].push(p);
   });
 
+  // Pending actions count
+  const pendingActions = allActions.filter(a => !a.done);
+
+  // Sub-tabs config
+  const subTabs = [
+    ["reunioes","📅 Reuniões"],
+    ["ideias",`💡 Ideias${filteredIdeas.filter(i=>i.status==="nova").length>0?` (${filteredIdeas.filter(i=>i.status==="nova").length})`:""}`],
+    ["pautas",`📋 Pautas${pendingActions.length>0?` · ${pendingActions.length} ação${pendingActions.length!==1?"ões":""}`:""}`],
+    ["relatorio","📄 Relatório"],
+  ];
+
   return (
     <div>
-      {/* New plan button */}
-      <button onClick={()=>setShowForm(!showForm)} style={{...S.btnPrimary,marginBottom:16,fontSize:13,padding:"10px 20px",background:showForm?"var(--red)":"#3b82f6",borderColor:showForm?"var(--red)":"#3b82f6"}}>
-        {showForm ? "✕ Cancelar" : "+ Planejar reunião"}
-      </button>
+      {/* Area filter for Líder */}
+      {isLider && managerAreas?.length > 0 && (
+        <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:12,flexWrap:"wrap"}}>
+          <span style={{fontSize:11,color:"var(--text3)"}}>Áreas:</span>
+          {managerAreas.map(a => {
+            const col = AREA_COLORS[a] ?? "#888";
+            return <span key={a} style={{fontSize:11,padding:"3px 10px",borderRadius:12,background:col+"18",color:col,fontWeight:600}}>{a}</span>;
+          })}
+          <button onClick={()=>setShowAllAreas(!showAllAreas)} style={{fontSize:10,padding:"3px 10px",borderRadius:12,border:"1px solid var(--border)",background:showAllAreas?"var(--ac)11":"transparent",color:showAllAreas?"var(--ac)":"var(--text3)",cursor:"pointer",fontFamily:"'DM Sans',sans-serif"}}>
+            {showAllAreas ? "✓ Todas as áreas" : "Ver todas as áreas"}
+          </button>
+        </div>
+      )}
 
-      {/* Form */}
-      {showForm && (
-        <div style={{...S.card,padding:"18px 20px",marginBottom:20,border:`1px solid ${typeColor}22`}}>
-          <h4 style={{color:"var(--text)",margin:"0 0 14px",fontSize:15,fontWeight:700}}>Nova reunião</h4>
-          {/* Type toggle */}
-          <div style={{display:"flex",gap:6,marginBottom:14}}>
-            {[["alinhamento","💬 Alinhamento","#3b82f6"],["avaliação","📋 Avaliação","#8b5cf6"]].map(([val,lbl,col]) => (
-              <button key={val} onClick={()=>setPlanType(val)} style={{
-                flex:1,padding:"10px",borderRadius:10,border:`2px solid ${planType===val?col:"var(--border)"}`,
-                background:planType===val?col+"14":"transparent",color:planType===val?col:"var(--text3)",
-                cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:12,fontWeight:planType===val?700:400
-              }}>{lbl}</button>
-            ))}
-          </div>
-          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:12}}>
-            <div>
-              <label style={S.label}>Data prevista</label>
-              <input type="date" value={planDate} onChange={e=>setPlanDate(e.target.value)} style={S.input}/>
-            </div>
-            <div>
-              <label style={S.label}>Observação <span style={{fontWeight:400,color:"var(--text3)"}}>(opcional)</span></label>
-              <input value={planNote} onChange={e=>setPlanNote(e.target.value)} placeholder="Ex: Fechamento trimestral" style={S.input}/>
-            </div>
-          </div>
-          {/* Area selector */}
-          <label style={S.label}>Participantes</label>
-          <div style={{display:"flex",gap:6,marginBottom:10,flexWrap:"wrap"}}>
-            {areas.map(area => {
-              const active = selectedAreas.includes(area);
-              const col = AREA_COLORS[area] ?? "#888";
-              return (
-                <button key={area} onClick={()=>toggleArea(area)} style={{
-                  padding:"6px 14px",borderRadius:20,border:`1px solid ${active?col:"var(--border)"}`,
-                  background:active?col+"22":"transparent",color:active?col:"var(--text3)",
-                  cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:12,fontWeight:active?700:400
-                }}>{area}</button>
-              );
-            })}
-          </div>
-          {/* Employee chips */}
-          {selectedAreas.length > 0 && (
-            <div style={{display:"flex",gap:4,flexWrap:"wrap",marginBottom:14,maxHeight:160,overflowY:"auto",padding:4}}>
-              {employees.filter(e => {
-                const r = roles.find(rl => rl.id === e.roleId);
-                return selectedAreas.includes(r?.area);
-              }).map(emp => {
-                const active = selectedEmps.includes(emp.id);
-                return (
-                  <button key={emp.id} onClick={()=>toggleEmp(emp.id)} style={{
-                    padding:"4px 10px",borderRadius:8,border:`1px solid ${active?"var(--ac)":"var(--border)"}`,
-                    background:active?"var(--ac-bg,#d4a01711)":"transparent",color:active?"var(--ac)":"var(--text3)",
-                    cursor:"pointer",fontSize:11,fontFamily:"'DM Mono',monospace",fontWeight:active?600:400
-                  }}>{active ? "✓ " : ""}{emp.name}</button>
-                );
-              })}
+      {/* Sub-tabs */}
+      <div style={{display:"flex",gap:4,marginBottom:16,overflowX:"auto",scrollbarWidth:"none",WebkitOverflowScrolling:"touch"}}>
+        {subTabs.map(([id,lbl]) => (
+          <button key={id} onClick={()=>setSubTab(id)} style={{
+            padding:mobileOnly?"8px 12px":"9px 16px",borderRadius:10,border:`1px solid ${subTab===id?"var(--ac)":"var(--border)"}`,
+            background:subTab===id?"var(--ac)11":"transparent",color:subTab===id?"var(--ac)":"var(--text3)",
+            cursor:"pointer",fontSize:mobileOnly?11:12,fontFamily:"'DM Sans',sans-serif",fontWeight:subTab===id?700:500,whiteSpace:"nowrap",flexShrink:0
+          }}>{lbl}</button>
+        ))}
+      </div>
+
+      {/* Pending actions reminder */}
+      {pendingActions.length > 0 && subTab !== "pautas" && (
+        <div onClick={()=>setSubTab("pautas")} style={{padding:"10px 14px",borderRadius:10,border:"1px solid #f59e0b33",background:"#f59e0b08",marginBottom:12,cursor:"pointer",display:"flex",alignItems:"center",gap:8}}>
+          <span style={{fontSize:14}}>⚠️</span>
+          <span style={{fontSize:12,color:"#f59e0b",fontWeight:600}}>{pendingActions.length} ação{pendingActions.length!==1?"ões":""} pendente{pendingActions.length!==1?"s":""}</span>
+          <span style={{fontSize:10,color:"var(--text3)"}}>— clique para ver</span>
+        </div>
+      )}
+
+      {/* ═══ SUB-TAB: REUNIÕES ═══ */}
+      {subTab === "reunioes" && (
+        <div>
+          <button onClick={()=>setShowForm(!showForm)} style={{...S.btnPrimary,marginBottom:16,fontSize:13,padding:"10px 20px",background:showForm?"var(--red)":"#3b82f6",borderColor:showForm?"var(--red)":"#3b82f6"}}>
+            {showForm ? "✕ Cancelar" : "+ Planejar reunião"}
+          </button>
+
+          {showForm && (
+            <div style={{...S.card,padding:"18px 20px",marginBottom:20,border:`1px solid ${typeColor}22`}}>
+              <h4 style={{color:"var(--text)",margin:"0 0 14px",fontSize:15,fontWeight:700}}>Nova reunião</h4>
+              <div style={{display:"flex",gap:6,marginBottom:14}}>
+                {[["alinhamento","💬 Alinhamento","#3b82f6"],["avaliação","📋 Avaliação","#8b5cf6"]].map(([val,lbl,col]) => (
+                  <button key={val} onClick={()=>setPlanType(val)} style={{
+                    flex:1,padding:"10px",borderRadius:10,border:`2px solid ${planType===val?col:"var(--border)"}`,
+                    background:planType===val?col+"14":"transparent",color:planType===val?col:"var(--text3)",
+                    cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:12,fontWeight:planType===val?700:400
+                  }}>{lbl}</button>
+                ))}
+              </div>
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:12}}>
+                <div>
+                  <label style={S.label}>Data prevista</label>
+                  <input type="date" value={planDate} onChange={e=>setPlanDate(e.target.value)} style={S.input}/>
+                </div>
+                <div>
+                  <label style={S.label}>Observação <span style={{fontWeight:400,color:"var(--text3)"}}>(opcional)</span></label>
+                  <input value={planNote} onChange={e=>setPlanNote(e.target.value)} placeholder="Ex: Fechamento trimestral" style={S.input}/>
+                </div>
+              </div>
+              <label style={S.label}>Participantes</label>
+              <div style={{display:"flex",gap:6,marginBottom:10,flexWrap:"wrap"}}>
+                {filteredAreas.map(area => {
+                  const active = selectedAreas.includes(area);
+                  const col = AREA_COLORS[area] ?? "#888";
+                  return (
+                    <button key={area} onClick={()=>toggleArea(area)} style={{
+                      padding:"6px 14px",borderRadius:20,border:`1px solid ${active?col:"var(--border)"}`,
+                      background:active?col+"22":"transparent",color:active?col:"var(--text3)",
+                      cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:12,fontWeight:active?700:400
+                    }}>{area}</button>
+                  );
+                })}
+              </div>
+              {selectedAreas.length > 0 && (
+                <div style={{display:"flex",gap:4,flexWrap:"wrap",marginBottom:14,maxHeight:160,overflowY:"auto",padding:4}}>
+                  {filteredEmployees.filter(e => {
+                    const r = roles.find(rl => rl.id === e.roleId);
+                    return selectedAreas.includes(r?.area);
+                  }).map(emp => {
+                    const active = selectedEmps.includes(emp.id);
+                    return (
+                      <button key={emp.id} onClick={()=>toggleEmp(emp.id)} style={{
+                        padding:"4px 10px",borderRadius:8,border:`1px solid ${active?"var(--ac)":"var(--border)"}`,
+                        background:active?"var(--ac-bg,#d4a01711)":"transparent",color:active?"var(--ac)":"var(--text3)",
+                        cursor:"pointer",fontSize:11,fontFamily:"'DM Mono',monospace",fontWeight:active?600:400
+                      }}>{active ? "✓ " : ""}{emp.name}</button>
+                    );
+                  })}
+                </div>
+              )}
+              {selectedEmps.length > 0 && <div style={{fontSize:11,color:"var(--text3)",marginBottom:10}}>{selectedEmps.length} participante{selectedEmps.length!==1?"s":""} selecionado{selectedEmps.length!==1?"s":""}</div>}
+              <button onClick={handleCreatePlan} style={{...S.btnPrimary,width:"auto",padding:"10px 24px",background:typeColor,borderColor:typeColor}}>Criar reunião</button>
             </div>
           )}
-          {selectedEmps.length > 0 && <div style={{fontSize:11,color:"var(--text3)",marginBottom:10}}>{selectedEmps.length} participante{selectedEmps.length!==1?"s":""} selecionado{selectedEmps.length!==1?"s":""}</div>}
-          <button onClick={handleCreatePlan} style={{...S.btnPrimary,width:"auto",padding:"10px 24px",background:typeColor,borderColor:typeColor}}>Criar reunião</button>
+
+          {Object.keys(grouped).length === 0 && !showForm && (
+            <div style={{...S.card,textAlign:"center",padding:40}}>
+              <div style={{fontSize:36,marginBottom:12}}>📅</div>
+              <p style={{color:"var(--text3)",fontSize:14}}>Nenhuma reunião planejada ainda.</p>
+              <p style={{color:"var(--text3)",fontSize:12}}>Clique em "+ Planejar reunião" para começar.</p>
+            </div>
+          )}
+          {Object.entries(grouped).sort(([a],[b])=>b.localeCompare(a)).map(([mk, plans]) => {
+            const [y,m] = mk.split("-");
+            const monthName = new Date(parseInt(y), parseInt(m)-1, 15).toLocaleDateString("pt-BR", {month:"long", year:"numeric"});
+            return (
+              <div key={mk} style={{marginBottom:20}}>
+                <h4 style={{color:"var(--text)",fontSize:14,fontWeight:700,margin:"0 0 10px",textTransform:"capitalize"}}>{monthName}</h4>
+                {plans.map(plan => {
+                  const pColor = plan.type === "avaliação" ? "#8b5cf6" : "#3b82f6";
+                  const pIcon = plan.type === "avaliação" ? "📋" : "💬";
+                  const totalEmps = (plan.employeeIds ?? []).length;
+                  const doneCount = (plan.employeeIds ?? []).filter(eid => getEmpStatus(plan, eid) === "realizada").length;
+                  const lateCount = (plan.employeeIds ?? []).filter(eid => getEmpStatus(plan, eid) === "atrasada").length;
+                  const dateStr = plan.plannedDate ? new Date(plan.plannedDate+"T12:00:00").toLocaleDateString("pt-BR") : "—";
+                  const isPast = plan.plannedDate < today();
+                  return (
+                    <div key={plan.id} style={{...S.card,padding:"14px 16px",marginBottom:8,border:`1px solid ${isPast && doneCount < totalEmps ? "#f59e0b33" : pColor+"22"}`}}>
+                      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
+                        <div style={{display:"flex",alignItems:"center",gap:8}}>
+                          <span style={{fontSize:16}}>{pIcon}</span>
+                          <span style={{color:pColor,fontWeight:700,fontSize:13}}>Conversa de {plan.type}</span>
+                          <span style={{color:"var(--text3)",fontSize:11}}>— {dateStr}</span>
+                        </div>
+                        <div style={{display:"flex",alignItems:"center",gap:6}}>
+                          <span style={{fontSize:10,color:doneCount===totalEmps?"#10b981":lateCount>0?"#f59e0b":"var(--text3)",fontWeight:700}}>
+                            {doneCount}/{totalEmps} {doneCount===totalEmps?"✓":""}
+                          </span>
+                          <button onClick={()=>handleDeletePlan(plan.id)} style={{padding:"2px 6px",borderRadius:6,border:"1px solid var(--red)33",background:"transparent",color:"var(--red)",cursor:"pointer",fontSize:9,fontFamily:"'DM Mono',monospace"}}>✕</button>
+                        </div>
+                      </div>
+                      {plan.note && <div style={{fontSize:11,color:"var(--text3)",marginBottom:8,fontStyle:"italic"}}>{plan.note}</div>}
+                      <div style={{display:"flex",gap:4,flexWrap:"wrap"}}>
+                        {(plan.employeeIds ?? []).map(eid => {
+                          const emp = employees.find(e => e.id === eid);
+                          const status = getEmpStatus(plan, eid);
+                          const sColor = status === "realizada" ? "#10b981" : status === "atrasada" ? "#f59e0b" : "var(--text3)";
+                          const sIcon = status === "realizada" ? "✓" : status === "atrasada" ? "⏰" : "○";
+                          return (
+                            <span key={eid} style={{fontSize:10,padding:"3px 8px",borderRadius:6,border:`1px solid ${sColor}33`,background:sColor+"08",color:sColor,fontWeight:status==="realizada"?700:400}}>
+                              {sIcon} {emp?.name?.split(" ")[0] ?? eid}
+                            </span>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            );
+          })}
         </div>
       )}
 
-      {/* Plans list grouped by month */}
-      {Object.keys(grouped).length === 0 && !showForm && (
-        <div style={{...S.card,textAlign:"center",padding:40}}>
-          <div style={{fontSize:36,marginBottom:12}}>📅</div>
-          <p style={{color:"var(--text3)",fontSize:14}}>Nenhuma reunião planejada ainda.</p>
-          <p style={{color:"var(--text3)",fontSize:12}}>Clique em "+ Planejar reunião" para começar.</p>
-        </div>
-      )}
-      {Object.entries(grouped).sort(([a],[b])=>b.localeCompare(a)).map(([mk, plans]) => {
-        const [y,m] = mk.split("-");
-        const monthName = new Date(parseInt(y), parseInt(m)-1, 15).toLocaleDateString("pt-BR", {month:"long", year:"numeric"});
-        return (
-          <div key={mk} style={{marginBottom:20}}>
-            <h4 style={{color:"var(--text)",fontSize:14,fontWeight:700,margin:"0 0 10px",textTransform:"capitalize"}}>{monthName}</h4>
-            {plans.map(plan => {
-              const pColor = plan.type === "avaliação" ? "#8b5cf6" : "#3b82f6";
-              const pIcon = plan.type === "avaliação" ? "📋" : "💬";
-              const totalEmps = (plan.employeeIds ?? []).length;
-              const doneCount = (plan.employeeIds ?? []).filter(eid => getEmpStatus(plan, eid) === "realizada").length;
-              const lateCount = (plan.employeeIds ?? []).filter(eid => getEmpStatus(plan, eid) === "atrasada").length;
-              const dateStr = plan.plannedDate ? new Date(plan.plannedDate+"T12:00:00").toLocaleDateString("pt-BR") : "—";
-              const isPast = plan.plannedDate < today();
-              return (
-                <div key={plan.id} style={{...S.card,padding:"14px 16px",marginBottom:8,border:`1px solid ${isPast && doneCount < totalEmps ? "#f59e0b33" : pColor+"22"}`}}>
-                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
-                    <div style={{display:"flex",alignItems:"center",gap:8}}>
-                      <span style={{fontSize:16}}>{pIcon}</span>
-                      <span style={{color:pColor,fontWeight:700,fontSize:13}}>Conversa de {plan.type}</span>
-                      <span style={{color:"var(--text3)",fontSize:11}}>— {dateStr}</span>
+      {/* ═══ SUB-TAB: IDEIAS ═══ */}
+      {subTab === "ideias" && (
+        <div>
+          <button onClick={()=>setShowIdeaForm(!showIdeaForm)} style={{...S.btnPrimary,marginBottom:16,fontSize:13,padding:"10px 20px",background:showIdeaForm?"var(--red)":"#f59e0b",borderColor:showIdeaForm?"var(--red)":"#f59e0b"}}>
+            {showIdeaForm ? "✕ Cancelar" : "+ Nova ideia"}
+          </button>
+
+          {showIdeaForm && (
+            <div style={{...S.card,padding:"18px 20px",marginBottom:20,border:"1px solid #f59e0b22"}}>
+              <h4 style={{color:"var(--text)",margin:"0 0 14px",fontSize:15,fontWeight:700}}>Nova ideia para reunião</h4>
+              <div style={{marginBottom:12}}>
+                <label style={S.label}>Título</label>
+                <input value={ideaTitle} onChange={e=>setIdeaTitle(e.target.value)} placeholder="Ex: Revisar escala do feriado" style={S.input}/>
+              </div>
+              <div style={{marginBottom:12}}>
+                <label style={S.label}>Descrição <span style={{fontWeight:400,color:"var(--text3)"}}>(opcional)</span></label>
+                <textarea value={ideaDesc} onChange={e=>setIdeaDesc(e.target.value)} rows={2} placeholder="Detalhes..." style={{...S.input,resize:"vertical"}}/>
+              </div>
+              <div style={{marginBottom:14}}>
+                <label style={S.label}>Área relacionada <span style={{fontWeight:400,color:"var(--text3)"}}>(opcional)</span></label>
+                <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+                  <button onClick={()=>setIdeaArea("")} style={{padding:"5px 12px",borderRadius:8,border:`1px solid ${!ideaArea?"var(--ac)":"var(--border)"}`,background:!ideaArea?"var(--ac)11":"transparent",color:!ideaArea?"var(--ac)":"var(--text3)",cursor:"pointer",fontSize:11,fontFamily:"'DM Sans',sans-serif"}}>Geral</button>
+                  {filteredAreas.map(a => {
+                    const col = AREA_COLORS[a] ?? "#888";
+                    return <button key={a} onClick={()=>setIdeaArea(a)} style={{padding:"5px 12px",borderRadius:8,border:`1px solid ${ideaArea===a?col:"var(--border)"}`,background:ideaArea===a?col+"18":"transparent",color:ideaArea===a?col:"var(--text3)",cursor:"pointer",fontSize:11,fontFamily:"'DM Sans',sans-serif"}}>{a}</button>;
+                  })}
+                </div>
+              </div>
+              <button onClick={handleCreateIdea} style={{...S.btnPrimary,width:"auto",padding:"10px 24px",background:"#f59e0b",borderColor:"#f59e0b"}}>Salvar ideia</button>
+            </div>
+          )}
+
+          {filteredIdeas.filter(i=>i.status==="nova").length === 0 && !showIdeaForm && (
+            <div style={{...S.card,textAlign:"center",padding:40}}>
+              <div style={{fontSize:36,marginBottom:12}}>💡</div>
+              <p style={{color:"var(--text3)",fontSize:14}}>Nenhuma ideia cadastrada.</p>
+              <p style={{color:"var(--text3)",fontSize:12}}>Anote temas para discutir nas próximas reuniões.</p>
+            </div>
+          )}
+
+          {/* Priority ideas first */}
+          {filteredIdeas.filter(i=>i.status==="nova").sort((a,b) => (b.priority?1:0) - (a.priority?1:0) || (b.createdAt??"").localeCompare(a.createdAt??"")).map(idea => {
+            const col = idea.area ? (AREA_COLORS[idea.area] ?? "#888") : "#888";
+            return (
+              <div key={idea.id} style={{...S.card,padding:"12px 16px",marginBottom:8,border:`1px solid ${idea.priority?"#f59e0b33":"var(--border)"}`,background:idea.priority?"#f59e0b05":"var(--card-bg)"}}>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:8}}>
+                  <div style={{flex:1,minWidth:0}}>
+                    <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:4,flexWrap:"wrap"}}>
+                      {idea.priority && <span style={{fontSize:10,padding:"2px 6px",borderRadius:4,background:"#f59e0b22",color:"#f59e0b",fontWeight:700}}>⚡ Prioridade</span>}
+                      {idea.area && <span style={{fontSize:10,padding:"2px 6px",borderRadius:4,background:col+"18",color:col}}>{idea.area}</span>}
                     </div>
-                    <div style={{display:"flex",alignItems:"center",gap:6}}>
-                      <span style={{fontSize:10,color:doneCount===totalEmps?"#10b981":lateCount>0?"#f59e0b":"var(--text3)",fontWeight:700}}>
-                        {doneCount}/{totalEmps} {doneCount===totalEmps?"✓":""}
-                      </span>
-                      <button onClick={()=>handleDeletePlan(plan.id)} style={{padding:"2px 6px",borderRadius:6,border:"1px solid var(--red)33",background:"transparent",color:"var(--red)",cursor:"pointer",fontSize:9,fontFamily:"'DM Mono',monospace"}}>✕</button>
-                    </div>
+                    <div style={{color:"var(--text)",fontWeight:600,fontSize:13}}>{idea.title}</div>
+                    {idea.description && <div style={{color:"var(--text3)",fontSize:11,marginTop:2}}>{idea.description}</div>}
+                    <div style={{color:"var(--text3)",fontSize:10,marginTop:4}}>{idea.createdBy} · {new Date(idea.createdAt).toLocaleDateString("pt-BR")}</div>
                   </div>
-                  {plan.note && <div style={{fontSize:11,color:"var(--text3)",marginBottom:8,fontStyle:"italic"}}>{plan.note}</div>}
-                  <div style={{display:"flex",gap:4,flexWrap:"wrap"}}>
-                    {(plan.employeeIds ?? []).map(eid => {
-                      const emp = employees.find(e => e.id === eid);
-                      const status = getEmpStatus(plan, eid);
-                      const sColor = status === "realizada" ? "#10b981" : status === "atrasada" ? "#f59e0b" : "var(--text3)";
-                      const sIcon = status === "realizada" ? "✓" : status === "atrasada" ? "⏰" : "○";
-                      return (
-                        <span key={eid} style={{fontSize:10,padding:"3px 8px",borderRadius:6,border:`1px solid ${sColor}33`,background:sColor+"08",color:sColor,fontWeight:status==="realizada"?700:400}}>
-                          {sIcon} {emp?.name?.split(" ")[0] ?? eid}
-                        </span>
-                      );
-                    })}
+                  <div style={{display:"flex",gap:4,flexShrink:0}}>
+                    <button onClick={()=>toggleIdeaPriority(idea.id)} title={idea.priority?"Remover prioridade":"Marcar como prioridade"} style={{padding:"4px 8px",borderRadius:6,border:"1px solid #f59e0b44",background:idea.priority?"#f59e0b22":"transparent",color:"#f59e0b",cursor:"pointer",fontSize:12}}>⚡</button>
+                    <button onClick={()=>deleteIdea(idea.id)} style={{padding:"4px 8px",borderRadius:6,border:"1px solid var(--red)33",background:"transparent",color:"var(--red)",cursor:"pointer",fontSize:10}}>✕</button>
                   </div>
                 </div>
-              );
-            })}
+              </div>
+            );
+          })}
+
+          {/* Ideas already in pauta */}
+          {filteredIdeas.filter(i=>i.status==="na_pauta").length > 0 && (
+            <div style={{marginTop:16}}>
+              <h4 style={{color:"var(--text3)",fontSize:12,fontWeight:600,margin:"0 0 8px"}}>Já incluídas em pauta</h4>
+              {filteredIdeas.filter(i=>i.status==="na_pauta").map(idea => (
+                <div key={idea.id} style={{padding:"8px 14px",marginBottom:4,borderRadius:8,background:"var(--bg2)",border:"1px solid var(--border)"}}>
+                  <div style={{display:"flex",alignItems:"center",gap:6}}>
+                    <span style={{color:"#10b981",fontSize:10}}>✓</span>
+                    <span style={{color:"var(--text3)",fontSize:12,textDecoration:"line-through"}}>{idea.title}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ═══ SUB-TAB: PAUTAS ═══ */}
+      {subTab === "pautas" && (
+        <div>
+          <button onClick={()=>{setShowPautaForm(!showPautaForm);if(!showPautaForm){setPautaItems([]);setPautaPickIdeas([]);setPautaTitle("");setPautaDate("");}}} style={{...S.btnPrimary,marginBottom:16,fontSize:13,padding:"10px 20px",background:showPautaForm?"var(--red)":"#10b981",borderColor:showPautaForm?"var(--red)":"#10b981"}}>
+            {showPautaForm ? "✕ Cancelar" : "+ Nova pauta"}
+          </button>
+
+          {showPautaForm && (
+            <div style={{...S.card,padding:"18px 20px",marginBottom:20,border:"1px solid #10b98122"}}>
+              <h4 style={{color:"var(--text)",margin:"0 0 14px",fontSize:15,fontWeight:700}}>Montar pauta de reunião</h4>
+
+              {/* Template selector */}
+              <label style={S.label}>Modelo</label>
+              <div style={{display:"flex",gap:6,marginBottom:14,flexWrap:"wrap"}}>
+                {AGENDA_TEMPLATES.map(tpl => (
+                  <button key={tpl.id} onClick={()=>{setPautaType(tpl.id);handleApplyTemplate(tpl.id);}} style={{
+                    padding:mobileOnly?"6px 10px":"8px 14px",borderRadius:10,border:`2px solid ${pautaType===tpl.id?"#10b981":"var(--border)"}`,
+                    background:pautaType===tpl.id?"#10b98114":"transparent",color:pautaType===tpl.id?"#10b981":"var(--text3)",
+                    cursor:"pointer",fontSize:mobileOnly?10:12,fontFamily:"'DM Sans',sans-serif",fontWeight:pautaType===tpl.id?700:400
+                  }}>{tpl.icon} {mobileOnly?tpl.label.split(" ").slice(0,2).join(" "):tpl.label}</button>
+                ))}
+              </div>
+
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:12}}>
+                <div>
+                  <label style={S.label}>Título da pauta</label>
+                  <input value={pautaTitle} onChange={e=>setPautaTitle(e.target.value)} placeholder="Ex: Reunião semanal 14/04" style={S.input}/>
+                </div>
+                <div>
+                  <label style={S.label}>Data</label>
+                  <input type="date" value={pautaDate} onChange={e=>setPautaDate(e.target.value)} style={S.input}/>
+                </div>
+              </div>
+
+              {/* Items list */}
+              <label style={S.label}>Itens da pauta</label>
+              <div style={{marginBottom:12}}>
+                {pautaItems.map((item, idx) => (
+                  <div key={item.id} style={{display:"flex",alignItems:"center",gap:6,marginBottom:4,padding:"6px 10px",borderRadius:8,background:"var(--bg2)",border:"1px solid var(--border)"}}>
+                    <span style={{color:"var(--text3)",fontSize:10,fontWeight:700,minWidth:20}}>{idx+1}.</span>
+                    <span style={{flex:1,fontSize:12,color:"var(--text)"}}>{item.text}</span>
+                    {item.fromIdea && <span style={{fontSize:9,padding:"1px 5px",borderRadius:4,background:"#f59e0b18",color:"#f59e0b"}}>💡</span>}
+                    <button onClick={()=>handleMovePautaItem(idx,-1)} disabled={idx===0} style={{padding:"2px 5px",border:"none",background:"transparent",color:idx===0?"var(--border)":"var(--text3)",cursor:idx===0?"default":"pointer",fontSize:10}}>▲</button>
+                    <button onClick={()=>handleMovePautaItem(idx,1)} disabled={idx===pautaItems.length-1} style={{padding:"2px 5px",border:"none",background:"transparent",color:idx===pautaItems.length-1?"var(--border)":"var(--text3)",cursor:idx===pautaItems.length-1?"default":"pointer",fontSize:10}}>▼</button>
+                    <button onClick={()=>handleRemovePautaItem(item.id)} style={{padding:"2px 5px",border:"none",background:"transparent",color:"var(--red)",cursor:"pointer",fontSize:10}}>✕</button>
+                  </div>
+                ))}
+              </div>
+
+              {/* Add custom item */}
+              <div style={{display:"flex",gap:6,marginBottom:12}}>
+                <input value={pautaNewItem} onChange={e=>setPautaNewItem(e.target.value)} onKeyDown={e=>{if(e.key==="Enter")handleAddPautaItem();}} placeholder="Adicionar item..." style={{...S.input,flex:1}}/>
+                <button onClick={handleAddPautaItem} style={{...S.btnSecondary,fontSize:12,padding:"8px 14px",whiteSpace:"nowrap"}}>+ Adicionar</button>
+              </div>
+
+              {/* Pull ideas */}
+              {filteredIdeas.filter(i=>i.status==="nova" && !pautaPickIdeas.includes(i.id)).length > 0 && (
+                <div style={{marginBottom:14}}>
+                  <label style={{...S.label,display:"flex",alignItems:"center",gap:4}}>💡 Puxar ideias do banco</label>
+                  <div style={{display:"flex",gap:4,flexWrap:"wrap"}}>
+                    {filteredIdeas.filter(i=>i.status==="nova" && !pautaPickIdeas.includes(i.id)).map(idea => (
+                      <button key={idea.id} onClick={()=>handleAddIdeaToPauta(idea)} style={{
+                        padding:"5px 10px",borderRadius:8,border:"1px solid #f59e0b44",background:"#f59e0b08",color:"var(--text2)",
+                        cursor:"pointer",fontSize:11,fontFamily:"'DM Sans',sans-serif"
+                      }}>💡 {idea.title}</button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              <button onClick={handleSavePauta} style={{...S.btnPrimary,width:"auto",padding:"10px 24px",background:"#10b981",borderColor:"#10b981"}}>Salvar pauta</button>
+            </div>
+          )}
+
+          {/* Existing pautas */}
+          {allPautas.length === 0 && !showPautaForm && (
+            <div style={{...S.card,textAlign:"center",padding:40}}>
+              <div style={{fontSize:36,marginBottom:12}}>📋</div>
+              <p style={{color:"var(--text3)",fontSize:14}}>Nenhuma pauta criada.</p>
+              <p style={{color:"var(--text3)",fontSize:12}}>Monte pautas para suas reuniões de liderança.</p>
+            </div>
+          )}
+
+          {allPautas.sort((a,b)=>(b.createdAt??"").localeCompare(a.createdAt??"")).map(pauta => {
+            const tpl = AGENDA_TEMPLATES.find(t => t.id === pauta.templateType);
+            const pautaActions = allActions.filter(a => a.pautaId === pauta.id);
+            const isActive = activePautaId === pauta.id;
+            const statusColors = { aberta:"#3b82f6", em_andamento:"#f59e0b", encerrada:"#10b981" };
+            const statusLabels = { aberta:"Aberta", em_andamento:"Em andamento", encerrada:"Encerrada" };
+            const doneItems = pauta.items?.filter(it => it.status === "discutido" || it.status === "acao_definida").length ?? 0;
+            const totalItems = pauta.items?.length ?? 0;
+
+            return (
+              <div key={pauta.id} style={{...S.card,padding:0,marginBottom:12,border:`1px solid ${statusColors[pauta.status]??"var(--border)"}22`,overflow:"hidden"}}>
+                {/* Header */}
+                <div onClick={()=>setActivePautaId(isActive?null:pauta.id)} style={{padding:"14px 16px",cursor:"pointer",display:"flex",justifyContent:"space-between",alignItems:"center",background:isActive?"var(--bg2)":"transparent"}}>
+                  <div>
+                    <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:2}}>
+                      <span style={{fontSize:14}}>{tpl?.icon ?? "📋"}</span>
+                      <span style={{color:"var(--text)",fontWeight:700,fontSize:14}}>{pauta.title}</span>
+                    </div>
+                    <div style={{display:"flex",alignItems:"center",gap:8,fontSize:10,color:"var(--text3)"}}>
+                      <span style={{padding:"2px 6px",borderRadius:4,background:(statusColors[pauta.status]??"#888")+"18",color:statusColors[pauta.status]??"#888",fontWeight:600}}>{statusLabels[pauta.status]??"—"}</span>
+                      <span>{new Date(pauta.date+"T12:00:00").toLocaleDateString("pt-BR")}</span>
+                      <span>{doneItems}/{totalItems} itens</span>
+                      {pautaActions.filter(a=>!a.done).length > 0 && <span style={{color:"#f59e0b",fontWeight:600}}>{pautaActions.filter(a=>!a.done).length} ação pendente</span>}
+                    </div>
+                  </div>
+                  <div style={{display:"flex",gap:6,alignItems:"center"}}>
+                    <span style={{color:"var(--text3)",fontSize:12}}>{isActive?"▲":"▼"}</span>
+                  </div>
+                </div>
+
+                {/* Expanded content — checklist ao vivo */}
+                {isActive && (
+                  <div style={{borderTop:"1px solid var(--border)",padding:"14px 16px"}}>
+                    {/* Status controls */}
+                    <div style={{display:"flex",gap:6,marginBottom:14}}>
+                      {(["aberta","em_andamento","encerrada"]).map(st => (
+                        <button key={st} onClick={()=>handleUpdatePautaStatus(pauta.id,st)} style={{
+                          padding:"5px 12px",borderRadius:8,border:`1px solid ${pauta.status===st?(statusColors[st]??"#888"):"var(--border)"}`,
+                          background:pauta.status===st?(statusColors[st]??"#888")+"14":"transparent",
+                          color:pauta.status===st?(statusColors[st]??"#888"):"var(--text3)",
+                          cursor:"pointer",fontSize:11,fontFamily:"'DM Sans',sans-serif",fontWeight:pauta.status===st?700:400
+                        }}>{statusLabels[st]}</button>
+                      ))}
+                    </div>
+
+                    {/* Items checklist */}
+                    {(pauta.items ?? []).map((item, idx) => {
+                      const itemStatusOpts = [["pendente","○","var(--text3)"],["discutido","✓","#10b981"],["acao_definida","⚡","#f59e0b"]];
+                      const curOpt = itemStatusOpts.find(([s])=>s===item.status) ?? itemStatusOpts[0];
+                      return (
+                        <div key={item.id} style={{padding:"10px 12px",marginBottom:6,borderRadius:8,background:item.status==="discutido"?"#10b98106":item.status==="acao_definida"?"#f59e0b06":"var(--bg2)",border:`1px solid ${curOpt[2]}22`}}>
+                          <div style={{display:"flex",alignItems:"center",gap:8}}>
+                            <span style={{fontSize:10,color:"var(--text3)",fontWeight:700,minWidth:18}}>{idx+1}.</span>
+                            <span style={{flex:1,fontSize:12,color:"var(--text)",textDecoration:item.status==="discutido"?"line-through":"none"}}>{item.text}</span>
+                            <div style={{display:"flex",gap:2}}>
+                              {itemStatusOpts.map(([s,icon,col]) => (
+                                <button key={s} onClick={()=>handleUpdatePautaItem(pauta.id,item.id,{status:s})} title={s} style={{
+                                  padding:"3px 6px",borderRadius:4,border:`1px solid ${item.status===s?col:"transparent"}`,
+                                  background:item.status===s?col+"18":"transparent",color:col,cursor:"pointer",fontSize:11,fontWeight:item.status===s?700:400
+                                }}>{icon}</button>
+                              ))}
+                            </div>
+                          </div>
+                          {/* Decision field for acao_definida */}
+                          {item.status === "acao_definida" && (
+                            <div style={{marginTop:6,marginLeft:26}}>
+                              <input value={item.decision??""} onChange={e=>handleUpdatePautaItem(pauta.id,item.id,{decision:e.target.value})} placeholder="Decisão tomada / ação definida..." style={{...S.input,fontSize:11,padding:"5px 8px"}}/>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+
+                    {/* Ações pós-reunião */}
+                    <div style={{marginTop:16,borderTop:"1px solid var(--border)",paddingTop:14}}>
+                      <h4 style={{color:"var(--text)",fontSize:13,fontWeight:700,margin:"0 0 10px"}}>📌 Ações pós-reunião</h4>
+                      {pautaActions.map(action => (
+                        <div key={action.id} style={{display:"flex",alignItems:"center",gap:8,marginBottom:6,padding:"8px 10px",borderRadius:8,background:action.done?"#10b98106":"var(--bg2)",border:`1px solid ${action.done?"#10b98122":"var(--border)"}`}}>
+                          <button onClick={()=>handleToggleAction(action.id)} style={{padding:"2px 6px",borderRadius:4,border:`1px solid ${action.done?"#10b981":"var(--border)"}`,background:action.done?"#10b98122":"transparent",color:action.done?"#10b981":"var(--text3)",cursor:"pointer",fontSize:11}}>{action.done?"✓":"○"}</button>
+                          <div style={{flex:1,minWidth:0}}>
+                            <div style={{fontSize:12,color:action.done?"var(--text3)":"var(--text)",textDecoration:action.done?"line-through":"none"}}>{action.text}</div>
+                            <div style={{fontSize:10,color:"var(--text3)"}}>
+                              {action.responsible && `👤 ${action.responsible}`}
+                              {action.responsible && action.deadline && " · "}
+                              {action.deadline && `📅 ${new Date(action.deadline+"T12:00:00").toLocaleDateString("pt-BR")}`}
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                      {/* Add action form */}
+                      <AddActionInline pautaId={pauta.id} onAdd={handleAddAction}/>
+                    </div>
+
+                    {/* Delete pauta */}
+                    <div style={{marginTop:14,textAlign:"right"}}>
+                      <button onClick={()=>handleDeletePauta(pauta.id)} style={{fontSize:11,padding:"5px 12px",borderRadius:6,border:"1px solid var(--red)33",background:"transparent",color:"var(--red)",cursor:"pointer"}}>🗑️ Excluir pauta</button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {/* ═══ SUB-TAB: RELATÓRIO ═══ */}
+      {subTab === "relatorio" && (
+        <div>
+          <div style={{...S.card,padding:"18px 20px",marginBottom:16}}>
+            <h4 style={{color:"var(--text)",margin:"0 0 14px",fontSize:15,fontWeight:700}}>📄 Relatório de Reuniões</h4>
+            <div style={{display:"grid",gridTemplateColumns:mobileOnly?"1fr":"1fr 1fr 1fr 1fr",gap:10,marginBottom:14}}>
+              <div>
+                <label style={S.label}>Data inicial</label>
+                <input type="date" value={relFrom} onChange={e=>setRelFrom(e.target.value)} style={S.input}/>
+              </div>
+              <div>
+                <label style={S.label}>Data final</label>
+                <input type="date" value={relTo} onChange={e=>setRelTo(e.target.value)} style={S.input}/>
+              </div>
+              <div>
+                <label style={S.label}>Área</label>
+                <select value={relFilterArea} onChange={e=>setRelFilterArea(e.target.value)} style={S.input}>
+                  <option value="Todos">Todas</option>
+                  {areas.map(a => <option key={a} value={a}>{a}</option>)}
+                </select>
+              </div>
+              <div>
+                <label style={S.label}>Líder</label>
+                <select value={relFilterLider} onChange={e=>setRelFilterLider(e.target.value)} style={S.input}>
+                  <option value="Todos">Todos</option>
+                  {[...new Set((feedbacks??[]).filter(f=>f.restaurantId===restaurantId&&f.createdBy).map(f=>f.createdBy))].sort().map(name => (
+                    <option key={name} value={name}>{name}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+            <button onClick={()=>{
+              if(!relFrom||!relTo){window.alert("Informe data inicial e final.");return;}
+              // Build report data
+              const fbs = (feedbacks??[]).filter(f=>{
+                if(f.restaurantId!==restaurantId||f.deletedAt)return false;
+                const d=f.meetingDate||f.createdAt?.slice(0,10);
+                if(!d||d<relFrom||d>relTo)return false;
+                if(relFilterLider!=="Todos"&&f.createdBy!==relFilterLider)return false;
+                if(relFilterArea!=="Todos"){
+                  const emp=employees.find(e=>e.id===f.employeeId);
+                  const role=emp?roles.find(r=>r.id===emp.roleId):null;
+                  if(role?.area!==relFilterArea)return false;
+                }
+                return true;
+              }).sort((a,b)=>(a.meetingDate||(a.createdAt?.slice(0,10)??"")).localeCompare(b.meetingDate||(b.createdAt?.slice(0,10)??"")));
+
+              if(fbs.length===0){window.alert("Nenhuma reunião encontrada no período.");return;}
+
+              // Group by area
+              const byArea={};
+              fbs.forEach(f=>{
+                const emp=employees.find(e=>e.id===f.employeeId);
+                const role=emp?roles.find(r=>r.id===emp.roleId):null;
+                const area=role?.area??"Sem área";
+                if(!byArea[area])byArea[area]=[];
+                byArea[area].push({...f,empName:emp?.name??"—",roleName:role?.name??"—"});
+              });
+
+              // Generate HTML for PDF
+              const fromStr=new Date(relFrom+"T12:00:00").toLocaleDateString("pt-BR");
+              const toStr=new Date(relTo+"T12:00:00").toLocaleDateString("pt-BR");
+              let html=`<html><head><meta charset="utf-8"><style>
+                *{margin:0;padding:0;box-sizing:border-box}
+                body{font-family:'Segoe UI',Arial,sans-serif;padding:40px;color:#1a1a2e;font-size:12px;line-height:1.5}
+                h1{font-size:20px;margin-bottom:4px;color:#1a1a2e}
+                .sub{font-size:12px;color:#666;margin-bottom:24px}
+                .area-header{font-size:16px;font-weight:700;color:#3b82f6;border-bottom:2px solid #3b82f6;padding-bottom:4px;margin:20px 0 12px}
+                .meeting{padding:10px 14px;margin-bottom:8px;border-radius:8px;border:1px solid #e5e7eb;page-break-inside:avoid}
+                .meeting-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:4px}
+                .emp-name{font-weight:700;font-size:13px}
+                .meeting-meta{font-size:10px;color:#888}
+                .meeting-type{font-size:10px;padding:2px 8px;border-radius:4px;font-weight:600}
+                .type-alinhamento{background:#3b82f614;color:#3b82f6}
+                .type-avaliacao{background:#8b5cf614;color:#8b5cf6}
+                .notes{font-size:11px;color:#444;margin-top:4px}
+                .rating{margin-top:4px;font-size:11px}
+                .summary{background:#f8f9fa;border-radius:8px;padding:14px;margin-top:20px;page-break-inside:avoid}
+                .summary h3{font-size:14px;margin-bottom:8px}
+                .stat{display:inline-block;margin-right:16px;font-size:12px}
+                @media print{body{padding:20px}}.page-break{page-break-before:always}
+              </style></head><body>`;
+              html+=`<h1>Relatório de Reuniões</h1>`;
+              html+=`<div class="sub">${fromStr} a ${toStr}${relFilterArea!=="Todos"?` · Área: ${relFilterArea}`:""}${relFilterLider!=="Todos"?` · Líder: ${relFilterLider}`:""}</div>`;
+
+              // Summary
+              const totalMeetings=fbs.length;
+              const totalAval=fbs.filter(f=>f.meetingType==="avaliação"||(!f.meetingType&&f.rating>0)).length;
+              const totalAlinh=totalMeetings-totalAval;
+              const uniqueEmps=new Set(fbs.map(f=>f.employeeId)).size;
+              html+=`<div class="summary"><h3>Resumo</h3><div><span class="stat"><strong>${totalMeetings}</strong> reuniões</span><span class="stat"><strong>${totalAlinh}</strong> alinhamentos</span><span class="stat"><strong>${totalAval}</strong> avaliações</span><span class="stat"><strong>${uniqueEmps}</strong> pessoas atendidas</span></div></div>`;
+
+              Object.entries(byArea).sort(([a],[b])=>a.localeCompare(b)).forEach(([area,meetings],aIdx)=>{
+                if(aIdx>0)html+=`<div class="page-break"></div>`;
+                html+=`<div class="area-header">${area} (${meetings.length} reunião${meetings.length!==1?"ões":""})</div>`;
+                meetings.forEach(m=>{
+                  const isAval=m.meetingType==="avaliação"||(!m.meetingType&&m.rating>0);
+                  const dateStr=m.meetingDate?new Date(m.meetingDate+"T12:00:00").toLocaleDateString("pt-BR"):"—";
+                  html+=`<div class="meeting">`;
+                  html+=`<div class="meeting-header"><div><span class="emp-name">${m.empName}</span> <span class="meeting-meta">${m.roleName}</span></div><div><span class="meeting-type ${isAval?"type-avaliacao":"type-alinhamento"}">${isAval?"Avaliação":"Alinhamento"}</span> <span class="meeting-meta">${dateStr}</span></div></div>`;
+                  if(m.notes)html+=`<div class="notes">${m.notes.replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/\n/g,"<br>")}</div>`;
+                  if(isAval&&m.rating){
+                    const rLabels=["","Insuficiente","Em desenvolvimento","Atende","Supera","Excepcional"];
+                    html+=`<div class="rating">Avaliação: <strong>${rLabels[m.rating]??m.rating}</strong></div>`;
+                  }
+                  if(m.strengths)html+=`<div class="notes"><strong>Pontos positivos:</strong> ${m.strengths.replace(/</g,"&lt;").replace(/\n/g,"<br>")}</div>`;
+                  if(m.improvements)html+=`<div class="notes"><strong>Pontos a melhorar:</strong> ${m.improvements.replace(/</g,"&lt;").replace(/\n/g,"<br>")}</div>`;
+                  if(m.createdBy)html+=`<div class="meeting-meta" style="margin-top:4px">Conduzida por: ${m.createdBy}</div>`;
+                  html+=`</div>`;
+                });
+              });
+              html+=`</body></html>`;
+
+              // Open print dialog
+              const w=window.open("","_blank","width=800,height=600");
+              if(w){w.document.write(html);w.document.close();setTimeout(()=>w.print(),500);}
+              else{onUpdate("_toast","⚠️ Popup bloqueado — permita popups para gerar o PDF");}
+            }} style={{...S.btnPrimary,width:"auto",padding:"10px 24px",background:"#3b82f6",borderColor:"#3b82f6"}}>
+              📄 Gerar relatório PDF
+            </button>
           </div>
-        );
-      })}
+
+          {/* Preview of what will be included */}
+          {relFrom && relTo && (() => {
+            const fbs = (feedbacks??[]).filter(f=>{
+              if(f.restaurantId!==restaurantId||f.deletedAt)return false;
+              const d=f.meetingDate||f.createdAt?.slice(0,10);
+              if(!d||d<relFrom||d>relTo)return false;
+              if(relFilterLider!=="Todos"&&f.createdBy!==relFilterLider)return false;
+              if(relFilterArea!=="Todos"){
+                const emp=employees.find(e=>e.id===f.employeeId);
+                const role=emp?roles.find(r=>r.id===emp.roleId):null;
+                if(role?.area!==relFilterArea)return false;
+              }
+              return true;
+            });
+            const byArea={};
+            fbs.forEach(f=>{
+              const emp=employees.find(e=>e.id===f.employeeId);
+              const role=emp?roles.find(r=>r.id===emp.roleId):null;
+              const area=role?.area??"Sem área";
+              if(!byArea[area])byArea[area]=[];
+              byArea[area].push(f);
+            });
+            return (
+              <div style={{...S.card,padding:"14px 16px"}}>
+                <div style={{fontSize:12,color:"var(--text3)",marginBottom:8}}>Prévia: {fbs.length} reunião{fbs.length!==1?"ões":""} no período</div>
+                {Object.entries(byArea).sort(([a],[b])=>a.localeCompare(b)).map(([area,meetings]) => (
+                  <div key={area} style={{marginBottom:8}}>
+                    <div style={{fontSize:12,fontWeight:700,color:AREA_COLORS[area]??'var(--text)',marginBottom:2}}>{area} — {meetings.length} reunião{meetings.length!==1?"ões":""}</div>
+                    <div style={{fontSize:10,color:"var(--text3)",paddingLeft:8}}>
+                      {[...new Set(meetings.map(m=>m.employeeId))].map(eid=>{
+                        const emp=employees.find(e=>e.id===eid);
+                        const count=meetings.filter(m=>m.employeeId===eid).length;
+                        return <span key={eid} style={{marginRight:10}}>{emp?.name?.split(" ")[0]??"?"} ({count})</span>;
+                      })}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            );
+          })()}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Inline component for adding actions to a pauta
+function AddActionInline({ pautaId, onAdd }) {
+  const [text, setText] = useState("");
+  const [responsible, setResponsible] = useState("");
+  const [deadline, setDeadline] = useState("");
+  const [show, setShow] = useState(false);
+
+  if (!show) return (
+    <button onClick={()=>setShow(true)} style={{fontSize:11,padding:"6px 12px",borderRadius:8,border:"1px dashed var(--border)",background:"transparent",color:"var(--text3)",cursor:"pointer",width:"100%",textAlign:"left"}}>
+      + Adicionar ação...
+    </button>
+  );
+
+  return (
+    <div style={{padding:"10px",borderRadius:8,border:"1px solid var(--border)",background:"var(--bg2)"}}>
+      <input value={text} onChange={e=>setText(e.target.value)} placeholder="O que precisa ser feito..." style={{...S.input,marginBottom:6,fontSize:11}}/>
+      <div style={{display:"flex",gap:6,marginBottom:8}}>
+        <input value={responsible} onChange={e=>setResponsible(e.target.value)} placeholder="Responsável" style={{...S.input,flex:1,fontSize:11}}/>
+        <input type="date" value={deadline} onChange={e=>setDeadline(e.target.value)} style={{...S.input,flex:1,fontSize:11}}/>
+      </div>
+      <div style={{display:"flex",gap:6}}>
+        <button onClick={()=>{onAdd(pautaId,text,responsible,deadline);setText("");setResponsible("");setDeadline("");}} style={{...S.btnPrimary,fontSize:11,padding:"6px 14px",background:"#10b981",borderColor:"#10b981"}}>Salvar</button>
+        <button onClick={()=>{setShow(false);setText("");}} style={{...S.btnSecondary,fontSize:11,padding:"6px 14px"}}>Cancelar</button>
+      </div>
     </div>
   );
 }
@@ -8630,6 +9349,9 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                 currentUser={currentUser}
                 isOwner={isOwner}
                 mobileOnly={mobileOnly}
+                isLider={isLider}
+                managerAreas={managerAreas}
+                data={data}
               />
             </div>
           );
@@ -14571,6 +15293,9 @@ export default function App() {
   const [delays,              setDelays]              = useState({});
   const [tipApprovals,        setTipApprovals]        = useState({});
   const [meetingPlans,        setMeetingPlans]        = useState([]);
+  const [meetingIdeas,        setMeetingIdeas]        = useState([]);
+  const [meetingAgendas,      setMeetingAgendas]      = useState([]);
+  const [meetingActions,      setMeetingActions]      = useState([]);
 
   useEffect(() => {
     const savedId = currentUserId;
@@ -14598,7 +15323,7 @@ export default function App() {
       setLoadProgress("Preparando o sistema...");
 
       const keys = keyNames;
-      const map = { owners:setOwners, managers:setManagers, restaurants:setRestaurants, employees:setEmployees, roles:setRoles, tips:setTips, splits:setSplits, schedules:setSchedules, communications:setCommunications, commAcks:setCommAcks, faq:setFaq, dpMessages:setDpMessages, workSchedules:setWorkSchedules, notifications:setNotifications, noTipDays:setNoTipDays, trash:setTrash, schedTemplates:setSchedTemplates, schedDrafts:setSchedDrafts, scheduleVersions:setScheduleVersions, tipVersions:setTipVersions, vtConfig:setVtConfig, vtMonthly:setVtMonthly, vtPayments:setVtPayments, incidents:setIncidents, feedbacks:setFeedbacks, devChecklists:setDevChecklists, scheduleAdjustments:setScheduleAdjustments, scheduleStatus:setScheduleStatus, schedulePrevista:setSchedulePrevista, employeeGoals:setEmployeeGoals, delays:setDelays, tipApprovals:setTipApprovals, meetingPlans:setMeetingPlans };
+      const map = { owners:setOwners, managers:setManagers, restaurants:setRestaurants, employees:setEmployees, roles:setRoles, tips:setTips, splits:setSplits, schedules:setSchedules, communications:setCommunications, commAcks:setCommAcks, faq:setFaq, dpMessages:setDpMessages, workSchedules:setWorkSchedules, notifications:setNotifications, noTipDays:setNoTipDays, trash:setTrash, schedTemplates:setSchedTemplates, schedDrafts:setSchedDrafts, scheduleVersions:setScheduleVersions, tipVersions:setTipVersions, vtConfig:setVtConfig, vtMonthly:setVtMonthly, vtPayments:setVtPayments, incidents:setIncidents, feedbacks:setFeedbacks, devChecklists:setDevChecklists, scheduleAdjustments:setScheduleAdjustments, scheduleStatus:setScheduleStatus, schedulePrevista:setSchedulePrevista, employeeGoals:setEmployeeGoals, delays:setDelays, tipApprovals:setTipApprovals, meetingPlans:setMeetingPlans, meetingIdeas:setMeetingIdeas, meetingAgendas:setMeetingAgendas, meetingActions:setMeetingActions };
       const loaded_data = {};
       let successCount = 0;
       keys.forEach((k, i) => {
@@ -14746,12 +15471,12 @@ export default function App() {
     return () => { clearTimeout(slowTimer); clearTimeout(verySlowTimer); };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const data = { owners, managers, restaurants, employees, roles, tips, splits, schedules, communications, commAcks, faq, dpMessages, workSchedules, notifications, noTipDays, trash, schedTemplates, schedDrafts, scheduleVersions, tipVersions, vtConfig, vtMonthly, vtPayments, incidents, feedbacks, devChecklists, scheduleAdjustments, scheduleStatus, schedulePrevista, employeeGoals, delays, tipApprovals, meetingPlans };
+  const data = { owners, managers, restaurants, employees, roles, tips, splits, schedules, communications, commAcks, faq, dpMessages, workSchedules, notifications, noTipDays, trash, schedTemplates, schedDrafts, scheduleVersions, tipVersions, vtConfig, vtMonthly, vtPayments, incidents, feedbacks, devChecklists, scheduleAdjustments, scheduleStatus, schedulePrevista, employeeGoals, delays, tipApprovals, meetingPlans, meetingIdeas, meetingAgendas, meetingActions };
 
   async function handleUpdate(field, value) {
     if (field === "_toast") { setToast(value); return; }
-    const setters = { owners:setOwners, managers:setManagers, restaurants:setRestaurants, employees:setEmployees, roles:setRoles, tips:setTips, splits:setSplits, schedules:setSchedules, communications:setCommunications, commAcks:setCommAcks, faq:setFaq, dpMessages:setDpMessages, workSchedules:setWorkSchedules, notifications:setNotifications, noTipDays:setNoTipDays, trash:setTrash, schedTemplates:setSchedTemplates, schedDrafts:setSchedDrafts, scheduleVersions:setScheduleVersions, tipVersions:setTipVersions, vtConfig:setVtConfig, vtMonthly:setVtMonthly, vtPayments:setVtPayments, incidents:setIncidents, feedbacks:setFeedbacks, devChecklists:setDevChecklists, scheduleAdjustments:setScheduleAdjustments, scheduleStatus:setScheduleStatus, schedulePrevista:setSchedulePrevista, employeeGoals:setEmployeeGoals, delays:setDelays, tipApprovals:setTipApprovals, meetingPlans:setMeetingPlans };
-    const keys    = { owners:K.owners, managers:K.managers, restaurants:K.restaurants, employees:K.employees, roles:K.roles, tips:K.tips, splits:K.splits, schedules:K.schedules, communications:K.communications, commAcks:K.commAcks, faq:K.faq, dpMessages:K.dpMessages, workSchedules:K.workSchedules, notifications:K.notifications, noTipDays:K.noTipDays, trash:K.trash, schedTemplates:K.schedTemplates, schedDrafts:K.schedDrafts, scheduleVersions:K.scheduleVersions, tipVersions:K.tipVersions, vtConfig:K.vtConfig, vtMonthly:K.vtMonthly, vtPayments:K.vtPayments, incidents:K.incidents, feedbacks:K.feedbacks, devChecklists:K.devChecklists, scheduleAdjustments:K.scheduleAdjustments, scheduleStatus:K.scheduleStatus, schedulePrevista:K.schedulePrevista, employeeGoals:K.employeeGoals, delays:K.delays, tipApprovals:K.tipApprovals, meetingPlans:K.meetingPlans };
+    const setters = { owners:setOwners, managers:setManagers, restaurants:setRestaurants, employees:setEmployees, roles:setRoles, tips:setTips, splits:setSplits, schedules:setSchedules, communications:setCommunications, commAcks:setCommAcks, faq:setFaq, dpMessages:setDpMessages, workSchedules:setWorkSchedules, notifications:setNotifications, noTipDays:setNoTipDays, trash:setTrash, schedTemplates:setSchedTemplates, schedDrafts:setSchedDrafts, scheduleVersions:setScheduleVersions, tipVersions:setTipVersions, vtConfig:setVtConfig, vtMonthly:setVtMonthly, vtPayments:setVtPayments, incidents:setIncidents, feedbacks:setFeedbacks, devChecklists:setDevChecklists, scheduleAdjustments:setScheduleAdjustments, scheduleStatus:setScheduleStatus, schedulePrevista:setSchedulePrevista, employeeGoals:setEmployeeGoals, delays:setDelays, tipApprovals:setTipApprovals, meetingPlans:setMeetingPlans, meetingIdeas:setMeetingIdeas, meetingAgendas:setMeetingAgendas, meetingActions:setMeetingActions };
+    const keys    = { owners:K.owners, managers:K.managers, restaurants:K.restaurants, employees:K.employees, roles:K.roles, tips:K.tips, splits:K.splits, schedules:K.schedules, communications:K.communications, commAcks:K.commAcks, faq:K.faq, dpMessages:K.dpMessages, workSchedules:K.workSchedules, notifications:K.notifications, noTipDays:K.noTipDays, trash:K.trash, schedTemplates:K.schedTemplates, schedDrafts:K.schedDrafts, scheduleVersions:K.scheduleVersions, tipVersions:K.tipVersions, vtConfig:K.vtConfig, vtMonthly:K.vtMonthly, vtPayments:K.vtPayments, incidents:K.incidents, feedbacks:K.feedbacks, devChecklists:K.devChecklists, scheduleAdjustments:K.scheduleAdjustments, scheduleStatus:K.scheduleStatus, schedulePrevista:K.schedulePrevista, employeeGoals:K.employeeGoals, delays:K.delays, tipApprovals:K.tipApprovals, meetingPlans:K.meetingPlans, meetingIdeas:K.meetingIdeas, meetingAgendas:K.meetingAgendas, meetingActions:K.meetingActions };
     // Support functional updates to prevent stale-state race conditions:
     // When value is a function, it receives the latest state (like setState(prev => ...))
     let resolvedValue;
