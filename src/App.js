@@ -4474,7 +4474,7 @@ Inclua apenas as ações solicitadas. Arrays vazios se não houver ação daquel
     const numericPin = (emp.empCode ?? "").replace(/\D/g, "").padStart(4, "0"); // sempre 4 dígitos ex: "0005"
     if (!window.confirm(`Resetar PIN de "${emp.name}"?\n\nO PIN voltará para ${numericPin} e ele será obrigado a trocar no próximo acesso.`)) return;
     onUpdate("employees", employees.map(x => x.id===emp.id ? {...x, pin: numericPin, mustChangePin: true} : x));
-    onUpdate("_toast", `🔑 PIN de ${emp.name} resetado para ${numericPin}`);
+    onUpdate("_toast", `🔐 PIN de ${emp.name} resetado para ${numericPin}`);
   }
 
   const detailEmpObj = detailEmp ? restEmps.find(e => e.id === detailEmp) : null;
@@ -12200,8 +12200,8 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                           const newPin = cpfDigits.slice(0,4);
                           if(!window.confirm(`Resetar PIN de "${m.name}"?\n\nO PIN voltará para ${newPin} (4 primeiros dígitos do CPF) e ele será obrigado a trocar no próximo acesso.`)) return;
                           onUpdate("managers", managers.map(x=>x.id===m.id?{...x,pin:newPin,mustChangePin:true}:x));
-                          onUpdate("_toast",`🔑 PIN de ${m.name} resetado para ${newPin}`);
-                        }} title="Resetar PIN para os 4 primeiros dígitos do CPF" style={{...S.btnSecondary,fontSize:11,padding:"5px 10px"}}>🔑 Resetar PIN</button>
+                          onUpdate("_toast",`🔐 PIN de ${m.name} resetado para ${newPin}`);
+                        }} title="Resetar PIN para os 4 primeiros dígitos do CPF" style={{...S.btnSecondary,fontSize:11,padding:"5px 10px"}}>🔐 Resetar PIN</button>
                         <button onClick={()=>{
                           setDpMgrEdit(m.id);
                           setDpMgrForm({name:m.name,cpf:m.cpf??"",pin:m.pin??"",restaurantIds:m.restaurantIds??[],perms:m.perms??{tips:true,schedule:true},isDP:m.isDP??false,profile:m.profile??"custom",areas:m.areas??[],masterRestaurantIds:m.masterRestaurantIds??[]});
@@ -13068,8 +13068,8 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }
                         const newPin = cpfDigits.slice(0,4);
                         if(!window.confirm(`Resetar PIN de "${m.name}"?\n\nO PIN voltará para ${newPin} (4 primeiros dígitos do CPF) e ele será obrigado a trocar no próximo acesso.`)) return;
                         onUpdate("managers", managers.map(x=>x.id===m.id?{...x,pin:newPin,mustChangePin:true}:x));
-                        onUpdate("_toast", `🔑 PIN de ${m.name} resetado para ${newPin}`);
-                      }} title="Resetar PIN para os 4 primeiros dígitos do CPF" style={{...S.btnSecondary,fontSize:isMobile?11:12,flex:isMobile?1:undefined,textAlign:"center",padding:isMobile?"6px 8px":undefined}}>{isMobile?"🔑 PIN":"🔑 Resetar PIN"}</button>
+                        onUpdate("_toast", `🔐 PIN de ${m.name} resetado para ${newPin}`);
+                      }} title="Resetar PIN para os 4 primeiros dígitos do CPF" style={{...S.btnSecondary,fontSize:isMobile?11:12,flex:isMobile?1:undefined,textAlign:"center",padding:isMobile?"6px 8px":undefined}}>{isMobile?"🔐 PIN":"🔐 Resetar PIN"}</button>
                       <button onClick={()=>{setEditMgrId(m.id);setMgrForm({name:m.name,cpf:m.cpf??"",pin:m.pin??"",restaurantIds:m.restaurantIds??[],perms:m.perms??{tips:true,schedule:true},isDP:m.isDP??false,profile:m.profile??"custom",areas:m.areas??[],masterRestaurantIds:m.masterRestaurantIds??[]});setShowMgrModal(true);}} style={{...S.btnSecondary,fontSize:isMobile?11:12,flex:isMobile?1:undefined,textAlign:"center",padding:isMobile?"6px 8px":undefined}}>Editar</button>
                       <button onClick={()=>{
                         // Proteger último master do restaurante
@@ -14338,8 +14338,8 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }
                     <button onClick={()=>{
                       if(!window.confirm(`Resetar o PIN de ${m.name}? O novo PIN temporário será 0000.`)) return;
                       onUpdate("managers", managers.map(x=>x.id===m.id?{...x,pin:"0000",mustChangePin:true}:x));
-                      onUpdate("_toast",`🔑 PIN de ${m.name} resetado para 0000`);
-                    }} style={{...S.btnSecondary,fontSize:isMobile?11:12,flex:isMobile?1:undefined,textAlign:"center"}}>{isMobile?"🔑 PIN":"🔑 Resetar PIN"}</button>
+                      onUpdate("_toast",`🔐 PIN de ${m.name} resetado para 0000`);
+                    }} style={{...S.btnSecondary,fontSize:isMobile?11:12,flex:isMobile?1:undefined,textAlign:"center"}}>{isMobile?"🔐 PIN":"🔐 Resetar PIN"}</button>
                   </div>
                 </div>
               </div>
@@ -14633,7 +14633,7 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }
               "Melhoria: card verde 'Horário validado' aparece entre validação e salvamento como confirmação visual",
             ]},
             { version:"5.13.0", date:"2026-04-12", items:[
-              "Novo: botão '🔑 Resetar PIN' nos cards de gestores (Admin AppTip e DP Gestores) — PIN volta para 4 primeiros dígitos do CPF e força troca no próximo acesso",
+              "Novo: botão '🔐 Resetar PIN' nos cards de gestores (Admin AppTip e DP Gestores) — PIN volta para 4 primeiros dígitos do CPF e força troca no próximo acesso",
               "Melhoria: fluxo de reset de PIN dos gestores agora consistente com o dos empregados",
               "Correção: IA (Comunicados, FAQ, Cargos, Empregados, Horários) agora exibe mensagem real do erro em vez de 'Não foi possível gerar'",
               "Correção: groqGenerate detecta chave ausente, modelo descontinuado, rate limit (429) e auth inválido (401) com mensagens específicas",
@@ -14896,7 +14896,7 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }
               <div><label style={S.label}>PIN (4 dígitos)</label><input type="password" value={mgrForm.pin} onChange={e=>setMgrForm({...mgrForm,pin:e.target.value.replace(/\D/g,"").slice(0,4)})} maxLength={4} style={S.input} inputMode="numeric"/></div>
             ) : (
               <div style={{background:"var(--ac-bg)",border:"1px solid var(--ac)33",borderRadius:10,padding:"10px 14px"}}>
-                <span style={{color:"var(--ac-text)",fontSize:13}}>🔑 PIN inicial = 4 primeiros dígitos do CPF. No primeiro acesso o gestor será solicitado a trocar.</span>
+                <span style={{color:"var(--ac-text)",fontSize:13}}>🔐 PIN inicial = 4 primeiros dígitos do CPF. No primeiro acesso o gestor será solicitado a trocar.</span>
               </div>
             )}
 
@@ -16608,11 +16608,12 @@ export default function App() {
     try { return localStorage.getItem("apptip_userid") || null; } catch { return null; }
   });
   const [userRole, setUserRole] = useState(() => localStorage.getItem("apptip_role") || null);
+  const sessionRestoredRef = React.useRef(false); // true após data-load verificar sessão
 
-  // Persist session
+  // Persist session — só limpa localStorage DEPOIS que a restauração de sessão rodou
   useEffect(() => {
     if (currentUser) localStorage.setItem("apptip_userid", currentUser.id);
-    else if (userRole !== "employee") localStorage.removeItem("apptip_userid");
+    else if (sessionRestoredRef.current && userRole !== "employee") localStorage.removeItem("apptip_userid");
     // empregado: apptip_userid salvo diretamente no login via apptip_empid
   }, [currentUser, userRole]);
   useEffect(() => {
@@ -16747,6 +16748,7 @@ export default function App() {
           }
         }
       }
+      sessionRestoredRef.current = true; // sessão verificada — agora persist effect e fallback podem agir
       // Limpeza automática da lixeira — itens com mais de 30 dias
       if (loaded_data.trash) {
         const cutoff = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
@@ -16888,8 +16890,9 @@ export default function App() {
   }
 
   // Fallback: se carregou mas sessão ficou sem usuário, redireciona pro login
+  // Só age DEPOIS que sessionRestoredRef = true (data-load já tentou restaurar a sessão)
   useEffect(() => {
-    if (loaded && !currentUser && (view === "super" || view === "manager")) {
+    if (loaded && sessionRestoredRef.current && !currentUser && (view === "super" || view === "manager")) {
       console.warn("Sessão inválida: view="+view+" sem currentUser. Redirecionando para login.");
       doLogout();
     }
