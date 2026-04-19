@@ -12955,7 +12955,7 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }
 
         {/* Sub-tabs */}
         <div style={{ display:"flex", borderBottom:"1px solid var(--border)", background:"var(--header-bg)", overflowX:"auto" }}>
-          {[["operacional",isMobile?"⚙️ Op.":"⚙️ Operacional"],["gestores","👔 Gestores"],["financeiro","💳 Financeiro"]].map(([id,lbl])=>(
+          {[["operacional",isMobile?"🏠 Restaurante":"🏠 Restaurante"],["gestores","👔 Gestores"],["financeiro","💳 Financeiro"]].map(([id,lbl])=>(
             <button key={id} onClick={()=>setRestTab(id)}
               style={{ padding:isMobile?"10px 14px":"10px 20px", background:"none", border:"none", borderBottom:`2px solid ${restTab===id?ac:"transparent"}`, color:restTab===id?ac:"var(--text3)", cursor:"pointer", fontSize:isMobile?12:13, fontFamily:"'DM Sans',sans-serif", fontWeight:restTab===id?700:500, whiteSpace:"nowrap", flex:isMobile?1:undefined, textAlign:"center" }}>
               {lbl}
