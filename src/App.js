@@ -3,7 +3,7 @@ import React, { useState, useEffect, Component } from "react";
 import { db } from "./firebase";
 import { doc, getDoc, setDoc } from "firebase/firestore";
 
-const APP_VERSION = "5.46.0";
+const APP_VERSION = "5.48.0";
 
 const DEFAULT_ADMISSION = () => `${new Date().getFullYear()}-01-01`;
 const round2 = (v) => Math.round(v * 100) / 100;
@@ -618,7 +618,123 @@ const K = {
   meetingActions:      "v4:meetingActions",       // [{id, restaurantId, pautaId, text, responsible, deadline, done:bool, createdAt}]
   meetingOccurrences:  "v4:meetingOccurrences",   // [{id, restaurantId, title, description, type:"cliente"|"estrutura"|"operacao"|"outro", areas:[], createdBy, createdAt, status:"nova"|"na_pauta"|"resolvida"|"descartada"}]
   meetingPendencias:   "v4:meetingPendencias",    // [{id, restaurantId, text, reason, type:"pendente"|"sem_resolucao", fromPautaId, fromItemId, createdAt, status:"ativa"|"na_pauta"|"resolvida"}]
+  inbox:               "v4:inbox",                // [{id, tipo, de:{id,nome,role}, para:{id?,role?,restaurantId?}, restaurantId?, assunto, corpo, lido:bool, criadoEm, metadata:{}, folder:null|string, deletedAt:null|iso}]
+  inboxFolders:        "v4:inboxFolders",         // {userId: [{id, nome, cor, ordem}]}
 };
+
+// ── Inbox helpers ──
+// tipos: "solicitacao" | "comunicado" | "sistema" | "reuniao" | "acao_reuniao"
+function createInboxMessage({ tipo, de, para, restaurantId, assunto, corpo, metadata = {} }) {
+  return {
+    id: Date.now().toString() + "_" + Math.random().toString(36).slice(2, 8),
+    tipo,
+    de,           // {id, nome, role} — quem enviou
+    para,         // {id?, role?, restaurantId?} — destinatário (userId ou role+restaurantId)
+    restaurantId: restaurantId || null,
+    assunto,
+    corpo,
+    lido: false,
+    criadoEm: new Date().toISOString(),
+    metadata,     // dados extras (ex: meetingId, actionIds, prazo, etc.)
+    folder: null,     // null = Entrada, string = id da pasta custom
+    deletedAt: null,  // null = ativa, ISO string = na lixeira (purge após 90 dias)
+  };
+}
+
+// Filtrar mensagens do inbox para um destinatário específico
+// folder: undefined = todas (exceto excluídas), null = Entrada, "__trash" = excluídas, string = id da pasta
+function getInboxForUser({ inbox, userId, userRole, restaurantId, includeRead = true, folder }) {
+  const NINETY_DAYS = 90 * 24 * 60 * 60 * 1000;
+  const now = Date.now();
+  return (inbox ?? []).filter(m => {
+    // Purge: mensagens excluídas há mais de 90 dias são invisíveis
+    if (m.deletedAt && (now - new Date(m.deletedAt).getTime()) > NINETY_DAYS) return false;
+    // Filtro de pasta
+    if (folder === "__trash") { if (!m.deletedAt) return false; }
+    else if (folder === null || folder === undefined) { if (m.deletedAt) return false; }
+    else { if (m.deletedAt) return false; if (m.folder !== folder) return false; }
+    // Filtro pasta específica (quando folder é null = Entrada, mostra só sem pasta)
+    if (folder === null && m.folder) return false;
+    if (!includeRead && m.lido) return false;
+    // Destinatário
+    if (m.para?.id === userId) return true;
+    if (m.para?.role === userRole && m.para?.restaurantId === restaurantId) return true;
+    if (m.para?.role === userRole && !m.para?.restaurantId) return true;
+    if (m.para?.role === "all" && m.para?.restaurantId === restaurantId) return true;
+    return false;
+  }).sort((a, b) => b.criadoEm.localeCompare(a.criadoEm));
+}
+
+// Auto-purge: remove mensagens excluídas há mais de 90 dias do array (chamado no load)
+function purgeExpiredInbox(inbox) {
+  const NINETY_DAYS = 90 * 24 * 60 * 60 * 1000;
+  const now = Date.now();
+  const before = (inbox ?? []).length;
+  const cleaned = (inbox ?? []).filter(m => !m.deletedAt || (now - new Date(m.deletedAt).getTime()) <= NINETY_DAYS);
+  return cleaned.length < before ? cleaned : null; // null = nada mudou
+}
+
+// Criar notificações automáticas de reunião agendada
+function createMeetingNotifications({ meetingType, meetingDate, restaurantId, participants, createdBy }) {
+  const tipoLabel = meetingType === "equipe" ? "Reunião de Equipe" : "Reunião de Liderança";
+  const dataFmt = meetingDate ? new Date(meetingDate + "T12:00:00").toLocaleDateString("pt-BR") : "em breve";
+  return participants.map(p => createInboxMessage({
+    tipo: "reuniao",
+    de: createdBy,
+    para: { id: p.id },
+    restaurantId,
+    assunto: `📅 ${tipoLabel} agendada`,
+    corpo: `Nova ${tipoLabel.toLowerCase()} marcada para ${dataFmt}. Sua presença é esperada.`,
+    metadata: { meetingType, meetingDate },
+  }));
+}
+
+// Criar notificações de ações pós-reunião de liderança
+function createActionNotifications({ actions, restaurantId, meetingDate, createdBy }) {
+  // Agrupar ações por responsável
+  const byResponsible = {};
+  actions.forEach(a => {
+    const key = a.responsibleId || a.responsible;
+    if (!key) return;
+    if (!byResponsible[key]) byResponsible[key] = { responsible: a.responsible, responsibleId: a.responsibleId, direct: [], involved: [] };
+    byResponsible[key].direct.push(a);
+  });
+  // Também marcar envolvidos (quem não é responsável direto mas está na lista de envolvidos)
+  actions.forEach(a => {
+    (a.involvedIds ?? []).forEach(iid => {
+      if (iid === (a.responsibleId || a.responsible)) return; // já é responsável direto
+      if (!byResponsible[iid]) byResponsible[iid] = { responsible: null, responsibleId: iid, direct: [], involved: [] };
+      byResponsible[iid].involved.push(a);
+    });
+  });
+
+  const dataFmt = meetingDate ? new Date(meetingDate + "T12:00:00").toLocaleDateString("pt-BR") : "recente";
+  return Object.entries(byResponsible).map(([key, { responsibleId, direct, involved }]) => {
+    let corpo = `**Ações da Reunião de Liderança — ${dataFmt}**\n\n`;
+    if (direct.length > 0) {
+      corpo += `🔴 Você é responsável:\n`;
+      direct.forEach(a => {
+        corpo += `• ${a.text}${a.deadline ? ` (prazo: ${new Date(a.deadline + "T12:00:00").toLocaleDateString("pt-BR")})` : ""}\n`;
+      });
+      corpo += "\n";
+    }
+    if (involved.length > 0) {
+      corpo += `🟡 Você está envolvido:\n`;
+      involved.forEach(a => {
+        corpo += `• ${a.text} (responsável: ${a.responsible || "—"}${a.deadline ? `, prazo: ${new Date(a.deadline + "T12:00:00").toLocaleDateString("pt-BR")}` : ""})\n`;
+      });
+    }
+    return createInboxMessage({
+      tipo: "acao_reuniao",
+      de: createdBy,
+      para: { id: responsibleId || key },
+      restaurantId,
+      assunto: `📋 Ações da reunião de liderança — ${dataFmt}`,
+      corpo: corpo.trim(),
+      metadata: { meetingDate, actionCount: direct.length + involved.length },
+    });
+  });
+}
 
 // ── Version retention ──
 const MAX_VERSIONS = 30;
@@ -1919,126 +2035,256 @@ function FaqManagerTab({ restaurantId, faq, onUpdate }) {
 // DP MESSAGES MANAGER TAB
 //
 // ── Notificações Tab (DP only) ────────────────────────────────────────────────
-function NotificacoesTab({ restaurantId, dpMessages, notifications, onUpdate, isOwner }) {
+function NotificacoesTab({ restaurantId, dpMessages, notifications, onUpdate, isOwner, inbox, managerId, managerRole, inboxFolders }) {
   const ac = "#3b82f6";
-  const [showTrash, setShowTrash] = useState(false);
+  const [activeFolder, setActiveFolder] = useState(null); // null=Entrada, "__trash"=Excluídas, string=folderId
+  const [ntFolderModal, setNtFolderModal] = useState(null);
+  const [ntFolderForm, setNtFolderForm] = useState({ nome: "", cor: "#3498db" });
+  const [ntMoveModal, setNtMoveModal] = useState(null);
+  const FOLDER_COLORS = ["#3498db","#e74c3c","#2ecc71","#f39c12","#9b59b6","#1abc9c","#e67e22","#34495e"];
+
+  const myFolders = managerId ? ((inboxFolders ?? {})[managerId] ?? []) : [];
+  const isTrash = activeFolder === "__trash";
 
   // All DP messages for this restaurant (exclude soft-deleted)
   const dpMsgs = (dpMessages ?? [])
     .filter(m => m.restaurantId === restaurantId && !m.deleted)
     .map(m => ({ ...m, _kind: "dp" }));
 
-  // System notifications (horário changes, etc) — exclude admin-only items and soft-deleted
+  // System notifications — exclude admin-only and soft-deleted
   const sysNots = (notifications ?? [])
     .filter(n => n.restaurantId === restaurantId && n.targetRole !== "admin" && n.type !== "upgrade_request" && !n.deleted)
     .map(n => ({ ...n, _kind: "sys" }));
 
-  // Trashed items
+  // New inbox messages filtered by folder
+  const inboxMsgs = managerId ? getInboxForUser({ inbox, userId: managerId, userRole: managerRole || "manager", restaurantId, folder: activeFolder })
+    .map(m => ({ ...m, _kind: "inbox", read: m.lido, body: m.corpo, date: m.criadoEm })) : [];
+
+  // Trashed items (legacy)
   const trashedDp = (dpMessages ?? []).filter(m => m.restaurantId === restaurantId && m.deleted).map(m => ({ ...m, _kind: "dp" }));
   const trashedSys = (notifications ?? []).filter(n => n.restaurantId === restaurantId && n.targetRole !== "admin" && n.type !== "upgrade_request" && n.deleted).map(n => ({ ...n, _kind: "sys" }));
-  const trashed = [...trashedDp, ...trashedSys].sort((a, b) => (b.deletedAt || b.date || "").localeCompare(a.deletedAt || a.date || ""));
+  // Trash inbox msgs
+  const trashedInbox = managerId ? getInboxForUser({ inbox, userId: managerId, userRole: managerRole || "manager", restaurantId, folder: "__trash" })
+    .map(m => ({ ...m, _kind: "inbox", read: m.lido, body: m.corpo, date: m.criadoEm })) : [];
 
-  const all = [...dpMsgs, ...sysNots]
-    .sort((a, b) => (b.date || b.createdAt || "").localeCompare(a.date || a.createdAt || ""));
+  // Build final list based on active folder
+  const all = isTrash
+    ? [...trashedDp, ...trashedSys, ...trashedInbox].sort((a, b) => (b.deletedAt || b.date || "").localeCompare(a.deletedAt || a.date || ""))
+    : (activeFolder === null
+      ? [...dpMsgs, ...sysNots, ...inboxMsgs]
+      : inboxMsgs // custom folders only have inbox messages
+    ).sort((a, b) => (b.date || b.createdAt || "").localeCompare(a.date || a.createdAt || ""));
 
   const unread = all.filter(m => !m.read).length;
+  // Counts for tabs
+  const entradaUnread = dpMsgs.filter(m=>!m.read).length + sysNots.filter(m=>!m.read).length
+    + (managerId ? getInboxForUser({ inbox, userId: managerId, userRole: managerRole || "manager", restaurantId, folder: null, includeRead: false }).length : 0);
+  const trashCount = trashedDp.length + trashedSys.length + trashedInbox.length;
+  const folderUnread = (fid) => managerId ? getInboxForUser({ inbox, userId: managerId, userRole: managerRole || "manager", restaurantId, folder: fid, includeRead: false }).length : 0;
 
   function markRead(item) {
     if (item._kind === "dp") {
       onUpdate("dpMessages", dpMessages.map(m => m.id === item.id ? { ...m, read: true } : m));
+    } else if (item._kind === "inbox") {
+      onUpdate("inbox", (inbox ?? []).map(m => m.id === item.id ? { ...m, lido: true } : m));
     } else {
       onUpdate("notifications", notifications.map(n => n.id === item.id ? { ...n, read: true } : n));
     }
   }
 
   function markAllRead() {
-    onUpdate("dpMessages", dpMessages.map(m => m.restaurantId === restaurantId ? { ...m, read: true } : m));
-    onUpdate("notifications", notifications.map(n => n.restaurantId === restaurantId ? { ...n, read: true } : n));
+    if (activeFolder === null) {
+      onUpdate("dpMessages", dpMessages.map(m => m.restaurantId === restaurantId ? { ...m, read: true } : m));
+      onUpdate("notifications", notifications.map(n => n.restaurantId === restaurantId ? { ...n, read: true } : n));
+    }
+    if (inboxMsgs.length > 0) {
+      const ids = new Set(inboxMsgs.map(m => m.id));
+      onUpdate("inbox", (inbox ?? []).map(m => ids.has(m.id) ? { ...m, lido: true } : m));
+    }
   }
 
   function softDeleteItem(item) {
     if (item._kind === "dp") {
       onUpdate("dpMessages", dpMessages.map(m => m.id === item.id ? { ...m, deleted: true, deletedAt: new Date().toISOString(), read: true } : m));
+    } else if (item._kind === "inbox") {
+      onUpdate("inbox", (inbox ?? []).map(m => m.id === item.id ? { ...m, deletedAt: new Date().toISOString(), lido: true, folder: null } : m));
     } else {
       onUpdate("notifications", notifications.map(n => n.id === item.id ? { ...n, deleted: true, deletedAt: new Date().toISOString(), read: true } : n));
     }
-    onUpdate("_toast", "🗑️ Mensagem movida para a lixeira");
+    onUpdate("_toast", "🗑️ Movido para Excluídas");
   }
 
   function restoreItem(item) {
     if (item._kind === "dp") {
       onUpdate("dpMessages", dpMessages.map(m => m.id === item.id ? { ...m, deleted: false, deletedAt: undefined } : m));
+    } else if (item._kind === "inbox") {
+      onUpdate("inbox", (inbox ?? []).map(m => m.id === item.id ? { ...m, deletedAt: null } : m));
     } else {
       onUpdate("notifications", notifications.map(n => n.id === item.id ? { ...n, deleted: false, deletedAt: undefined } : n));
     }
-    onUpdate("_toast", "♻️ Mensagem restaurada");
+    onUpdate("_toast", "📥 Restaurado para Entrada");
+  }
+
+  function permDeleteItem(item) {
+    if (!window.confirm("Excluir definitivamente? Esta ação não pode ser desfeita.")) return;
+    if (item._kind === "dp") onUpdate("dpMessages", (dpMessages??[]).filter(m=>m.id!==item.id));
+    else if (item._kind === "inbox") onUpdate("inbox", (inbox??[]).filter(m=>m.id!==item.id));
+    else onUpdate("notifications", (notifications??[]).filter(n=>n.id!==item.id));
+    onUpdate("_toast", "❌ Excluído definitivamente");
+  }
+
+  function moveToFolder(msgId, folderId) {
+    onUpdate("inbox", (inbox ?? []).map(m => m.id === msgId ? {...m, folder: folderId, deletedAt: null} : m));
+    setNtMoveModal(null);
+    onUpdate("_toast", folderId ? `📁 Movido para ${myFolders.find(f=>f.id===folderId)?.nome || "pasta"}` : "📥 Movido para Entrada");
+  }
+
+  function saveFolder() {
+    if (!ntFolderForm.nome.trim() || !managerId) return;
+    const allF = { ...(inboxFolders ?? {}) };
+    const mine = [...(allF[managerId] ?? [])];
+    if (ntFolderModal === "new") {
+      mine.push({ id: Date.now().toString(36), nome: ntFolderForm.nome.trim(), cor: ntFolderForm.cor, ordem: mine.length });
+    } else if (ntFolderModal?.id) {
+      const idx = mine.findIndex(f => f.id === ntFolderModal.id);
+      if (idx >= 0) mine[idx] = { ...mine[idx], nome: ntFolderForm.nome.trim(), cor: ntFolderForm.cor };
+    }
+    allF[managerId] = mine;
+    onUpdate("inboxFolders", allF);
+    setNtFolderModal(null);
+    onUpdate("_toast", "📁 Pasta salva");
+  }
+
+  function deleteFolder(fid) {
+    if (!window.confirm("Excluir esta pasta? As mensagens serão movidas para Entrada.")) return;
+    onUpdate("inbox", (inbox ?? []).map(x => x.folder === fid ? {...x, folder: null} : x));
+    const allF = { ...(inboxFolders ?? {}) };
+    allF[managerId] = (allF[managerId] ?? []).filter(f => f.id !== fid);
+    onUpdate("inboxFolders", allF);
+    if (activeFolder === fid) setActiveFolder(null);
+    onUpdate("_toast", "📁 Pasta excluída");
   }
 
   const CATS = { sugestao:"💡 Sugestão", elogio:"👏 Elogio", reclamacao:"⚠️ Reclamação", denuncia:"🚨 Denúncia" };
+  const tabSt = (active, cor) => ({padding:"5px 12px",borderRadius:20,border:`1px solid ${active?(cor||ac)+"66":"var(--border)"}`,background:active?(cor||ac)+"15":"transparent",color:active?(cor||ac):"var(--text3)",cursor:"pointer",fontSize:11,fontFamily:"'DM Sans',sans-serif",fontWeight:active?700:500,display:"flex",alignItems:"center",gap:4});
 
   return (
     <div style={{fontFamily:"'DM Mono',monospace"}}>
-      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}}>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
         <div>
-          <p style={{color:ac,fontSize:15,fontWeight:700,margin:0}}>📬 Notificações</p>
-          {unread > 0 && <p style={{color:"var(--text3)",fontSize:12,margin:"2px 0 0"}}>{unread} não lida{unread>1?"s":""}</p>}
+          <p style={{color:ac,fontSize:15,fontWeight:700,margin:0}}>📬 Caixa</p>
+          {unread > 0 && !isTrash && <p style={{color:"var(--text3)",fontSize:12,margin:"2px 0 0"}}>{unread} não lida{unread>1?"s":""}</p>}
         </div>
-        {unread > 0 && <button onClick={markAllRead} style={{...S.btnSecondary,fontSize:12}}>Marcar todas lidas</button>}
+        {unread > 0 && !isTrash && <button onClick={markAllRead} style={{...S.btnSecondary,fontSize:12}}>Marcar todas lidas</button>}
       </div>
-      {all.length === 0 && <p style={{color:"var(--text3)",textAlign:"center",marginTop:40}}>Nenhuma notificação.</p>}
+
+      {/* Folder tabs */}
+      <div style={{display:"flex",gap:5,marginBottom:12,flexWrap:"wrap",alignItems:"center"}}>
+        <button onClick={()=>setActiveFolder(null)} style={tabSt(activeFolder===null)}>📥 Entrada{entradaUnread>0?` (${entradaUnread})`:""}</button>
+        {myFolders.map(f => {
+          const fu = folderUnread(f.id);
+          return <button key={f.id} onClick={()=>setActiveFolder(f.id)} style={tabSt(activeFolder===f.id,f.cor)}><span style={{width:7,height:7,borderRadius:"50%",background:f.cor||ac}}></span>{f.nome}{fu>0?` (${fu})`:""}</button>;
+        })}
+        <button onClick={()=>setActiveFolder("__trash")} style={tabSt(isTrash)}>🗑️ Excluídas{trashCount>0?` (${trashCount})`:""}</button>
+        <button onClick={()=>{setNtFolderModal("new");setNtFolderForm({nome:"",cor:"#3498db"});}} style={{background:"none",border:"1px dashed var(--border)",borderRadius:20,padding:"5px 10px",color:"var(--text3)",cursor:"pointer",fontSize:11,fontFamily:"'DM Sans',sans-serif"}} title="Nova pasta">+</button>
+      </div>
+
+      {/* Edit/delete current custom folder */}
+      {activeFolder && activeFolder !== "__trash" && (() => {
+        const cf = myFolders.find(f=>f.id===activeFolder);
+        return cf ? (
+          <div style={{display:"flex",gap:8,marginBottom:10}}>
+            <button onClick={()=>{setNtFolderModal(cf);setNtFolderForm({nome:cf.nome,cor:cf.cor||"#3498db"});}} style={{...S.btnSecondary,fontSize:10,padding:"3px 8px"}}>Renomear</button>
+            <button onClick={()=>deleteFolder(cf.id)} style={{...S.btnSecondary,fontSize:10,padding:"3px 8px",color:"#e74c3c",borderColor:"#e74c3c44"}}>Excluir pasta</button>
+          </div>
+        ) : null;
+      })()}
+
+      {isTrash && <p style={{color:"var(--text3)",fontSize:11,marginBottom:10}}>Mensagens excluídas são removidas automaticamente após 90 dias.</p>}
+
+      {all.length === 0 && <p style={{color:"var(--text3)",textAlign:"center",marginTop:40}}>{isTrash?"Nenhuma mensagem excluída.":"Nenhuma notificação."}</p>}
+
       {all.map(item => {
         const date = item.date || item.createdAt || "";
         const isDP = item._kind === "dp";
         const isSys = item._kind === "sys";
+        const isInbox = item._kind === "inbox";
         return (
           <div key={item.id} style={{...S.card,marginBottom:10,opacity:item.read?0.65:1,borderColor:item.read?"var(--border)":isDP?"var(--ac)44":"#3b82f644"}}>
             <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:8}}>
               <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
                 {isDP && <span style={{background:"var(--ac)22",color:"var(--ac)",borderRadius:6,padding:"2px 8px",fontSize:10,fontWeight:700}}>💬 Fale com DP</span>}
                 {isSys && <span style={{background:"#3b82f622",color:"#3b82f6",borderRadius:6,padding:"2px 8px",fontSize:10,fontWeight:700}}>⚙️ Sistema</span>}
+                {isInbox && <span style={{background:item.tipo==="reuniao"?"#10b98122":item.tipo==="acao_reuniao"?"#f59e0b22":"#8b5cf622",color:item.tipo==="reuniao"?"#10b981":item.tipo==="acao_reuniao"?"#f59e0b":"#8b5cf6",borderRadius:6,padding:"2px 8px",fontSize:10,fontWeight:700}}>{{reuniao:"📅 Reunião",acao_reuniao:"📋 Ação",comunicado:"📨 Comunicado",solicitacao:"📩 Solicitação",sistema:"⚙️ Sistema"}[item.tipo]??item.tipo}</span>}
+                {isInbox && item.assunto && <span style={{color:"var(--text)",fontSize:12,fontWeight:600}}>{item.assunto}</span>}
                 {isDP && item.category && <span style={{color:"var(--text3)",fontSize:11}}>{CATS[item.category]??item.category}</span>}
                 {!item.read && <span style={{background:isDP?"var(--ac)":"#3b82f6",color:"var(--text)",borderRadius:4,padding:"1px 6px",fontSize:10,fontWeight:700}}>Novo</span>}
               </div>
               <span style={{color:"var(--text3)",fontSize:11,whiteSpace:"nowrap"}}>{date ? new Date(date).toLocaleString("pt-BR") : ""}</span>
             </div>
             {isDP && <div style={{color:"var(--text2)",fontSize:12,marginBottom:6}}>De: <span style={{color:item.empName==="Anônimo"?"#8b5cf6":"var(--text)"}}>{item.empName}</span></div>}
+            {isInbox && item.de && <div style={{color:"var(--text2)",fontSize:12,marginBottom:6}}>De: <span style={{color:"var(--text)"}}>{item.de.nome || item.de.role}</span></div>}
             <div style={{color:"var(--text)",fontSize:13,lineHeight:1.6,whiteSpace:"pre-wrap",marginBottom:8}}>{item.body}</div>
             <div style={{display:"flex",gap:8,alignItems:"center"}}>
-              {!item.read && <button onClick={()=>markRead(item)} style={{...S.btnSecondary,fontSize:11,padding:"4px 12px"}}>Marcar como lida</button>}
-              <button onClick={()=>softDeleteItem(item)} aria-label="Excluir item" style={{background:"none",border:"1px solid #e74c3c22",borderRadius:8,color:"var(--text3)",cursor:"pointer",fontSize:11,padding:"4px 10px",fontFamily:"'DM Mono',monospace"}}>🗑️</button>
+              {!isTrash && !item.read && <button onClick={()=>markRead(item)} style={{...S.btnSecondary,fontSize:11,padding:"4px 12px"}}>Marcar como lida</button>}
+              {!isTrash && isInbox && myFolders.length > 0 && <button onClick={()=>setNtMoveModal(item.id)} style={{background:"none",border:"1px solid var(--border)",borderRadius:8,color:"var(--text3)",cursor:"pointer",fontSize:11,padding:"4px 10px",fontFamily:"'DM Mono',monospace"}}>📁</button>}
+              {isTrash ? (
+                <>
+                  <button onClick={()=>restoreItem(item)} style={{...S.btnSecondary,fontSize:11,padding:"4px 10px"}}>📥 Restaurar</button>
+                  {isOwner && <button onClick={()=>permDeleteItem(item)} style={{background:"none",border:"1px solid #e74c3c33",borderRadius:8,color:"#e74c3c",cursor:"pointer",fontSize:11,padding:"4px 10px",fontFamily:"'DM Mono',monospace"}}>❌ Excluir</button>}
+                </>
+              ) : (
+                <button onClick={()=>softDeleteItem(item)} aria-label="Excluir" style={{background:"none",border:"1px solid #e74c3c22",borderRadius:8,color:"var(--text3)",cursor:"pointer",fontSize:11,padding:"4px 10px",fontFamily:"'DM Mono',monospace"}}>🗑️</button>
+              )}
             </div>
           </div>
         );
       })}
 
-      {/* Trash toggle */}
-      {trashed.length > 0 && (
-        <button onClick={() => setShowTrash(!showTrash)} style={{ ...S.btnSecondary, fontSize: 12, marginTop: 12, display: "flex", alignItems: "center", gap: 6 }}>
-          🗑️ Lixeira ({trashed.length}) {showTrash ? "▲" : "▼"}
-        </button>
-      )}
-
-      {/* Trash view */}
-      {showTrash && trashed.map(item => (
-        <div key={item.id} style={{...S.card,marginBottom:10,marginTop:10,opacity:0.5,borderColor:"var(--border)"}}>
-          <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
-            <div style={{flex:1}}>
-              <div style={{color:"var(--text3)",fontSize:11,marginBottom:4}}>
-                {item._kind==="dp"?"💬 Fale com DP":"⚙️ Sistema"} · Apagado em {item.deletedAt ? new Date(item.deletedAt).toLocaleDateString("pt-BR") : "—"}
-              </div>
-              <div style={{color:"var(--text2)",fontSize:13,lineHeight:1.5}}>{item.body?.slice(0,100)}{(item.body?.length??0)>100?"…":""}</div>
+      {/* Modal mover para pasta */}
+      {ntMoveModal && (
+        <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.5)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:9999,padding:16}} onClick={()=>setNtMoveModal(null)}>
+          <div style={{background:"var(--card-bg)",borderRadius:16,padding:20,maxWidth:320,width:"100%",border:"1px solid var(--border)"}} onClick={e=>e.stopPropagation()}>
+            <h3 style={{color:"var(--text)",fontSize:14,fontWeight:700,margin:"0 0 12px"}}>📁 Mover para pasta</h3>
+            <div style={{display:"flex",flexDirection:"column",gap:6}}>
+              <button onClick={()=>moveToFolder(ntMoveModal, null)} style={{...S.btnSecondary,fontSize:12,textAlign:"left"}}>📥 Entrada</button>
+              {myFolders.map(f => (
+                <button key={f.id} onClick={()=>moveToFolder(ntMoveModal, f.id)} style={{...S.btnSecondary,fontSize:12,textAlign:"left",display:"flex",alignItems:"center",gap:6}}>
+                  <span style={{width:8,height:8,borderRadius:"50%",background:f.cor||ac}}></span> {f.nome}
+                </button>
+              ))}
             </div>
-            <div style={{display:"flex",gap:6,flexShrink:0}}>
-              <button onClick={()=>restoreItem(item)} style={{...S.btnSecondary,fontSize:11,padding:"4px 10px"}}>♻️ Restaurar</button>
-              {isOwner && <button onClick={()=>{
-                if(!window.confirm("Excluir definitivamente? Esta ação não pode ser desfeita.")) return;
-                if(item._kind==="dp") onUpdate("dpMessages", (dpMessages??[]).filter(m=>m.id!==item.id));
-                else onUpdate("notifications", (notifications??[]).filter(n=>n.id!==item.id));
-              }} style={{background:"none",border:"1px solid #e74c3c33",borderRadius:8,color:"var(--red)",cursor:"pointer",fontSize:11,padding:"4px 10px",fontFamily:"'DM Mono',monospace"}}>✕ Excluir</button>}
+            <div style={{marginTop:10,textAlign:"right"}}>
+              <button onClick={()=>setNtMoveModal(null)} style={{...S.btnSecondary,fontSize:11}}>Cancelar</button>
             </div>
           </div>
         </div>
-      ))}
+      )}
+
+      {/* Modal criar/editar pasta */}
+      {ntFolderModal && (
+        <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.5)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:9999,padding:16}} onClick={()=>setNtFolderModal(null)}>
+          <div style={{background:"var(--card-bg)",borderRadius:16,padding:20,maxWidth:360,width:"100%",border:"1px solid var(--border)"}} onClick={e=>e.stopPropagation()}>
+            <h3 style={{color:"var(--text)",fontSize:14,fontWeight:700,margin:"0 0 12px"}}>{ntFolderModal==="new"?"📁 Nova pasta":"📁 Editar pasta"}</h3>
+            <div style={{marginBottom:10}}>
+              <label style={{color:"var(--text3)",fontSize:11,fontWeight:600,display:"block",marginBottom:4}}>Nome</label>
+              <input value={ntFolderForm.nome} onChange={e=>setNtFolderForm(p=>({...p,nome:e.target.value}))} style={{...S.input,width:"100%"}} placeholder="Nome da pasta" maxLength={30}/>
+            </div>
+            <div style={{marginBottom:14}}>
+              <label style={{color:"var(--text3)",fontSize:11,fontWeight:600,display:"block",marginBottom:4}}>Cor</label>
+              <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+                {FOLDER_COLORS.map(c => (
+                  <button key={c} onClick={()=>setNtFolderForm(p=>({...p,cor:c}))} style={{width:24,height:24,borderRadius:"50%",background:c,border:ntFolderForm.cor===c?"3px solid var(--text)":"2px solid transparent",cursor:"pointer"}}/>
+                ))}
+              </div>
+            </div>
+            <div style={{display:"flex",justifyContent:"flex-end",gap:8}}>
+              <button onClick={()=>setNtFolderModal(null)} style={{...S.btnSecondary,fontSize:12}}>Cancelar</button>
+              <button onClick={saveFolder} disabled={!ntFolderForm.nome.trim()} style={{...S.btnPrimary,fontSize:12,opacity:!ntFolderForm.nome.trim()?0.5:1}}>Salvar</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -3450,7 +3696,7 @@ function DpManagerTab({ restaurantId, dpMessages, onUpdate, isOwner }) {
   );
 }
 
-function EmployeePortal({ employees, roles, tips, schedules, splits, restaurants, communications, commAcks, faq, dpMessages, workSchedules, incidents, feedbacks, devChecklists, onBack, onUpdateEmployee, onUpdate, toggleTheme, theme, onSwitchToManager, employeeGoals, tipApprovals, delays, meetingPlans }) {
+function EmployeePortal({ employees, roles, tips, schedules, splits, restaurants, communications, commAcks, faq, dpMessages, workSchedules, incidents, feedbacks, devChecklists, onBack, onUpdateEmployee, onUpdate, toggleTheme, theme, onSwitchToManager, employeeGoals, tipApprovals, delays, meetingPlans, inbox, inboxFolders }) {
   const [empId, setEmpId] = useState(() => localStorage.getItem("apptip_empid") || null);
 
   useEffect(() => {
@@ -3467,6 +3713,11 @@ function EmployeePortal({ employees, roles, tips, schedules, splits, restaurants
   const [firstPin2, setFirstPin2] = useState("");
   const [firstErr, setFirstErr] = useState("");
   const [empSchedView, setEmpSchedView] = useState("mine");
+  // Inbox folder state (must be at component level, not in IIFE)
+  const [eFolder, setEFolder] = useState(null);
+  const [eFolderModal, setEFolderModal] = useState(null);
+  const [eFolderForm, setEFolderForm] = useState({ nome: "", cor: "#3498db" });
+  const [eMoveModal, setEMoveModal] = useState(null);
 
   const emp = employees.find(e => e.id === empId);
   const role = emp ? roles.find(r => r.id === emp.roleId) : null;
@@ -3576,6 +3827,8 @@ function EmployeePortal({ employees, roles, tips, schedules, splits, restaurants
   );
 
   // Bottom nav config: icon + short label
+  const empInbox = getInboxForUser({ inbox: inbox ?? [], userId: empId, userRole: "employee", restaurantId: emp?.restaurantId, includeRead: false });
+  const empInboxCount = empInbox.length;
   const NAV = [
     ["comunicados","📢","Avisos"],
     ["escala","📅","Escala"],
@@ -3584,6 +3837,7 @@ function EmployeePortal({ employees, roles, tips, schedules, splits, restaurants
     empTabVisible("horarios") && ["horarios","🕐","Horários"],
     empTabVisible("faq")      && ["faq","❓","FAQ"],
     empTabVisible("dp")       && ["dp","💬","Fale DP"],
+    ["empInbox","📬",empInboxCount > 0 ? `Caixa (${empInboxCount})` : "Caixa"],
   ].filter(Boolean);
 
   return (
@@ -3846,6 +4100,154 @@ function EmployeePortal({ employees, roles, tips, schedules, splits, restaurants
           <WorkScheduleEmployeeTab empId={empId} restaurantId={emp?.restaurantId} workSchedules={workSchedules ?? {}} />
         )}
 
+        {tab === "empInbox" && (() => {
+          const ac2 = "#3b82f6";
+          const eFolders = (inboxFolders ?? {})[empId] ?? [];
+          const FOLDER_COLORS = ["#3498db","#e74c3c","#2ecc71","#f39c12","#9b59b6","#1abc9c","#e67e22","#34495e"];
+          const isTrash = eFolder === "__trash";
+
+          const myMsgs = getInboxForUser({ inbox: inbox ?? [], userId: empId, userRole: "employee", restaurantId: emp?.restaurantId, folder: eFolder });
+          const entradaUn = getInboxForUser({ inbox: inbox ?? [], userId: empId, userRole: "employee", restaurantId: emp?.restaurantId, folder: null, includeRead: false }).length;
+          const trashCt = getInboxForUser({ inbox: inbox ?? [], userId: empId, userRole: "employee", restaurantId: emp?.restaurantId, folder: "__trash" }).length;
+          const fUnread = (fid) => getInboxForUser({ inbox: inbox ?? [], userId: empId, userRole: "employee", restaurantId: emp?.restaurantId, folder: fid, includeRead: false }).length;
+
+          function softDel(m) {
+            onUpdate("inbox", (inbox??[]).map(x => x.id===m.id ? {...x, deletedAt: new Date().toISOString(), folder: null} : x));
+            onUpdate("_toast","🗑️ Movido para Excluídas");
+          }
+          function restore(m) {
+            onUpdate("inbox", (inbox??[]).map(x => x.id===m.id ? {...x, deletedAt: null} : x));
+            onUpdate("_toast","📥 Restaurado");
+          }
+          function moveMsg(msgId, folderId) {
+            onUpdate("inbox", (inbox??[]).map(x => x.id===msgId ? {...x, folder: folderId, deletedAt: null} : x));
+            setEMoveModal(null);
+            onUpdate("_toast", folderId ? `📁 Movido` : "📥 Movido para Entrada");
+          }
+          function saveFld() {
+            if (!eFolderForm.nome.trim()) return;
+            const allF = { ...(inboxFolders ?? {}) };
+            const mine = [...(allF[empId] ?? [])];
+            if (eFolderModal === "new") mine.push({ id: Date.now().toString(36), nome: eFolderForm.nome.trim(), cor: eFolderForm.cor, ordem: mine.length });
+            else if (eFolderModal?.id) { const idx = mine.findIndex(f=>f.id===eFolderModal.id); if (idx>=0) mine[idx]={...mine[idx],nome:eFolderForm.nome.trim(),cor:eFolderForm.cor}; }
+            allF[empId] = mine;
+            onUpdate("inboxFolders", allF);
+            setEFolderModal(null);
+          }
+          function delFld(fid) {
+            if (!window.confirm("Excluir esta pasta?")) return;
+            onUpdate("inbox", (inbox??[]).map(x => x.folder===fid?{...x,folder:null}:x));
+            const allF = { ...(inboxFolders ?? {}) };
+            allF[empId] = (allF[empId] ?? []).filter(f => f.id !== fid);
+            onUpdate("inboxFolders", allF);
+            if (eFolder === fid) setEFolder(null);
+          }
+
+          const tabSt = (active, cor) => ({padding:"5px 10px",borderRadius:16,border:`1px solid ${active?(cor||ac2)+"66":"var(--border)"}`,background:active?(cor||ac2)+"15":"transparent",color:active?(cor||ac2):"var(--text3)",cursor:"pointer",fontSize:11,fontFamily:"'DM Sans',sans-serif",fontWeight:active?700:500,display:"flex",alignItems:"center",gap:4});
+          const ICONS = { reuniao:"📅", acao_reuniao:"📋", comunicado:"📨", sistema:"⚙️" };
+          const LABELS = { reuniao:"Reunião", acao_reuniao:"Ação", comunicado:"Comunicado", sistema:"Sistema" };
+
+          return (
+            <div>
+              <h3 style={{color:"var(--text)",fontSize:16,fontWeight:700,margin:"0 0 12px"}}>📬 Caixa de entrada</h3>
+
+              {/* Folder tabs */}
+              <div style={{display:"flex",gap:5,marginBottom:12,flexWrap:"wrap",alignItems:"center"}}>
+                <button onClick={()=>setEFolder(null)} style={tabSt(eFolder===null)}>📥 Entrada{entradaUn>0?` (${entradaUn})`:""}</button>
+                {eFolders.map(f => {
+                  const fu = fUnread(f.id);
+                  return <button key={f.id} onClick={()=>setEFolder(f.id)} style={tabSt(eFolder===f.id,f.cor)}><span style={{width:7,height:7,borderRadius:"50%",background:f.cor||ac2}}></span>{f.nome}{fu>0?` (${fu})`:""}</button>;
+                })}
+                <button onClick={()=>setEFolder("__trash")} style={tabSt(isTrash)}>🗑️ Excluídas{trashCt>0?` (${trashCt})`:""}</button>
+                <button onClick={()=>{setEFolderModal("new");setEFolderForm({nome:"",cor:"#3498db"});}} style={{background:"none",border:"1px dashed var(--border)",borderRadius:16,padding:"5px 8px",color:"var(--text3)",cursor:"pointer",fontSize:11}}>+</button>
+              </div>
+
+              {/* Edit/delete custom folder */}
+              {eFolder && eFolder !== "__trash" && (() => {
+                const cf = eFolders.find(f=>f.id===eFolder);
+                return cf ? (
+                  <div style={{display:"flex",gap:6,marginBottom:10}}>
+                    <button onClick={()=>{setEFolderModal(cf);setEFolderForm({nome:cf.nome,cor:cf.cor||"#3498db"});}} style={{...S.btnSecondary,fontSize:10,padding:"3px 8px"}}>Renomear</button>
+                    <button onClick={()=>delFld(cf.id)} style={{...S.btnSecondary,fontSize:10,padding:"3px 8px",color:"#e74c3c"}}>Excluir pasta</button>
+                  </div>
+                ) : null;
+              })()}
+
+              {isTrash && <p style={{color:"var(--text3)",fontSize:11,marginBottom:8}}>Excluídas são removidas após 90 dias.</p>}
+
+              {myMsgs.length === 0 && (
+                <div style={{...S.card,textAlign:"center",padding:40}}>
+                  <div style={{fontSize:36,marginBottom:12}}>{isTrash?"🗑️":"📭"}</div>
+                  <p style={{color:"var(--text3)",fontSize:14}}>{isTrash?"Nenhuma mensagem excluída.":"Nenhuma mensagem."}</p>
+                </div>
+              )}
+              {myMsgs.map(m => (
+                <div key={m.id} style={{...S.card,marginBottom:10,border:`1px solid ${m.lido?"var(--border)":"#3b82f633"}`,background:m.lido?"var(--card-bg)":"#3b82f608"}}>
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:8}}>
+                    <div style={{flex:1}}>
+                      <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:4,flexWrap:"wrap"}}>
+                        <span style={{fontSize:14}}>{ICONS[m.tipo]??"💬"}</span>
+                        <span style={{color:"var(--text)",fontWeight:700,fontSize:13}}>{m.assunto || LABELS[m.tipo] || "Mensagem"}</span>
+                        {!m.lido && <span style={{background:"#3b82f6",color:"#fff",borderRadius:20,padding:"1px 8px",fontSize:10,fontWeight:700}}>Novo</span>}
+                      </div>
+                      {m.de && <div style={{color:"var(--text3)",fontSize:11,marginBottom:4}}>De: {m.de.nome || m.de.role}</div>}
+                      <div style={{color:"var(--text2)",fontSize:13,lineHeight:1.6,whiteSpace:"pre-line",marginBottom:6}}>{m.corpo}</div>
+                      <span style={{color:"var(--text3)",fontSize:11}}>{m.criadoEm ? fmtRelTime(m.criadoEm) : ""}</span>
+                    </div>
+                    <div style={{display:"flex",flexDirection:"column",gap:4,flexShrink:0}}>
+                      {!m.lido && !isTrash && <button onClick={()=>onUpdate("inbox",(inbox??[]).map(x=>x.id===m.id?{...x,lido:true}:x))} style={{background:"none",border:"none",color:"var(--text3)",cursor:"pointer",fontSize:16,padding:4}} title="Marcar como lida">✓</button>}
+                      {!isTrash && eFolders.length > 0 && <button onClick={()=>setEMoveModal(m.id)} style={{background:"none",border:"1px solid var(--border)",borderRadius:6,color:"var(--text3)",cursor:"pointer",fontSize:11,padding:"2px 6px"}}>📁</button>}
+                      {isTrash ? (
+                        <button onClick={()=>restore(m)} style={{background:"none",border:"1px solid var(--border)",borderRadius:6,color:"var(--text3)",cursor:"pointer",fontSize:11,padding:"2px 6px"}}>📥</button>
+                      ) : (
+                        <button onClick={()=>softDel(m)} style={{background:"none",border:"1px solid #e74c3c22",borderRadius:6,color:"var(--text3)",cursor:"pointer",fontSize:11,padding:"2px 6px"}}>🗑️</button>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              ))}
+
+              {/* Move modal */}
+              {eMoveModal && (
+                <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.5)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:9999,padding:16}} onClick={()=>setEMoveModal(null)}>
+                  <div style={{background:"var(--card-bg)",borderRadius:16,padding:20,maxWidth:300,width:"100%",border:"1px solid var(--border)"}} onClick={e=>e.stopPropagation()}>
+                    <h3 style={{color:"var(--text)",fontSize:14,fontWeight:700,margin:"0 0 12px"}}>📁 Mover</h3>
+                    <div style={{display:"flex",flexDirection:"column",gap:6}}>
+                      <button onClick={()=>moveMsg(eMoveModal,null)} style={{...S.btnSecondary,fontSize:12,textAlign:"left"}}>📥 Entrada</button>
+                      {eFolders.map(f => (
+                        <button key={f.id} onClick={()=>moveMsg(eMoveModal,f.id)} style={{...S.btnSecondary,fontSize:12,textAlign:"left",display:"flex",alignItems:"center",gap:6}}>
+                          <span style={{width:8,height:8,borderRadius:"50%",background:f.cor||ac2}}></span> {f.nome}
+                        </button>
+                      ))}
+                    </div>
+                    <div style={{marginTop:10,textAlign:"right"}}><button onClick={()=>setEMoveModal(null)} style={{...S.btnSecondary,fontSize:11}}>Cancelar</button></div>
+                  </div>
+                </div>
+              )}
+
+              {/* Folder modal */}
+              {eFolderModal && (
+                <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.5)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:9999,padding:16}} onClick={()=>setEFolderModal(null)}>
+                  <div style={{background:"var(--card-bg)",borderRadius:16,padding:20,maxWidth:340,width:"100%",border:"1px solid var(--border)"}} onClick={e=>e.stopPropagation()}>
+                    <h3 style={{color:"var(--text)",fontSize:14,fontWeight:700,margin:"0 0 12px"}}>{eFolderModal==="new"?"Nova pasta":"Editar pasta"}</h3>
+                    <div style={{marginBottom:10}}>
+                      <input value={eFolderForm.nome} onChange={e=>setEFolderForm(p=>({...p,nome:e.target.value}))} style={{...S.input,width:"100%"}} placeholder="Nome" maxLength={30}/>
+                    </div>
+                    <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:14}}>
+                      {FOLDER_COLORS.map(c => (
+                        <button key={c} onClick={()=>setEFolderForm(p=>({...p,cor:c}))} style={{width:24,height:24,borderRadius:"50%",background:c,border:eFolderForm.cor===c?"3px solid var(--text)":"2px solid transparent",cursor:"pointer"}}/>
+                      ))}
+                    </div>
+                    <div style={{display:"flex",justifyContent:"flex-end",gap:8}}>
+                      <button onClick={()=>setEFolderModal(null)} style={{...S.btnSecondary,fontSize:12}}>Cancelar</button>
+                      <button onClick={saveFld} disabled={!eFolderForm.nome.trim()} style={{...S.btnPrimary,fontSize:12,opacity:!eFolderForm.nome.trim()?0.5:1}}>Salvar</button>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          );
+        })()}
 
       </div>
 
@@ -4206,6 +4608,7 @@ Inclua apenas as ações solicitadas. Arrays vazios se não houver ação daquel
 function EmployeeSpreadsheet({ restEmps, restRoles, rid, employees, onUpdate, restCode: restCode_, isOwner, restaurant, notifications, privacyMask, onGenerateDismissalReport, incidents, feedbacks, devChecklists, schedules, currentUser, isLider, mobileOnly: mobileOnlyProp, roles, vtPayments, vtConfig, scheduleStatus, employeeGoals, delays, meetingPlans, meetingOccurrences, resetSignal }) {
   const mobileOnly = mobileOnlyProp ?? false; // eslint-disable-line no-unused-vars
   const PLANOS = [
+    { id:"pIsento", empMax:999 },
     { id:"p10",  empMax:10  },
     { id:"p20",  empMax:20  },
     { id:"p50",  empMax:50  },
@@ -5447,7 +5850,7 @@ Inclua apenas as ações solicitadas. Arrays vazios se não houver ação daquel
               <div style={{color:"var(--text3)",fontSize:12}}>Solicite upgrade para adicionar mais.</div>
             </div>
             <button onClick={()=>{
-              const PLANOS_LABEL = { p10:"Starter (10)", p20:"Básico (20)", p50:"Profissional (50)", p999:"Enterprise (51-100)", pOrc:"On Demand (+100)" };
+              const PLANOS_LABEL = { pIsento:"Isento", p10:"Starter (10)", p20:"Básico (20)", p50:"Profissional (50)", p999:"Enterprise (51-100)", pOrc:"On Demand (+100)" };
               const PROXIMO = { p10:"p20", p20:"p50", p50:"p999", p999:"pOrc" };
               const planoAtual = PLANOS_LABEL[restaurant?.planoId??"p10"] ?? "Starter";
               const planoProx = PLANOS_LABEL[PROXIMO[restaurant?.planoId??"p10"]] ?? "Enterprise";
@@ -6682,6 +7085,16 @@ function MeetingPlannerSection({ restaurantId, employees, roles, areas, meetingP
       } : {}),
     };
     onUpdate("meetingPlans", [...(allMeetingPlans ?? []), plan]);
+    // Etapa 6a: Notificar participantes sobre reunião agendada
+    if (plan.employeeIds?.length > 0 && plan.plannedDate) {
+      const createdByInfo = { id: currentUser?.id, nome: plan.createdBy, role: isOwner ? "owner" : "manager" };
+      const participants = plan.employeeIds.map(eid => ({ id: eid }));
+      const meetingType = plan.type === "alinhamento" ? "lideranca" : "equipe";
+      const newNotifs = createMeetingNotifications({ meetingType, meetingDate: plan.plannedDate, restaurantId, participants, createdBy: createdByInfo });
+      if (newNotifs.length > 0) {
+        onUpdate("inbox", [...(data?.inbox ?? []), ...newNotifs]);
+      }
+    }
     setPlanDate(""); setPlanNote(""); setSelectedAreas([]); setSelectedEmps([]); setShowForm(false);
     setAvalPontosFortes([]); setAvalPontosMelhorar([]); setAvalNotas([]); setAvalNewItem(""); setAvalSection("fortes");
     setAlinhTopics([]); setAlinhNewTopic("");
@@ -7032,6 +7445,21 @@ function MeetingPlannerSection({ restaurantId, employees, roles, areas, meetingP
     if (idx >= 0) {
       all[idx] = { ...all[idx], status: "encerrada", endedAt: new Date().toISOString(), meetingNotes: livePlanNotes || all[idx].meetingNotes || "" };
       onUpdate("meetingPlans", all);
+      // Etapa 6b: Enviar ações pós-reunião para cada participante responsável
+      const plan = all[idx];
+      const planActions = getData("meetingActions").filter(a => a.restaurantId === restaurantId && !a.done);
+      if (planActions.length > 0) {
+        // Encontrar responsáveis por nome → mapear para IDs de employees
+        const actionsWithIds = planActions.map(a => {
+          const emp = employees.find(e => e.name === a.responsible);
+          return { ...a, responsibleId: emp?.id || null };
+        });
+        const createdByInfo = { id: currentUser?.id, nome: currentUser?.name || "Gestor", role: isOwner ? "owner" : "manager" };
+        const actionNotifs = createActionNotifications({ actions: actionsWithIds, restaurantId, meetingDate: plan.plannedDate || today(), createdBy: createdByInfo });
+        if (actionNotifs.length > 0) {
+          onUpdate("inbox", [...(data?.inbox ?? []), ...actionNotifs]);
+        }
+      }
     }
     setLivePlanId(null);
     setLivePlanNotes("");
@@ -9175,10 +9603,12 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
   const gestorAtivou  = (key) => restaurant.tabsGestor?.[key] !== false;
   const tabVisible    = (key) => adminAutoriza(key) && (isOwner || gestorAtivou(key));
 
-  const inboxUnread = ((data?.notifications??[]).filter(n=>n.restaurantId===rid&&!n.read&&!n.deleted&&n.targetRole!=="admin"&&n.type!=="upgrade_request").length + (data?.dpMessages??[]).filter(m=>m.restaurantId===rid&&!m.read&&!m.deleted).length);
+  const userRoleForInbox = isOwner ? "owner" : isLider ? "lider" : "manager";
+  const inboxUnread = ((data?.notifications??[]).filter(n=>n.restaurantId===rid&&!n.read&&!n.deleted&&n.targetRole!=="admin"&&n.type!=="upgrade_request").length + (data?.dpMessages??[]).filter(m=>m.restaurantId===rid&&!m.read&&!m.deleted).length + getInboxForUser({ inbox: data?.inbox, userId: currentUser?.id, userRole: userRoleForInbox, restaurantId: rid, includeRead: false }).length);
 
   // Líder Operacional: acesso restrito a Dashboard + Escala + Horários + Equipe
   // ── Grouped tabs ──
+  const liderInboxCount = isLider ? getInboxForUser({ inbox: data?.inbox, userId: currentUser?.id, userRole: "lider", restaurantId: rid, includeRead: false }).length : 0;
   const TAB_GROUPS = isLider ? [
     { id:"equipe", label:"👥 Pessoas", icon:"👥", tabs: [
       ["employees","Equipe"],
@@ -9186,6 +9616,9 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
       canSched && ["schedule","Escala"],
       ["horarios","Horários"],
     ].filter(Boolean) },
+    { id:"comunicacao", label:"📢 Comunicação", icon:"📢", tabs: [
+      ["notificacoes",`Caixa${liderInboxCount>0?` (${liderInboxCount})`:""}`],
+    ] },
   ] : [
     { id:"operacao", label:"💰 Operação", icon:"💰", tabs: [
       canTips && ["dashboard","Dashboard"],
@@ -9203,16 +9636,16 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
       (isOwner || tabVisible("comunicados")) && ["comunicados","Comunicados"],
       (isOwner || tabVisible("faq")) && ["faq","FAQ"],
       (isOwner || tabVisible("dp")) && ["dp","Fale com DP"],
-      isDP && ["notificacoes",`Caixa${inboxUnread>0?` (${inboxUnread})`:""}`],
+      (isDP || isOwner || currentIsMasterDP) && ["notificacoes",`Caixa${inboxUnread>0?` (${inboxUnread})`:""}`],
     ].filter(Boolean) },
     { id:"config", label:"⚙️ Config", icon:"⚙️", tabs: [
       (canTips || isOwner) && ["config","Configurações"],
-      isDP && ["dp_gestores","Gestores"],
+      (isDP || isOwner) && ["dp_gestores","Gestores"],
     ].filter(Boolean) },
   ].filter(g => g.tabs.length > 0);
 
-  // Mobile: restrict to dashboard, schedule, horarios, employees, reunioes, notificacoes
-  const MOBILE_ALLOWED = ["dashboard","schedule","horarios","employees","reunioes","notificacoes"];
+  // Mobile: restrict to dashboard, schedule, horarios, employees, reunioes, notificacoes, config, dp_gestores
+  const MOBILE_ALLOWED = ["dashboard","schedule","horarios","employees","reunioes","notificacoes","config","dp_gestores"];
   const TAB_GROUPS_FINAL = mobileOnly
     ? TAB_GROUPS.map(g => ({ ...g, tabs: g.tabs.filter(([id]) => MOBILE_ALLOWED.includes(id)) })).filter(g => g.tabs.length > 0)
     : TAB_GROUPS;
@@ -12136,14 +12569,14 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
               <p style={{color:"var(--text3)",fontSize:14}}>Notificações ocultas pelo modo privacidade.</p>
             </div>
           ) : (
-            <NotificacoesTab restaurantId={rid} dpMessages={data?.dpMessages??[]} notifications={data?.notifications??[]} onUpdate={onUpdate} isOwner={isOwner} />
+            <NotificacoesTab restaurantId={rid} dpMessages={data?.dpMessages??[]} notifications={data?.notifications??[]} onUpdate={onUpdate} isOwner={isOwner} inbox={data?.inbox??[]} managerId={currentUser?.id} managerRole={userRoleForInbox} inboxFolders={data?.inboxFolders??{}} />
           )}
           </div>
         )}
 
 
         {/* GESTORES (DP) */}
-        {tab === "dp_gestores" && isDP && (() => {
+        {tab === "dp_gestores" && (isDP || isOwner) && (() => {
           const managers = data?.managers ?? [];
           const myId = currentUser?.id;
           // eslint-disable-next-line no-unused-vars
@@ -12223,7 +12656,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
         })()}
 
         {/* Modal novo gestor (DP) */}
-        {dpMgrModal && isDP && (
+        {dpMgrModal && (isDP || isOwner) && (
           <Modal title={dpMgrEdit?"Editar Gestor":"Novo Gestor"} onClose={()=>setDpMgrModal(false)} wide>
             <div style={{display:"flex",flexDirection:"column",gap:12}}>
               {/* Puxar da equipe */}
@@ -12829,6 +13262,14 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }
   const setEditOwnerId = v => setEditIds(p=>({...p,owner:v}));
   const [restForm, setRestForm]             = useState({ name:"",shortCode:"",cnpj:"",address:"",whatsappFin:"",whatsappOp:"",serviceStartDate:"" });
   const [mgrForm, setMgrForm]               = useState({ name:"",cpf:"",pin:"",restaurantIds:[],perms:{tips:true,schedule:true},isDP:false,profile:"custom",areas:[],masterRestaurantIds:[] });
+  // Inbox state
+  const [inboxFilter, setInboxFilter] = useState("all");
+  const [inboxFolder, setInboxFolder] = useState(null); // null=Entrada, "__trash"=Excluídas, string=folderId
+  const [composeOpen, setComposeOpen] = useState(false);
+  const [composeData, setComposeData] = useState({ restaurantId: "", assunto: "", corpo: "" });
+  const [folderModal, setFolderModal] = useState(null); // null|"new"|{id,nome,cor} for edit
+  const [folderForm, setFolderForm] = useState({ nome: "", cor: "#3498db" });
+  const [moveModal, setMoveModal] = useState(null); // null | msgId
   const [ownerForm, setOwnerForm]           = useState({ name:"",cpf:"",pin:"" });
   const [viewOnly, setViewOnly]             = useState(false);
   // View-only guard — shadow onUpdate to block writes when locked
@@ -12891,6 +13332,7 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }
   }
 
   const PLANOS = [
+    { id:"pIsento", label:"Isento",       empMax:999, mensal:0,     anual:0,      multi:true, isento:true },
     { id:"p10",  label:"Starter",     empMax:10,  mensal:97,    anual:87.30,  multi:false },
     { id:"p20",  label:"Básico",      empMax:20,  mensal:187,   anual:168.30, multi:true  },
     { id:"p50",  label:"Profissional",empMax:50,  mensal:397,   anual:357.30, multi:true  },
@@ -12915,7 +13357,9 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }
   }
 
   const notifications = data?.notifications ?? [];
-  const unreadNotifs = notifications.filter(n => !n.read && n.targetRole === "admin").length;
+  const inboxMsgs = data?.inbox ?? [];
+  const ownerInbox = getInboxForUser({ inbox: inboxMsgs, userId: currentUser?.id, userRole: "owner", includeRead: false });
+  const unreadNotifs = notifications.filter(n => !n.read && n.targetRole === "admin").length + ownerInbox.length;
   const isMaster = currentUser?.isMaster === true;
   const trash = data?.trash ?? { restaurants:[], managers:[], employees:[], tabData:[] };
   const trashCount = (trash.restaurants?.length??0) + (trash.managers?.length??0) + (trash.employees?.length??0) + (trash.tabData?.length??0);
@@ -12967,8 +13411,7 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }
   const ac = "var(--ac)";
   const TABS = [
     ["financeiro_geral", "💰 Financeiro"],
-    ["managers","👔 Gestores"],
-    ["owners","⭐ Admins AppTip"],
+    ["owners","👔 Gestores AppTip"],
     ["inbox", `📬 Caixa${unreadNotifs > 0 ? ` (${unreadNotifs})` : ""}`],
     ...(isMaster ? [["trash", `🗑️ Lixeira${trashCount > 0 ? ` (${trashCount})` : ""}`]] : []),
     ["changelog", "📋 Versões"],
@@ -12994,7 +13437,7 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }
 
         {/* Sub-tabs */}
         <div style={{ display:"flex", borderBottom:"1px solid var(--border)", background:"var(--header-bg)", overflowX:"auto" }}>
-          {[["operacional",isMobile?"🏠 Restaurante":"🏠 Restaurante"],["gestores","👔 Gestores"],["financeiro","💳 Financeiro"]].map(([id,lbl])=>(
+          {[["operacional",isMobile?"🏠 Restaurante":"🏠 Restaurante"],["financeiro","💳 Financeiro"]].map(([id,lbl])=>(
             <button key={id} onClick={()=>setRestTab(id)}
               style={{ padding:isMobile?"10px 14px":"10px 20px", background:"none", border:"none", borderBottom:`2px solid ${restTab===id?ac:"transparent"}`, color:restTab===id?ac:"var(--text3)", cursor:"pointer", fontSize:isMobile?12:13, fontFamily:"'DM Sans',sans-serif", fontWeight:restTab===id?700:500, whiteSpace:"nowrap", flex:isMobile?1:undefined, textAlign:"center" }}>
               {lbl}
@@ -13131,9 +13574,10 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }
           // ─── Plano e valor ──────────────────────────────────────────
           const plano        = getPlano(rest);
           const tipo         = rest?.tipoCobranca ?? "mensal";
+          const isIsento     = rest?.planoId === "pIsento";
           const isEnt        = rest?.planoId === "p999";
           const isOrc        = rest?.planoId === "pOrc";
-          const empMax       = isEnt ? (rest?.empMaxCustom ?? 51) : isOrc ? (rest?.empMaxCustom ?? 101) : plano.empMax;
+          const empMax       = isIsento ? 999 : isEnt ? (rest?.empMaxCustom ?? 51) : isOrc ? (rest?.empMaxCustom ?? 101) : plano.empMax;
           const empAtivos    = employees.filter(e=>e.restaurantId===selRestaurant&&!e.inactive).length;
 
           // Early Adopter — 30% desconto permanente
@@ -13142,6 +13586,7 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }
 
           // Valor da cobrança — mensal = valor do mês, anual = total do ano
           const valorBruto = (() => {
+            if (isIsento) return 0;
             if (isOrc) return null;
             if (isEnt) {
               const porEmp = empMax * 7.99;
@@ -13205,8 +13650,24 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }
           return (
             <div style={{padding:"24px",maxWidth:700,margin:"0 auto"}}>
 
+              {/* ── STATUS ISENTO ── */}
+              {isIsento && (
+                <div style={{...S.card,marginBottom:20,border:"1px solid #10b98133",background:"linear-gradient(135deg,#10b98108,#10b98118)"}}>
+                  <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:8}}>
+                    <span style={{fontSize:28}}>🤝</span>
+                    <div>
+                      <div style={{color:"#10b981",fontWeight:700,fontSize:16}}>Plano Isento</div>
+                      <div style={{color:"var(--text3)",fontSize:12}}>Sem cobrança — ativo por tempo indeterminado</div>
+                    </div>
+                  </div>
+                  <div style={{color:"var(--text2)",fontSize:13,marginTop:4}}>
+                    Empregados ativos: <strong>{empAtivos}</strong> · Sem limite
+                  </div>
+                </div>
+              )}
+
               {/* ── 1. STATUS DO CICLO ── */}
-              <div style={{...S.card, marginBottom:20, border:`1px solid ${
+              {!isIsento && <div style={{...S.card, marginBottom:20, border:`1px solid ${
                 inadimplente?"var(--red)44":
                 trialVencido||cicloVencido?"var(--red)44":
                 emTrial||alertaVenc?"#f59e0b44":"var(--green)44"
@@ -13281,10 +13742,10 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }
                     </>}
                   </div>
                 </div>
-              </div>
+              </div>}
 
               {/* Iniciar trial */}
-              {!trialIni && !cicloIni && (
+              {!isIsento && !trialIni && !cicloIni && (
                 <div style={{...S.card,marginBottom:20,textAlign:"center",padding:28}}>
                   <div style={{fontSize:32,marginBottom:12}}>🎯</div>
                   <h4 style={{color:"var(--text)",fontWeight:700,fontSize:15,margin:"0 0 8px"}}>Iniciar período de teste</h4>
@@ -13305,27 +13766,39 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }
                   {PLANOS.map(p=>{
                     const sel = (rest?.planoId??"p10")===p.id;
                     const precos = {
+                      pIsento: "Sem cobrança",
                       p10:  "R$97/mês · R$1.047,60/ano (−10%)",
                       p20:  "R$187/mês · R$2.019,60/ano (−10%)",
                       p50:  "R$397/mês · R$4.287,60/ano (−10%)",
                       p999: "R$7,99/emp./mês · 10% desc. no anual",
                       pOrc: "Sob orçamento"
                     };
+                    const empLabel = p.id==="pIsento"?"(ilimitado)":p.id==="p10"?"(até 10)":p.id==="p20"?"(até 20)":p.id==="p50"?"(até 50)":p.id==="p999"?"(51–100)":"(+100)";
+                    const isentoSel = p.id==="pIsento" && sel;
                     return (
                       <button key={p.id} onClick={()=>onUpdate("restaurants",restaurants.map(r=>r.id===selRestaurant?{...r,planoId:p.id}:r))}
-                        style={{padding:"10px 14px",borderRadius:10,border:`1px solid ${sel?ac:"var(--border)"}`,background:sel?"var(--ac-bg)":"transparent",cursor:"pointer",fontFamily:"'DM Sans',sans-serif",textAlign:"left",display:"flex",flexDirection:"column",gap:4}}>
+                        style={{padding:"10px 14px",borderRadius:10,border:`1px solid ${isentoSel?"#10b981":sel?ac:"var(--border)"}`,background:isentoSel?"#10b98112":sel?"var(--ac-bg)":"transparent",cursor:"pointer",fontFamily:"'DM Sans',sans-serif",textAlign:"left",display:"flex",flexDirection:"column",gap:4}}>
                         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",width:"100%"}}>
-                          <span style={{color:sel?"var(--ac-text)":"var(--text2)",fontWeight:sel?700:400}}>{sel?"✓":"○"} {p.label} {p.id==="p10"?"(até 10)":p.id==="p20"?"(até 20)":p.id==="p50"?"(até 50)":p.id==="p999"?"(51–100)":"(+100)"}</span>
-                          <span style={{color:"var(--text3)",fontSize:11}}>{precos[p.id]}</span>
+                          <span style={{color:isentoSel?"#10b981":sel?"var(--ac-text)":"var(--text2)",fontWeight:sel?700:400}}>{sel?"✓":"○"} {p.id==="pIsento"?"🤝 ":""}{p.label} {empLabel}</span>
+                          <span style={{color:p.id==="pIsento"?"#10b981":"var(--text3)",fontSize:11,fontWeight:p.id==="pIsento"?600:400}}>{precos[p.id]}</span>
                         </div>
                         <span style={{fontSize:10,color:p.multi?"var(--green)":"var(--text3)",fontWeight:500}}>
-                          {p.multi?"🏢 Múltiplas unidades":"🏢 Máx. 1 unidade"}
+                          {p.id==="pIsento"?"🤝 Parceiro / uso interno — sem cobrança":p.multi?"🏢 Múltiplas unidades":"🏢 Máx. 1 unidade"}
                         </span>
                       </button>
                     );
                   })}
                 </div>
 
+                {isIsento ? (
+                  <div style={{padding:"14px 16px",borderRadius:10,border:"1px solid #10b98133",background:"linear-gradient(135deg,#10b98108,#10b98115)",marginBottom:12}}>
+                    <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:4}}>
+                      <span style={{fontSize:18}}>🤝</span>
+                      <span style={{color:"#10b981",fontWeight:700,fontSize:14}}>Plano Isento</span>
+                    </div>
+                    <div style={{color:"var(--text3)",fontSize:12}}>Restaurante parceiro ou de uso interno. Sem cobrança, sem trial, sem vencimento. Ativo até que o plano seja alterado.</div>
+                  </div>
+                ) : (<>
                 <div style={{display:"flex",gap:8,marginBottom:12}}>
                   {[["mensal","Mensal"],["anual","Anual (−10%)"]].map(([v,l])=>{
                     const sel=(rest?.tipoCobranca??"mensal")===v;
@@ -13346,6 +13819,7 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }
                     <div style={{color:"var(--text3)",fontSize:11,marginTop:2}}>Primeiros 30 clientes. Desconto válido enquanto a assinatura estiver ativa.</div>
                   </div>
                 </label>
+                </>)}
 
                 {isEnt && <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:8}}>
                   <label style={{...S.label,marginBottom:0}}>Empregados contratados (51–100):</label>
@@ -13391,7 +13865,7 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }
               </div>
 
               {/* ── 3. GERAR COBRANÇA ── */}
-              <div style={{...S.card,marginBottom:20}}>
+              {!isIsento && <div style={{...S.card,marginBottom:20}}>
                 <h4 style={{color:"var(--text)",fontWeight:700,fontSize:14,margin:"0 0 4px"}}>📲 Gerar cobrança</h4>
                 <p style={{color:"var(--text3)",fontSize:12,margin:"0 0 14px"}}>Envia a fatura via WhatsApp para o contato financeiro</p>
 
@@ -13477,10 +13951,10 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }
                   style={{...S.btnPrimary,opacity:rest?.whatsappFin?1:0.5,cursor:rest?.whatsappFin?"pointer":"not-allowed"}}>
                   📲 Enviar cobrança via WhatsApp
                 </button>
-              </div>
+              </div>}
 
               {/* ── 4. COBRANÇAS EM ABERTO ── */}
-              {cobrancasAbertas.length > 0 && (
+              {!isIsento && cobrancasAbertas.length > 0 && (
                 <div style={{...S.card,marginBottom:20,border:"1px solid #f59e0b33",background:"#fffbeb"}}>
                   <h4 style={{color:"#92400e",fontWeight:700,fontSize:14,margin:"0 0 12px"}}>⏳ Cobranças em aberto</h4>
                   <div style={{display:"flex",flexDirection:"column",gap:8}}>
@@ -13733,6 +14207,7 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }
           const receitaMensal = restaurants.reduce((sum, r) => {
             const p = getPlano(r);
             const ea = r.earlyAdopter ? 0.7 : 1;
+            if (r.planoId === "pIsento") return sum;
             if (r.planoId === "p999") return sum + ((r.empMaxCustom ?? 51) * 7.99 * ea);
             if (r.planoId === "pOrc") return sum;
             return sum + ((p.mensal ?? 0) * ea);
@@ -13809,7 +14284,7 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }
                         <div style={{flex:1,minWidth:0}}>
                           <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:3}}>
                             <span style={{color:"var(--text)",fontWeight:700,fontSize:14}}>{r.name}</span>
-                            <span style={{background:"var(--ac-bg)",color:"var(--ac-text)",borderRadius:6,padding:"1px 8px",fontSize:11,fontWeight:700}}>{plano.label}</span>
+                            <span style={{background:plano.isento?"#10b98115":"var(--ac-bg)",color:plano.isento?"#10b981":"var(--ac-text)",borderRadius:6,padding:"1px 8px",fontSize:11,fontWeight:700}}>{plano.isento?"🤝 ":""}{plano.label}</span>
                           </div>
                           <div style={{display:"flex",gap:12,fontSize:12,color:"var(--text3)"}}>
                             <span>{empAtivos}/{plano.empMax} emp.</span>
@@ -13908,74 +14383,312 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }
           );
         })()}
 
-        {/* CAIXA */}
+        {/* CAIXA — INBOX UNIFICADO */}
         {tab === "inbox" && (() => {
+          const uid = currentUser?.id;
+          const myFolders = (data?.inboxFolders ?? {})[uid] ?? [];
+          const FOLDER_COLORS = ["#3498db","#e74c3c","#2ecc71","#f39c12","#9b59b6","#1abc9c","#e67e22","#34495e"];
+
+          // Legado: notificações do sistema antigo
           const adminNotifs = [...notifications].filter(n => n.targetRole === "admin" || n.type === "upgrade_request")
-            .sort((a,b) => b.date?.localeCompare(a.date??""));
+            .sort((a,b) => b.date?.localeCompare(a.date??""))
+            .map(n => ({ ...n, _source: "legacy", _sortDate: n.date || n.criadoEm || "" }));
+          // Novo inbox filtrado por pasta
+          const myInbox = getInboxForUser({ inbox: data?.inbox, userId: uid, userRole: "owner", folder: inboxFolder })
+            .map(m => ({ ...m, _source: "inbox", _sortDate: m.criadoEm || "" }));
+          // Merge (legado só aparece na Entrada)
+          const showLegacy = inboxFolder === null;
+          const allMessages = showLegacy ? [...adminNotifs, ...myInbox].sort((a,b) => b._sortDate.localeCompare(a._sortDate)) : myInbox;
+          // Filtro de tipo
+          const filtered = inboxFilter === "all" ? allMessages
+            : inboxFilter === "unread" ? allMessages.filter(m => m._source === "legacy" ? !m.read : !m.lido)
+            : allMessages.filter(m => m.tipo === inboxFilter || (inboxFilter === "sistema" && m._source === "legacy"));
+          // Contadores
+          const entradaUnread = getInboxForUser({ inbox: data?.inbox, userId: uid, userRole: "owner", folder: null, includeRead: false }).length
+            + notifications.filter(n => (n.targetRole==="admin"||n.type==="upgrade_request") && !n.read).length;
+          const trashCount = getInboxForUser({ inbox: data?.inbox, userId: uid, userRole: "owner", folder: "__trash" }).length;
+          const folderUnread = (fid) => getInboxForUser({ inbox: data?.inbox, userId: uid, userRole: "owner", folder: fid, includeRead: false }).length;
+          const currentUnread = allMessages.filter(m => m._source === "legacy" ? !m.read : !m.lido).length;
+
+          function markAllRead() {
+            if (showLegacy) {
+              onUpdate("notifications", notifications.map(n => n.targetRole==="admin"||n.type==="upgrade_request" ? {...n,read:true} : n));
+            }
+            const updInbox = (data?.inbox ?? []).map(m => {
+              const isForMe = myInbox.some(x => x.id === m.id);
+              return isForMe ? { ...m, lido: true } : m;
+            });
+            onUpdate("inbox", updInbox);
+          }
+          function markRead(msg) {
+            if (msg._source === "legacy") {
+              onUpdate("notifications", notifications.map(x => x.id===msg.id ? {...x,read:true} : x));
+            } else {
+              onUpdate("inbox", (data?.inbox ?? []).map(x => x.id===msg.id ? {...x, lido:true} : x));
+            }
+          }
+          function softDelete(msg) {
+            if (msg._source === "legacy") {
+              onUpdate("notifications", notifications.filter(x => x.id!==msg.id));
+            } else {
+              onUpdate("inbox", (data?.inbox ?? []).map(x => x.id===msg.id ? {...x, deletedAt: new Date().toISOString(), folder: null} : x));
+            }
+            onUpdate("_toast","🗑️ Movido para Excluídas");
+          }
+          function restoreMsg(msg) {
+            onUpdate("inbox", (data?.inbox ?? []).map(x => x.id===msg.id ? {...x, deletedAt: null} : x));
+            onUpdate("_toast","📥 Restaurado para Entrada");
+          }
+          function permDelete(msg) {
+            if (!window.confirm("Excluir definitivamente? Esta ação não pode ser desfeita.")) return;
+            onUpdate("inbox", (data?.inbox ?? []).filter(x => x.id!==msg.id));
+            onUpdate("_toast","🗑️ Excluído definitivamente");
+          }
+          function moveToFolder(msgId, folderId) {
+            onUpdate("inbox", (data?.inbox ?? []).map(x => x.id===msgId ? {...x, folder: folderId, deletedAt: null} : x));
+            setMoveModal(null);
+            onUpdate("_toast", folderId ? `📁 Movido para ${myFolders.find(f=>f.id===folderId)?.nome || "pasta"}` : "📥 Movido para Entrada");
+          }
+          function sendMessage() {
+            if (!composeData.assunto.trim() || !composeData.corpo.trim()) return;
+            const msg = createInboxMessage({
+              tipo: "comunicado",
+              de: { id: uid, nome: currentUser?.name ?? "Gestor AppTip", role: "owner" },
+              para: composeData.restaurantId ? { role: "manager", restaurantId: composeData.restaurantId } : { role: "manager" },
+              restaurantId: composeData.restaurantId || null,
+              assunto: composeData.assunto.trim(),
+              corpo: composeData.corpo.trim(),
+            });
+            onUpdate("inbox", [...(data?.inbox ?? []), msg]);
+            setComposeOpen(false);
+            setComposeData({ restaurantId: "", assunto: "", corpo: "" });
+            onUpdate("_toast", "📨 Mensagem enviada!");
+          }
+          // CRUD pastas
+          function saveFolder() {
+            if (!folderForm.nome.trim()) return;
+            const allFolders = { ...(data?.inboxFolders ?? {}) };
+            const mine = [...(allFolders[uid] ?? [])];
+            if (folderModal === "new") {
+              mine.push({ id: Date.now().toString(36), nome: folderForm.nome.trim(), cor: folderForm.cor, ordem: mine.length });
+            } else if (folderModal?.id) {
+              const idx = mine.findIndex(f => f.id === folderModal.id);
+              if (idx >= 0) mine[idx] = { ...mine[idx], nome: folderForm.nome.trim(), cor: folderForm.cor };
+            }
+            allFolders[uid] = mine;
+            onUpdate("inboxFolders", allFolders);
+            setFolderModal(null);
+            onUpdate("_toast", "📁 Pasta salva");
+          }
+          function deleteFolder(fid) {
+            if (!window.confirm("Excluir esta pasta? As mensagens serão movidas para Entrada.")) return;
+            // Move messages back to Entrada
+            onUpdate("inbox", (data?.inbox ?? []).map(x => x.folder === fid ? {...x, folder: null} : x));
+            const allFolders = { ...(data?.inboxFolders ?? {}) };
+            allFolders[uid] = (allFolders[uid] ?? []).filter(f => f.id !== fid);
+            onUpdate("inboxFolders", allFolders);
+            if (inboxFolder === fid) setInboxFolder(null);
+            onUpdate("_toast", "📁 Pasta excluída");
+          }
+
+          const isTrash = inboxFolder === "__trash";
+          const FILTER_OPTS = [
+            ["all", "Todas"],
+            ["unread", `Não lidas${currentUnread>0?` (${currentUnread})`:""}`],
+            ["reuniao", "📅 Reuniões"],
+            ["acao_reuniao", "📋 Ações"],
+            ["solicitacao", "📩 Solicitações"],
+            ["sistema", "⚙️ Sistema"],
+          ];
+          const TIPO_ICON = { reuniao: "📅", acao_reuniao: "📋", solicitacao: "📩", comunicado: "📨", sistema: "⚙️" };
+          const TIPO_LABEL = { reuniao: "Reunião", acao_reuniao: "Ação de reunião", solicitacao: "Solicitação", comunicado: "Comunicado", sistema: "Sistema" };
+          const folderTabStyle = (active) => ({padding:"6px 14px",borderRadius:20,border:`1px solid ${active?ac+"66":"var(--border)"}`,background:active?ac+"15":"transparent",color:active?"var(--ac-text)":"var(--text3)",cursor:"pointer",fontSize:12,fontFamily:"'DM Sans',sans-serif",fontWeight:active?700:500,display:"flex",alignItems:"center",gap:4});
 
           return (
             <div>
-              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12,flexWrap:"wrap",gap:8}}>
                 <h3 style={{color:"var(--text)",fontSize:16,fontWeight:700,margin:0}}>📬 Caixa de entrada</h3>
-                {adminNotifs.some(n=>!n.read) && (
-                  <button onClick={()=>{
-                    const updated = notifications.map(n => n.targetRole==="admin"||n.type==="upgrade_request" ? {...n,read:true} : n);
-                    onUpdate("notifications", updated);
-                  }} style={{...S.btnSecondary,fontSize:12,padding:"6px 14px"}}>Marcar todas como lidas</button>
-                )}
+                <div style={{display:"flex",gap:8}}>
+                  {currentUnread > 0 && <button onClick={markAllRead} style={{...S.btnSecondary,fontSize:12,padding:"6px 14px"}}>Marcar todas como lidas</button>}
+                  <button onClick={()=>setComposeOpen(true)} style={{...S.btnPrimary,fontSize:12,padding:"6px 14px"}}>+ Nova mensagem</button>
+                </div>
               </div>
 
-              {adminNotifs.length === 0 && (
+              {/* Abas de pastas */}
+              <div style={{display:"flex",gap:6,marginBottom:10,flexWrap:"wrap",alignItems:"center"}}>
+                <button onClick={()=>{setInboxFolder(null);setInboxFilter("all");}} style={folderTabStyle(inboxFolder===null)}>
+                  📥 Entrada{entradaUnread>0?` (${entradaUnread})`:""}
+                </button>
+                {myFolders.map(f => {
+                  const fu = folderUnread(f.id);
+                  return (
+                    <button key={f.id} onClick={()=>{setInboxFolder(f.id);setInboxFilter("all");}} style={{...folderTabStyle(inboxFolder===f.id),borderColor:inboxFolder===f.id?(f.cor||ac)+"66":"var(--border)",background:inboxFolder===f.id?(f.cor||ac)+"15":"transparent",color:inboxFolder===f.id?f.cor||"var(--ac-text)":"var(--text3)"}}>
+                      <span style={{width:8,height:8,borderRadius:"50%",background:f.cor||ac,display:"inline-block"}}></span>
+                      {f.nome}{fu>0?` (${fu})`:""}
+                    </button>
+                  );
+                })}
+                <button onClick={()=>{setInboxFolder("__trash");setInboxFilter("all");}} style={folderTabStyle(isTrash)}>
+                  🗑️ Excluídas{trashCount>0?` (${trashCount})`:""}
+                </button>
+                <button onClick={()=>{setFolderModal("new");setFolderForm({nome:"",cor:"#3498db"});}} style={{background:"none",border:"1px dashed var(--border)",borderRadius:20,padding:"6px 12px",color:"var(--text3)",cursor:"pointer",fontSize:12,fontFamily:"'DM Sans',sans-serif"}} title="Nova pasta">+ Pasta</button>
+              </div>
+
+              {/* Filtros de tipo (não aparece na lixeira) */}
+              {!isTrash && (
+                <div style={{display:"flex",gap:6,marginBottom:16,flexWrap:"wrap"}}>
+                  {FILTER_OPTS.map(([id,lbl])=>(
+                    <button key={id} onClick={()=>setInboxFilter(id)} style={{padding:"4px 10px",borderRadius:16,border:`1px solid ${inboxFilter===id?ac+"44":"var(--border)"}`,background:inboxFilter===id?ac+"10":"transparent",color:inboxFilter===id?"var(--ac-text)":"var(--text3)",cursor:"pointer",fontSize:11,fontFamily:"'DM Sans',sans-serif",fontWeight:inboxFilter===id?600:400}}>
+                      {lbl}
+                    </button>
+                  ))}
+                </div>
+              )}
+
+              {/* Botão editar/excluir pasta custom atual */}
+              {inboxFolder && inboxFolder !== "__trash" && (() => {
+                const cf = myFolders.find(f=>f.id===inboxFolder);
+                return cf ? (
+                  <div style={{display:"flex",gap:8,marginBottom:12}}>
+                    <button onClick={()=>{setFolderModal(cf);setFolderForm({nome:cf.nome,cor:cf.cor||"#3498db"});}} style={{...S.btnSecondary,fontSize:11,padding:"4px 10px"}}>Renomear pasta</button>
+                    <button onClick={()=>deleteFolder(cf.id)} style={{...S.btnSecondary,fontSize:11,padding:"4px 10px",color:"#e74c3c",borderColor:"#e74c3c44"}}>Excluir pasta</button>
+                  </div>
+                ) : null;
+              })()}
+
+              {filtered.length === 0 && (
                 <div style={{...S.card,textAlign:"center",padding:40}}>
-                  <div style={{fontSize:36,marginBottom:12}}>📭</div>
-                  <p style={{color:"var(--text3)",fontSize:14}}>Nenhuma mensagem ainda.</p>
+                  <div style={{fontSize:36,marginBottom:12}}>{isTrash?"🗑️":"📭"}</div>
+                  <p style={{color:"var(--text3)",fontSize:14}}>{isTrash?"Nenhuma mensagem excluída.":"Nenhuma mensagem"+(inboxFilter!=="all"?" neste filtro":"")+"."}</p>
+                  {isTrash && <p style={{color:"var(--text3)",fontSize:12,marginTop:4}}>Mensagens excluídas são removidas automaticamente após 90 dias.</p>}
                 </div>
               )}
 
               <div style={{display:"flex",flexDirection:"column",gap:10}}>
-                {adminNotifs.map(n => {
-                  const isUpgrade = n.type === "upgrade_request";
-                  const rest = restaurants.find(r=>r.id===n.restaurantId);
+                {filtered.map(msg => {
+                  const isLegacy = msg._source === "legacy";
+                  const isRead = isLegacy ? msg.read : msg.lido;
+                  const isUpgrade = isLegacy && msg.type === "upgrade_request";
+                  const rest = restaurants.find(r=>r.id===msg.restaurantId);
+                  const icon = isLegacy ? (isUpgrade ? "📦" : "💬") : (TIPO_ICON[msg.tipo] ?? "💬");
+                  const label = isLegacy ? (isUpgrade ? "Solicitação de upgrade" : "Notificação do sistema") : (TIPO_LABEL[msg.tipo] ?? "Mensagem");
+                  const body = isLegacy ? msg.body : msg.corpo;
+                  const subject = isLegacy ? null : msg.assunto;
+                  const dateStr = isLegacy ? msg.date : msg.criadoEm;
+                  const from = isLegacy ? null : msg.de;
+                  const msgFolder = !isLegacy && msg.folder ? myFolders.find(f=>f.id===msg.folder) : null;
+
                   return (
-                    <div key={n.id} style={{...S.card,border:`1px solid ${n.read?"var(--border)":isUpgrade?"var(--ac)44":"var(--blue)33"}`,background:n.read?"var(--card-bg)":isUpgrade?"var(--ac-bg)":"var(--blue-bg)"}}>
+                    <div key={msg.id} style={{...S.card,border:`1px solid ${isRead?"var(--border)":isUpgrade?"var(--ac)44":"var(--blue)33"}`,background:isRead?"var(--card-bg)":isUpgrade?"var(--ac-bg)":"var(--blue-bg)"}}>
                       <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:12}}>
                         <div style={{flex:1}}>
-                          <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:6}}>
-                            <span style={{fontSize:16}}>{isUpgrade?"📦":"💬"}</span>
-                            <span style={{color:"var(--text)",fontWeight:700,fontSize:14}}>
-                              {isUpgrade?"Solicitação de upgrade":"Mensagem"}
-                            </span>
-                            {!n.read && <span style={{background:isUpgrade?ac:"var(--blue)",color:"#fff",borderRadius:20,padding:"1px 8px",fontSize:10,fontWeight:700}}>Novo</span>}
+                          <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:4,flexWrap:"wrap"}}>
+                            <span style={{fontSize:16}}>{icon}</span>
+                            <span style={{color:"var(--text)",fontWeight:700,fontSize:14}}>{subject || label}</span>
+                            {!isRead && <span style={{background:isUpgrade?ac:"var(--blue)",color:"#fff",borderRadius:20,padding:"1px 8px",fontSize:10,fontWeight:700}}>Novo</span>}
                             {rest && <span style={{color:"var(--text3)",fontSize:12}}>· {rest.name}</span>}
+                            {msgFolder && <span style={{color:msgFolder.cor,fontSize:10,fontWeight:600,border:`1px solid ${msgFolder.cor}44`,borderRadius:10,padding:"1px 6px"}}>📁 {msgFolder.nome}</span>}
                           </div>
-                          <p style={{color:"var(--text2)",fontSize:13,margin:"0 0 8px",lineHeight:1.5}}>{n.body}</p>
+                          {from && <div style={{color:"var(--text3)",fontSize:11,marginBottom:4}}>De: {from.nome || from.role}</div>}
+                          <p style={{color:"var(--text2)",fontSize:13,margin:"0 0 8px",lineHeight:1.5,whiteSpace:"pre-line"}}>{body}</p>
                           <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
-                            <span style={{color:"var(--text3)",fontSize:11}}>{n.date ? new Date(n.date).toLocaleString("pt-BR") : ""}</span>
-                            {isUpgrade && (
-                              <button onClick={()=>setSelRestaurant(n.restaurantId)} style={{padding:"4px 12px",borderRadius:8,border:`1px solid ${ac}`,background:"transparent",color:"var(--ac-text)",cursor:"pointer",fontFamily:"'DM Sans',sans-serif",fontSize:12,fontWeight:600}}>
-                                Abrir restaurante →
-                              </button>
-                            )}
+                            <span style={{color:"var(--text3)",fontSize:11}}>{dateStr ? fmtRelTime(dateStr) : ""}</span>
+                            {isTrash && msg.deletedAt && <span style={{color:"var(--text3)",fontSize:10}}>Excluído {fmtRelTime(msg.deletedAt)}</span>}
+                            {isUpgrade && <button onClick={()=>setSelRestaurant(msg.restaurantId)} style={{padding:"4px 12px",borderRadius:8,border:`1px solid ${ac}`,background:"transparent",color:"var(--ac-text)",cursor:"pointer",fontFamily:"'DM Sans',sans-serif",fontSize:12,fontWeight:600}}>Abrir restaurante →</button>}
                           </div>
                         </div>
                         <div style={{display:"flex",flexDirection:"column",gap:4,flexShrink:0,alignItems:"flex-end"}}>
-                          {!n.read && (
-                            <button onClick={()=>{
-                              const updated = notifications.map(x => x.id===n.id ? {...x,read:true} : x);
-                              onUpdate("notifications", updated);
-                            }} style={{background:"none",border:"none",color:"var(--text3)",cursor:"pointer",fontSize:18,padding:4}}>✓</button>
+                          {!isRead && !isTrash && <button onClick={()=>markRead(msg)} style={{background:"none",border:"none",color:"var(--text3)",cursor:"pointer",fontSize:18,padding:4}} title="Marcar como lida">✓</button>}
+                          {!isLegacy && !isTrash && <button onClick={()=>setMoveModal(msg.id)} style={{background:"none",border:"1px solid var(--border)",borderRadius:6,color:"var(--text3)",cursor:"pointer",fontSize:11,padding:"3px 8px",fontFamily:"'DM Mono',monospace"}} title="Mover para pasta">📁</button>}
+                          {isTrash ? (
+                            <>
+                              <button onClick={()=>restoreMsg(msg)} style={{background:"none",border:"1px solid var(--border)",borderRadius:6,color:"var(--text3)",cursor:"pointer",fontSize:11,padding:"3px 8px",fontFamily:"'DM Mono',monospace"}} title="Restaurar">📥</button>
+                              <button onClick={()=>permDelete(msg)} style={{background:"none",border:"1px solid #e74c3c22",borderRadius:6,color:"#e74c3c",cursor:"pointer",fontSize:11,padding:"3px 8px",fontFamily:"'DM Mono',monospace"}} title="Excluir definitivamente">❌</button>
+                            </>
+                          ) : (
+                            <button onClick={()=>softDelete(msg)} style={{background:"none",border:"1px solid #e74c3c22",borderRadius:6,color:"var(--text3)",cursor:"pointer",fontSize:11,padding:"3px 8px",fontFamily:"'DM Mono',monospace"}} title="Excluir">🗑️</button>
                           )}
-                          <button onClick={()=>{
-                            if(!window.confirm("Apagar permanentemente esta notificação?")) return;
-                            onUpdate("notifications", notifications.filter(x => x.id!==n.id));
-                            onUpdate("_toast","🗑️ Notificação apagada");
-                          }} style={{background:"none",border:"1px solid #e74c3c22",borderRadius:6,color:"var(--text3)",cursor:"pointer",fontSize:11,padding:"3px 8px",fontFamily:"'DM Mono',monospace"}}>🗑️</button>
                         </div>
                       </div>
                     </div>
                   );
                 })}
               </div>
+
+              {/* Modal mover para pasta */}
+              {moveModal && (
+                <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.5)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:9999,padding:16}} onClick={()=>setMoveModal(null)}>
+                  <div style={{background:"var(--card-bg)",borderRadius:16,padding:24,maxWidth:360,width:"100%",border:"1px solid var(--border)"}} onClick={e=>e.stopPropagation()}>
+                    <h3 style={{color:"var(--text)",fontSize:15,fontWeight:700,margin:"0 0 16px"}}>📁 Mover para pasta</h3>
+                    <div style={{display:"flex",flexDirection:"column",gap:8}}>
+                      <button onClick={()=>moveToFolder(moveModal, null)} style={{...S.btnSecondary,fontSize:13,textAlign:"left"}}>📥 Entrada</button>
+                      {myFolders.map(f => (
+                        <button key={f.id} onClick={()=>moveToFolder(moveModal, f.id)} style={{...S.btnSecondary,fontSize:13,textAlign:"left",display:"flex",alignItems:"center",gap:8}}>
+                          <span style={{width:10,height:10,borderRadius:"50%",background:f.cor||ac}}></span> {f.nome}
+                        </button>
+                      ))}
+                    </div>
+                    <div style={{marginTop:12,textAlign:"right"}}>
+                      <button onClick={()=>setMoveModal(null)} style={{...S.btnSecondary,fontSize:12}}>Cancelar</button>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Modal criar/editar pasta */}
+              {folderModal && (
+                <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.5)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:9999,padding:16}} onClick={()=>setFolderModal(null)}>
+                  <div style={{background:"var(--card-bg)",borderRadius:16,padding:24,maxWidth:400,width:"100%",border:"1px solid var(--border)"}} onClick={e=>e.stopPropagation()}>
+                    <h3 style={{color:"var(--text)",fontSize:15,fontWeight:700,margin:"0 0 16px"}}>{folderModal==="new"?"📁 Nova pasta":"📁 Editar pasta"}</h3>
+                    <div style={{marginBottom:12}}>
+                      <label style={{color:"var(--text3)",fontSize:12,fontWeight:600,display:"block",marginBottom:4}}>Nome</label>
+                      <input value={folderForm.nome} onChange={e=>setFolderForm(p=>({...p,nome:e.target.value}))} style={{...S.input,width:"100%"}} placeholder="Nome da pasta" maxLength={30}/>
+                    </div>
+                    <div style={{marginBottom:16}}>
+                      <label style={{color:"var(--text3)",fontSize:12,fontWeight:600,display:"block",marginBottom:4}}>Cor</label>
+                      <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+                        {FOLDER_COLORS.map(c => (
+                          <button key={c} onClick={()=>setFolderForm(p=>({...p,cor:c}))} style={{width:28,height:28,borderRadius:"50%",background:c,border:folderForm.cor===c?"3px solid var(--text)":"2px solid transparent",cursor:"pointer"}}/>
+                        ))}
+                      </div>
+                    </div>
+                    <div style={{display:"flex",justifyContent:"flex-end",gap:8}}>
+                      <button onClick={()=>setFolderModal(null)} style={{...S.btnSecondary,fontSize:13}}>Cancelar</button>
+                      <button onClick={saveFolder} disabled={!folderForm.nome.trim()} style={{...S.btnPrimary,fontSize:13,opacity:!folderForm.nome.trim()?0.5:1}}>Salvar</button>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Modal compor mensagem */}
+              {composeOpen && (
+                <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.5)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:9999,padding:16}} onClick={()=>setComposeOpen(false)}>
+                  <div style={{background:"var(--card-bg)",borderRadius:16,padding:24,maxWidth:500,width:"100%",border:"1px solid var(--border)"}} onClick={e=>e.stopPropagation()}>
+                    <h3 style={{color:"var(--text)",fontSize:16,fontWeight:700,margin:"0 0 16px"}}>📨 Nova mensagem</h3>
+                    <div style={{marginBottom:12}}>
+                      <label style={{color:"var(--text3)",fontSize:12,fontWeight:600,display:"block",marginBottom:4}}>Destinatário</label>
+                      <select value={composeData.restaurantId} onChange={e=>setComposeData(p=>({...p,restaurantId:e.target.value}))} style={{...S.input,width:"100%"}}>
+                        <option value="">Todos os restaurantes</option>
+                        {restaurants.filter(r=>!r.deleted).map(r=>(
+                          <option key={r.id} value={r.id}>{r.name}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div style={{marginBottom:12}}>
+                      <label style={{color:"var(--text3)",fontSize:12,fontWeight:600,display:"block",marginBottom:4}}>Assunto</label>
+                      <input value={composeData.assunto} onChange={e=>setComposeData(p=>({...p,assunto:e.target.value}))} style={{...S.input,width:"100%"}} placeholder="Assunto da mensagem"/>
+                    </div>
+                    <div style={{marginBottom:16}}>
+                      <label style={{color:"var(--text3)",fontSize:12,fontWeight:600,display:"block",marginBottom:4}}>Mensagem</label>
+                      <textarea value={composeData.corpo} onChange={e=>setComposeData(p=>({...p,corpo:e.target.value}))} style={{...S.input,width:"100%",minHeight:100,resize:"vertical"}} placeholder="Escreva sua mensagem..."/>
+                    </div>
+                    <div style={{display:"flex",justifyContent:"flex-end",gap:8}}>
+                      <button onClick={()=>setComposeOpen(false)} style={{...S.btnSecondary,fontSize:13}}>Cancelar</button>
+                      <button onClick={sendMessage} disabled={!composeData.assunto.trim()||!composeData.corpo.trim()} style={{...S.btnPrimary,fontSize:13,opacity:(!composeData.assunto.trim()||!composeData.corpo.trim())?0.5:1}}>Enviar</button>
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
           );
         })()}
@@ -13990,11 +14703,13 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }
             const plano = getPlano(r);
             const fin = r.financeiro ?? {};
             const tipoCobranca = r.tipoCobranca ?? "mensal";
+            const isIsento_ = r.planoId === "pIsento";
             const isEnt = r.planoId === "p999";
             const isOrc = r.planoId === "pOrc";
-            const empMax = isEnt ? (r.empMaxCustom ?? 51) : (isOrc ? (r.empMaxCustom ?? 101) : plano.empMax);
+            const empMax = isIsento_ ? 999 : isEnt ? (r.empMaxCustom ?? 51) : (isOrc ? (r.empMaxCustom ?? 101) : plano.empMax);
             const ea = r.earlyAdopter ? 0.7 : 1;
             const valorMensalCalc = (() => {
+              if (isIsento_) return 0;
               if (isOrc) return null;
               if (isEnt) {
                 const porEmp = empMax * 7.99;
@@ -14247,8 +14962,11 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }
                     const isVencido = !isInad && cicloFimRow && diasRow < 0;
                     const isVencendo = !isInad && diasRow !== null && diasRow >= 0 && diasRow <= 7;
 
+                    const isIsentoRow = r.planoId === "pIsento";
                     const rowBg = isInad ? "var(--red-bg)" : isVencido ? "#fff8f0" : "transparent";
-                    const statusEl = isInad
+                    const statusEl = isIsentoRow
+                      ? <span style={{color:"#10b981",fontWeight:600,fontSize:11}}>🤝 Isento</span>
+                      : isInad
                       ? <span style={{color:"var(--red)",fontWeight:700,fontSize:11}}>🔴 Inadimplente</span>
                       : isVencido
                       ? <span style={{color:"var(--red)",fontWeight:600,fontSize:11}}>⏰ Vencido {Math.abs(diasRow)}d</span>
@@ -14267,12 +14985,12 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }
                             {r.name}
                             {r.earlyAdopter && <span style={{marginLeft:6,fontSize:9,color:"#d4a017",fontWeight:700,background:"#d4a01715",padding:"1px 5px",borderRadius:6}}>🚀 EA</span>}
                           </div>
-                          <div style={{color:"var(--text3)",fontSize:10}}>{r.tipoCobranca==="anual"?"Anual":"Mensal"} {diasGorjeta>0?`· ${diasGorjeta}d gorjeta`:""}</div>
+                          <div style={{color:"var(--text3)",fontSize:10}}>{r.planoId==="pIsento"?"Isento":r.tipoCobranca==="anual"?"Anual":"Mensal"} {diasGorjeta>0?`· ${diasGorjeta}d gorjeta`:""}</div>
                         </div>
                         <div style={{color:"var(--text2)",fontSize:12,cursor:"pointer"}} onClick={()=>{ setSelRestaurant(r.id); setRestTab("financeiro"); }}>{plano.label}</div>
                         <div style={{color:"var(--text2)",fontSize:12,fontFamily:"'DM Mono',monospace"}}>{empAtivos}/{empMax}</div>
-                        <div style={{color:"var(--text)",fontWeight:700,fontSize:12,fontFamily:"'DM Mono',monospace"}}>
-                          {valorTotal ? `R$${valorTotal.toLocaleString("pt-BR",{minimumFractionDigits:2})}` : "—"}
+                        <div style={{color:isIsentoRow?"#10b981":"var(--text)",fontWeight:700,fontSize:12,fontFamily:"'DM Mono',monospace"}}>
+                          {isIsentoRow ? "Isento" : valorTotal ? `R$${valorTotal.toLocaleString("pt-BR",{minimumFractionDigits:2})}` : "—"}
                         </div>
                         <div style={{color:"var(--text3)",fontSize:11}}>
                           {ultimoPag ? new Date(ultimoPag.data+"T12:00:00").toLocaleDateString("pt-BR") : "—"}
@@ -14523,6 +15241,25 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }
 
         {tab === "changelog" && (() => {
           const CHANGELOG = [
+            { version:"5.48.0", date:"2026-04-19", items:[
+              "Novo: pastas customizáveis na Caixa de entrada — crie, renomeie e exclua pastas com cores para organizar mensagens",
+              "Novo: aba Excluídas com lixeira de 90 dias e purge automático",
+              "Novo: mover mensagens entre pastas e Entrada com modal dedicado",
+              "Novo: exclusão definitiva restrita ao gestor AppTip (owner)",
+              "Novo: pastas disponíveis para todos os perfis — Gestor AppTip, Gestor ADM, Líder e Funcionário",
+              "Melhoria: aba Caixa sempre visível no portal do funcionário (não apenas com mensagens não lidas)",
+              "Melhoria: contadores de não-lidas por pasta em todas as visualizações",
+            ]},
+            { version:"5.47.0", date:"2026-04-19", items:[
+              "Novo: sistema unificado de Caixa de Entrada (inbox) — mensagens por papel (Gestor AppTip, ADM, Líder, Funcionário)",
+              "Novo: notificações automáticas ao agendar reuniões — cada participante recebe aviso na Caixa",
+              "Novo: notificações de ações pós-reunião — responsável recebe resumo com responsabilidades diretas e envolvidas",
+              "Novo: composição de comunicados pelo Gestor AppTip para todos ou restaurante específico",
+              "Novo: aba Caixa no portal do funcionário — visualização e marcação de lidas",
+              "Novo: grupo Comunicação com aba Caixa para líderes operacionais",
+              "Melhoria: filtros por tipo (reuniões, ações, solicitações, sistema) na Caixa do owner",
+              "Melhoria: contador de não-lidas no badge da aba Caixa em todos os portais",
+            ]},
             { version:"5.46.0", date:"2026-04-19", items:[
               "Novo: aba Arquitetura no portal do gestor AppTip — mapa interativo do sistema com 7 seções navegáveis",
               "Novo: visão geral da stack, portais (árvore expandível), modelo de dados, abas, permissões, fluxos e guia de planejamento",
@@ -15963,7 +16700,7 @@ function FaturaPage({ faturaId, restaurants, onUpdate, loaded }) {
           <div style={{padding:"24px"}}>
             <div style={{display:"flex",flexDirection:"column",gap:14,marginBottom:24}}>
               {[
-                ["Plano", cobFound.forma === "PIX" || cobFound.forma === "Link" ? (restFound.planoId === "p10"?"Starter":restFound.planoId === "p20"?"Básico":restFound.planoId === "p50"?"Profissional":restFound.planoId === "p999"?"Enterprise":"On Demand") : cobFound.forma],
+                ["Plano", cobFound.forma === "PIX" || cobFound.forma === "Link" ? (restFound.planoId === "pIsento"?"Isento":restFound.planoId === "p10"?"Starter":restFound.planoId === "p20"?"Básico":restFound.planoId === "p50"?"Profissional":restFound.planoId === "p999"?"Enterprise":"On Demand") : cobFound.forma],
                 ["Valor", `R$ ${cobFound.valor?.toLocaleString("pt-BR",{minimumFractionDigits:2})}`],
                 ...(vencLabel ? [["Vencimento", vencLabel]] : []),
               ].map(([k,v])=>(
@@ -16668,6 +17405,8 @@ export default function App() {
   const [meetingActions,      setMeetingActions]      = useState([]);
   const [meetingOccurrences,  setMeetingOccurrences]  = useState([]);
   const [meetingPendencias,   setMeetingPendencias]   = useState([]);
+  const [inbox,               setInbox]               = useState([]);
+  const [inboxFolders,        setInboxFolders]        = useState({});
 
   useEffect(() => {
     const savedId = currentUserId;
@@ -16695,7 +17434,7 @@ export default function App() {
       setLoadProgress("Preparando o sistema...");
 
       const keys = keyNames;
-      const map = { owners:setOwners, managers:setManagers, restaurants:setRestaurants, employees:setEmployees, roles:setRoles, tips:setTips, splits:setSplits, schedules:setSchedules, communications:setCommunications, commAcks:setCommAcks, faq:setFaq, dpMessages:setDpMessages, workSchedules:setWorkSchedules, notifications:setNotifications, noTipDays:setNoTipDays, trash:setTrash, schedTemplates:setSchedTemplates, schedDrafts:setSchedDrafts, scheduleVersions:setScheduleVersions, tipVersions:setTipVersions, vtConfig:setVtConfig, vtMonthly:setVtMonthly, vtPayments:setVtPayments, incidents:setIncidents, feedbacks:setFeedbacks, devChecklists:setDevChecklists, scheduleAdjustments:setScheduleAdjustments, scheduleStatus:setScheduleStatus, schedulePrevista:setSchedulePrevista, employeeGoals:setEmployeeGoals, delays:setDelays, tipApprovals:setTipApprovals, meetingPlans:setMeetingPlans, meetingIdeas:setMeetingIdeas, meetingAgendas:setMeetingAgendas, meetingActions:setMeetingActions, meetingOccurrences:setMeetingOccurrences, meetingPendencias:setMeetingPendencias };
+      const map = { owners:setOwners, managers:setManagers, restaurants:setRestaurants, employees:setEmployees, roles:setRoles, tips:setTips, splits:setSplits, schedules:setSchedules, communications:setCommunications, commAcks:setCommAcks, faq:setFaq, dpMessages:setDpMessages, workSchedules:setWorkSchedules, notifications:setNotifications, noTipDays:setNoTipDays, trash:setTrash, schedTemplates:setSchedTemplates, schedDrafts:setSchedDrafts, scheduleVersions:setScheduleVersions, tipVersions:setTipVersions, vtConfig:setVtConfig, vtMonthly:setVtMonthly, vtPayments:setVtPayments, incidents:setIncidents, feedbacks:setFeedbacks, devChecklists:setDevChecklists, scheduleAdjustments:setScheduleAdjustments, scheduleStatus:setScheduleStatus, schedulePrevista:setSchedulePrevista, employeeGoals:setEmployeeGoals, delays:setDelays, tipApprovals:setTipApprovals, meetingPlans:setMeetingPlans, meetingIdeas:setMeetingIdeas, meetingAgendas:setMeetingAgendas, meetingActions:setMeetingActions, meetingOccurrences:setMeetingOccurrences, meetingPendencias:setMeetingPendencias, inbox:setInbox, inboxFolders:setInboxFolders };
       const loaded_data = {};
       let successCount = 0;
       keys.forEach((k, i) => {
@@ -16705,6 +17444,12 @@ export default function App() {
       // Se nenhuma key carregou com sucesso, marca como erro de conexão
       _loadSuccess = successCount > 0;
       if (!_loadSuccess) setLoadError(true);
+
+      // Auto-purge: remover mensagens do inbox excluídas há mais de 90 dias
+      if (loaded_data.inbox) {
+        const purged = purgeExpiredInbox(loaded_data.inbox);
+        if (purged) { setInbox(purged); save(K.inbox, purged); }
+      }
 
       // Migração automática: v4:superManagers → v4:owners (executa só uma vez)
       if (!loaded_data.owners || loaded_data.owners.length === 0) {
@@ -16844,7 +17589,7 @@ export default function App() {
     return () => { clearTimeout(slowTimer); clearTimeout(verySlowTimer); };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const data = { owners, managers, restaurants, employees, roles, tips, splits, schedules, communications, commAcks, faq, dpMessages, workSchedules, notifications, noTipDays, trash, schedTemplates, schedDrafts, scheduleVersions, tipVersions, vtConfig, vtMonthly, vtPayments, incidents, feedbacks, devChecklists, scheduleAdjustments, scheduleStatus, schedulePrevista, employeeGoals, delays, tipApprovals, meetingPlans, meetingIdeas, meetingAgendas, meetingActions, meetingOccurrences, meetingPendencias };
+  const data = { owners, managers, restaurants, employees, roles, tips, splits, schedules, communications, commAcks, faq, dpMessages, workSchedules, notifications, noTipDays, trash, schedTemplates, schedDrafts, scheduleVersions, tipVersions, vtConfig, vtMonthly, vtPayments, incidents, feedbacks, devChecklists, scheduleAdjustments, scheduleStatus, schedulePrevista, employeeGoals, delays, tipApprovals, meetingPlans, meetingIdeas, meetingAgendas, meetingActions, meetingOccurrences, meetingPendencias, inbox, inboxFolders };
 
   async function handleUpdate(field, value) {
     if (field === "_toast") { setToast(value); return; }
@@ -16853,8 +17598,8 @@ export default function App() {
       setToast("⚠️ Você está offline — conecte à internet para salvar alterações");
       return;
     }
-    const setters = { owners:setOwners, managers:setManagers, restaurants:setRestaurants, employees:setEmployees, roles:setRoles, tips:setTips, splits:setSplits, schedules:setSchedules, communications:setCommunications, commAcks:setCommAcks, faq:setFaq, dpMessages:setDpMessages, workSchedules:setWorkSchedules, notifications:setNotifications, noTipDays:setNoTipDays, trash:setTrash, schedTemplates:setSchedTemplates, schedDrafts:setSchedDrafts, scheduleVersions:setScheduleVersions, tipVersions:setTipVersions, vtConfig:setVtConfig, vtMonthly:setVtMonthly, vtPayments:setVtPayments, incidents:setIncidents, feedbacks:setFeedbacks, devChecklists:setDevChecklists, scheduleAdjustments:setScheduleAdjustments, scheduleStatus:setScheduleStatus, schedulePrevista:setSchedulePrevista, employeeGoals:setEmployeeGoals, delays:setDelays, tipApprovals:setTipApprovals, meetingPlans:setMeetingPlans, meetingIdeas:setMeetingIdeas, meetingAgendas:setMeetingAgendas, meetingActions:setMeetingActions, meetingOccurrences:setMeetingOccurrences, meetingPendencias:setMeetingPendencias };
-    const keys    = { owners:K.owners, managers:K.managers, restaurants:K.restaurants, employees:K.employees, roles:K.roles, tips:K.tips, splits:K.splits, schedules:K.schedules, communications:K.communications, commAcks:K.commAcks, faq:K.faq, dpMessages:K.dpMessages, workSchedules:K.workSchedules, notifications:K.notifications, noTipDays:K.noTipDays, trash:K.trash, schedTemplates:K.schedTemplates, schedDrafts:K.schedDrafts, scheduleVersions:K.scheduleVersions, tipVersions:K.tipVersions, vtConfig:K.vtConfig, vtMonthly:K.vtMonthly, vtPayments:K.vtPayments, incidents:K.incidents, feedbacks:K.feedbacks, devChecklists:K.devChecklists, scheduleAdjustments:K.scheduleAdjustments, scheduleStatus:K.scheduleStatus, schedulePrevista:K.schedulePrevista, employeeGoals:K.employeeGoals, delays:K.delays, tipApprovals:K.tipApprovals, meetingPlans:K.meetingPlans, meetingIdeas:K.meetingIdeas, meetingAgendas:K.meetingAgendas, meetingActions:K.meetingActions };
+    const setters = { owners:setOwners, managers:setManagers, restaurants:setRestaurants, employees:setEmployees, roles:setRoles, tips:setTips, splits:setSplits, schedules:setSchedules, communications:setCommunications, commAcks:setCommAcks, faq:setFaq, dpMessages:setDpMessages, workSchedules:setWorkSchedules, notifications:setNotifications, noTipDays:setNoTipDays, trash:setTrash, schedTemplates:setSchedTemplates, schedDrafts:setSchedDrafts, scheduleVersions:setScheduleVersions, tipVersions:setTipVersions, vtConfig:setVtConfig, vtMonthly:setVtMonthly, vtPayments:setVtPayments, incidents:setIncidents, feedbacks:setFeedbacks, devChecklists:setDevChecklists, scheduleAdjustments:setScheduleAdjustments, scheduleStatus:setScheduleStatus, schedulePrevista:setSchedulePrevista, employeeGoals:setEmployeeGoals, delays:setDelays, tipApprovals:setTipApprovals, meetingPlans:setMeetingPlans, meetingIdeas:setMeetingIdeas, meetingAgendas:setMeetingAgendas, meetingActions:setMeetingActions, meetingOccurrences:setMeetingOccurrences, meetingPendencias:setMeetingPendencias, inbox:setInbox, inboxFolders:setInboxFolders };
+    const keys    = { owners:K.owners, managers:K.managers, restaurants:K.restaurants, employees:K.employees, roles:K.roles, tips:K.tips, splits:K.splits, schedules:K.schedules, communications:K.communications, commAcks:K.commAcks, faq:K.faq, dpMessages:K.dpMessages, workSchedules:K.workSchedules, notifications:K.notifications, noTipDays:K.noTipDays, trash:K.trash, schedTemplates:K.schedTemplates, schedDrafts:K.schedDrafts, scheduleVersions:K.scheduleVersions, tipVersions:K.tipVersions, vtConfig:K.vtConfig, vtMonthly:K.vtMonthly, vtPayments:K.vtPayments, incidents:K.incidents, feedbacks:K.feedbacks, devChecklists:K.devChecklists, scheduleAdjustments:K.scheduleAdjustments, scheduleStatus:K.scheduleStatus, schedulePrevista:K.schedulePrevista, employeeGoals:K.employeeGoals, delays:K.delays, tipApprovals:K.tipApprovals, meetingPlans:K.meetingPlans, meetingIdeas:K.meetingIdeas, meetingAgendas:K.meetingAgendas, meetingActions:K.meetingActions, inbox:K.inbox, inboxFolders:K.inboxFolders };
     // Support functional updates to prevent stale-state race conditions:
     // When value is a function, it receives the latest state (like setState(prev => ...))
     let resolvedValue;
@@ -16874,7 +17619,7 @@ export default function App() {
         return;
       }
     }
-    const labels = { owners:"Admins atualizados", managers:"Gestores atualizados", restaurants:"Restaurantes atualizados", employees:"Empregados atualizados", roles:"Cargos atualizados", tips:"Gorjetas atualizadas", splits:"Percentuais salvos", schedules:"Escala atualizada", communications:"Comunicados atualizados", commAcks:"Ciências atualizadas", faq:"FAQ atualizado", dpMessages:"Mensagem enviada", workSchedules:"Horários salvos", notifications:"Notificações atualizadas", schedTemplates:"Template salvo", schedDrafts:"Rascunho salvo", trash:"Lixeira atualizada", noTipDays:"Dias sem gorjeta atualizados", scheduleVersions:null, tipVersions:null, vtConfig:null, vtMonthly:null, vtPayments:"VT registrado", incidents:"Ocorrência registrada", feedbacks:"Feedback registrado", devChecklists:"Checklist atualizado", scheduleAdjustments:null, scheduleStatus:null, schedulePrevista:null, employeeGoals:"Objetivo atualizado", delays:"Atrasos atualizados", tipApprovals:null };
+    const labels = { owners:"Admins atualizados", managers:"Gestores atualizados", restaurants:"Restaurantes atualizados", employees:"Empregados atualizados", roles:"Cargos atualizados", tips:"Gorjetas atualizadas", splits:"Percentuais salvos", schedules:"Escala atualizada", communications:"Comunicados atualizados", commAcks:"Ciências atualizadas", faq:"FAQ atualizado", dpMessages:"Mensagem enviada", workSchedules:"Horários salvos", notifications:"Notificações atualizadas", schedTemplates:"Template salvo", schedDrafts:"Rascunho salvo", trash:"Lixeira atualizada", noTipDays:"Dias sem gorjeta atualizados", scheduleVersions:null, tipVersions:null, vtConfig:null, vtMonthly:null, vtPayments:"VT registrado", incidents:"Ocorrência registrada", feedbacks:"Feedback registrado", devChecklists:"Checklist atualizado", scheduleAdjustments:null, scheduleStatus:null, schedulePrevista:null, employeeGoals:"Objetivo atualizado", delays:"Atrasos atualizados", tipApprovals:null, inbox:null, inboxFolders:null };
     if (labels[field] === null) return; // silent save (e.g. version snapshots)
     setToast(labels[field] ?? (typeof value === "string" ? value : "Salvo!"));
   }
@@ -16971,7 +17716,7 @@ export default function App() {
             return () => { setCurrentUser(emp); setUserRole("employee"); localStorage.setItem("apptip_role","employee"); localStorage.setItem("apptip_userid",emp.id); localStorage.setItem("apptip_empid",emp.id); setView("employee"); };
           })()} />
       ))}
-      {view === "employee" && <EmployeePortal employees={employees} roles={roles} tips={tips} schedules={schedules} splits={splits} restaurants={restaurants} communications={communications} commAcks={commAcks} faq={faq} dpMessages={dpMessages} workSchedules={workSchedules} incidents={incidents} feedbacks={feedbacks} devChecklists={devChecklists} employeeGoals={employeeGoals} tipApprovals={tipApprovals} delays={delays} meetingPlans={meetingPlans} onBack={doLogout} onUpdateEmployee={emp=>{const next=employees.map(e=>e.id===emp.id?emp:e);handleUpdate("employees",next);}} onUpdate={handleUpdate} toggleTheme={toggleTheme} theme={theme}
+      {view === "employee" && <EmployeePortal employees={employees} roles={roles} tips={tips} schedules={schedules} splits={splits} restaurants={restaurants} communications={communications} commAcks={commAcks} faq={faq} dpMessages={dpMessages} workSchedules={workSchedules} incidents={incidents} feedbacks={feedbacks} devChecklists={devChecklists} employeeGoals={employeeGoals} tipApprovals={tipApprovals} delays={delays} meetingPlans={meetingPlans} inbox={inbox} inboxFolders={inboxFolders} onBack={doLogout} onUpdateEmployee={emp=>{const next=employees.map(e=>e.id===emp.id?emp:e);handleUpdate("employees",next);}} onUpdate={handleUpdate} toggleTheme={toggleTheme} theme={theme}
         onSwitchToManager={(() => {
           const cpf = currentUser?.cpf?.replace(/\D/g,"");
           let mgr = cpf ? managers.find(m => m.cpf?.replace(/\D/g,"") === cpf) : null;
