@@ -3,7 +3,7 @@ import { useState, useEffect, Component } from "react";
 import { db } from "./firebase";
 import { doc, getDoc, setDoc } from "firebase/firestore";
 
-const APP_VERSION = "5.42.0";
+const APP_VERSION = "5.44.0";
 
 const DEFAULT_ADMISSION = () => `${new Date().getFullYear()}-01-01`;
 const round2 = (v) => Math.round(v * 100) / 100;
@@ -1919,7 +1919,7 @@ function FaqManagerTab({ restaurantId, faq, onUpdate }) {
 // DP MESSAGES MANAGER TAB
 //
 // ── Notificações Tab (DP only) ────────────────────────────────────────────────
-function NotificacoesTab({ restaurantId, dpMessages, notifications, onUpdate }) {
+function NotificacoesTab({ restaurantId, dpMessages, notifications, onUpdate, isOwner }) {
   const ac = "#3b82f6";
   const [showTrash, setShowTrash] = useState(false);
 
@@ -2028,7 +2028,14 @@ function NotificacoesTab({ restaurantId, dpMessages, notifications, onUpdate }) 
               </div>
               <div style={{color:"var(--text2)",fontSize:13,lineHeight:1.5}}>{item.body?.slice(0,100)}{(item.body?.length??0)>100?"…":""}</div>
             </div>
-            <button onClick={()=>restoreItem(item)} style={{...S.btnSecondary,fontSize:11,padding:"4px 10px",flexShrink:0}}>♻️ Restaurar</button>
+            <div style={{display:"flex",gap:6,flexShrink:0}}>
+              <button onClick={()=>restoreItem(item)} style={{...S.btnSecondary,fontSize:11,padding:"4px 10px"}}>♻️ Restaurar</button>
+              {isOwner && <button onClick={()=>{
+                if(!window.confirm("Excluir definitivamente? Esta ação não pode ser desfeita.")) return;
+                if(item._kind==="dp") onUpdate("dpMessages", (dpMessages??[]).filter(m=>m.id!==item.id));
+                else onUpdate("notifications", (notifications??[]).filter(n=>n.id!==item.id));
+              }} style={{background:"none",border:"1px solid #e74c3c33",borderRadius:8,color:"var(--red)",cursor:"pointer",fontSize:11,padding:"4px 10px",fontFamily:"'DM Mono',monospace"}}>✕ Excluir</button>}
+            </div>
           </div>
         </div>
       ))}
@@ -4829,9 +4836,25 @@ Inclua apenas as ações solicitadas. Arrays vazios se não houver ação daquel
                   const isNeg = incType?.negative;
                   events.push({ date: new Date(inc.date+"T12:00:00"), label: incType?.label ?? inc.type, icon: isNeg ? "🔴" : "🟢", type:"incident", inc, incNeg: isNeg });
                 });
-                upcomingPlans.forEach(p => {
+                // All meetingPlans (upcoming = future, past = realized or overdue)
+                empPlans.forEach(p => {
                   const isAval = p.type === "avaliação";
-                  events.push({ date: new Date(p.plannedDate+"T12:00:00"), label: isAval ? "Avaliação prevista" : "Alinhamento previsto", icon: "📅", future: true });
+                  const isFuture = p.plannedDate >= today();
+                  const isDone = p.status === "encerrada";
+                  const isInProgress = p.status === "em_andamento";
+                  if (isFuture && !isDone) {
+                    events.push({ date: new Date(p.plannedDate+"T12:00:00"), label: isAval ? "Avaliação prevista" : "Alinhamento previsto", icon: "📅", future: true });
+                  } else {
+                    events.push({ date: new Date((p.endedAt ?? p.startedAt ?? p.plannedDate+"T12:00:00")), label: isDone ? (isAval ? "Avaliação realizada" : "Alinhamento realizado") : isInProgress ? (isAval ? "Avaliação em andamento" : "Alinhamento em andamento") : (isAval ? "Avaliação (não realizada)" : "Alinhamento (não realizado)"), icon: isDone ? "✅" : isInProgress ? "▶️" : "⏳", type:"meetingPlan", plan: p });
+                  }
+                });
+                // Unified meetingOccurrences
+                const empMeetingOccs = (meetingOccurrences??[]).filter(o => o.restaurantId === rid && (o.occEmployeeIds??o.employeeIds??[]).includes(emp.id) && !o.deletedAt);
+                const OCC_TYPES_TIMELINE = [["cliente","🧑‍🍳","Cliente"],["estrutura","🏗️","Estrutura"],["operacao","⚙️","Operação"],["pessoal","👤","Pessoal"],["outro","📝","Outro"]];
+                empMeetingOccs.forEach(o => {
+                  const occT = OCC_TYPES_TIMELINE.find(([t])=>t===o.type);
+                  const isResolved = o.status === "resolvida";
+                  events.push({ date: new Date(o.createdAt ?? o.date+"T12:00:00"), label: `Ocorrência: ${o.title || occT?.[2] || o.type}`, icon: isResolved ? "✓" : (occT?.[1] ?? "📝"), type:"meetingOcc", occ: o, occResolved: isResolved });
                 });
                 completedGoals.forEach(g => {
                   events.push({ date: new Date(g.createdAt), label: `Objetivo: ${g.title}`, icon: "🎯" });
@@ -5168,10 +5191,10 @@ Inclua apenas as ações solicitadas. Arrays vazios se não houver ação daquel
                     <div style={{position:"relative",paddingLeft:24}}>
                       <div style={{position:"absolute",left:7,top:4,bottom:4,width:2,background:"var(--border)",borderRadius:1}}/>
                       {jornadaEvents.map((ev,i) => {
-                        const evId = ev.fb?.id || ev.inc?.id || `ev-${i}`;
-                        const isClickable = ev.type === "feedback" || ev.type === "incident";
+                        const evId = ev.fb?.id || ev.inc?.id || ev.plan?.id || ev.occ?.id || `ev-${i}`;
+                        const isClickable = ev.type === "feedback" || ev.type === "incident" || ev.type === "meetingPlan" || ev.type === "meetingOcc";
                         const isExpanded = expandedJornada === evId;
-                        const dotColor = ev.future ? "#3b82f6" : ev.type === "incident" ? (ev.incNeg ? "#ef4444" : "#10b981") : ev.type === "feedback" ? "#8b5cf6" : i === jornadaEvents.length-1 ? "var(--ac)" : "var(--border)";
+                        const dotColor = ev.future ? "#3b82f6" : ev.type === "incident" ? (ev.incNeg ? "#ef4444" : "#10b981") : ev.type === "feedback" ? "#8b5cf6" : ev.type === "meetingPlan" ? "#6366f1" : ev.type === "meetingOcc" ? (ev.occResolved ? "#10b981" : "#f59e0b") : i === jornadaEvents.length-1 ? "var(--ac)" : "var(--border)";
                         const canDeleteFb = !isLider;
                         const canDeleteInc = !isLider;
                         return (
@@ -5228,6 +5251,40 @@ Inclua apenas as ações solicitadas. Arrays vazios se não houver ação daquel
                                 }} style={{padding:"3px 10px",borderRadius:6,border:"1px solid var(--red)33",background:"transparent",color:"var(--red)",cursor:"pointer",fontSize:10,fontFamily:"'DM Mono',monospace"}}>🗑️ Excluir</button></div>}
                               </div>
                             )}
+                            {/* Expanded meetingPlan detail */}
+                            {isExpanded && ev.type === "meetingPlan" && ev.plan && (
+                              <div style={{marginLeft:4,marginBottom:8,padding:"10px 14px",borderRadius:10,background:"var(--card-bg)",border:"1px solid var(--border)",borderLeft:"3px solid #6366f1"}}>
+                                <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:6}}>
+                                  <span style={{fontSize:11,padding:"2px 8px",borderRadius:6,background:ev.plan.status==="encerrada"?"#10b98118":ev.plan.status==="em_andamento"?"#3b82f618":"#f59e0b18",color:ev.plan.status==="encerrada"?"#10b981":ev.plan.status==="em_andamento"?"#3b82f6":"#f59e0b",fontWeight:700}}>{ev.plan.status==="encerrada"?"Encerrada":ev.plan.status==="em_andamento"?"Em andamento":"Aberta"}</span>
+                                  <span style={{fontSize:11,color:"var(--text3)"}}>{ev.plan.type === "avaliação" ? "Avaliação" : "Alinhamento"}</span>
+                                </div>
+                                {ev.plan.type === "avaliação" && (
+                                  <div>
+                                    {(ev.plan.pontosFortes??[]).length > 0 && <div style={{fontSize:12,color:"var(--text2)",marginBottom:4}}><strong style={{color:"#10b981"}}>Pontos fortes:</strong> {(ev.plan.pontosFortes??[]).filter(x=>x.text).map(x=>x.text).join(", ")}</div>}
+                                    {(ev.plan.pontosMelhorar??[]).length > 0 && <div style={{fontSize:12,color:"var(--text2)",marginBottom:4}}><strong style={{color:"#f59e0b"}}>Melhorias:</strong> {(ev.plan.pontosMelhorar??[]).filter(x=>x.text).map(x=>x.text).join(", ")}</div>}
+                                    {(ev.plan.notasInternas??[]).length > 0 && <div style={{fontSize:11,color:"var(--text3)",fontStyle:"italic",marginBottom:4}}>Notas: {(ev.plan.notasInternas??[]).filter(x=>x.text).map(x=>x.text).join(", ")}</div>}
+                                  </div>
+                                )}
+                                {ev.plan.type === "alinhamento" && (ev.plan.topics??[]).length > 0 && (
+                                  <div style={{fontSize:12,color:"var(--text2)",marginBottom:4}}><strong>Temas:</strong> {(ev.plan.topics??[]).filter(x=>x.text).map(x=>x.text).join(", ")}</div>
+                                )}
+                                {ev.plan.meetingNotes && <div style={{fontSize:11,color:"var(--text3)",fontStyle:"italic",marginTop:4}}>Notas da reunião: {ev.plan.meetingNotes}</div>}
+                                {ev.plan.createdBy && <div style={{fontSize:10,color:"var(--text3)",marginTop:4}}>{ev.plan.createdBy}</div>}
+                              </div>
+                            )}
+                            {/* Expanded meetingOcc detail */}
+                            {isExpanded && ev.type === "meetingOcc" && ev.occ && (
+                              <div style={{marginLeft:4,marginBottom:8,padding:"10px 14px",borderRadius:10,background:"var(--card-bg)",border:"1px solid var(--border)",borderLeft:`3px solid ${ev.occResolved?"#10b981":"#f59e0b"}`}}>
+                                <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:6}}>
+                                  <span style={{fontSize:11,padding:"2px 8px",borderRadius:6,background:ev.occResolved?"#10b98118":"#f59e0b18",color:ev.occResolved?"#10b981":"#f59e0b",fontWeight:700}}>{ev.occResolved?"Resolvida":ev.occ.status==="na_pauta"?"Na pauta":"Nova"}</span>
+                                  {ev.occ.priority && <span style={{fontSize:10,padding:"2px 6px",borderRadius:4,background:"#ef444418",color:"#ef4444",fontWeight:600}}>Prioridade</span>}
+                                </div>
+                                {ev.occ.description && <div style={{fontSize:12,color:"var(--text2)",marginBottom:4}}>{ev.occ.description}</div>}
+                                {ev.occ.resolvedText && <div style={{fontSize:12,color:"#10b981",marginBottom:4}}>Resolução: {ev.occ.resolvedText}</div>}
+                                {ev.occ.resolvedAt && <div style={{fontSize:10,color:"var(--text3)"}}>Resolvida em {new Date(ev.occ.resolvedAt).toLocaleDateString("pt-BR")}{ev.occ.resolvedBy ? ` por ${ev.occ.resolvedBy}` : ""}</div>}
+                                {ev.occ.createdBy && <div style={{fontSize:10,color:"var(--text3)",marginTop:2}}>Criada por {ev.occ.createdBy}</div>}
+                              </div>
+                            )}
                           </div>
                         );
                       })}
@@ -5245,11 +5302,17 @@ Inclua apenas as ações solicitadas. Arrays vazios se não houver ação daquel
                             const dateStr = fb.meetingDate ? new Date(fb.meetingDate+"T12:00:00").toLocaleDateString("pt-BR") : "";
                             return (
                               <div key={fb.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"4px 0",fontSize:10}}>
-                                <span style={{color:"var(--text3)"}}>💬 Reunião {dateStr} — {fb.deletedBy} ({daysLeft}d)</span>
-                                <button onClick={()=>{
-                                  const updated = (feedbacks??[]).map(f => f.id === fb.id ? (()=>{ const {deletedAt, deletedBy, ...rest} = f; return rest; })() : f);
-                                  onUpdate("feedbacks", updated);
-                                }} style={{padding:"2px 8px",borderRadius:6,border:"1px solid var(--ac)44",background:"transparent",color:"var(--ac-text)",cursor:"pointer",fontSize:10,fontFamily:"'DM Mono',monospace"}}>Restaurar</button>
+                                <span style={{color:"var(--text3)",flex:1,minWidth:0}}>💬 Reunião {dateStr} — {fb.deletedBy} ({daysLeft}d)</span>
+                                <div style={{display:"flex",gap:4,flexShrink:0}}>
+                                  <button onClick={()=>{
+                                    const updated = (feedbacks??[]).map(f => f.id === fb.id ? (()=>{ const {deletedAt, deletedBy, ...rest} = f; return rest; })() : f);
+                                    onUpdate("feedbacks", updated);
+                                  }} style={{padding:"2px 8px",borderRadius:6,border:"1px solid var(--ac)44",background:"transparent",color:"var(--ac-text)",cursor:"pointer",fontSize:10,fontFamily:"'DM Mono',monospace"}}>Restaurar</button>
+                                  {isOwner && <button onClick={()=>{
+                                    if(!window.confirm("Excluir definitivamente esta reunião? Esta ação não pode ser desfeita.")) return;
+                                    onUpdate("feedbacks", (feedbacks??[]).filter(f => f.id !== fb.id));
+                                  }} style={{padding:"2px 8px",borderRadius:6,border:"1px solid var(--red)44",background:"transparent",color:"var(--red)",cursor:"pointer",fontSize:10,fontFamily:"'DM Mono',monospace"}}>Excluir</button>}
+                                </div>
                               </div>
                             );
                           })}
@@ -5258,11 +5321,17 @@ Inclua apenas as ações solicitadas. Arrays vazios se não houver ação daquel
                             const t = INCIDENT_TYPES.find(x=>x.id===inc.type);
                             return (
                               <div key={inc.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"4px 0",fontSize:10}}>
-                                <span style={{color:"var(--text3)"}}>{t?.negative?"🔴":"🟢"} {t?.label??inc.type} — {inc.deletedBy} ({daysLeft}d)</span>
-                                <button onClick={()=>{
-                                  const updated = (incidents??[]).map(i => i.id === inc.id ? (()=>{ const {deletedAt, deletedBy, ...rest} = i; return rest; })() : i);
-                                  onUpdate("incidents", updated);
-                                }} style={{padding:"2px 8px",borderRadius:6,border:"1px solid var(--ac)44",background:"transparent",color:"var(--ac-text)",cursor:"pointer",fontSize:10,fontFamily:"'DM Mono',monospace"}}>Restaurar</button>
+                                <span style={{color:"var(--text3)",flex:1,minWidth:0}}>{t?.negative?"🔴":"🟢"} {t?.label??inc.type} — {inc.deletedBy} ({daysLeft}d)</span>
+                                <div style={{display:"flex",gap:4,flexShrink:0}}>
+                                  <button onClick={()=>{
+                                    const updated = (incidents??[]).map(i => i.id === inc.id ? (()=>{ const {deletedAt, deletedBy, ...rest} = i; return rest; })() : i);
+                                    onUpdate("incidents", updated);
+                                  }} style={{padding:"2px 8px",borderRadius:6,border:"1px solid var(--ac)44",background:"transparent",color:"var(--ac-text)",cursor:"pointer",fontSize:10,fontFamily:"'DM Mono',monospace"}}>Restaurar</button>
+                                  {isOwner && <button onClick={()=>{
+                                    if(!window.confirm("Excluir definitivamente esta ocorrência? Esta ação não pode ser desfeita.")) return;
+                                    onUpdate("incidents", (incidents??[]).filter(i => i.id !== inc.id));
+                                  }} style={{padding:"2px 8px",borderRadius:6,border:"1px solid var(--red)44",background:"transparent",color:"var(--red)",cursor:"pointer",fontSize:10,fontFamily:"'DM Mono',monospace"}}>Excluir</button>}
+                                </div>
                               </div>
                             );
                           })}
@@ -7737,6 +7806,10 @@ function MeetingPlannerSection({ restaurantId, employees, roles, areas, meetingP
                     <span style={{flex:1,fontSize:11,color:"var(--text3)",textDecoration:"line-through"}}>{p.title}</span>
                     <span style={{fontSize:9,color:"var(--text3)"}}>{daysLeft}d</span>
                     <button onClick={()=>handleRestorePauta(p.id)} style={{padding:"2px 8px",borderRadius:4,border:"1px solid #3b82f633",background:"transparent",color:"#3b82f6",cursor:"pointer",fontSize:10}}>↩ Restaurar</button>
+                    {isOwner && <button onClick={()=>{
+                      if(!window.confirm("Excluir definitivamente esta pauta? Esta ação não pode ser desfeita.")) return;
+                      onUpdate("allPautas", (data?.allPautas??[]).filter(x => x.id !== p.id));
+                    }} style={{padding:"2px 8px",borderRadius:4,border:"1px solid #ef444433",background:"transparent",color:"#ef4444",cursor:"pointer",fontSize:10}}>✕ Excluir</button>}
                   </div>
                 );
               })}
@@ -7749,6 +7822,10 @@ function MeetingPlannerSection({ restaurantId, employees, roles, areas, meetingP
                     <span style={{flex:1,fontSize:11,color:"var(--text3)",textDecoration:"line-through"}}>{p.type} {emp0?`— ${emp0.name?.split(" ")[0]}`:""} {p.plannedDate?new Date(p.plannedDate+"T12:00:00").toLocaleDateString("pt-BR"):""}</span>
                     <span style={{fontSize:9,color:"var(--text3)"}}>{daysLeft}d</span>
                     <button onClick={()=>handleRestorePlan(p.id)} style={{padding:"2px 8px",borderRadius:4,border:"1px solid #3b82f633",background:"transparent",color:"#3b82f6",cursor:"pointer",fontSize:10}}>↩ Restaurar</button>
+                    {isOwner && <button onClick={()=>{
+                      if(!window.confirm("Excluir definitivamente esta reunião planejada? Esta ação não pode ser desfeita.")) return;
+                      onUpdate("meetingPlans", (data?.meetingPlans??[]).filter(x => x.id !== p.id));
+                    }} style={{padding:"2px 8px",borderRadius:4,border:"1px solid #ef444433",background:"transparent",color:"#ef4444",cursor:"pointer",fontSize:10}}>✕ Excluir</button>}
                   </div>
                 );
               })}
@@ -12053,7 +12130,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
               <p style={{color:"var(--text3)",fontSize:14}}>Notificações ocultas pelo modo privacidade.</p>
             </div>
           ) : (
-            <NotificacoesTab restaurantId={rid} dpMessages={data?.dpMessages??[]} notifications={data?.notifications??[]} onUpdate={onUpdate} />
+            <NotificacoesTab restaurantId={rid} dpMessages={data?.dpMessages??[]} notifications={data?.notifications??[]} onUpdate={onUpdate} isOwner={isOwner} />
           )}
           </div>
         )}
@@ -14273,6 +14350,11 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }
 
         {tab === "changelog" && (() => {
           const CHANGELOG = [
+            { version:"5.44.0", date:"2026-04-19", items:[
+              "Novo: gestor administrativo pode excluir definitivamente itens de todas as lixeiras do sistema",
+              "Novo: jornada do empregado exibe reuniões realizadas e ocorrências unificadas com detalhes clicáveis",
+              "Melhoria: reuniões passadas/encerradas e em andamento integradas à timeline cronológica",
+            ]},
             { version:"5.19.0", date:"2026-04-18", items:[
               "Refatoração: removidas ~400 linhas de código morto (componentes e funções não utilizadas)",
               "Refatoração: hook useAiGenerate unifica chamadas de IA — reduz duplicação de lógica de loading/erro",
