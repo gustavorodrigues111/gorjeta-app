@@ -4196,7 +4196,7 @@ Inclua apenas as ações solicitadas. Arrays vazios se não houver ação daquel
 
 
 
-function EmployeeSpreadsheet({ restEmps, restRoles, rid, employees, onUpdate, restCode: restCode_, isOwner, restaurant, notifications, privacyMask, onGenerateDismissalReport, incidents, feedbacks, devChecklists, schedules, currentUser, isLider, mobileOnly: mobileOnlyProp, roles, vtPayments, vtConfig, scheduleStatus, employeeGoals, delays, meetingPlans }) {
+function EmployeeSpreadsheet({ restEmps, restRoles, rid, employees, onUpdate, restCode: restCode_, isOwner, restaurant, notifications, privacyMask, onGenerateDismissalReport, incidents, feedbacks, devChecklists, schedules, currentUser, isLider, mobileOnly: mobileOnlyProp, roles, vtPayments, vtConfig, scheduleStatus, employeeGoals, delays, meetingPlans, meetingOccurrences }) {
   const mobileOnly = mobileOnlyProp ?? false; // eslint-disable-line no-unused-vars
   const PLANOS = [
     { id:"p10",  empMax:10  },
@@ -4223,7 +4223,7 @@ function EmployeeSpreadsheet({ restEmps, restRoles, rid, employees, onUpdate, re
   const [detailEmp, setDetailEmp] = useState(null); // empId for detail view
   const [detailTab, setDetailTab] = useState("cadastro"); // cadastro | acoes | trilha
   const [showIncForm, setShowIncForm] = useState(false);
-  const [showFbForm, setShowFbForm] = useState(false);
+  // showFbForm removed — meetings now created only in Reuniões tab
   const [expandedJornada, setExpandedJornada] = useState(null); // id of expanded event
   const [showNewForm, setShowNewForm] = useState(false);
 
@@ -4360,7 +4360,7 @@ Inclua apenas as ações solicitadas. Arrays vazios se não houver ação daquel
   const list = showInactive ? inactiveEmps : activeEmps;
 
   function getRow(emp) {
-    return { name:emp.name||"", cpf:emp.cpf||"", admission:emp.admission||"", roleId:emp.roleId||"", inactiveFrom:emp.inactiveFrom||"", ...(editRows[emp.id]??{}) };
+    return { name:emp.name||"", cpf:emp.cpf||"", admission:emp.admission||"", roleId:emp.roleId||"", inactiveFrom:emp.inactiveFrom||"", phone:emp.phone||"", email:emp.email||"", emergencyName:emp.emergencyName||"", emergencyPhone:emp.emergencyPhone||"", ...(editRows[emp.id]??{}) };
   }
 
   function setField(id, field, val) {
@@ -4369,9 +4369,9 @@ Inclua apenas as ações solicitadas. Arrays vazios se não houver ação daquel
 
   function saveEmp(emp) {
     setEditRows(prev => {
-      const row = { name:emp.name||"", cpf:emp.cpf||"", admission:emp.admission||"", roleId:emp.roleId||"", inactiveFrom:emp.inactiveFrom||"", ...(prev[emp.id]??{}) };
+      const row = { name:emp.name||"", cpf:emp.cpf||"", admission:emp.admission||"", roleId:emp.roleId||"", inactiveFrom:emp.inactiveFrom||"", phone:emp.phone||"", email:emp.email||"", emergencyName:emp.emergencyName||"", emergencyPhone:emp.emergencyPhone||"", ...(prev[emp.id]??{}) };
       if (!row.name.trim()) return prev;
-      onUpdate("employees", employees.map(x => x.id===emp.id ? {...emp, name:row.name.trim(), cpf:row.cpf, admission:row.admission, roleId:row.roleId, inactiveFrom:row.inactiveFrom} : x));
+      onUpdate("employees", employees.map(x => x.id===emp.id ? {...emp, name:row.name.trim(), cpf:row.cpf, admission:row.admission, roleId:row.roleId, inactiveFrom:row.inactiveFrom, phone:row.phone, email:row.email, emergencyName:row.emergencyName, emergencyPhone:row.emergencyPhone} : x));
       setSaved(p=>({...p,[emp.id]:true}));
       setTimeout(()=>setSaved(p=>({...p,[emp.id]:false})),1500);
       return prev;
@@ -4508,7 +4508,7 @@ Inclua apenas as ações solicitadas. Arrays vazios se não houver ação daquel
         return (
           <div>
             {/* Back */}
-            <button onClick={()=>{setDetailEmp(null);setDetailTab("cadastro");setShowIncForm(false);setShowFbForm(false);}} style={{background:"none",border:"none",color:"var(--accent)",cursor:"pointer",fontSize:13,fontFamily:"'DM Mono',monospace",padding:"4px 0",marginBottom:12,display:"flex",alignItems:"center",gap:4}}>
+            <button onClick={()=>{setDetailEmp(null);setDetailTab("cadastro");setShowIncForm(false);}} style={{background:"none",border:"none",color:"var(--accent)",cursor:"pointer",fontSize:13,fontFamily:"'DM Mono',monospace",padding:"4px 0",marginBottom:12,display:"flex",alignItems:"center",gap:4}}>
               ← Voltar para equipe
             </button>
 
@@ -4554,6 +4554,22 @@ Inclua apenas as ações solicitadas. Arrays vazios se não houver ação daquel
                   <div>
                     <label style={{fontSize:10,color:"var(--text3)",fontWeight:700,display:"block",marginBottom:4}}>Código</label>
                     <div style={{...S.input,fontSize:13,background:"var(--bg3)",color:"var(--accent)",fontWeight:700}}>{emp.empCode ?? "—"}</div>
+                  </div>
+                  <div>
+                    <label style={{fontSize:10,color:"var(--text3)",fontWeight:700,display:"block",marginBottom:4}}>Telefone</label>
+                    <input value={row.phone||""} onChange={ev=>setField(emp.id,"phone",ev.target.value)} placeholder="(00) 00000-0000" style={{...S.input,fontSize:13}} inputMode="tel"/>
+                  </div>
+                  <div>
+                    <label style={{fontSize:10,color:"var(--text3)",fontWeight:700,display:"block",marginBottom:4}}>E-mail</label>
+                    <input value={row.email||""} onChange={ev=>setField(emp.id,"email",ev.target.value)} placeholder="email@exemplo.com" style={{...S.input,fontSize:13}} type="email"/>
+                  </div>
+                  <div>
+                    <label style={{fontSize:10,color:"var(--text3)",fontWeight:700,display:"block",marginBottom:4}}>Nome do contato de emergência</label>
+                    <input value={row.emergencyName||""} onChange={ev=>setField(emp.id,"emergencyName",ev.target.value)} placeholder="Nome completo" style={{...S.input,fontSize:13}}/>
+                  </div>
+                  <div>
+                    <label style={{fontSize:10,color:"var(--text3)",fontWeight:700,display:"block",marginBottom:4}}>Telefone de emergência</label>
+                    <input value={row.emergencyPhone||""} onChange={ev=>setField(emp.id,"emergencyPhone",ev.target.value)} placeholder="(00) 00000-0000" style={{...S.input,fontSize:13}} inputMode="tel"/>
                   </div>
                   <div>
                     <label style={{fontSize:10,color:"var(--text3)",fontWeight:700,display:"block",marginBottom:4}}>Flags</label>
@@ -4864,11 +4880,8 @@ Inclua apenas as ações solicitadas. Arrays vazios se não houver ação daquel
 
                 {/* ── Action buttons ── */}
                 <div style={{display:"flex",gap:8,marginBottom:16,flexWrap:"wrap"}}>
-                  <button onClick={()=>{setShowIncForm(!showIncForm);setShowFbForm(false);}} style={{padding:"8px 16px",borderRadius:10,border:`1px solid ${showIncForm?"var(--accent)":"var(--border)"}`,background:showIncForm?"var(--accent)11":"transparent",color:showIncForm?"var(--accent)":"var(--text3)",cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:12}}>
+                  <button onClick={()=>{setShowIncForm(!showIncForm);}} style={{padding:"8px 16px",borderRadius:10,border:`1px solid ${showIncForm?"var(--accent)":"var(--border)"}`,background:showIncForm?"var(--accent)11":"transparent",color:showIncForm?"var(--accent)":"var(--text3)",cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:12}}>
                     📋 Ocorrência
-                  </button>
-                  <button onClick={()=>{setShowFbForm(!showFbForm);setShowIncForm(false);}} style={{padding:"8px 16px",borderRadius:10,border:`1px solid ${showFbForm?"#f59e0b":"var(--border)"}`,background:showFbForm?"#f59e0b11":"transparent",color:showFbForm?"#f59e0b":"var(--text3)",cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:12}}>
-                    💬 Reunião
                   </button>
                   <button onClick={async()=>{
                     const dateFrom = window.prompt("Data início (DD/MM/AAAA):", emp.admission ? new Date(emp.admission+"T12:00:00").toLocaleDateString("pt-BR") : "01/01/2026");
@@ -4912,7 +4925,6 @@ Inclua apenas as ações solicitadas. Arrays vazios se não houver ação daquel
                   </button>
                 </div>
                 {showIncForm && <div style={{marginBottom:16}}><IncidentForm restaurantId={rid} employees={restEmps.filter(e=>!e.inactive)} onUpdate={onUpdate} incidents={incidents??[]} currentUser={currentUser} isOwner={isOwner} preSelectedEmpId={emp.id}/></div>}
-                {showFbForm && <div style={{marginBottom:16}}><FeedbackForm restaurantId={rid} employees={restEmps.filter(e=>!e.inactive)} roles={restRoles} onUpdate={onUpdate} feedbacks={feedbacks??[]} currentUser={currentUser} isOwner={isOwner} preSelectedEmpId={emp.id} allMeetingPlans={meetingPlans??[]}/></div>}
 
                 {/* Meeting alert removed — info now in Jornada timeline */}
 
@@ -4956,6 +4968,141 @@ Inclua apenas as ações solicitadas. Arrays vazios se não houver ação daquel
                     })}
                   </div>
                 )}
+
+                {/* ── 3b. Reuniões — all meetings for this employee ── */}
+                {(() => {
+                  const allEmpPlans = (meetingPlans??[]).filter(p => p.restaurantId === rid && (p.employeeIds??[]).includes(emp.id)).sort((a,b)=>(b.plannedDate??"").localeCompare(a.plannedDate??""));
+                  const empCompletedFbs = (feedbacks??[]).filter(f => f.restaurantId === rid && f.employeeId === emp.id && !f.deletedAt).sort((a,b)=>(b.meetingDate??b.createdAt??"").localeCompare(a.meetingDate??a.createdAt??""));
+                  const allMeetingItems = [
+                    ...allEmpPlans.map(p => ({ kind:"plan", id:"p-"+p.id, date:p.plannedDate, item:p })),
+                    ...empCompletedFbs.map(f => ({ kind:"feedback", id:"f-"+f.id, date:f.meetingDate??(f.createdAt??"").slice(0,10), item:f }))
+                  ].sort((a,b)=>(b.date??"").localeCompare(a.date??""));
+                  if (allMeetingItems.length === 0) return null;
+                  const MAX_VISIBLE = 5;
+                  const visibleItems = allMeetingItems.slice(0, MAX_VISIBLE);
+                  const hasMore = allMeetingItems.length > MAX_VISIBLE;
+                  return (
+                    <div style={{marginBottom:16}}>
+                      <h4 style={{color:"var(--text)",margin:"0 0 10px",fontSize:14}}>📋 Reuniões</h4>
+                      {visibleItems.map(mi => {
+                        if (mi.kind === "plan") {
+                          const p = mi.item;
+                          const isAval = p.type === "avaliação";
+                          const pColor = isAval ? "#8b5cf6" : "#3b82f6";
+                          const pIcon = isAval ? "📋" : "💬";
+                          const statusBadge = p.status === "encerrada"
+                            ? {bg:"#10b98118",color:"#10b981",label:"✓ Encerrada"}
+                            : p.status === "em_andamento"
+                            ? {bg:"#f59e0b18",color:"#f59e0b",label:"Em andamento"}
+                            : {bg:"var(--border)33",color:"var(--text3)",label:"Agendada"};
+                          const fortes = (p.pontosFortes??[]).length;
+                          const melhorar = (p.pontosMelhorar??[]).length;
+                          const notas = (p.notasInternas??[]).length;
+                          const topics = (p.topics??[]).length;
+                          const topicsDone = (p.topics??[]).filter(t=>t.done).length;
+                          return (
+                            <div key={mi.id} style={{...S.card,padding:"10px 14px",marginBottom:6,borderLeft:`3px solid ${pColor}`}}>
+                              <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
+                                <span style={{fontSize:16}}>{pIcon}</span>
+                                <span style={{color:pColor,fontWeight:600,fontSize:12}}>{isAval?"Avaliação":"Alinhamento"}</span>
+                                <span style={{fontSize:10,padding:"2px 6px",borderRadius:4,background:statusBadge.bg,color:statusBadge.color,fontWeight:600}}>{statusBadge.label}</span>
+                                <span style={{marginLeft:"auto",color:"var(--text3)",fontSize:11}}>{fmtDate(p.plannedDate)}</span>
+                              </div>
+                              {isAval && (fortes>0||melhorar>0||notas>0) && (
+                                <div style={{display:"flex",gap:8,marginTop:4,fontSize:10,color:"var(--text3)"}}>
+                                  {fortes>0&&<span>💪 {fortes} forte{fortes>1?"s":""}</span>}
+                                  {melhorar>0&&<span>📈 {melhorar} melhoria{melhorar>1?"s":""}</span>}
+                                  {notas>0&&<span>📝 {notas} nota{notas>1?"s":""}</span>}
+                                </div>
+                              )}
+                              {!isAval && topics>0 && (
+                                <div style={{fontSize:10,color:"var(--text3)",marginTop:4}}>📝 {topicsDone}/{topics} tópico{topics>1?"s":""} concluído{topicsDone>1?"s":""}</div>
+                              )}
+                            </div>
+                          );
+                        } else {
+                          const f = mi.item;
+                          const isAval = f.meetingType === "avaliação" || (!f.meetingType && f.rating > 0);
+                          const fColor = isAval ? "#8b5cf6" : "#3b82f6";
+                          return (
+                            <div key={mi.id} style={{...S.card,padding:"10px 14px",marginBottom:6,borderLeft:`3px solid ${fColor}`,opacity:0.85}}>
+                              <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
+                                <span style={{fontSize:16}}>{isAval?"📋":"💬"}</span>
+                                <span style={{color:fColor,fontWeight:600,fontSize:12}}>{isAval?"Avaliação":"Alinhamento"} (feedback)</span>
+                                {f.rating > 0 && <span style={{fontSize:10,padding:"2px 6px",borderRadius:4,background:(RATING_COLORS[f.rating-1]??"var(--text3)")+"18",color:RATING_COLORS[f.rating-1]??"var(--text3)",fontWeight:700}}>{RATING_LABELS[f.rating-1]}</span>}
+                                <span style={{marginLeft:"auto",color:"var(--text3)",fontSize:11}}>{fmtDate(f.meetingDate??(f.createdAt??"").slice(0,10))}</span>
+                              </div>
+                            </div>
+                          );
+                        }
+                      })}
+                      {hasMore && <div style={{textAlign:"center",marginTop:4}}><span style={{color:"var(--text3)",fontSize:11}}>+{allMeetingItems.length - MAX_VISIBLE} mais</span></div>}
+                    </div>
+                  );
+                })()}
+
+                {/* ── 3c. Ocorrências — from both incident systems ── */}
+                {(() => {
+                  const OCC_TYPES_LOCAL = [["cliente","🧑‍🍳","Cliente"],["estrutura","🏗️","Estrutura"],["operacao","⚙️","Operação"],["pessoal","👤","Pessoal"],["outro","📝","Outro"]];
+                  // Old incidents system
+                  const empIncidents2 = (incidents??[]).filter(i => i.restaurantId === rid && (i.employeeIds??[]).includes(emp.id) && !i.deletedAt);
+                  // Unified meetingOccurrences system
+                  const empMeetingOccs = (meetingOccurrences??[]).filter(o => o.restaurantId === rid && (o.employeeIds??[]).includes(emp.id) && !o.deletedAt);
+                  // Merge into unified list
+                  const allOccs = [
+                    ...empIncidents2.map(i => {
+                      const incType = INCIDENT_TYPES.find(x=>x.id===i.type);
+                      return { id:"inc-"+i.id, date:i.date??"", type:incType?.label??i.type, icon:incType?.negative?"🔴":"🟢", desc:(i.description??"").slice(0,120), severity:SEVERITY_OPTIONS.find(s=>s.id===i.severity)?.label??"", resolved:false, source:"incident", negative:!!incType?.negative, action:i.action??"" };
+                    }),
+                    ...empMeetingOccs.map(o => {
+                      const occT = OCC_TYPES_LOCAL.find(([t])=>t===o.type);
+                      return { id:"occ-"+o.id, date:(o.createdAt??"").slice(0,10), type:occT?.[2]??o.type, icon:occT?.[1]??"📝", desc:(o.description??"").slice(0,120), severity:o.priority?"Prioridade":"", resolved:o.status==="resolvida", source:"meetingOcc", resolvedText:o.resolvedText??"", title:o.title??"" };
+                    })
+                  ].sort((a,b)=>(b.date??"").localeCompare(a.date??""));
+                  if (allOccs.length === 0) return null;
+                  const abertas = allOccs.filter(o => !o.resolved);
+                  const resolvidas = allOccs.filter(o => o.resolved);
+                  const MAX_OCC = 5;
+                  return (
+                    <div style={{marginBottom:16}}>
+                      <h4 style={{color:"var(--text)",margin:"0 0 10px",fontSize:14}}>🚨 Ocorrências</h4>
+                      {abertas.length > 0 && (
+                        <div style={{marginBottom:8}}>
+                          <div style={{fontSize:11,fontWeight:700,color:"#ef4444",marginBottom:6}}>Abertas ({abertas.length})</div>
+                          {abertas.slice(0, MAX_OCC).map(o => (
+                            <div key={o.id} style={{...S.card,padding:"10px 14px",marginBottom:6,borderLeft:"3px solid #ef4444"}}>
+                              <div style={{display:"flex",alignItems:"center",gap:6,flexWrap:"wrap"}}>
+                                <span style={{fontSize:14}}>{o.icon}</span>
+                                <span style={{color:"var(--text)",fontWeight:600,fontSize:12}}>{o.title||o.type}</span>
+                                {o.severity && <span style={{fontSize:10,padding:"2px 6px",borderRadius:4,background:"#f59e0b18",color:"#f59e0b",fontWeight:600}}>{o.severity}</span>}
+                                <span style={{marginLeft:"auto",color:"var(--text3)",fontSize:11}}>{fmtDate(o.date)}</span>
+                              </div>
+                              {o.desc && <div style={{color:"var(--text3)",fontSize:11,marginTop:3}}>{o.desc}</div>}
+                              {o.action && <div style={{color:"var(--accent)",fontSize:11,marginTop:2}}>Ação: {o.action}</div>}
+                            </div>
+                          ))}
+                          {abertas.length > MAX_OCC && <div style={{textAlign:"center",marginTop:2}}><span style={{color:"var(--text3)",fontSize:11}}>+{abertas.length - MAX_OCC} mais</span></div>}
+                        </div>
+                      )}
+                      {resolvidas.length > 0 && (
+                        <div>
+                          <div style={{fontSize:11,fontWeight:700,color:"#10b981",marginBottom:6}}>Resolvidas ({resolvidas.length})</div>
+                          {resolvidas.slice(0, MAX_OCC).map(o => (
+                            <div key={o.id} style={{...S.card,padding:"10px 14px",marginBottom:6,borderLeft:"3px solid #10b981",opacity:0.75}}>
+                              <div style={{display:"flex",alignItems:"center",gap:6,flexWrap:"wrap"}}>
+                                <span style={{fontSize:14}}>✓</span>
+                                <span style={{color:"var(--text3)",fontWeight:600,fontSize:12,textDecoration:"line-through"}}>{o.title||o.type}</span>
+                                <span style={{marginLeft:"auto",color:"var(--text3)",fontSize:11}}>{fmtDate(o.date)}</span>
+                              </div>
+                              {o.resolvedText && <div style={{color:"#10b981",fontSize:11,marginTop:3}}>Resolução: {o.resolvedText}</div>}
+                            </div>
+                          ))}
+                          {resolvidas.length > MAX_OCC && <div style={{textAlign:"center",marginTop:2}}><span style={{color:"var(--text3)",fontSize:11}}>+{resolvidas.length - MAX_OCC} mais</span></div>}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
 
                 {/* ── 4. Objetivos ── */}
                 <GoalsManager empId={emp.id} employeeGoals={employeeGoals} roles={roles??restRoles} restaurantId={rid} onUpdate={onUpdate} currentUser={currentUser} isOwner={isOwner} schedules={schedules??{}} feedbacks={feedbacks??[]} employees={employees}/>
@@ -5175,6 +5322,14 @@ Inclua apenas as ações solicitadas. Arrays vazios se não houver ação daquel
                 <option value="">Selecionar…</option>
                 {AREAS.map(a=>(<optgroup key={a} label={a}>{restRoles.filter(r=>r.area===a&&!r.inactive).map(r=><option key={r.id} value={r.id}>{r.name} ({r.points}pt)</option>)}</optgroup>))}
               </select>
+            </div>
+            <div>
+              <label style={{fontSize:10,color:"var(--text3)",fontWeight:700,display:"block",marginBottom:3}}>Telefone</label>
+              <input value={newRow.phone||""} onChange={ev=>setNewRow(p=>({...p,phone:ev.target.value}))} placeholder="(00) 00000-0000" style={{...S.input,fontSize:13}} inputMode="tel"/>
+            </div>
+            <div>
+              <label style={{fontSize:10,color:"var(--text3)",fontWeight:700,display:"block",marginBottom:3}}>E-mail</label>
+              <input value={newRow.email||""} onChange={ev=>setNewRow(p=>({...p,email:ev.target.value}))} placeholder="email@exemplo.com" style={{...S.input,fontSize:13}} type="email"/>
             </div>
           </div>
           <div style={{display:"flex",gap:8,marginTop:12}}>
@@ -6352,6 +6507,9 @@ function MeetingPlannerSection({ restaurantId, employees, roles, areas, meetingP
   const [occAreas, setOccAreas] = useState([]);
   const [occEmployeeIds, setOccEmployeeIds] = useState([]);
   const [occSubtype, setOccSubtype] = useState("");
+  // Occurrence resolution
+  const [resolvingOccId, setResolvingOccId] = useState(null);
+  const [resolveOccText, setResolveOccText] = useState("");
   // Liderança participants
   const [lidParticipants, setLidParticipants] = useState([]);
   // Execution mode (live meeting)
@@ -6672,10 +6830,20 @@ function MeetingPlannerSection({ restaurantId, employees, roles, areas, meetingP
     setOccTitle(""); setOccDesc(""); setOccType("cliente"); setOccAreas([]); setOccEmployeeIds([]); setOccSubtype(""); setShowOccForm(false);
   }
 
-  function handleUpdateOccStatus(occId, status) {
+  function handleUpdateOccStatus(occId, status, resolvedText) {
     const all = [...getData("meetingOccurrences")];
     const idx = all.findIndex(o => o.id === occId);
-    if (idx >= 0) { all[idx] = { ...all[idx], status }; onUpdate("meetingOccurrences", all); }
+    if (idx >= 0) {
+      all[idx] = { ...all[idx], status };
+      if (status === "resolvida") {
+        all[idx].resolvedText = resolvedText || "";
+        all[idx].resolvedAt = new Date().toISOString();
+        all[idx].resolvedBy = currentUser?.name ?? (isOwner ? "Gestor AppTip" : "Gestor Adm.");
+      }
+      onUpdate("meetingOccurrences", all);
+    }
+    setResolvingOccId(null);
+    setResolveOccText("");
   }
 
   function toggleOccPriority(occId) {
@@ -6718,7 +6886,7 @@ function MeetingPlannerSection({ restaurantId, employees, roles, areas, meetingP
       const occIds = resolvedItems.filter(it => it.fromOccurrence).map(it => it.fromOccurrence);
       if (occIds.length > 0) {
         const allOcc = [...getData("meetingOccurrences")];
-        occIds.forEach(oid => { const idx = allOcc.findIndex(o => o.id === oid); if (idx >= 0 && (allOcc[idx].status === "na_pauta" || allOcc[idx].status === "nova")) allOcc[idx] = { ...allOcc[idx], status: "resolvida" }; });
+        occIds.forEach(oid => { const idx = allOcc.findIndex(o => o.id === oid); if (idx >= 0 && (allOcc[idx].status === "na_pauta" || allOcc[idx].status === "nova")) allOcc[idx] = { ...allOcc[idx], status: "resolvida", resolvedAt: new Date().toISOString(), resolvedBy: currentUser?.name ?? (isOwner ? "Gestor AppTip" : "Gestor Adm.") }; });
         onUpdate("meetingOccurrences", allOcc);
       }
       // Mark resolved idea items
@@ -7803,11 +7971,21 @@ function MeetingPlannerSection({ restaurantId, employees, roles, areas, meetingP
                   </div>
                   <div style={{display:"flex",gap:4,flexShrink:0}}>
                     <button onClick={()=>toggleOccPriority(occ.id)} title={occ.priority?"Remover prioridade":"Marcar como prioridade"} style={{padding:"4px 8px",borderRadius:6,border:"1px solid #f59e0b44",background:occ.priority?"#f59e0b22":"transparent",color:"#f59e0b",cursor:"pointer",fontSize:12}}>⚡</button>
-                    <button onClick={()=>handleUpdateOccStatus(occ.id,"resolvida")} title="Marcar como resolvida" style={{padding:"4px 8px",borderRadius:6,border:"1px solid #10b98144",background:"transparent",color:"#10b981",cursor:"pointer",fontSize:11}}>✓</button>
+                    <button onClick={()=>{setResolvingOccId(resolvingOccId===occ.id?null:occ.id);setResolveOccText("");}} title="Marcar como resolvida" style={{padding:"4px 8px",borderRadius:6,border:"1px solid #10b98144",background:resolvingOccId===occ.id?"#10b98122":"transparent",color:"#10b981",cursor:"pointer",fontSize:11}}>✓</button>
                     <button onClick={()=>handleUpdateOccStatus(occ.id,"descartada")} title="Descartar" style={{padding:"4px 8px",borderRadius:6,border:"1px solid var(--border)",background:"transparent",color:"var(--text3)",cursor:"pointer",fontSize:10}}>✕</button>
                     <button onClick={()=>handleDeleteOccurrence(occ.id)} style={{padding:"4px 8px",borderRadius:6,border:"1px solid var(--red)33",background:"transparent",color:"var(--red)",cursor:"pointer",fontSize:10}}>🗑️</button>
                   </div>
                 </div>
+                {resolvingOccId===occ.id && (
+                  <div style={{marginTop:8,padding:"10px 12px",borderRadius:8,background:"#10b98108",border:"1px solid #10b98133"}}>
+                    <label style={{fontSize:11,color:"#10b981",fontWeight:700,display:"block",marginBottom:4}}>O que foi resolvido?</label>
+                    <textarea value={resolveOccText} onChange={e=>setResolveOccText(e.target.value)} placeholder="Descreva a resolução..." rows={2} style={{...S.input,fontSize:12,resize:"vertical",marginBottom:6}}/>
+                    <div style={{display:"flex",gap:6}}>
+                      <button onClick={()=>handleUpdateOccStatus(occ.id,"resolvida",resolveOccText)} style={{padding:"6px 14px",borderRadius:6,border:"none",background:"#10b981",color:"#fff",cursor:"pointer",fontSize:11,fontWeight:700}}>Confirmar</button>
+                      <button onClick={()=>{setResolvingOccId(null);setResolveOccText("");}} style={{padding:"6px 14px",borderRadius:6,border:"1px solid var(--border)",background:"transparent",color:"var(--text3)",cursor:"pointer",fontSize:11}}>Cancelar</button>
+                    </div>
+                  </div>
+                )}
               </div>
             );
           })}
@@ -7843,6 +8021,8 @@ function MeetingPlannerSection({ restaurantId, employees, roles, areas, meetingP
                       <span style={{flex:1,color:"var(--text3)",fontSize:12,textDecoration:"line-through"}}>{occT?.[1]} {occ.title}</span>
                       <button onClick={()=>handleUpdateOccStatus(occ.id,"nova")} title="Reabrir" style={{padding:"2px 8px",borderRadius:4,border:"1px solid var(--border)",background:"transparent",color:"var(--text3)",cursor:"pointer",fontSize:10}}>↩ Reabrir</button>
                     </div>
+                    {occ.resolvedText && <div style={{color:"#10b981",fontSize:11,marginTop:4}}>Resolução: {occ.resolvedText}</div>}
+                    {occ.resolvedAt && <div style={{color:"var(--text3)",fontSize:10,marginTop:2}}>{occ.resolvedBy ? `${occ.resolvedBy} · ` : ""}{new Date(occ.resolvedAt).toLocaleDateString("pt-BR")}</div>}
                   </div>
                 );
               })}
@@ -8123,7 +8303,7 @@ function AddActionInline({ pautaId, onAdd }) {
   );
 }
 
-function FeedbackForm({ restaurantId, employees, roles, onUpdate, feedbacks, currentUser, isOwner, preSelectedEmpId, allMeetingPlans }) {
+function FeedbackForm({ restaurantId, employees, roles, onUpdate, feedbacks, currentUser, isOwner, preSelectedEmpId, allMeetingPlans }) { // eslint-disable-line no-unused-vars
   const restEmps = employees.filter(e => e.restaurantId === restaurantId && !(e.inactive && e.inactiveFrom && e.inactiveFrom <= today()));
   const [empId, setEmpId] = useState(preSelectedEmpId ?? "");
   const [meetingType, setMeetingType] = useState("alinhamento");
@@ -9846,6 +10026,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
               employeeGoals={data?.employeeGoals??{}}
               delays={data?.delays??{}}
               meetingPlans={data?.meetingPlans??[]}
+              meetingOccurrences={data?.meetingOccurrences??[]}
               onGenerateDismissalReport={async (emp) => {
                 try {
                   await loadScript("https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js");
