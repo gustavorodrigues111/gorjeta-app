@@ -3,7 +3,7 @@ import { useState, useEffect, Component } from "react";
 import { db } from "./firebase";
 import { doc, getDoc, setDoc } from "firebase/firestore";
 
-const APP_VERSION = "5.39.0";
+const APP_VERSION = "5.40.0";
 
 const DEFAULT_ADMISSION = () => `${new Date().getFullYear()}-01-01`;
 const round2 = (v) => Math.round(v * 100) / 100;
@@ -6373,7 +6373,10 @@ function MeetingPlannerSection({ restaurantId, employees, roles, areas, meetingP
 
   // Data keys
   const allIdeas = (data?.meetingIdeas ?? []).filter(i => i.restaurantId === restaurantId);
-  const allPautas = (data?.meetingAgendas ?? []).filter(p => p.restaurantId === restaurantId);
+  const TRASH_DAYS = 30;
+  const allPautasRaw = (data?.meetingAgendas ?? []).filter(p => p.restaurantId === restaurantId);
+  const allPautas = allPautasRaw.filter(p => !p.deletedAt);
+  const trashedPautas = allPautasRaw.filter(p => p.deletedAt && (Date.now() - new Date(p.deletedAt).getTime()) < TRASH_DAYS * 86400000);
   const allActions = (data?.meetingActions ?? []).filter(a => a.restaurantId === restaurantId);
   const allOccurrences = (data?.meetingOccurrences ?? []).filter(o => o.restaurantId === restaurantId);
   const allPendencias = (data?.meetingPendencias ?? []).filter(p => p.restaurantId === restaurantId);
@@ -6390,9 +6393,11 @@ function MeetingPlannerSection({ restaurantId, employees, roles, areas, meetingP
   const filteredEmployees = (isLider && !showAllAreas && managerAreas?.length > 0)
     ? employees.filter(e => { const r = roles.find(rl => rl.id === e.roleId); return r && managerAreas.includes(r.area); })
     : employees;
+  const activePlans = meetingPlans.filter(p => !p.deletedAt);
+  const trashedPlans = meetingPlans.filter(p => p.deletedAt && (Date.now() - new Date(p.deletedAt).getTime()) < TRASH_DAYS * 86400000);
   const filteredPlans = (isLider && !showAllAreas && managerAreas?.length > 0)
-    ? meetingPlans.filter(p => (p.employeeIds ?? []).some(eid => filteredEmployees.find(e => e.id === eid)))
-    : meetingPlans;
+    ? activePlans.filter(p => (p.employeeIds ?? []).some(eid => filteredEmployees.find(e => e.id === eid)))
+    : activePlans;
   const filteredIdeas = (isLider && !showAllAreas && managerAreas?.length > 0)
     ? allIdeas.filter(i => { const ia = i.areas ?? (i.area ? [i.area] : []); return ia.length === 0 || ia.some(a => managerAreas.includes(a)); })
     : allIdeas;
@@ -6447,8 +6452,15 @@ function MeetingPlannerSection({ restaurantId, employees, roles, areas, meetingP
   }
 
   function handleDeletePlan(planId) {
-    if (!window.confirm("Excluir esta reunião planejada?")) return;
-    onUpdate("meetingPlans", (allMeetingPlans ?? []).filter(p => p.id !== planId));
+    if (!window.confirm("Excluir esta reunião? Ficará na lixeira por 30 dias.")) return;
+    const all = [...(allMeetingPlans ?? [])];
+    const idx = all.findIndex(p => p.id === planId);
+    if (idx >= 0) { all[idx] = { ...all[idx], deletedAt: new Date().toISOString(), deletedBy: currentUser?.name ?? "Gestor" }; onUpdate("meetingPlans", all); }
+  }
+  function handleRestorePlan(planId) {
+    const all = [...(allMeetingPlans ?? [])];
+    const idx = all.findIndex(p => p.id === planId);
+    if (idx >= 0) { const { deletedAt, deletedBy, ...rest } = all[idx]; all[idx] = rest; onUpdate("meetingPlans", all); }
   }
 
   function getEmpStatus(plan, empId) {
@@ -6618,9 +6630,15 @@ function MeetingPlannerSection({ restaurantId, employees, roles, areas, meetingP
   }
 
   function handleDeletePauta(pautaId) {
-    if (!window.confirm("Excluir esta pauta e suas ações?")) return;
-    onUpdate("meetingAgendas", getData("meetingAgendas").filter(p => p.id !== pautaId));
-    onUpdate("meetingActions", getData("meetingActions").filter(a => a.pautaId !== pautaId));
+    if (!window.confirm("Excluir esta pauta? Ficará na lixeira por 30 dias.")) return;
+    const all = [...getData("meetingAgendas")];
+    const idx = all.findIndex(p => p.id === pautaId);
+    if (idx >= 0) { all[idx] = { ...all[idx], deletedAt: new Date().toISOString(), deletedBy: currentUser?.name ?? "Gestor" }; onUpdate("meetingAgendas", all); }
+  }
+  function handleRestorePauta(pautaId) {
+    const all = [...getData("meetingAgendas")];
+    const idx = all.findIndex(p => p.id === pautaId);
+    if (idx >= 0) { const { deletedAt, deletedBy, ...rest } = all[idx]; all[idx] = rest; onUpdate("meetingAgendas", all); }
   }
 
   // ── Ocorrências ──
@@ -6757,7 +6775,7 @@ function MeetingPlannerSection({ restaurantId, employees, roles, areas, meetingP
     ["ideias",`💡 Ideias${filteredIdeas.filter(i=>i.status==="nova").length>0?` (${filteredIdeas.filter(i=>i.status==="nova").length})`:""}`],
     ["ocorrencias",`🚨 Ocorrências${newOccCount>0?` (${newOccCount})`:""}`],
     ["pendencias",`📌 Pendências${activePendCount>0?` (${activePendCount})`:""}`],
-    ...(isOwner ? [["relatorio","📄 Relatório"]] : []),
+    ...(!isLider ? [["relatorio","📄 Relatório"]] : []),
   ];
 
   return (
@@ -7404,6 +7422,35 @@ function MeetingPlannerSection({ restaurantId, employees, roles, areas, meetingP
               <div style={{fontSize:36,marginBottom:12}}>📅</div>
               <p style={{color:"var(--text3)",fontSize:14}}>Nenhuma reunião planejada ainda.</p>
               <p style={{color:"var(--text3)",fontSize:12}}>Planeje reuniões com a equipe ou de liderança.</p>
+            </div>
+          )}
+          {/* ── Lixeira ── */}
+          {(trashedPautas.length > 0 || trashedPlans.length > 0) && (
+            <div style={{marginTop:24,padding:"14px 16px",borderRadius:10,border:"1px dashed var(--border)",background:"var(--bg2)"}}>
+              <h4 style={{color:"var(--text3)",fontSize:12,fontWeight:600,margin:"0 0 10px"}}>🗑️ Lixeira ({trashedPautas.length + trashedPlans.length})</h4>
+              {trashedPautas.map(p => {
+                const daysLeft = Math.ceil(TRASH_DAYS - (Date.now() - new Date(p.deletedAt).getTime()) / 86400000);
+                return (
+                  <div key={p.id} style={{display:"flex",alignItems:"center",gap:8,marginBottom:6,padding:"8px 10px",borderRadius:8,background:"var(--card-bg)",border:"1px solid var(--border)"}}>
+                    <span style={{fontSize:10}}>🤝</span>
+                    <span style={{flex:1,fontSize:11,color:"var(--text3)",textDecoration:"line-through"}}>{p.title}</span>
+                    <span style={{fontSize:9,color:"var(--text3)"}}>{daysLeft}d</span>
+                    <button onClick={()=>handleRestorePauta(p.id)} style={{padding:"2px 8px",borderRadius:4,border:"1px solid #3b82f633",background:"transparent",color:"#3b82f6",cursor:"pointer",fontSize:10}}>↩ Restaurar</button>
+                  </div>
+                );
+              })}
+              {trashedPlans.map(p => {
+                const daysLeft = Math.ceil(TRASH_DAYS - (Date.now() - new Date(p.deletedAt).getTime()) / 86400000);
+                const emp0 = (p.employeeIds??[]).length > 0 ? employees.find(e=>e.id===p.employeeIds[0]) : null;
+                return (
+                  <div key={p.id} style={{display:"flex",alignItems:"center",gap:8,marginBottom:6,padding:"8px 10px",borderRadius:8,background:"var(--card-bg)",border:"1px solid var(--border)"}}>
+                    <span style={{fontSize:10}}>{p.type==="avaliação"?"📋":"💬"}</span>
+                    <span style={{flex:1,fontSize:11,color:"var(--text3)",textDecoration:"line-through"}}>{p.type} {emp0?`— ${emp0.name?.split(" ")[0]}`:""} {p.plannedDate?new Date(p.plannedDate+"T12:00:00").toLocaleDateString("pt-BR"):""}</span>
+                    <span style={{fontSize:9,color:"var(--text3)"}}>{daysLeft}d</span>
+                    <button onClick={()=>handleRestorePlan(p.id)} style={{padding:"2px 8px",borderRadius:4,border:"1px solid #3b82f633",background:"transparent",color:"#3b82f6",cursor:"pointer",fontSize:10}}>↩ Restaurar</button>
+                  </div>
+                );
+              })}
             </div>
           )}
         </div>
@@ -8752,7 +8799,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
       canTips && ["tips","Gorjetas"],
       (isOwner || (perms.vt !== false && tabVisible("vt"))) && ["vt","Vale Transporte"],
     ].filter(Boolean) },
-    { id:"equipe", label:"👥 Pessoas e Planejamento", icon:"👥", tabs: [
+    { id:"equipe", label:"👥 Pessoas", icon:"👥", tabs: [
       (isOwner || canTips || tabVisible("employees")) && ["employees","Equipe"],
       (isOwner || tabVisible("roles")) && ["roles","Cargos"],
       (isOwner || tabVisible("horarios")) && ["horarios","Horários"],
@@ -8866,10 +8913,10 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
   return (
     <div style={{ fontFamily:"'DM Sans',sans-serif" }}>
       {/* Tab groups — row 1: group pills */}
-      <div style={{ display:"flex", gap:4, padding:"8px 12px 0", background:"var(--header-bg)", overflowX:"auto", scrollbarWidth:"none", WebkitOverflowScrolling:"touch" }}>
+      <div style={{ display:"flex", gap:2, padding:"8px 8px 0", background:"var(--header-bg)", justifyContent:"center" }}>
         {TAB_GROUPS_FINAL.map(g => (
           <button key={g.id} onClick={() => switchGroup(g.id)}
-            style={{ padding:"7px 14px", background:tabGroup===g.id?ac:"transparent", border:"none", borderRadius:20, color:tabGroup===g.id?"#fff":"var(--text3)", cursor:"pointer", fontSize:13, fontFamily:"'DM Sans',sans-serif", fontWeight:tabGroup===g.id?700:500, whiteSpace:"nowrap", flexShrink:0, transition:"all .15s" }}>
+            style={{ padding:"6px 10px", background:tabGroup===g.id?ac:"transparent", border:"none", borderRadius:16, color:tabGroup===g.id?"#fff":"var(--text3)", cursor:"pointer", fontSize:12, fontFamily:"'DM Sans',sans-serif", fontWeight:tabGroup===g.id?700:500, whiteSpace:"nowrap", transition:"all .15s" }}>
             {g.label}
           </button>
         ))}
