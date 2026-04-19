@@ -7810,7 +7810,7 @@ function MeetingPlannerSection({ restaurantId, employees, roles, areas, meetingP
                     <button onClick={()=>handleRestorePauta(p.id)} style={{padding:"2px 8px",borderRadius:4,border:"1px solid #3b82f633",background:"transparent",color:"#3b82f6",cursor:"pointer",fontSize:10}}>↩ Restaurar</button>
                     {isOwner && <button onClick={()=>{
                       if(!window.confirm("Excluir definitivamente esta pauta? Esta ação não pode ser desfeita.")) return;
-                      onUpdate("allPautas", (data?.allPautas??[]).filter(x => x.id !== p.id));
+                      onUpdate("meetingAgendas", (data?.meetingAgendas??[]).filter(x => x.id !== p.id));
                     }} style={{padding:"2px 8px",borderRadius:4,border:"1px solid #ef444433",background:"transparent",color:"#ef4444",cursor:"pointer",fontSize:10}}>✕ Excluir</button>}
                   </div>
                 );
