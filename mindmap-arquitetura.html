@@ -1,0 +1,882 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AppTip — Mapa da Arquitetura</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: 'Segoe UI', system-ui, -apple-system, sans-serif; background: #0f172a; color: #e2e8f0; overflow-x: hidden; }
+
+  .header { background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%); padding: 24px 32px; border-bottom: 1px solid #334155; display: flex; align-items: center; gap: 16px; position: sticky; top: 0; z-index: 100; }
+  .header h1 { font-size: 22px; font-weight: 700; color: #f8fafc; }
+  .header .subtitle { font-size: 13px; color: #94a3b8; }
+  .header .version { background: #6366f1; color: #fff; padding: 3px 10px; border-radius: 12px; font-size: 11px; font-weight: 600; }
+
+  .nav { display: flex; gap: 6px; padding: 16px 32px; background: #1e293b; border-bottom: 1px solid #334155; flex-wrap: wrap; }
+  .nav button { background: #334155; color: #94a3b8; border: none; padding: 8px 18px; border-radius: 8px; cursor: pointer; font-size: 13px; font-weight: 500; transition: all 0.2s; }
+  .nav button:hover { background: #475569; color: #e2e8f0; }
+  .nav button.active { background: #6366f1; color: #fff; }
+
+  .container { max-width: 1400px; margin: 0 auto; padding: 24px 32px; }
+
+  /* Mind Map Tree */
+  .map-section { display: none; }
+  .map-section.active { display: block; }
+
+  .tree { position: relative; padding-left: 0; }
+  .tree-root { display: flex; flex-direction: column; gap: 12px; }
+
+  .node { position: relative; }
+  .node-header { display: flex; align-items: center; gap: 10px; padding: 10px 16px; border-radius: 10px; cursor: pointer; transition: all 0.2s; user-select: none; }
+  .node-header:hover { filter: brightness(1.15); }
+  .node-header .icon { font-size: 20px; flex-shrink: 0; }
+  .node-header .label { font-weight: 600; font-size: 14px; }
+  .node-header .desc { font-size: 12px; color: #94a3b8; margin-left: auto; }
+  .node-header .toggle { font-size: 11px; color: #64748b; transition: transform 0.2s; margin-left: 8px; }
+  .node-header .toggle.open { transform: rotate(90deg); }
+
+  .node-children { margin-left: 28px; padding-left: 20px; border-left: 2px solid #334155; display: none; margin-top: 4px; }
+  .node-children.open { display: block; }
+
+  .leaf { padding: 6px 16px; margin: 3px 0; border-radius: 6px; display: flex; align-items: flex-start; gap: 10px; font-size: 13px; line-height: 1.5; }
+  .leaf .leaf-icon { flex-shrink: 0; }
+  .leaf .leaf-label { font-weight: 500; color: #e2e8f0; }
+  .leaf .leaf-desc { color: #94a3b8; font-size: 12px; }
+
+  /* Color coding */
+  .c-portal { background: #1e1b4b; border: 1px solid #4338ca55; }
+  .c-data { background: #172554; border: 1px solid #1d4ed855; }
+  .c-comp { background: #14532d; border: 1px solid #16a34a55; }
+  .c-feature { background: #431407; border: 1px solid #ea580c55; }
+  .c-infra { background: #1c1917; border: 1px solid #78716c55; }
+  .c-tab { background: #1e293b; border: 1px solid #47556955; }
+
+  /* Data table */
+  .data-table { width: 100%; border-collapse: separate; border-spacing: 0; margin: 16px 0; border-radius: 10px; overflow: hidden; }
+  .data-table th { background: #1e293b; padding: 10px 14px; font-size: 12px; font-weight: 600; text-align: left; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.5px; }
+  .data-table td { padding: 8px 14px; font-size: 13px; border-top: 1px solid #1e293b; }
+  .data-table tr:nth-child(even) td { background: #0f172a; }
+  .data-table tr:nth-child(odd) td { background: #1e293b22; }
+  .data-table code { background: #334155; padding: 1px 6px; border-radius: 4px; font-size: 12px; color: #a5b4fc; font-family: 'JetBrains Mono', 'Fira Code', monospace; }
+
+  /* Cards grid */
+  .cards-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 16px; margin: 16px 0; }
+  .card { background: #1e293b; border: 1px solid #334155; border-radius: 12px; padding: 20px; transition: all 0.2s; }
+  .card:hover { border-color: #6366f1; transform: translateY(-2px); }
+  .card h3 { font-size: 15px; font-weight: 600; margin-bottom: 8px; display: flex; align-items: center; gap: 8px; }
+  .card p { font-size: 13px; color: #94a3b8; line-height: 1.6; }
+  .card .tag { display: inline-block; background: #6366f122; color: #a5b4fc; padding: 2px 8px; border-radius: 6px; font-size: 11px; font-weight: 600; margin-top: 8px; }
+
+  /* Flow diagram */
+  .flow { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 16px 0; padding: 16px; background: #1e293b; border-radius: 10px; border: 1px solid #334155; }
+  .flow-box { background: #334155; padding: 8px 16px; border-radius: 8px; font-size: 13px; font-weight: 500; white-space: nowrap; }
+  .flow-arrow { color: #6366f1; font-size: 18px; }
+  .flow-box.highlight { background: #4338ca; color: #fff; }
+
+  .section-title { font-size: 18px; font-weight: 700; margin: 24px 0 12px; color: #f8fafc; display: flex; align-items: center; gap: 10px; }
+  .section-desc { font-size: 14px; color: #94a3b8; margin-bottom: 16px; line-height: 1.6; }
+
+  /* Access matrix */
+  .matrix { width: 100%; border-collapse: separate; border-spacing: 0; margin: 16px 0; border-radius: 10px; overflow: hidden; font-size: 12px; }
+  .matrix th { background: #1e293b; padding: 8px 10px; font-weight: 600; color: #94a3b8; text-align: center; }
+  .matrix th:first-child { text-align: left; }
+  .matrix td { padding: 6px 10px; border-top: 1px solid #1e293b; text-align: center; }
+  .matrix tr:nth-child(even) td { background: #0f172a; }
+  .matrix td:first-child { text-align: left; font-weight: 500; }
+  .access-full { color: #22c55e; }
+  .access-partial { color: #f59e0b; }
+  .access-read { color: #3b82f6; }
+  .access-no { color: #64748b; }
+
+  /* Legend */
+  .legend { display: flex; gap: 20px; margin: 12px 0; flex-wrap: wrap; }
+  .legend-item { display: flex; align-items: center; gap: 6px; font-size: 12px; color: #94a3b8; }
+  .legend-dot { width: 10px; height: 10px; border-radius: 50%; }
+
+  /* Search */
+  .search-box { background: #1e293b; border: 1px solid #334155; border-radius: 8px; padding: 8px 14px; color: #e2e8f0; font-size: 13px; width: 260px; outline: none; }
+  .search-box:focus { border-color: #6366f1; }
+  .search-box::placeholder { color: #475569; }
+
+  @media (max-width: 768px) {
+    .header { padding: 16px; }
+    .nav { padding: 12px 16px; }
+    .container { padding: 16px; }
+    .cards-grid { grid-template-columns: 1fr; }
+    .header h1 { font-size: 18px; }
+  }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <div>
+    <h1>🍽️ AppTip — Mapa da Arquitetura</h1>
+    <div class="subtitle">Visão completa do sistema para planejamento de novas funcionalidades</div>
+  </div>
+  <span class="version">v5.45.0</span>
+</div>
+
+<div class="nav" id="mainNav">
+  <button class="active" onclick="showSection('overview')">🏠 Visão Geral</button>
+  <button onclick="showSection('portals')">🚪 Portais</button>
+  <button onclick="showSection('data')">🗄️ Dados</button>
+  <button onclick="showSection('tabs')">📑 Abas</button>
+  <button onclick="showSection('access')">🔐 Permissões</button>
+  <button onclick="showSection('components')">🧩 Componentes</button>
+  <button onclick="showSection('flows')">🔄 Fluxos</button>
+  <button onclick="showSection('planning')">🗺️ Planejamento</button>
+</div>
+
+<div class="container">
+
+<!-- ============ VISÃO GERAL ============ -->
+<div class="map-section active" id="sec-overview">
+  <div class="section-title">🏗️ Arquitetura do Sistema</div>
+  <div class="section-desc">O AppTip é um app React de página única (~17.000 linhas) com Firebase Firestore como banco de dados. Todos os dados são carregados ao iniciar e gerenciados por uma função central <code>handleUpdate(campo, valor)</code>.</div>
+
+  <div class="flow">
+    <div class="flow-box">👤 Usuário</div>
+    <span class="flow-arrow">→</span>
+    <div class="flow-box">🔐 Login (CPF/Código)</div>
+    <span class="flow-arrow">→</span>
+    <div class="flow-box highlight">React App (App.js)</div>
+    <span class="flow-arrow">↔</span>
+    <div class="flow-box">🔥 Firebase Firestore</div>
+  </div>
+
+  <div class="cards-grid">
+    <div class="card">
+      <h3>📱 Frontend</h3>
+      <p>React 18 com hooks (sem Redux). Arquivo único <code>App.js</code>. CSS inline com variáveis para tema claro/escuro. Design responsivo com hook <code>useMobile()</code>.</p>
+      <span class="tag">React + Hooks</span>
+    </div>
+    <div class="card">
+      <h3>🔥 Banco de Dados</h3>
+      <p>Firebase Firestore, coleção única <code>appdata</code>. Cada documento tem formato <code>{ value: dados }</code>. Cache local via IndexedDB + localStorage.</p>
+      <span class="tag">Firestore</span>
+    </div>
+    <div class="card">
+      <h3>🤖 Inteligência Artificial</h3>
+      <p>API Groq com modelo Llama 3.3-70B para geração de FAQ, horários, e importação de ponto. Hook compartilhado <code>useAiGenerate()</code>.</p>
+      <span class="tag">Groq / Llama</span>
+    </div>
+    <div class="card">
+      <h3>🔒 Segurança</h3>
+      <p>Firebase App Check (reCAPTCHA v3). Login por CPF + PIN de 4 dígitos. Rate limiting: 5 tentativas → bloqueio de 30s. Persistência offline somente leitura (master).</p>
+      <span class="tag">App Check + PIN</span>
+    </div>
+    <div class="card">
+      <h3>💾 Salvamento</h3>
+      <p>Função central <code>handleUpdate(campo, valor)</code> atualiza o estado local E salva no Firebase. Bloqueio de escrita quando offline (somente master).</p>
+      <span class="tag">handleUpdate</span>
+    </div>
+    <div class="card">
+      <h3>📊 Versionamento</h3>
+      <p>Histórico de alterações em gorjetas e escalas (últimas 30 versões). Snapshots automáticos com debounce de 30s. Restauração com 1 clique.</p>
+      <span class="tag">30 versões</span>
+    </div>
+  </div>
+
+  <div class="section-title">👥 Perfis de Usuário</div>
+  <div class="cards-grid">
+    <div class="card" style="border-color: #a855f7">
+      <h3>⭐ Gestor AppTip (Owner)</h3>
+      <p>Administrador do SaaS. Acesso total a todos os restaurantes. Pode ter flag <code>isMaster</code> para operações sensíveis (lixeira definitiva, etc).</p>
+      <span class="tag">view = "super"</span>
+    </div>
+    <div class="card" style="border-color: #3b82f6">
+      <h3>👔 Gestor Administrativo</h3>
+      <p>Gerente do restaurante com acesso completo. Configurado com <code>profile:"custom"</code>. Pode ter flag <code>isDP</code> para acesso a mensagens e sub-gestores.</p>
+      <span class="tag">view = "manager"</span>
+    </div>
+    <div class="card" style="border-color: #22c55e">
+      <h3>🎯 Líder Operacional</h3>
+      <p>Líder restrito a áreas específicas (<code>areas[]</code>). Vê apenas: Dashboard, Escala, Horários, Equipe e Reuniões das suas áreas.</p>
+      <span class="tag">profile = "lider"</span>
+    </div>
+    <div class="card" style="border-color: #f59e0b">
+      <h3>👷 Empregado</h3>
+      <p>Acesso ao próprio portal: escala, gorjetas (se habilitado), trilha de desenvolvimento, comunicados, FAQ e Fale com DP.</p>
+      <span class="tag">view = "employee"</span>
+    </div>
+  </div>
+</div>
+
+<!-- ============ PORTAIS ============ -->
+<div class="map-section" id="sec-portals">
+  <div class="section-title">🚪 Portais do Sistema</div>
+  <div class="section-desc">Cada tipo de usuário entra num portal diferente. O OwnerPortal e o ManagerPortal delegam ao RestaurantPanel (o painel operacional compartilhado).</div>
+
+  <div class="tree">
+    <div class="tree-root">
+      <div class="node">
+        <div class="node-header c-infra" onclick="toggleNode(this)">
+          <span class="icon">🏠</span>
+          <span class="label">App()</span>
+          <span class="desc">Componente raiz — gerencia login, tema, carregamento de dados</span>
+          <span class="toggle">▶</span>
+        </div>
+        <div class="node-children">
+          <div class="node">
+            <div class="node-header c-portal" onclick="toggleNode(this)">
+              <span class="icon">⭐</span>
+              <span class="label">OwnerPortal</span>
+              <span class="desc">Gestor AppTip — multi-restaurante + financeiro</span>
+              <span class="toggle">▶</span>
+            </div>
+            <div class="node-children">
+              <div class="leaf c-tab"><span class="leaf-icon">💰</span><div><span class="leaf-label">Financeiro Geral</span><br><span class="leaf-desc">Visão de todos os restaurantes, cobranças, planos</span></div></div>
+              <div class="leaf c-tab"><span class="leaf-icon">👔</span><div><span class="leaf-label">Gestores</span><br><span class="leaf-desc">CRUD de gestores de todos os restaurantes</span></div></div>
+              <div class="leaf c-tab"><span class="leaf-icon">⭐</span><div><span class="leaf-label">Admins AppTip</span><br><span class="leaf-desc">Gerenciar contas de administradores (somente master)</span></div></div>
+              <div class="leaf c-tab"><span class="leaf-icon">📬</span><div><span class="leaf-label">Caixa</span><br><span class="leaf-desc">Notificações e mensagens não lidas</span></div></div>
+              <div class="leaf c-tab"><span class="leaf-icon">🗑️</span><div><span class="leaf-label">Lixeira</span><br><span class="leaf-desc">Itens excluídos (retenção 30 dias, exclusão definitiva master)</span></div></div>
+              <div class="leaf c-tab"><span class="leaf-icon">📋</span><div><span class="leaf-label">Versões</span><br><span class="leaf-desc">Changelog do sistema</span></div></div>
+              <div class="node">
+                <div class="node-header c-comp" onclick="toggleNode(this)">
+                  <span class="icon">🍽️</span>
+                  <span class="label">Restaurante selecionado → RestaurantPanel</span>
+                  <span class="desc">isOwner=true</span>
+                  <span class="toggle">▶</span>
+                </div>
+                <div class="node-children">
+                  <div class="leaf c-tab"><span class="leaf-icon">📊</span><div><span class="leaf-label">Aba Operacional</span><br><span class="leaf-desc">Todas as abas de operação do restaurante</span></div></div>
+                  <div class="leaf c-tab"><span class="leaf-icon">👔</span><div><span class="leaf-label">Gestores do restaurante</span><br><span class="leaf-desc">Gestores associados a este restaurante</span></div></div>
+                  <div class="leaf c-tab"><span class="leaf-icon">💰</span><div><span class="leaf-label">Financeiro</span><br><span class="leaf-desc">Cobrança e plano deste restaurante</span></div></div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="node">
+            <div class="node-header c-portal" onclick="toggleNode(this)">
+              <span class="icon">👔</span>
+              <span class="label">ManagerPortal</span>
+              <span class="desc">Gestor do restaurante — delega ao RestaurantPanel</span>
+              <span class="toggle">▶</span>
+            </div>
+            <div class="node-children">
+              <div class="leaf c-tab"><span class="leaf-icon">🍽️</span><div><span class="leaf-label">Seletor de restaurante</span><br><span class="leaf-desc">Se gerencia mais de 1, escolhe qual acessar</span></div></div>
+              <div class="node">
+                <div class="node-header c-comp" onclick="toggleNode(this)">
+                  <span class="icon">📊</span>
+                  <span class="label">RestaurantPanel</span>
+                  <span class="desc">isOwner=false — painel operacional</span>
+                  <span class="toggle">▶</span>
+                </div>
+                <div class="node-children">
+                  <div class="leaf c-tab"><span class="leaf-icon">📈</span><div><span class="leaf-label">Ver seção "Abas" para detalhes completos</span></div></div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="node">
+            <div class="node-header c-portal" onclick="toggleNode(this)">
+              <span class="icon">👷</span>
+              <span class="label">EmployeePortal</span>
+              <span class="desc">Portal do empregado — navegação por barra inferior</span>
+              <span class="toggle">▶</span>
+            </div>
+            <div class="node-children">
+              <div class="leaf c-tab"><span class="leaf-icon">📢</span><div><span class="leaf-label">Avisos (Comunicados)</span><br><span class="leaf-desc">Obrigatório ler antes de acessar outras abas</span></div></div>
+              <div class="leaf c-tab"><span class="leaf-icon">📅</span><div><span class="leaf-label">Escala</span><br><span class="leaf-desc">Calendário mensal com status de cada dia</span></div></div>
+              <div class="leaf c-tab"><span class="leaf-icon">💸</span><div><span class="leaf-label">Gorjeta (Extrato)</span><br><span class="leaf-desc">Somente se showTipsToEmployee + semanas aprovadas</span></div></div>
+              <div class="leaf c-tab"><span class="leaf-icon">📈</span><div><span class="leaf-label">Trilha</span><br><span class="leaf-desc">Jornada, metas, badges, feedback, objetivos</span></div></div>
+              <div class="leaf c-tab"><span class="leaf-icon">🕐</span><div><span class="leaf-label">Horários</span><br><span class="leaf-desc">Horário contratado (se habilitado)</span></div></div>
+              <div class="leaf c-tab"><span class="leaf-icon">❓</span><div><span class="leaf-label">FAQ</span><br><span class="leaf-desc">Perguntas frequentes (se habilitado)</span></div></div>
+              <div class="leaf c-tab"><span class="leaf-icon">💬</span><div><span class="leaf-label">Fale com DP</span><br><span class="leaf-desc">Mensagens diretas ou anônimas (se habilitado)</span></div></div>
+            </div>
+          </div>
+
+          <div class="node">
+            <div class="node-header c-infra" onclick="toggleNode(this)">
+              <span class="icon">📄</span>
+              <span class="label">Páginas públicas</span>
+              <span class="desc">Acesso sem login</span>
+              <span class="toggle">▶</span>
+            </div>
+            <div class="node-children">
+              <div class="leaf c-tab"><span class="leaf-icon">🏠</span><div><span class="leaf-label">Home</span><br><span class="leaf-desc">Landing page de marketing</span></div></div>
+              <div class="leaf c-tab"><span class="leaf-icon">🧾</span><div><span class="leaf-label">FaturaPage</span><br><span class="leaf-desc">Fatura pública via /fatura/:id</span></div></div>
+              <div class="leaf c-tab"><span class="leaf-icon">📖</span><div><span class="leaf-label">GuiaGestor</span><br><span class="leaf-desc">Guia de ajuda para gestores</span></div></div>
+              <div class="leaf c-tab"><span class="leaf-icon">⚙️</span><div><span class="leaf-label">FirstSetup</span><br><span class="leaf-desc">Setup inicial (protegido por código de convite)</span></div></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ============ DADOS ============ -->
+<div class="map-section" id="sec-data">
+  <div class="section-title">🗄️ Modelo de Dados (Firebase)</div>
+  <div class="section-desc">Todos os dados ficam em documentos na coleção <code>appdata</code> do Firestore. Cada documento tem chave <code>v4:nome</code> e valor <code>{ value: ... }</code>. Os dados são carregados em paralelo no startup e cacheados no localStorage.</div>
+
+  <div class="section-title" style="font-size:15px">📋 Dados Principais</div>
+  <table class="data-table">
+    <tr><th>Campo</th><th>Chave Firebase</th><th>Tipo</th><th>O que guarda</th></tr>
+    <tr><td><code>owners</code></td><td><code>v4:owners</code></td><td>Array</td><td>Contas de administradores AppTip (nome, CPF, PIN, isMaster)</td></tr>
+    <tr><td><code>managers</code></td><td><code>v4:managers</code></td><td>Array</td><td>Gestores de restaurante (nome, CPF, PIN, permissões, perfil, áreas)</td></tr>
+    <tr><td><code>restaurants</code></td><td><code>v4:restaurants</code></td><td>Array</td><td>Restaurantes cadastrados (nome, código, CNPJ, plano, configurações)</td></tr>
+    <tr><td><code>employees</code></td><td><code>v4:employees</code></td><td>Array</td><td>Todos os empregados (nome, CPF, cargo, admissão, status)</td></tr>
+    <tr><td><code>roles</code></td><td><code>v4:roles</code></td><td>Array</td><td>Cargos (nome, área, pontos para divisão de gorjeta)</td></tr>
+  </table>
+
+  <div class="section-title" style="font-size:15px">💰 Gorjetas & Financeiro</div>
+  <table class="data-table">
+    <tr><th>Campo</th><th>Chave Firebase</th><th>Tipo</th><th>O que guarda</th></tr>
+    <tr><td><code>tips</code></td><td><code>v4:tips</code></td><td>Array</td><td>Registros individuais de gorjeta por dia</td></tr>
+    <tr><td><code>splits</code></td><td><code>v4:splits</code></td><td>Objeto</td><td>Percentuais de divisão por área (Bar, Cozinha, Salão, Limpeza)</td></tr>
+    <tr><td><code>tipVersions</code></td><td><code>v4:tipVersions</code></td><td>Objeto</td><td>Histórico de versões das gorjetas (30 snapshots)</td></tr>
+    <tr><td><code>tipApprovals</code></td><td><code>v4:tipApprovals</code></td><td>Objeto</td><td>Aprovação semanal de gorjetas pelo gestor</td></tr>
+    <tr><td><code>noTipDays</code></td><td><code>v4:noTipDays</code></td><td>Objeto</td><td>Dias sem gorjeta (restaurante fechado)</td></tr>
+  </table>
+
+  <div class="section-title" style="font-size:15px">📅 Escala & Horários</div>
+  <table class="data-table">
+    <tr><th>Campo</th><th>Chave Firebase</th><th>Tipo</th><th>O que guarda</th></tr>
+    <tr><td><code>schedules</code></td><td><code>v4:schedules</code></td><td>Objeto</td><td>Escalas mensais {restaurante → mês → empregado → dia → status}</td></tr>
+    <tr><td><code>workSchedules</code></td><td><code>v4:workSchedules</code></td><td>Objeto</td><td>Horário contratado de cada empregado</td></tr>
+    <tr><td><code>schedTemplates</code></td><td><code>v4:schedTemplates</code></td><td>Objeto</td><td>Templates de escala reutilizáveis</td></tr>
+    <tr><td><code>schedDrafts</code></td><td><code>v4:schedDrafts</code></td><td>Objeto</td><td>Rascunhos de escala em andamento</td></tr>
+    <tr><td><code>scheduleVersions</code></td><td><code>v4:scheduleVersions</code></td><td>Objeto</td><td>Histórico de alterações na escala (30 snapshots)</td></tr>
+    <tr><td><code>scheduleStatus</code></td><td><code>v4:scheduleStatus</code></td><td>Objeto</td><td>Status do mês (aberto/revisão/fechado) + importação de ponto</td></tr>
+    <tr><td><code>scheduleAdjustments</code></td><td><code>v4:scheduleAdjustments</code></td><td>Objeto</td><td>Ajustes pós-fechamento na escala</td></tr>
+    <tr><td><code>schedulePrevista</code></td><td><code>v4:schedulePrevista</code></td><td>Objeto</td><td>Snapshot congelado da escala prevista</td></tr>
+    <tr><td><code>delays</code></td><td><code>v4:delays</code></td><td>Objeto</td><td>Atrasos em minutos {restaurante → mês → empregado → dia}</td></tr>
+  </table>
+
+  <div class="section-title" style="font-size:15px">🚌 Vale Transporte</div>
+  <table class="data-table">
+    <tr><th>Campo</th><th>Chave Firebase</th><th>Tipo</th><th>O que guarda</th></tr>
+    <tr><td><code>vtConfig</code></td><td><code>v4:vtConfig</code></td><td>Objeto</td><td>Taxa diária de VT por empregado</td></tr>
+    <tr><td><code>vtMonthly</code></td><td><code>v4:vtMonthly</code></td><td>Objeto</td><td>Ajustes manuais mensais de VT</td></tr>
+    <tr><td><code>vtPayments</code></td><td><code>v4:vtPayments</code></td><td>Objeto</td><td>Pagamentos de VT (data, snapshot, total)</td></tr>
+  </table>
+
+  <div class="section-title" style="font-size:15px">👥 Pessoas & Desenvolvimento</div>
+  <table class="data-table">
+    <tr><th>Campo</th><th>Chave Firebase</th><th>Tipo</th><th>O que guarda</th></tr>
+    <tr><td><code>incidents</code></td><td><code>v4:incidents</code></td><td>Array</td><td>Ocorrências (positivas/negativas) de empregados</td></tr>
+    <tr><td><code>feedbacks</code></td><td><code>v4:feedbacks</code></td><td>Array</td><td>Avaliações de desempenho trimestrais</td></tr>
+    <tr><td><code>employeeGoals</code></td><td><code>v4:employeeGoals</code></td><td>Objeto</td><td>Objetivos individuais de desenvolvimento</td></tr>
+    <tr><td><code>devChecklists</code></td><td><code>v4:devChecklists</code></td><td>Objeto</td><td>Checklists de desenvolvimento por cargo</td></tr>
+  </table>
+
+  <div class="section-title" style="font-size:15px">🤝 Reuniões</div>
+  <table class="data-table">
+    <tr><th>Campo</th><th>Chave Firebase</th><th>Tipo</th><th>O que guarda</th></tr>
+    <tr><td><code>meetingPlans</code></td><td><code>v4:meetingPlans</code></td><td>Array</td><td>Planejamento de reuniões (tipo, participantes, data)</td></tr>
+    <tr><td><code>meetingAgendas</code></td><td><code>v4:meetingAgendas</code></td><td>Array</td><td>Pautas de reunião com checklist de itens</td></tr>
+    <tr><td><code>meetingIdeas</code></td><td><code>v4:meetingIdeas</code></td><td>Array</td><td>Banco de ideias para pautas</td></tr>
+    <tr><td><code>meetingActions</code></td><td><code>v4:meetingActions</code></td><td>Array</td><td>Ações pós-reunião (responsável, prazo, status)</td></tr>
+    <tr><td><code>meetingOccurrences</code></td><td><code>v4:meetingOccurrences</code></td><td>Array</td><td>Ocorrências operacionais para pautas</td></tr>
+    <tr><td><code>meetingPendencias</code></td><td><code>v4:meetingPendencias</code></td><td>Array</td><td>Pendências de reuniões anteriores</td></tr>
+  </table>
+
+  <div class="section-title" style="font-size:15px">📢 Comunicação</div>
+  <table class="data-table">
+    <tr><th>Campo</th><th>Chave Firebase</th><th>Tipo</th><th>O que guarda</th></tr>
+    <tr><td><code>communications</code></td><td><code>v4:communications</code></td><td>Array</td><td>Comunicados/avisos para equipe</td></tr>
+    <tr><td><code>commAcks</code></td><td><code>v4:commAcks</code></td><td>Objeto</td><td>Ciências de leitura dos comunicados</td></tr>
+    <tr><td><code>faq</code></td><td><code>v4:faq</code></td><td>Objeto</td><td>Perguntas frequentes por restaurante</td></tr>
+    <tr><td><code>dpMessages</code></td><td><code>v4:dpMessages</code></td><td>Array</td><td>Mensagens empregado ↔ DP (diretas ou anônimas)</td></tr>
+    <tr><td><code>notifications</code></td><td><code>v4:notifications</code></td><td>Array</td><td>Notificações do sistema</td></tr>
+  </table>
+
+  <div class="section-title" style="font-size:15px">🗑️ Sistema</div>
+  <table class="data-table">
+    <tr><th>Campo</th><th>Chave Firebase</th><th>Tipo</th><th>O que guarda</th></tr>
+    <tr><td><code>trash</code></td><td><code>v4:trash</code></td><td>Objeto</td><td>Lixeira geral (restaurantes, gestores, empregados) — 30 dias</td></tr>
+  </table>
+</div>
+
+<!-- ============ ABAS ============ -->
+<div class="map-section" id="sec-tabs">
+  <div class="section-title">📑 Abas do RestaurantPanel</div>
+  <div class="section-desc">O RestaurantPanel é o coração operacional do sistema. Usado tanto pelo Owner quanto pelo Manager. As abas são organizadas em 4 grupos.</div>
+
+  <div class="tree">
+    <div class="tree-root">
+      <div class="node">
+        <div class="node-header c-feature" onclick="toggleNode(this)">
+          <span class="icon">💰</span>
+          <span class="label">Operação</span>
+          <span class="desc">Financeiro do dia-a-dia</span>
+          <span class="toggle open">▶</span>
+        </div>
+        <div class="node-children open">
+          <div class="leaf c-tab"><span class="leaf-icon">📊</span><div><span class="leaf-label">Dashboard</span><br><span class="leaf-desc">Resumo mensal: equipe ativa, gorjetas, comunicados pendentes, feedbacks próximos</span></div></div>
+          <div class="leaf c-tab"><span class="leaf-icon">💰</span><div><span class="leaf-label">Gorjetas</span><br><span class="leaf-desc">Grade diária de gorjetas, cálculo automático por área e pontos, aprovação semanal, dias sem gorjeta</span></div></div>
+          <div class="leaf c-tab"><span class="leaf-icon">🚌</span><div><span class="leaf-label">Vale Transporte</span><br><span class="leaf-desc">Cálculo de VT por empregado, marcar como pago com snapshot, ajustes mensais</span></div></div>
+        </div>
+      </div>
+
+      <div class="node">
+        <div class="node-header c-comp" onclick="toggleNode(this)">
+          <span class="icon">👥</span>
+          <span class="label">Pessoas e Planejamento</span>
+          <span class="desc">Equipe, escala, reuniões</span>
+          <span class="toggle open">▶</span>
+        </div>
+        <div class="node-children open">
+          <div class="node">
+            <div class="node-header c-tab" onclick="toggleNode(this)">
+              <span class="icon">👥</span>
+              <span class="label">Equipe (EmployeeSpreadsheet)</span>
+              <span class="desc">O maior componente do sistema</span>
+              <span class="toggle">▶</span>
+            </div>
+            <div class="node-children">
+              <div class="leaf c-tab"><span class="leaf-icon">📋</span><div><span class="leaf-label">Lista de empregados</span><br><span class="leaf-desc">Cards compactos, filtro por status, busca</span></div></div>
+              <div class="leaf c-tab"><span class="leaf-icon">📝</span><div><span class="leaf-label">Detalhe → Cadastro</span><br><span class="leaf-desc">Dados pessoais, cargo, promoção, demissão, contatos</span></div></div>
+              <div class="leaf c-tab"><span class="leaf-icon">⚡</span><div><span class="leaf-label">Detalhe → Ações</span><br><span class="leaf-desc">Ocorrências, feedbacks, reuniões, objetivos</span></div></div>
+              <div class="leaf c-tab"><span class="leaf-icon">📈</span><div><span class="leaf-label">Detalhe → Trilha</span><br><span class="leaf-desc">Timeline jornada, badges, metas, relatório de desligamento</span></div></div>
+            </div>
+          </div>
+          <div class="leaf c-tab"><span class="leaf-icon">🏷️</span><div><span class="leaf-label">Cargos (RoleSpreadsheet)</span><br><span class="leaf-desc">CRUD de cargos com área, pontos, geração IA</span></div></div>
+          <div class="leaf c-tab"><span class="leaf-icon">🕐</span><div><span class="leaf-label">Horários (WorkScheduleManagerTab)</span><br><span class="leaf-desc">Horário contratado, geração IA a partir de texto livre</span></div></div>
+          <div class="leaf c-tab"><span class="leaf-icon">📅</span><div><span class="leaf-label">Escala</span><br><span class="leaf-desc">Grade mensal, templates, rascunhos, importação de ponto, fechamento de mês, atrasos</span></div></div>
+          <div class="node">
+            <div class="node-header c-tab" onclick="toggleNode(this)">
+              <span class="icon">🤝</span>
+              <span class="label">Reuniões (MeetingPlannerSection)</span>
+              <span class="desc">Sistema completo de reuniões</span>
+              <span class="toggle">▶</span>
+            </div>
+            <div class="node-children">
+              <div class="leaf c-tab"><span class="leaf-icon">📝</span><div><span class="leaf-label">Planejamento</span><br><span class="leaf-desc">Planejar reuniões (liderança, alinhamento, avaliação), definir participantes</span></div></div>
+              <div class="leaf c-tab"><span class="leaf-icon">📋</span><div><span class="leaf-label">Pautas</span><br><span class="leaf-desc">Templates (semanal, quinzenal), checklist de itens, ocorrências auto-puxadas</span></div></div>
+              <div class="leaf c-tab"><span class="leaf-icon">💡</span><div><span class="leaf-label">Ideias</span><br><span class="leaf-desc">Banco de ideias com prioridade e status</span></div></div>
+              <div class="leaf c-tab"><span class="leaf-icon">🔔</span><div><span class="leaf-label">Ocorrências</span><br><span class="leaf-desc">Ocorrências operacionais que entram nas pautas</span></div></div>
+              <div class="leaf c-tab"><span class="leaf-icon">⚡</span><div><span class="leaf-label">Ações</span><br><span class="leaf-desc">Ações pós-reunião com responsável e prazo</span></div></div>
+              <div class="leaf c-tab"><span class="leaf-icon">⏳</span><div><span class="leaf-label">Pendências</span><br><span class="leaf-desc">Itens pendentes de reuniões anteriores</span></div></div>
+              <div class="leaf c-tab"><span class="leaf-icon">🎯</span><div><span class="leaf-label">Reunião ao vivo</span><br><span class="leaf-desc">Execução da pauta em tempo real, resolver inline</span></div></div>
+              <div class="leaf c-tab"><span class="leaf-icon">📄</span><div><span class="leaf-label">Relatório PDF</span><br><span class="leaf-desc">Exportar ata da reunião em PDF</span></div></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="node">
+        <div class="node-header c-data" onclick="toggleNode(this)">
+          <span class="icon">📢</span>
+          <span class="label">Comunicação</span>
+          <span class="desc">Avisos, FAQ, DP, notificações</span>
+          <span class="toggle">▶</span>
+        </div>
+        <div class="node-children">
+          <div class="leaf c-tab"><span class="leaf-icon">📢</span><div><span class="leaf-label">Comunicados</span><br><span class="leaf-desc">Criar avisos, segmentar por área/individual, acompanhar ciências</span></div></div>
+          <div class="leaf c-tab"><span class="leaf-icon">❓</span><div><span class="leaf-label">FAQ</span><br><span class="leaf-desc">Perguntas frequentes com geração IA, regras de gorjeta</span></div></div>
+          <div class="leaf c-tab"><span class="leaf-icon">💬</span><div><span class="leaf-label">Fale com DP</span><br><span class="leaf-desc">Mensagens dos empregados (diretas ou anônimas)</span></div></div>
+          <div class="leaf c-tab"><span class="leaf-icon">📬</span><div><span class="leaf-label">Caixa (Notificações)</span><br><span class="leaf-desc">Somente gestor DP — centraliza mensagens e alertas</span></div></div>
+        </div>
+      </div>
+
+      <div class="node">
+        <div class="node-header c-infra" onclick="toggleNode(this)">
+          <span class="icon">⚙️</span>
+          <span class="label">Configuração</span>
+          <span class="desc">Settings do restaurante</span>
+          <span class="toggle">▶</span>
+        </div>
+        <div class="node-children">
+          <div class="leaf c-tab"><span class="leaf-icon">⚙️</span><div><span class="leaf-label">Configurações</span><br><span class="leaf-desc">Taxa, modo de divisão, visibilidade de abas, privacidade</span></div></div>
+          <div class="leaf c-tab"><span class="leaf-icon">👔</span><div><span class="leaf-label">Gestores (sub-gerentes)</span><br><span class="leaf-desc">Somente DP — criar e gerenciar sub-gestores</span></div></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ============ PERMISSÕES ============ -->
+<div class="map-section" id="sec-access">
+  <div class="section-title">🔐 Matriz de Permissões</div>
+  <div class="section-desc">Quem pode ver e editar cada tipo de dado no sistema.</div>
+
+  <div class="legend">
+    <div class="legend-item"><div class="legend-dot" style="background:#22c55e"></div> Acesso total</div>
+    <div class="legend-item"><div class="legend-dot" style="background:#f59e0b"></div> Parcial/condicional</div>
+    <div class="legend-item"><div class="legend-dot" style="background:#3b82f6"></div> Somente leitura</div>
+    <div class="legend-item"><div class="legend-dot" style="background:#64748b"></div> Sem acesso</div>
+  </div>
+
+  <table class="matrix">
+    <tr>
+      <th>Funcionalidade</th>
+      <th>⭐ AppTip Master</th>
+      <th>👔 Gestor Adm.</th>
+      <th>🎯 Líder Op.</th>
+      <th>👷 Empregado</th>
+    </tr>
+    <tr>
+      <td>Gorjetas</td>
+      <td class="access-full">✅ Total</td>
+      <td class="access-partial">⚡ Se perms.tips</td>
+      <td class="access-no">❌</td>
+      <td class="access-read">👁️ Se habilitado</td>
+    </tr>
+    <tr>
+      <td>Escala</td>
+      <td class="access-full">✅ Total</td>
+      <td class="access-partial">⚡ Se perms.schedule</td>
+      <td class="access-partial">⚡ Só suas áreas</td>
+      <td class="access-read">👁️ Própria</td>
+    </tr>
+    <tr>
+      <td>Equipe (CRUD)</td>
+      <td class="access-full">✅ Total</td>
+      <td class="access-full">✅ Total</td>
+      <td class="access-read">👁️ Suas áreas</td>
+      <td class="access-no">❌</td>
+    </tr>
+    <tr>
+      <td>Cargos</td>
+      <td class="access-full">✅ Total</td>
+      <td class="access-partial">⚡ Se autorizado</td>
+      <td class="access-no">❌</td>
+      <td class="access-no">❌</td>
+    </tr>
+    <tr>
+      <td>Vale Transporte</td>
+      <td class="access-full">✅ Total</td>
+      <td class="access-partial">⚡ Se autorizado</td>
+      <td class="access-no">❌</td>
+      <td class="access-no">❌</td>
+    </tr>
+    <tr>
+      <td>Reuniões</td>
+      <td class="access-full">✅ Total</td>
+      <td class="access-full">✅ Total</td>
+      <td class="access-partial">⚡ Suas áreas</td>
+      <td class="access-no">❌</td>
+    </tr>
+    <tr>
+      <td>Comunicados</td>
+      <td class="access-full">✅ Total</td>
+      <td class="access-full">✅ CRUD</td>
+      <td class="access-no">❌</td>
+      <td class="access-read">👁️ Ler + ciência</td>
+    </tr>
+    <tr>
+      <td>Fale com DP</td>
+      <td class="access-full">✅ Admin view</td>
+      <td class="access-full">✅ Responder</td>
+      <td class="access-no">❌</td>
+      <td class="access-partial">⚡ Enviar/ler</td>
+    </tr>
+    <tr>
+      <td>Ocorrências</td>
+      <td class="access-full">✅ Total</td>
+      <td class="access-full">✅ Total</td>
+      <td class="access-no">❌</td>
+      <td class="access-read">👁️ Próprias (trilha)</td>
+    </tr>
+    <tr>
+      <td>Feedbacks</td>
+      <td class="access-full">✅ Total</td>
+      <td class="access-full">✅ Total</td>
+      <td class="access-no">❌</td>
+      <td class="access-read">👁️ Próprios (trilha)</td>
+    </tr>
+    <tr>
+      <td>Financeiro</td>
+      <td class="access-full">✅ Total</td>
+      <td class="access-no">❌</td>
+      <td class="access-no">❌</td>
+      <td class="access-no">❌</td>
+    </tr>
+    <tr>
+      <td>Lixeira definitiva</td>
+      <td class="access-partial">⚡ Só master</td>
+      <td class="access-no">❌</td>
+      <td class="access-no">❌</td>
+      <td class="access-no">❌</td>
+    </tr>
+    <tr>
+      <td>Modo offline</td>
+      <td class="access-partial">⚡ Só master</td>
+      <td class="access-no">❌</td>
+      <td class="access-no">❌</td>
+      <td class="access-no">❌</td>
+    </tr>
+  </table>
+
+  <div class="section-title" style="font-size: 15px">🔑 Flags importantes</div>
+  <div class="cards-grid">
+    <div class="card">
+      <h3>isMaster</h3>
+      <p>Flag no owner que habilita: lixeira definitiva, gerenciar admins, persistência offline com bloqueio de escrita.</p>
+    </div>
+    <div class="card">
+      <h3>isDP</h3>
+      <p>Flag no manager que habilita: visualizar mensagens DP, criar sub-gestores, ver aba Caixa de notificações.</p>
+    </div>
+    <div class="card">
+      <h3>isOwner</h3>
+      <p>Prop booleana passada ao RestaurantPanel. <code>true</code> para Owner, <code>false</code> para Manager. Desbloqueia funcionalidades extras.</p>
+    </div>
+    <div class="card">
+      <h3>privacyMode</h3>
+      <p>Config do restaurante. Quando ativo, mascara valores de gorjeta, CPFs e mensagens DP na visão do Owner.</p>
+    </div>
+    <div class="card">
+      <h3>profile: "lider"</h3>
+      <p>Perfil do manager que restringe a apenas Dashboard, Escala, Horários, Equipe e Reuniões das suas áreas.</p>
+    </div>
+    <div class="card">
+      <h3>tabsConfig / tabsGestor</h3>
+      <p>Duas camadas de visibilidade: admin define o que é possível, gestor define o que o empregado vê. Ambos precisam ser <code>true</code>.</p>
+    </div>
+  </div>
+</div>
+
+<!-- ============ COMPONENTES ============ -->
+<div class="map-section" id="sec-components">
+  <div class="section-title">🧩 Componentes Principais</div>
+  <div class="section-desc">Todos os componentes são funções React definidas no App.js. Aqui estão os mais importantes para entender a arquitetura.</div>
+
+  <div class="section-title" style="font-size:15px">🏗️ Infraestrutura</div>
+  <div class="cards-grid">
+    <div class="card"><h3>🔧 load(key)</h3><p>Carrega dados do Firestore com 3 retries. Fallback para cache localStorage se falhar.</p></div>
+    <div class="card"><h3>💾 save(key, value)</h3><p>Salva no Firestore + atualiza cache local. Usado internamente pelo handleUpdate.</p></div>
+    <div class="card"><h3>📤 handleUpdate(campo, valor)</h3><p>Função central de salvamento. Atualiza estado React + salva no Firebase. Bloqueia escrita quando offline (master).</p></div>
+    <div class="card"><h3>🤖 useAiGenerate()</h3><p>Hook que encapsula chamadas à API Groq (Llama 3.3-70B) com estados de loading/erro.</p></div>
+    <div class="card"><h3>📱 useMobile()</h3><p>Hook que retorna <code>true</code> se tela menor que 768px. Usado em todo o app.</p></div>
+    <div class="card"><h3>📸 saveVersion()</h3><p>Salva snapshot de escala ou gorjeta com debounce de 30s. Máximo 30 versões.</p></div>
+  </div>
+
+  <div class="section-title" style="font-size:15px">📊 Componentes de UI</div>
+  <div class="cards-grid">
+    <div class="card"><h3>🔔 Toast</h3><p>Notificação temporária no topo da tela. Auto-dismiss em 3s.</p></div>
+    <div class="card"><h3>📦 Modal</h3><p>Modal genérico com título, botão fechar, conteúdo livre.</p></div>
+    <div class="card"><h3>💊 PillBar</h3><p>Barra de pills para navegação entre sub-abas.</p></div>
+    <div class="card"><h3>🗓️ MonthNav</h3><p>Navegador de mês com setas (anterior/próximo).</p></div>
+    <div class="card"><h3>📅 CalendarGrid</h3><p>Grade de calendário mensal com status por dia.</p></div>
+    <div class="card"><h3>🏷️ AreaBadge</h3><p>Badge colorido por área (Bar=azul, Cozinha=laranja, etc).</p></div>
+  </div>
+
+  <div class="section-title" style="font-size:15px">📊 Componentes de Negócio</div>
+  <div class="cards-grid">
+    <div class="card"><h3>👥 EmployeeSpreadsheet</h3><p>Componente mais complexo. Lista de empregados em cards, com detalhe em 3 abas (Cadastro, Ações, Trilha). Inclui jornada timeline clicável.</p></div>
+    <div class="card"><h3>🤝 MeetingPlannerSection</h3><p>Sistema de reuniões completo: planejamento, pautas, ideias, ocorrências, ações, pendências, execução ao vivo.</p></div>
+    <div class="card"><h3>🚌 ValeTransporteTab</h3><p>Cálculo e pagamento de VT. Considera escala prevista vs realizada, ajustes manuais, snapshot ao pagar.</p></div>
+    <div class="card"><h3>📈 EmpTrilhaView</h3><p>Visão gamificada do empregado: badges, metas, timeline, feedbacks. Visão diferente para gestor vs empregado.</p></div>
+    <div class="card"><h3>🏷️ RoleSpreadsheet</h3><p>CRUD de cargos com geração IA. Define área e pontos para divisão de gorjeta.</p></div>
+    <div class="card"><h3>📊 RestaurantPanel</h3><p>Hub operacional. Gerencia todas as abas do restaurante com navegação em 2 níveis (grupo + aba).</p></div>
+  </div>
+</div>
+
+<!-- ============ FLUXOS ============ -->
+<div class="map-section" id="sec-flows">
+  <div class="section-title">🔄 Fluxos Principais</div>
+
+  <div class="section-title" style="font-size:15px">🔐 Login</div>
+  <div class="flow">
+    <div class="flow-box">Usuário digita CPF ou Código</div>
+    <span class="flow-arrow">→</span>
+    <div class="flow-box">Busca em owners → managers → employees</div>
+    <span class="flow-arrow">→</span>
+    <div class="flow-box">Verifica PIN (4 dígitos)</div>
+    <span class="flow-arrow">→</span>
+    <div class="flow-box highlight">Redireciona para portal</div>
+  </div>
+
+  <div class="section-title" style="font-size:15px">💰 Gorjeta do dia</div>
+  <div class="flow">
+    <div class="flow-box">Gestor informa pool total</div>
+    <span class="flow-arrow">→</span>
+    <div class="flow-box">Sistema divide por área (splits %)</div>
+    <span class="flow-arrow">→</span>
+    <div class="flow-box">Dentro da área, divide por pontos</div>
+    <span class="flow-arrow">→</span>
+    <div class="flow-box">Calcula imposto (33%)</div>
+    <span class="flow-arrow">→</span>
+    <div class="flow-box highlight">Gorjeta líquida por empregado</div>
+  </div>
+
+  <div class="section-title" style="font-size:15px">📅 Ciclo mensal da escala</div>
+  <div class="flow">
+    <div class="flow-box">Mês aberto</div>
+    <span class="flow-arrow">→</span>
+    <div class="flow-box">Gestor preenche escala</div>
+    <span class="flow-arrow">→</span>
+    <div class="flow-box">Importa ponto (PDF Sólides)</div>
+    <span class="flow-arrow">→</span>
+    <div class="flow-box">Compara ponto vs escala</div>
+    <span class="flow-arrow">→</span>
+    <div class="flow-box">Fecha mês</div>
+    <span class="flow-arrow">→</span>
+    <div class="flow-box highlight">Snapshot congelado</div>
+  </div>
+
+  <div class="section-title" style="font-size:15px">🚌 Ciclo do VT</div>
+  <div class="flow">
+    <div class="flow-box">Configura taxa diária</div>
+    <span class="flow-arrow">→</span>
+    <div class="flow-box">Sistema calcula: dias trabalhados × taxa</div>
+    <span class="flow-arrow">→</span>
+    <div class="flow-box">Gestor ajusta se necessário</div>
+    <span class="flow-arrow">→</span>
+    <div class="flow-box">Marca como pago</div>
+    <span class="flow-arrow">→</span>
+    <div class="flow-box highlight">Snapshot com data</div>
+  </div>
+
+  <div class="section-title" style="font-size:15px">🤝 Ciclo de reunião</div>
+  <div class="flow">
+    <div class="flow-box">Planeja reunião</div>
+    <span class="flow-arrow">→</span>
+    <div class="flow-box">Monta pauta (template + ideias + ocorrências)</div>
+    <span class="flow-arrow">→</span>
+    <div class="flow-box">Executa ao vivo (checklist)</div>
+    <span class="flow-arrow">→</span>
+    <div class="flow-box">Registra ações + pendências</div>
+    <span class="flow-arrow">→</span>
+    <div class="flow-box highlight">Exporta relatório PDF</div>
+  </div>
+
+  <div class="section-title" style="font-size:15px">👷 Ciclo do empregado</div>
+  <div class="flow">
+    <div class="flow-box">Admissão</div>
+    <span class="flow-arrow">→</span>
+    <div class="flow-box">Escala + gorjetas</div>
+    <span class="flow-arrow">→</span>
+    <div class="flow-box">Feedbacks trimestrais</div>
+    <span class="flow-arrow">→</span>
+    <div class="flow-box">Promoção (roleHistory)</div>
+    <span class="flow-arrow">→</span>
+    <div class="flow-box">Objetivos + metas</div>
+    <span class="flow-arrow">→</span>
+    <div class="flow-box highlight">Ou demissão → relatório PDF</div>
+  </div>
+
+  <div class="section-title" style="font-size:15px">💾 Fluxo de dados</div>
+  <div class="flow">
+    <div class="flow-box">Usuário clica botão</div>
+    <span class="flow-arrow">→</span>
+    <div class="flow-box">Componente chama onUpdate(campo, valor)</div>
+    <span class="flow-arrow">→</span>
+    <div class="flow-box">handleUpdate: verifica offline?</div>
+    <span class="flow-arrow">→</span>
+    <div class="flow-box">setState(valor)</div>
+    <span class="flow-arrow">→</span>
+    <div class="flow-box">save() → Firestore</div>
+    <span class="flow-arrow">→</span>
+    <div class="flow-box highlight">Toast de confirmação</div>
+  </div>
+</div>
+
+<!-- ============ PLANEJAMENTO ============ -->
+<div class="map-section" id="sec-planning">
+  <div class="section-title">🗺️ Guia de Planejamento</div>
+  <div class="section-desc">Use esta seção para planejar novas funcionalidades. Entenda o impacto de cada tipo de mudança.</div>
+
+  <div class="section-title" style="font-size:15px">📐 Como adicionar uma nova funcionalidade</div>
+  <div class="cards-grid">
+    <div class="card" style="border-color: #22c55e">
+      <h3>1️⃣ Novo campo de dados</h3>
+      <p>Adicionar chave em <code>const K</code>, criar <code>useState</code>, incluir no <code>load()</code> paralelo, no objeto <code>data</code>, nos <code>setters</code> e <code>keys</code> do handleUpdate, e no <code>cacheSet</code>.</p>
+      <span class="tag">~6 pontos de edição</span>
+    </div>
+    <div class="card" style="border-color: #3b82f6">
+      <h3>2️⃣ Nova aba no RestaurantPanel</h3>
+      <p>Adicionar no array de abas do grupo apropriado (Operação, Pessoas, Comunicação, Config). Criar o componente da aba e o bloco <code>{tab === "novaAba" && ...}</code>.</p>
+      <span class="tag">~3 pontos de edição</span>
+    </div>
+    <div class="card" style="border-color: #f59e0b">
+      <h3>3️⃣ Nova sub-aba no EmployeeSpreadsheet</h3>
+      <p>Adicionar pill no PillBar do detalhe do empregado, criar o bloco condicional com o conteúdo da sub-aba.</p>
+      <span class="tag">~2 pontos de edição</span>
+    </div>
+    <div class="card" style="border-color: #a855f7">
+      <h3>4️⃣ Nova aba do empregado</h3>
+      <p>Adicionar no array de tabs do EmployeePortal, criar componente, adicionar controle de visibilidade em <code>tabsConfig</code> e <code>tabsGestor</code>.</p>
+      <span class="tag">~4 pontos de edição</span>
+    </div>
+    <div class="card" style="border-color: #ec4899">
+      <h3>5️⃣ Novo tipo de reunião</h3>
+      <p>Adicionar no array <code>MEETING_TYPES</code> do MeetingPlannerSection. Pode precisar de template específico de pauta.</p>
+      <span class="tag">~2 pontos de edição</span>
+    </div>
+    <div class="card" style="border-color: #14b8a6">
+      <h3>6️⃣ Novo relatório PDF</h3>
+      <p>Criar função que gera o PDF com jsPDF ou html2pdf. Adicionar botão de exportação no componente relevante.</p>
+      <span class="tag">Componente novo</span>
+    </div>
+  </div>
+
+  <div class="section-title" style="font-size:15px">⚠️ Pontos de atenção</div>
+  <div class="cards-grid">
+    <div class="card" style="border-color: #ef4444">
+      <h3>🔴 Arquivo único</h3>
+      <p>Todo o código está em App.js (~17.000 linhas). Qualquer mudança precisa cuidar para não quebrar outras partes. O build com <code>CI=true</code> detecta erros.</p>
+    </div>
+    <div class="card" style="border-color: #ef4444">
+      <h3>🔴 Dados globais</h3>
+      <p>Todos os dados são carregados no startup. Adicionar novos campos aumenta o tempo de carregamento e o consumo do Firestore.</p>
+    </div>
+    <div class="card" style="border-color: #f59e0b">
+      <h3>🟡 Permissões manuais</h3>
+      <p>Não há sistema centralizado de permissões. Cada componente verifica <code>isOwner</code>, <code>isMaster</code>, <code>isDP</code>, <code>perms</code> manualmente.</p>
+    </div>
+    <div class="card" style="border-color: #f59e0b">
+      <h3>🟡 Mobile vs Desktop</h3>
+      <p>Algumas abas bloqueiam acesso no mobile com banner "use desktop". Considere se novas funcionalidades precisam funcionar no celular.</p>
+    </div>
+  </div>
+
+  <div class="section-title" style="font-size:15px">💡 Áreas com potencial de expansão</div>
+  <div class="cards-grid">
+    <div class="card">
+      <h3>📊 Analytics / Dashboards</h3>
+      <p>Hoje o dashboard é básico. Potencial para: gráficos de tendência, comparativo entre meses, ranking de empregados, KPIs do restaurante.</p>
+    </div>
+    <div class="card">
+      <h3>📱 App nativo / PWA</h3>
+      <p>O app já é responsivo. Um PWA com notificações push seria uma evolução natural, especialmente para empregados.</p>
+    </div>
+    <div class="card">
+      <h3>🔔 Notificações em tempo real</h3>
+      <p>Hoje as notificações são puxadas no login. Firebase tem suporte a listeners em tempo real (onSnapshot) que poderiam ser adicionados.</p>
+    </div>
+    <div class="card">
+      <h3>📋 Mais tipos de relatório</h3>
+      <p>Relatório de gorjetas mensal, relatório de atrasos, relatório financeiro consolidado, relatório de reuniões por período.</p>
+    </div>
+    <div class="card">
+      <h3>🤖 Mais IA</h3>
+      <p>Análise de padrões de atrasos, sugestão automática de feedback, previsão de custos de VT, resumo inteligente de reuniões.</p>
+    </div>
+    <div class="card">
+      <h3>🔗 Integrações</h3>
+      <p>Integração com folha de pagamento, sistemas de ponto além do Sólides, WhatsApp para comunicados, calendário do Google.</p>
+    </div>
+  </div>
+</div>
+
+</div>
+
+<script>
+function showSection(id) {
+  document.querySelectorAll('.map-section').forEach(s => s.classList.remove('active'));
+  document.getElementById('sec-' + id).classList.add('active');
+  document.querySelectorAll('.nav button').forEach(b => b.classList.remove('active'));
+  event.target.classList.add('active');
+}
+
+function toggleNode(header) {
+  const children = header.nextElementSibling;
+  const toggle = header.querySelector('.toggle');
+  if (children && children.classList.contains('node-children')) {
+    children.classList.toggle('open');
+    toggle.classList.toggle('open');
+  }
+}
+</script>
+
+</body>
+</html>
