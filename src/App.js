@@ -3,7 +3,7 @@ import { useState, useEffect, Component } from "react";
 import { db } from "./firebase";
 import { doc, getDoc, setDoc } from "firebase/firestore";
 
-const APP_VERSION = "5.44.0";
+const APP_VERSION = "5.45.0";
 
 const DEFAULT_ADMISSION = () => `${new Date().getFullYear()}-01-01`;
 const round2 = (v) => Math.round(v * 100) / 100;
@@ -14355,6 +14355,12 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }
 
         {tab === "changelog" && (() => {
           const CHANGELOG = [
+            { version:"5.45.0", date:"2026-04-19", items:[
+              "Novo: persistência offline com cache local (IndexedDB) para gestor AppTip master",
+              "Novo: indicador de conexão online/offline no rodapé (somente master)",
+              "Novo: banner vermelho no topo quando offline — modo somente leitura",
+              "Novo: bloqueio de escrita quando offline impede sobrescrever dados de gestores online",
+            ]},
             { version:"5.44.0", date:"2026-04-19", items:[
               "Novo: gestor administrativo pode excluir definitivamente itens de todas as lixeiras do sistema",
               "Novo: jornada do empregado exibe reuniões realizadas e ocorrências unificadas com detalhes clicáveis",
@@ -16405,6 +16411,7 @@ export default function App() {
   const [loadError, setLoadError] = useState(false);    // true se não conseguiu conectar
   const [toast, setToast] = useState("");
   const [currentUser, setCurrentUser] = useState(null);
+  const [isOnline, setIsOnline] = useState(navigator.onLine);
   const [currentUserId] = useState(() => {
     try { return localStorage.getItem("apptip_userid") || null; } catch { return null; }
   });
@@ -16420,6 +16427,15 @@ export default function App() {
     if (userRole) localStorage.setItem("apptip_role", userRole);
     else localStorage.removeItem("apptip_role");
   }, [userRole]);
+
+  // Detectar online/offline para bloqueio de escrita (somente isMaster)
+  useEffect(() => {
+    const goOnline  = () => setIsOnline(true);
+    const goOffline = () => setIsOnline(false);
+    window.addEventListener("online",  goOnline);
+    window.addEventListener("offline", goOffline);
+    return () => { window.removeEventListener("online", goOnline); window.removeEventListener("offline", goOffline); };
+  }, []);
 
   const [owners, setOwners] = useState([]);
   const [managers,      setManagers]      = useState([]);
@@ -16638,6 +16654,11 @@ export default function App() {
 
   async function handleUpdate(field, value) {
     if (field === "_toast") { setToast(value); return; }
+    // Bloqueio de escrita offline — somente para gestor AppTip master
+    if (!isOnline && currentUser?.isMaster === true && field !== "_toast") {
+      setToast("⚠️ Você está offline — conecte à internet para salvar alterações");
+      return;
+    }
     const setters = { owners:setOwners, managers:setManagers, restaurants:setRestaurants, employees:setEmployees, roles:setRoles, tips:setTips, splits:setSplits, schedules:setSchedules, communications:setCommunications, commAcks:setCommAcks, faq:setFaq, dpMessages:setDpMessages, workSchedules:setWorkSchedules, notifications:setNotifications, noTipDays:setNoTipDays, trash:setTrash, schedTemplates:setSchedTemplates, schedDrafts:setSchedDrafts, scheduleVersions:setScheduleVersions, tipVersions:setTipVersions, vtConfig:setVtConfig, vtMonthly:setVtMonthly, vtPayments:setVtPayments, incidents:setIncidents, feedbacks:setFeedbacks, devChecklists:setDevChecklists, scheduleAdjustments:setScheduleAdjustments, scheduleStatus:setScheduleStatus, schedulePrevista:setSchedulePrevista, employeeGoals:setEmployeeGoals, delays:setDelays, tipApprovals:setTipApprovals, meetingPlans:setMeetingPlans, meetingIdeas:setMeetingIdeas, meetingAgendas:setMeetingAgendas, meetingActions:setMeetingActions, meetingOccurrences:setMeetingOccurrences, meetingPendencias:setMeetingPendencias };
     const keys    = { owners:K.owners, managers:K.managers, restaurants:K.restaurants, employees:K.employees, roles:K.roles, tips:K.tips, splits:K.splits, schedules:K.schedules, communications:K.communications, commAcks:K.commAcks, faq:K.faq, dpMessages:K.dpMessages, workSchedules:K.workSchedules, notifications:K.notifications, noTipDays:K.noTipDays, trash:K.trash, schedTemplates:K.schedTemplates, schedDrafts:K.schedDrafts, scheduleVersions:K.scheduleVersions, tipVersions:K.tipVersions, vtConfig:K.vtConfig, vtMonthly:K.vtMonthly, vtPayments:K.vtPayments, incidents:K.incidents, feedbacks:K.feedbacks, devChecklists:K.devChecklists, scheduleAdjustments:K.scheduleAdjustments, scheduleStatus:K.scheduleStatus, schedulePrevista:K.schedulePrevista, employeeGoals:K.employeeGoals, delays:K.delays, tipApprovals:K.tipApprovals, meetingPlans:K.meetingPlans, meetingIdeas:K.meetingIdeas, meetingAgendas:K.meetingAgendas, meetingActions:K.meetingActions };
     // Support functional updates to prevent stale-state race conditions:
@@ -16771,9 +16792,22 @@ export default function App() {
       {view === "fatura" && <FaturaPage faturaId={faturaId} restaurants={restaurants} onUpdate={handleUpdate} loaded={loaded} />}
       {view === "guia-gestor" && <GuiaGestor />}
       {view === "home" && <Home onLogin={()=>setView("login")} />}
+      {/* Banner offline — somente gestor AppTip master */}
+      {currentUser?.isMaster === true && !isOnline && (
+        <div style={{position:"fixed",top:0,left:0,right:0,zIndex:9999,background:"#ef4444",color:"#fff",textAlign:"center",padding:"6px 16px",fontSize:13,fontFamily:"'DM Sans',sans-serif",fontWeight:600,letterSpacing:0.3}}>
+          📡 Sem conexão — modo somente leitura
+        </div>
+      )}
       <Toast msg={toast} onClose={()=>setToast("")} />
-      {/* Rodapé de versão */}
-      <div style={{position:"fixed",bottom:8,left:0,right:0,fontSize:10,color:"var(--text3)",fontFamily:"'DM Mono',monospace",opacity:0.45,pointerEvents:"none",zIndex:100,textAlign:"center"}}>v{APP_VERSION}</div>
+      {/* Rodapé de versão + indicador online/offline (somente master) */}
+      <div style={{position:"fixed",bottom:8,left:0,right:0,fontSize:10,color:"var(--text3)",fontFamily:"'DM Mono',monospace",opacity:0.45,pointerEvents:"none",zIndex:100,textAlign:"center"}}>
+        v{APP_VERSION}
+        {currentUser?.isMaster === true && (
+          <span style={{marginLeft:8,color:isOnline?"#10b981":"#ef4444",opacity:1,fontWeight:600}}>
+            {isOnline ? "● Online" : "● Offline"}
+          </span>
+        )}
+      </div>
 
       <PrivacyModal open={showPrivacy} onClose={()=>setShowPrivacy(false)} />
     </>
