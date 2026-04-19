@@ -3,7 +3,7 @@ import { useState, useEffect, Component } from "react";
 import { db } from "./firebase";
 import { doc, getDoc, setDoc } from "firebase/firestore";
 
-const APP_VERSION = "5.37.0";
+const APP_VERSION = "5.38.0";
 
 const DEFAULT_ADMISSION = () => `${new Date().getFullYear()}-01-01`;
 const round2 = (v) => Math.round(v * 100) / 100;
@@ -617,6 +617,7 @@ const K = {
   meetingAgendas:      "v4:meetingAgendas",       // [{id, restaurantId, title, templateType, date, items:[], createdBy, createdAt, status:"aberta"|"em_andamento"|"encerrada"}]
   meetingActions:      "v4:meetingActions",       // [{id, restaurantId, pautaId, text, responsible, deadline, done:bool, createdAt}]
   meetingOccurrences:  "v4:meetingOccurrences",   // [{id, restaurantId, title, description, type:"cliente"|"estrutura"|"operacao"|"outro", areas:[], createdBy, createdAt, status:"nova"|"na_pauta"|"resolvida"|"descartada"}]
+  meetingPendencias:   "v4:meetingPendencias",    // [{id, restaurantId, text, reason, type:"pendente"|"sem_resolucao", fromPautaId, fromItemId, createdAt, status:"ativa"|"na_pauta"|"resolvida"}]
 };
 
 // ── Version retention ──
@@ -6309,18 +6310,17 @@ function GoalsManager({ empId, employeeGoals, roles, restaurantId, onUpdate, cur
 // ── Meeting agenda templates ──
 const AGENDA_TEMPLATES = [
   { id:"semanal", label:"Reunião Semanal de Lideranças", icon:"📋", items:[
-    "Abertura e alinhamento geral",
     "Revisão de ações pendentes da semana anterior",
-    "Indicadores da semana (faltas, atrasos, ocorrências)",
-    "Pontos por área — destaques e problemas",
+    "Ocorrências registradas",
+    "Ideias do banco",
+    "Indicadores da semana (faltas, atrasos)",
     "Novas ações e responsáveis",
-    "Encerramento e próximos passos",
   ]},
 ];
 
 function MeetingPlannerSection({ restaurantId, employees, roles, areas, meetingPlans, allMeetingPlans, feedbacks, onUpdate, currentUser, isOwner, mobileOnly, isLider, managerAreas, data }) {
   // Sub-tab state
-  const [subTab, setSubTab] = useState("reunioes"); // reunioes | ideias | ocorrencias | relatorio
+  const [subTab, setSubTab] = useState("reunioes"); // reunioes | ideias | ocorrencias | pendencias | relatorio
   // Reuniões (existing) — showForm: false | "equipe" | "lideranca"
   const [showForm, setShowForm] = useState(false);
   const [planType, setPlanType] = useState("alinhamento");
@@ -6365,6 +6365,7 @@ function MeetingPlannerSection({ restaurantId, employees, roles, areas, meetingP
   const allPautas = (data?.meetingAgendas ?? []).filter(p => p.restaurantId === restaurantId);
   const allActions = (data?.meetingActions ?? []).filter(a => a.restaurantId === restaurantId);
   const allOccurrences = (data?.meetingOccurrences ?? []).filter(o => o.restaurantId === restaurantId);
+  const allPendencias = (data?.meetingPendencias ?? []).filter(p => p.restaurantId === restaurantId);
   const OCC_TYPES = [["cliente","🧑‍🍳","Cliente"],["estrutura","🏗️","Estrutura"],["operacao","⚙️","Operação"],["outro","📝","Outro"]];
 
   // Wrapper for reading data
@@ -6541,6 +6542,13 @@ function MeetingPlannerSection({ restaurantId, employees, roles, areas, meetingP
       occIds.forEach(oid => { const idx = allOccData.findIndex(o => o.id === oid); if (idx >= 0) allOccData[idx] = { ...allOccData[idx], status: "na_pauta" }; });
       onUpdate("meetingOccurrences", allOccData);
     }
+    // Mark pendências as included
+    const pendIds = pautaItems.filter(i => i.fromPendencia).map(i => i.fromPendencia);
+    if (pendIds.length > 0) {
+      const allPendData = [...getData("meetingPendencias")];
+      pendIds.forEach(pid => { const idx = allPendData.findIndex(p => p.id === pid); if (idx >= 0) allPendData[idx] = { ...allPendData[idx], status: "na_pauta" }; });
+      onUpdate("meetingPendencias", allPendData);
+    }
     onUpdate("meetingAgendas", [...getData("meetingAgendas"), pauta]);
     setPautaTitle(""); setPautaType("semanal"); setPautaDate(""); setPautaItems([]); setPautaNewItem(""); setPautaPickIdeas([]); setLidParticipants([]); setShowForm(false);
   }
@@ -6629,7 +6637,14 @@ function MeetingPlannerSection({ restaurantId, employees, roles, areas, meetingP
     if (pautaPickIdeas.includes(occ.id)) return;
     setPautaPickIdeas(prev => [...prev, occ.id]);
     const occTypeLabel = OCC_TYPES.find(([t])=>t===occ.type)?.[2] ?? occ.type;
-    setPautaItems(prev => [...prev, { id: `occ-${occ.id}`, text: `[${occTypeLabel}] ${occ.title}${occ.description ? ` — ${occ.description}` : ""}`, fromOccurrence: occ.id, fromIdea: null, status: "pendente", decision: "" }]);
+    setPautaItems(prev => [...prev, { id: `occ-${occ.id}`, text: `[${occTypeLabel}] ${occ.title}${occ.description ? ` — ${occ.description}` : ""}`, fromOccurrence: occ.id, fromIdea: null, status: "pendente", decision: "", reason: "" }]);
+  }
+
+  function handleAddIncidentToPauta(inc) {
+    if (pautaPickIdeas.includes(inc.id)) return;
+    setPautaPickIdeas(prev => [...prev, inc.id]);
+    const empNames = (inc.employeeIds ?? []).map(eid => { const e = employees.find(emp => emp.id === eid); return e?.name?.split(" ")[0] ?? ""; }).filter(Boolean).join(", ");
+    setPautaItems(prev => [...prev, { id: `inc-${inc.id}`, text: `[Empregado${empNames ? `: ${empNames}` : ""}] ${inc.type ?? "Ocorrência"} — ${inc.description ?? ""}`, fromIncident: inc.id, fromIdea: null, fromOccurrence: null, status: "pendente", decision: "", reason: "" }]);
   }
 
   // ── Live meeting (execution mode) ──
@@ -6642,20 +6657,42 @@ function MeetingPlannerSection({ restaurantId, employees, roles, areas, meetingP
     handleUpdatePautaStatus(pautaId, "encerrada");
     const pauta = allPautas.find(p => p.id === pautaId);
     if (pauta) {
-      const discussedItems = (pauta.items ?? []).filter(it => it.status === "discutido" || it.status === "acao_definida");
-      // Mark discussed occurrence items as resolved
-      const occIds = discussedItems.filter(it => it.fromOccurrence).map(it => it.fromOccurrence);
+      const resolvedItems = (pauta.items ?? []).filter(it => it.status === "resolvido" || it.status === "acao_definida");
+      // Mark resolved occurrence items
+      const occIds = resolvedItems.filter(it => it.fromOccurrence).map(it => it.fromOccurrence);
       if (occIds.length > 0) {
         const allOcc = [...getData("meetingOccurrences")];
         occIds.forEach(oid => { const idx = allOcc.findIndex(o => o.id === oid); if (idx >= 0 && (allOcc[idx].status === "na_pauta" || allOcc[idx].status === "nova")) allOcc[idx] = { ...allOcc[idx], status: "resolvida" }; });
         onUpdate("meetingOccurrences", allOcc);
       }
-      // Mark discussed idea items as resolved
-      const ideaIds = discussedItems.filter(it => it.fromIdea).map(it => it.fromIdea);
+      // Mark resolved idea items
+      const ideaIds = resolvedItems.filter(it => it.fromIdea).map(it => it.fromIdea);
       if (ideaIds.length > 0) {
         const allIdeasData = [...getData("meetingIdeas")];
         ideaIds.forEach(iid => { const idx = allIdeasData.findIndex(i => i.id === iid); if (idx >= 0 && (allIdeasData[idx].status === "na_pauta" || allIdeasData[idx].status === "nova")) allIdeasData[idx] = { ...allIdeasData[idx], status: "resolvida" }; });
         onUpdate("meetingIdeas", allIdeasData);
+      }
+      // Create pendências for items marked pendente or sem_resolucao
+      const pendingItems = (pauta.items ?? []).filter(it => it.status === "pendente" || it.status === "sem_resolucao");
+      if (pendingItems.length > 0) {
+        const allPend = [...getData("meetingPendencias")];
+        pendingItems.forEach(item => {
+          allPend.push({
+            id: `pend-${Date.now()}-${Math.random().toString(36).slice(2,6)}`,
+            restaurantId,
+            text: item.text,
+            reason: item.reason ?? "",
+            type: item.status, // "pendente" or "sem_resolucao"
+            fromPautaId: pautaId,
+            fromItemId: item.id,
+            fromIdea: item.fromIdea ?? null,
+            fromOccurrence: item.fromOccurrence ?? null,
+            fromIncident: item.fromIncident ?? null,
+            createdAt: new Date().toISOString(),
+            status: "ativa", // ativa | na_pauta | resolvida
+          });
+        });
+        onUpdate("meetingPendencias", allPend);
       }
     }
     setLivePautaId(null);
@@ -6686,11 +6723,13 @@ function MeetingPlannerSection({ restaurantId, employees, roles, areas, meetingP
 
   // Sub-tabs config
   const newOccCount = filteredOccurrences.filter(o=>o.status==="nova").length;
+  const activePendCount = allPendencias.filter(p=>p.status==="ativa").length;
   const subTabs = [
     ["reunioes",`📅 Reuniões${pendingActions.length>0?` (${pendingActions.length})`:""}`],
     ["ideias",`💡 Ideias${filteredIdeas.filter(i=>i.status==="nova").length>0?` (${filteredIdeas.filter(i=>i.status==="nova").length})`:""}`],
     ["ocorrencias",`🚨 Ocorrências${newOccCount>0?` (${newOccCount})`:""}`],
-    ["relatorio","📄 Relatório"],
+    ["pendencias",`📌 Pendências${activePendCount>0?` (${activePendCount})`:""}`],
+    ...(isOwner ? [["relatorio","📄 Relatório"]] : []),
   ];
 
   return (
@@ -6738,7 +6777,7 @@ function MeetingPlannerSection({ restaurantId, employees, roles, areas, meetingP
               <button onClick={()=>setShowForm("equipe")} style={{...S.btnPrimary,fontSize:13,padding:"10px 20px",background:"#3b82f6",borderColor:"#3b82f6"}}>
                 + Reunião com equipe
               </button>
-              <button onClick={()=>{setShowForm("lideranca");setPautaItems([]);setPautaPickIdeas([]);setPautaTitle("");setPautaDate("");}} style={{...S.btnPrimary,fontSize:13,padding:"10px 20px",background:"#10b981",borderColor:"#10b981"}}>
+              <button onClick={()=>{setShowForm("lideranca");const autoP=allPendencias.filter(p=>p.status==="ativa");const autoItems=autoP.map(p=>({id:`item-${Date.now()}-${Math.random().toString(36).slice(2,6)}`,text:p.text,fromPendencia:p.id}));setPautaItems(autoItems);setPautaPickIdeas(autoP.map(p=>p.id));setPautaTitle("");setPautaDate("");}} style={{...S.btnPrimary,fontSize:13,padding:"10px 20px",background:"#10b981",borderColor:"#10b981"}}>
                 + Reunião de liderança
               </button>
             </div>
@@ -6856,6 +6895,8 @@ function MeetingPlannerSection({ restaurantId, employees, roles, areas, meetingP
                     <span style={{flex:1,fontSize:12,color:"var(--text)"}}>{item.text}</span>
                     {item.fromIdea && <span style={{fontSize:9,padding:"1px 5px",borderRadius:4,background:"#f59e0b18",color:"#f59e0b"}}>💡</span>}
                     {item.fromOccurrence && <span style={{fontSize:9,padding:"1px 5px",borderRadius:4,background:"#ef444418",color:"#ef4444"}}>🚨</span>}
+                    {item.fromIncident && <span style={{fontSize:9,padding:"1px 5px",borderRadius:4,background:"#8b5cf618",color:"#8b5cf6"}}>👤</span>}
+                    {item.fromPendencia && <span style={{fontSize:9,padding:"1px 5px",borderRadius:4,background:"#6366f118",color:"#6366f1"}}>📌</span>}
                     <button onClick={()=>handleMovePautaItem(idx,-1)} disabled={idx===0} style={{padding:"2px 5px",border:"none",background:"transparent",color:idx===0?"var(--border)":"var(--text3)",cursor:idx===0?"default":"pointer",fontSize:10}}>▲</button>
                     <button onClick={()=>handleMovePautaItem(idx,1)} disabled={idx===pautaItems.length-1} style={{padding:"2px 5px",border:"none",background:"transparent",color:idx===pautaItems.length-1?"var(--border)":"var(--text3)",cursor:idx===pautaItems.length-1?"default":"pointer",fontSize:10}}>▼</button>
                     <button onClick={()=>handleRemovePautaItem(item.id)} style={{padding:"2px 5px",border:"none",background:"transparent",color:"var(--red)",cursor:"pointer",fontSize:10}}>✕</button>
@@ -6896,6 +6937,44 @@ function MeetingPlannerSection({ restaurantId, employees, roles, areas, meetingP
                           padding:"5px 10px",borderRadius:8,border:"1px solid #ef444444",background:"#ef444408",color:"var(--text2)",
                           cursor:"pointer",fontSize:11,fontFamily:"'DM Sans',sans-serif"
                         }}>{occT?.[1]??""} {occ.title}</button>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {/* Pull employee incidents */}
+              {(() => {
+                const recentIncidents = (data?.incidents ?? []).filter(i => i.restaurantId === restaurantId && !pautaPickIdeas.includes(i.id)).sort((a,b)=>(b.createdAt??"").localeCompare(a.createdAt??"")).slice(0, 20);
+                return recentIncidents.length > 0 ? (
+                  <div style={{marginBottom:14}}>
+                    <label style={{...S.label,display:"flex",alignItems:"center",gap:4}}>👤 Puxar ocorrências de empregados</label>
+                    <div style={{display:"flex",gap:4,flexWrap:"wrap",maxHeight:120,overflowY:"auto"}}>
+                      {recentIncidents.map(inc => {
+                        const empNames = (inc.employeeIds ?? []).map(eid => { const e = employees.find(emp => emp.id === eid); return e?.name?.split(" ")[0] ?? ""; }).filter(Boolean).join(", ");
+                        return (
+                          <button key={inc.id} onClick={()=>handleAddIncidentToPauta(inc)} style={{
+                            padding:"5px 10px",borderRadius:8,border:"1px solid #8b5cf644",background:"#8b5cf608",color:"var(--text2)",
+                            cursor:"pointer",fontSize:11,fontFamily:"'DM Sans',sans-serif"
+                          }}>👤 {empNames ? `${empNames}: ` : ""}{(inc.description ?? "").slice(0,40)}{(inc.description??"").length>40?"...":""}</button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                ) : null;
+              })()}
+
+              {/* Pull pendências */}
+              {allPendencias.filter(p=>p.status==="ativa" && !pautaPickIdeas.includes(p.id)).length > 0 && (
+                <div style={{marginBottom:14}}>
+                  <label style={{...S.label,display:"flex",alignItems:"center",gap:4}}>📌 Puxar pendências anteriores</label>
+                  <div style={{display:"flex",gap:4,flexWrap:"wrap"}}>
+                    {allPendencias.filter(p=>p.status==="ativa" && !pautaPickIdeas.includes(p.id)).map(pend => {
+                      const typeIcon = pend.type === "pendente" ? "⏸" : "💭";
+                      return (
+                        <button key={pend.id} onClick={()=>{setPautaPickIdeas(prev=>[...prev,pend.id]);setPautaItems(prev=>[...prev,{id:`item-${Date.now()}-${Math.random().toString(36).slice(2,6)}`,text:pend.text,fromPendencia:pend.id}]);}} style={{padding:"4px 10px",borderRadius:6,border:"1px solid #8b5cf622",background:"#8b5cf608",color:"#8b5cf6",cursor:"pointer",fontSize:11,fontFamily:"'DM Sans',sans-serif"}}>
+                          {typeIcon} {pend.text.length > 40 ? pend.text.slice(0,40)+"…" : pend.text}
+                        </button>
                       );
                     })}
                   </div>
@@ -6967,7 +7046,7 @@ function MeetingPlannerSection({ restaurantId, employees, roles, areas, meetingP
             const livePauta = allPautas.find(p => p.id === livePautaId);
             if (!livePauta) return null;
             const liveActions = allActions.filter(a => a.pautaId === livePautaId);
-            const liveDone = (livePauta.items ?? []).filter(it => it.status === "discutido" || it.status === "acao_definida").length;
+            const liveDone = (livePauta.items ?? []).filter(it => it.status === "resolvido" || it.status === "acao_definida" || it.status === "pendente" || it.status === "sem_resolucao").length;
             const liveTotal = (livePauta.items ?? []).length;
             const managers = data?.managers ?? [];
             const pParts = (livePauta.participants ?? []).map(pid => managers.find(m => m.id === pid)).filter(Boolean);
@@ -6988,36 +7067,54 @@ function MeetingPlannerSection({ restaurantId, employees, roles, areas, meetingP
                 </div>
                 <div style={{padding:"14px 16px"}}>
                   {(livePauta.items ?? []).map((item, idx) => {
-                    const itemStatusOpts = [["pendente","○","var(--text3)"],["discutido","✓","#10b981"],["acao_definida","⚡","#f59e0b"]];
+                    const newStatusOpts = [["pendente","⏸","var(--text3)","Pendente"],["sem_resolucao","💭","#8b5cf6","Sem resolução"],["resolvido","✓","#10b981","Resolvido"],["acao_definida","⚡","#f59e0b","Ação definida"]];
+                    const curSt = newStatusOpts.find(([s])=>s===item.status) ?? newStatusOpts[0];
                     return (
-                      <div key={item.id} style={{padding:"12px 14px",marginBottom:8,borderRadius:10,background:item.status==="discutido"?"#10b98108":item.status==="acao_definida"?"#f59e0b08":"var(--bg2)",border:`1px solid ${item.status==="discutido"?"#10b98133":item.status==="acao_definida"?"#f59e0b33":"var(--border)"}`}}>
+                      <div key={item.id} style={{padding:"12px 14px",marginBottom:8,borderRadius:10,background:item.status==="resolvido"?"#10b98108":item.status==="acao_definida"?"#f59e0b08":item.status==="sem_resolucao"?"#8b5cf608":"var(--bg2)",border:`1px solid ${curSt[2]}33`}}>
                         <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:6}}>
                           <span style={{fontSize:11,color:"var(--text3)",fontWeight:700,minWidth:22}}>{idx+1}.</span>
-                          <span style={{flex:1,fontSize:13,color:"var(--text)",fontWeight:600,textDecoration:item.status==="discutido"?"line-through":"none"}}>{item.text}</span>
+                          <span style={{flex:1,fontSize:13,color:"var(--text)",fontWeight:600,textDecoration:item.status==="resolvido"?"line-through":"none"}}>{item.text}</span>
                           {item.fromIdea && <span style={{fontSize:9,padding:"1px 5px",borderRadius:4,background:"#f59e0b18",color:"#f59e0b"}}>💡</span>}
                           {item.fromOccurrence && <span style={{fontSize:9,padding:"1px 5px",borderRadius:4,background:"#ef444418",color:"#ef4444"}}>🚨</span>}
+                          {item.fromIncident && <span style={{fontSize:9,padding:"1px 5px",borderRadius:4,background:"#8b5cf618",color:"#8b5cf6"}}>👤</span>}
+                    {item.fromPendencia && <span style={{fontSize:9,padding:"1px 5px",borderRadius:4,background:"#6366f118",color:"#6366f1"}}>📌</span>}
                         </div>
                         <div style={{display:"flex",gap:4,marginBottom:6,marginLeft:30,flexWrap:"wrap"}}>
-                          {itemStatusOpts.map(([s,icon,col]) => (
+                          {newStatusOpts.map(([s,icon,col,lbl]) => (
                             <button key={s} onClick={()=>handleUpdatePautaItem(livePautaId,item.id,{status:s})} style={{
                               padding:"4px 10px",borderRadius:6,border:`1px solid ${item.status===s?col:"var(--border)"}`,
                               background:item.status===s?col+"18":"transparent",color:item.status===s?col:"var(--text3)",
                               cursor:"pointer",fontSize:11,fontFamily:"'DM Sans',sans-serif",fontWeight:item.status===s?700:400
-                            }}>{icon} {s==="pendente"?"Pendente":s==="discutido"?"Discutido":"Ação definida"}</button>
+                            }}>{icon} {lbl}</button>
                           ))}
-                          {item.fromIdea && (() => { const srcIdea = allIdeas.find(i=>i.id===item.fromIdea); return srcIdea && srcIdea.status !== "resolvida" ? (
-                            <button onClick={()=>handleUpdateIdeaStatus(item.fromIdea,"resolvida")} style={{padding:"4px 10px",borderRadius:6,border:"1px solid #10b98144",background:"#10b98108",color:"#10b981",cursor:"pointer",fontSize:11,fontFamily:"'DM Sans',sans-serif"}}>💡 Marcar ideia resolvida</button>
-                          ) : srcIdea?.status === "resolvida" ? <span style={{fontSize:10,color:"#10b981",padding:"4px 8px"}}>💡 ✓ Ideia resolvida</span> : null; })()}
-                          {item.fromOccurrence && (() => { const srcOcc = allOccurrences.find(o=>o.id===item.fromOccurrence); return srcOcc && srcOcc.status !== "resolvida" ? (
-                            <button onClick={()=>handleUpdateOccStatus(item.fromOccurrence,"resolvida")} style={{padding:"4px 10px",borderRadius:6,border:"1px solid #10b98144",background:"#10b98108",color:"#10b981",cursor:"pointer",fontSize:11,fontFamily:"'DM Sans',sans-serif"}}>🚨 Marcar ocorrência resolvida</button>
-                          ) : srcOcc?.status === "resolvida" ? <span style={{fontSize:10,color:"#10b981",padding:"4px 8px"}}>🚨 ✓ Ocorrência resolvida</span> : null; })()}
                         </div>
+                        {/* Inline resolve for ideas/occurrences */}
+                        {(item.fromIdea || item.fromOccurrence) && item.status === "resolvido" && (
+                          <div style={{display:"flex",gap:4,marginLeft:30,marginBottom:6,flexWrap:"wrap"}}>
+                            {item.fromIdea && (() => { const srcIdea = allIdeas.find(i=>i.id===item.fromIdea); return srcIdea && srcIdea.status !== "resolvida" ? (
+                              <button onClick={()=>handleUpdateIdeaStatus(item.fromIdea,"resolvida")} style={{padding:"3px 8px",borderRadius:6,border:"1px solid #10b98144",background:"#10b98108",color:"#10b981",cursor:"pointer",fontSize:10}}>💡 Marcar ideia resolvida</button>
+                            ) : srcIdea?.status === "resolvida" ? <span style={{fontSize:10,color:"#10b981"}}>💡 ✓ Resolvida</span> : null; })()}
+                            {item.fromOccurrence && (() => { const srcOcc = allOccurrences.find(o=>o.id===item.fromOccurrence); return srcOcc && srcOcc.status !== "resolvida" ? (
+                              <button onClick={()=>handleUpdateOccStatus(item.fromOccurrence,"resolvida")} style={{padding:"3px 8px",borderRadius:6,border:"1px solid #10b98144",background:"#10b98108",color:"#10b981",cursor:"pointer",fontSize:10}}>🚨 Marcar ocorrência resolvida</button>
+                            ) : srcOcc?.status === "resolvida" ? <span style={{fontSize:10,color:"#10b981"}}>🚨 ✓ Resolvida</span> : null; })()}
+                          </div>
+                        )}
+                        {/* Notes */}
                         <div style={{marginLeft:30}}>
                           <textarea value={item.notes??""} onChange={e=>handleUpdatePautaItemNotes(livePautaId,item.id,e.target.value)} rows={1} placeholder="Anotações..." style={{...S.input,fontSize:11,padding:"6px 8px",resize:"vertical",width:"100%",boxSizing:"border-box"}}/>
                         </div>
+                        {/* Reason required for pendente and sem_resolucao */}
+                        {(item.status === "pendente" || item.status === "sem_resolucao") && (
+                          <div style={{marginTop:6,marginLeft:30}}>
+                            <input value={item.reason??""} onChange={e=>handleUpdatePautaItem(livePautaId,item.id,{reason:e.target.value})} placeholder={item.status==="pendente"?"Por que ficou pendente?":"Por que não foi resolvido?"} style={{...S.input,fontSize:11,padding:"5px 8px",borderColor:!(item.reason??"").trim()?"#f59e0b":"var(--border)"}}/>
+                            {!(item.reason??"").trim() && <div style={{fontSize:10,color:"#f59e0b",marginTop:2}}>⚠️ Motivo obrigatório</div>}
+                          </div>
+                        )}
+                        {/* Decision/actions required for acao_definida */}
                         {item.status === "acao_definida" && (
                           <div style={{marginTop:6,marginLeft:30}}>
-                            <input value={item.decision??""} onChange={e=>handleUpdatePautaItem(livePautaId,item.id,{decision:e.target.value})} placeholder="Decisão / ação definida..." style={{...S.input,fontSize:11,padding:"5px 8px"}}/>
+                            <input value={item.decision??""} onChange={e=>handleUpdatePautaItem(livePautaId,item.id,{decision:e.target.value})} placeholder="Quais ações e responsáveis?" style={{...S.input,fontSize:11,padding:"5px 8px",borderColor:!(item.decision??"").trim()?"#f59e0b":"var(--border)"}}/>
+                            {!(item.decision??"").trim() && <div style={{fontSize:10,color:"#f59e0b",marginTop:2}}>⚠️ Defina as ações e responsáveis</div>}
                           </div>
                         )}
                       </div>
@@ -7055,7 +7152,7 @@ function MeetingPlannerSection({ restaurantId, employees, roles, areas, meetingP
                 const isActive = activePautaId === pauta.id;
                 const statusColors = { aberta:"#3b82f6", em_andamento:"#f59e0b", encerrada:"#10b981" };
                 const statusLabels = { aberta:"Agendada", em_andamento:"Em andamento", encerrada:"Encerrada" };
-                const doneItems = pauta.items?.filter(it => it.status === "discutido" || it.status === "acao_definida").length ?? 0;
+                const doneItems = pauta.items?.filter(it => it.status === "resolvido" || it.status === "acao_definida" || it.status === "pendente" || it.status === "sem_resolucao").length ?? 0;
                 const totalItems = pauta.items?.length ?? 0;
                 const managers = data?.managers ?? [];
                 const pParts = (pauta.participants ?? []).map(pid => managers.find(m => m.id === pid)).filter(Boolean);
@@ -7119,19 +7216,22 @@ function MeetingPlannerSection({ restaurantId, employees, roles, areas, meetingP
 
                         {/* Items summary */}
                         {(pauta.items ?? []).map((item, idx) => {
-                          const sIcon = item.status==="discutido"?"✓":item.status==="acao_definida"?"⚡":"○";
-                          const sCol = item.status==="discutido"?"#10b981":item.status==="acao_definida"?"#f59e0b":"var(--text3)";
+                          const sIcon = item.status==="resolvido"?"✓":item.status==="acao_definida"?"⚡":item.status==="sem_resolucao"?"💭":item.status==="pendente"?"⏸":"○";
+                          const sCol = item.status==="resolvido"?"#10b981":item.status==="acao_definida"?"#f59e0b":item.status==="sem_resolucao"?"#8b5cf6":item.status==="pendente"?"var(--text3)":"var(--text3)";
                           return (
-                            <div key={item.id} style={{padding:"8px 10px",marginBottom:4,borderRadius:8,background:item.status==="discutido"?"#10b98106":item.status==="acao_definida"?"#f59e0b06":"var(--bg2)",border:`1px solid ${sCol}22`}}>
+                            <div key={item.id} style={{padding:"8px 10px",marginBottom:4,borderRadius:8,background:item.status==="resolvido"?"#10b98106":item.status==="acao_definida"?"#f59e0b06":item.status==="sem_resolucao"?"#8b5cf606":"var(--bg2)",border:`1px solid ${sCol}22`}}>
                               <div style={{display:"flex",alignItems:"center",gap:6}}>
                                 <span style={{fontSize:10,color:"var(--text3)",fontWeight:700,minWidth:18}}>{idx+1}.</span>
                                 <span style={{color:sCol,fontSize:11}}>{sIcon}</span>
-                                <span style={{flex:1,fontSize:12,color:"var(--text)",textDecoration:item.status==="discutido"?"line-through":"none"}}>{item.text}</span>
+                                <span style={{flex:1,fontSize:12,color:"var(--text)",textDecoration:item.status==="resolvido"?"line-through":"none"}}>{item.text}</span>
                                 {item.fromIdea && <span style={{fontSize:9,padding:"1px 5px",borderRadius:4,background:"#f59e0b18",color:"#f59e0b"}}>💡</span>}
                                 {item.fromOccurrence && <span style={{fontSize:9,padding:"1px 5px",borderRadius:4,background:"#ef444418",color:"#ef4444"}}>🚨</span>}
+                    {item.fromIncident && <span style={{fontSize:9,padding:"1px 5px",borderRadius:4,background:"#8b5cf618",color:"#8b5cf6"}}>👤</span>}
+                    {item.fromPendencia && <span style={{fontSize:9,padding:"1px 5px",borderRadius:4,background:"#6366f118",color:"#6366f1"}}>📌</span>}
                               </div>
                               {item.notes && <div style={{fontSize:10,color:"var(--text3)",marginTop:4,marginLeft:36,fontStyle:"italic"}}>{item.notes}</div>}
                               {item.decision && <div style={{fontSize:10,color:"#f59e0b",marginTop:2,marginLeft:36}}>⚡ {item.decision}</div>}
+                              {item.reason && <div style={{fontSize:10,color:item.status==="sem_resolucao"?"#8b5cf6":"var(--text3)",marginTop:2,marginLeft:36}}>💬 {item.reason}</div>}
                             </div>
                           );
                         })}
@@ -7391,6 +7491,82 @@ function MeetingPlannerSection({ restaurantId, employees, roles, areas, meetingP
                   </div>
                 );
               })}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ═══ SUB-TAB: PENDÊNCIAS ═══ */}
+      {subTab === "pendencias" && (
+        <div>
+          {allPendencias.filter(p=>p.status==="ativa").length === 0 && allPendencias.filter(p=>p.status==="na_pauta").length === 0 && allPendencias.filter(p=>p.status==="resolvida").length === 0 && (
+            <div style={{...S.card,padding:"30px 20px",textAlign:"center"}}>
+              <div style={{fontSize:32,marginBottom:8}}>📌</div>
+              <div style={{color:"var(--text3)",fontSize:13}}>Nenhuma pendência registrada.</div>
+              <div style={{color:"var(--text3)",fontSize:11,marginTop:4}}>Itens pendentes ou sem resolução das reuniões aparecerão aqui automaticamente.</div>
+            </div>
+          )}
+
+          {/* Active pendências */}
+          {allPendencias.filter(p=>p.status==="ativa").map(pend => {
+            const fromPauta = allPautas.find(p=>p.id===pend.fromPautaId);
+            const typeLabel = pend.type === "pendente" ? "Pendente" : "Sem resolução";
+            const typeColor = pend.type === "pendente" ? "var(--text3)" : "#8b5cf6";
+            const typeIcon = pend.type === "pendente" ? "⏸" : "💭";
+            return (
+              <div key={pend.id} style={{...S.card,padding:"14px 16px",marginBottom:8,border:`1px solid ${typeColor}33`}}>
+                <div style={{display:"flex",alignItems:"flex-start",gap:8}}>
+                  <span style={{fontSize:14}}>{typeIcon}</span>
+                  <div style={{flex:1,minWidth:0}}>
+                    <div style={{display:"flex",alignItems:"center",gap:6,flexWrap:"wrap",marginBottom:4}}>
+                      <span style={{color:"var(--text)",fontSize:13,fontWeight:600}}>{pend.text}</span>
+                      {pend.fromIdea && <span style={{fontSize:9,padding:"1px 5px",borderRadius:4,background:"#f59e0b18",color:"#f59e0b"}}>💡</span>}
+                      {pend.fromOccurrence && <span style={{fontSize:9,padding:"1px 5px",borderRadius:4,background:"#ef444418",color:"#ef4444"}}>🚨</span>}
+                      {pend.fromIncident && <span style={{fontSize:9,padding:"1px 5px",borderRadius:4,background:"#8b5cf618",color:"#8b5cf6"}}>👤</span>}
+                    </div>
+                    {pend.reason && <div style={{fontSize:11,color:typeColor,marginBottom:4}}>💬 {pend.reason}</div>}
+                    <div style={{display:"flex",alignItems:"center",gap:8,fontSize:10,color:"var(--text3)"}}>
+                      <span style={{padding:"2px 6px",borderRadius:4,background:typeColor+"18",color:typeColor,fontWeight:600}}>{typeLabel}</span>
+                      {fromPauta && <span>de: {fromPauta.title} ({new Date(fromPauta.date+"T12:00:00").toLocaleDateString("pt-BR")})</span>}
+                      <span>{new Date(pend.createdAt).toLocaleDateString("pt-BR")}</span>
+                    </div>
+                  </div>
+                  <div style={{display:"flex",gap:4}}>
+                    <button onClick={()=>{const allP=[...getData("meetingPendencias")];const idx=allP.findIndex(p=>p.id===pend.id);if(idx>=0){allP[idx]={...allP[idx],status:"resolvida"};onUpdate("meetingPendencias",allP);}}} title="Marcar como resolvida" style={{padding:"4px 8px",borderRadius:6,border:"1px solid #10b98133",background:"#10b98108",color:"#10b981",cursor:"pointer",fontSize:11,fontFamily:"'DM Sans',sans-serif"}}>✓</button>
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+
+          {/* In pauta pendências */}
+          {allPendencias.filter(p=>p.status==="na_pauta").length > 0 && (
+            <div style={{marginTop:16}}>
+              <h4 style={{color:"var(--text3)",fontSize:12,fontWeight:600,margin:"0 0 8px"}}>Incluídas em pauta</h4>
+              {allPendencias.filter(p=>p.status==="na_pauta").map(pend => (
+                <div key={pend.id} style={{padding:"8px 14px",marginBottom:4,borderRadius:8,background:"var(--bg2)",border:"1px solid var(--border)"}}>
+                  <div style={{display:"flex",alignItems:"center",gap:6}}>
+                    <span style={{color:"#f59e0b",fontSize:10}}>📋</span>
+                    <span style={{color:"var(--text3)",fontSize:12}}>{pend.text}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Resolved pendências */}
+          {allPendencias.filter(p=>p.status==="resolvida").length > 0 && (
+            <div style={{marginTop:16}}>
+              <h4 style={{color:"var(--text3)",fontSize:12,fontWeight:600,margin:"0 0 8px"}}>Resolvidas</h4>
+              {allPendencias.filter(p=>p.status==="resolvida").map(pend => (
+                <div key={pend.id} style={{padding:"8px 14px",marginBottom:4,borderRadius:8,background:"#10b98106",border:"1px solid #10b98122"}}>
+                  <div style={{display:"flex",alignItems:"center",gap:6}}>
+                    <span style={{color:"#10b981",fontSize:10}}>✓</span>
+                    <span style={{flex:1,color:"var(--text3)",fontSize:12,textDecoration:"line-through"}}>{pend.text}</span>
+                    <button onClick={()=>{const allP=[...getData("meetingPendencias")];const idx=allP.findIndex(p=>p.id===pend.id);if(idx>=0){allP[idx]={...allP[idx],status:"ativa"};onUpdate("meetingPendencias",allP);}}} title="Reabrir" style={{padding:"2px 8px",borderRadius:4,border:"1px solid var(--border)",background:"transparent",color:"var(--text3)",cursor:"pointer",fontSize:10}}>↩ Reabrir</button>
+                  </div>
+                </div>
+              ))}
             </div>
           )}
         </div>
@@ -15664,6 +15840,7 @@ export default function App() {
   const [meetingAgendas,      setMeetingAgendas]      = useState([]);
   const [meetingActions,      setMeetingActions]      = useState([]);
   const [meetingOccurrences,  setMeetingOccurrences]  = useState([]);
+  const [meetingPendencias,   setMeetingPendencias]   = useState([]);
 
   useEffect(() => {
     const savedId = currentUserId;
@@ -15691,7 +15868,7 @@ export default function App() {
       setLoadProgress("Preparando o sistema...");
 
       const keys = keyNames;
-      const map = { owners:setOwners, managers:setManagers, restaurants:setRestaurants, employees:setEmployees, roles:setRoles, tips:setTips, splits:setSplits, schedules:setSchedules, communications:setCommunications, commAcks:setCommAcks, faq:setFaq, dpMessages:setDpMessages, workSchedules:setWorkSchedules, notifications:setNotifications, noTipDays:setNoTipDays, trash:setTrash, schedTemplates:setSchedTemplates, schedDrafts:setSchedDrafts, scheduleVersions:setScheduleVersions, tipVersions:setTipVersions, vtConfig:setVtConfig, vtMonthly:setVtMonthly, vtPayments:setVtPayments, incidents:setIncidents, feedbacks:setFeedbacks, devChecklists:setDevChecklists, scheduleAdjustments:setScheduleAdjustments, scheduleStatus:setScheduleStatus, schedulePrevista:setSchedulePrevista, employeeGoals:setEmployeeGoals, delays:setDelays, tipApprovals:setTipApprovals, meetingPlans:setMeetingPlans, meetingIdeas:setMeetingIdeas, meetingAgendas:setMeetingAgendas, meetingActions:setMeetingActions, meetingOccurrences:setMeetingOccurrences };
+      const map = { owners:setOwners, managers:setManagers, restaurants:setRestaurants, employees:setEmployees, roles:setRoles, tips:setTips, splits:setSplits, schedules:setSchedules, communications:setCommunications, commAcks:setCommAcks, faq:setFaq, dpMessages:setDpMessages, workSchedules:setWorkSchedules, notifications:setNotifications, noTipDays:setNoTipDays, trash:setTrash, schedTemplates:setSchedTemplates, schedDrafts:setSchedDrafts, scheduleVersions:setScheduleVersions, tipVersions:setTipVersions, vtConfig:setVtConfig, vtMonthly:setVtMonthly, vtPayments:setVtPayments, incidents:setIncidents, feedbacks:setFeedbacks, devChecklists:setDevChecklists, scheduleAdjustments:setScheduleAdjustments, scheduleStatus:setScheduleStatus, schedulePrevista:setSchedulePrevista, employeeGoals:setEmployeeGoals, delays:setDelays, tipApprovals:setTipApprovals, meetingPlans:setMeetingPlans, meetingIdeas:setMeetingIdeas, meetingAgendas:setMeetingAgendas, meetingActions:setMeetingActions, meetingOccurrences:setMeetingOccurrences, meetingPendencias:setMeetingPendencias };
       const loaded_data = {};
       let successCount = 0;
       keys.forEach((k, i) => {
@@ -15839,11 +16016,11 @@ export default function App() {
     return () => { clearTimeout(slowTimer); clearTimeout(verySlowTimer); };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const data = { owners, managers, restaurants, employees, roles, tips, splits, schedules, communications, commAcks, faq, dpMessages, workSchedules, notifications, noTipDays, trash, schedTemplates, schedDrafts, scheduleVersions, tipVersions, vtConfig, vtMonthly, vtPayments, incidents, feedbacks, devChecklists, scheduleAdjustments, scheduleStatus, schedulePrevista, employeeGoals, delays, tipApprovals, meetingPlans, meetingIdeas, meetingAgendas, meetingActions, meetingOccurrences };
+  const data = { owners, managers, restaurants, employees, roles, tips, splits, schedules, communications, commAcks, faq, dpMessages, workSchedules, notifications, noTipDays, trash, schedTemplates, schedDrafts, scheduleVersions, tipVersions, vtConfig, vtMonthly, vtPayments, incidents, feedbacks, devChecklists, scheduleAdjustments, scheduleStatus, schedulePrevista, employeeGoals, delays, tipApprovals, meetingPlans, meetingIdeas, meetingAgendas, meetingActions, meetingOccurrences, meetingPendencias };
 
   async function handleUpdate(field, value) {
     if (field === "_toast") { setToast(value); return; }
-    const setters = { owners:setOwners, managers:setManagers, restaurants:setRestaurants, employees:setEmployees, roles:setRoles, tips:setTips, splits:setSplits, schedules:setSchedules, communications:setCommunications, commAcks:setCommAcks, faq:setFaq, dpMessages:setDpMessages, workSchedules:setWorkSchedules, notifications:setNotifications, noTipDays:setNoTipDays, trash:setTrash, schedTemplates:setSchedTemplates, schedDrafts:setSchedDrafts, scheduleVersions:setScheduleVersions, tipVersions:setTipVersions, vtConfig:setVtConfig, vtMonthly:setVtMonthly, vtPayments:setVtPayments, incidents:setIncidents, feedbacks:setFeedbacks, devChecklists:setDevChecklists, scheduleAdjustments:setScheduleAdjustments, scheduleStatus:setScheduleStatus, schedulePrevista:setSchedulePrevista, employeeGoals:setEmployeeGoals, delays:setDelays, tipApprovals:setTipApprovals, meetingPlans:setMeetingPlans, meetingIdeas:setMeetingIdeas, meetingAgendas:setMeetingAgendas, meetingActions:setMeetingActions, meetingOccurrences:setMeetingOccurrences };
+    const setters = { owners:setOwners, managers:setManagers, restaurants:setRestaurants, employees:setEmployees, roles:setRoles, tips:setTips, splits:setSplits, schedules:setSchedules, communications:setCommunications, commAcks:setCommAcks, faq:setFaq, dpMessages:setDpMessages, workSchedules:setWorkSchedules, notifications:setNotifications, noTipDays:setNoTipDays, trash:setTrash, schedTemplates:setSchedTemplates, schedDrafts:setSchedDrafts, scheduleVersions:setScheduleVersions, tipVersions:setTipVersions, vtConfig:setVtConfig, vtMonthly:setVtMonthly, vtPayments:setVtPayments, incidents:setIncidents, feedbacks:setFeedbacks, devChecklists:setDevChecklists, scheduleAdjustments:setScheduleAdjustments, scheduleStatus:setScheduleStatus, schedulePrevista:setSchedulePrevista, employeeGoals:setEmployeeGoals, delays:setDelays, tipApprovals:setTipApprovals, meetingPlans:setMeetingPlans, meetingIdeas:setMeetingIdeas, meetingAgendas:setMeetingAgendas, meetingActions:setMeetingActions, meetingOccurrences:setMeetingOccurrences, meetingPendencias:setMeetingPendencias };
     const keys    = { owners:K.owners, managers:K.managers, restaurants:K.restaurants, employees:K.employees, roles:K.roles, tips:K.tips, splits:K.splits, schedules:K.schedules, communications:K.communications, commAcks:K.commAcks, faq:K.faq, dpMessages:K.dpMessages, workSchedules:K.workSchedules, notifications:K.notifications, noTipDays:K.noTipDays, trash:K.trash, schedTemplates:K.schedTemplates, schedDrafts:K.schedDrafts, scheduleVersions:K.scheduleVersions, tipVersions:K.tipVersions, vtConfig:K.vtConfig, vtMonthly:K.vtMonthly, vtPayments:K.vtPayments, incidents:K.incidents, feedbacks:K.feedbacks, devChecklists:K.devChecklists, scheduleAdjustments:K.scheduleAdjustments, scheduleStatus:K.scheduleStatus, schedulePrevista:K.schedulePrevista, employeeGoals:K.employeeGoals, delays:K.delays, tipApprovals:K.tipApprovals, meetingPlans:K.meetingPlans, meetingIdeas:K.meetingIdeas, meetingAgendas:K.meetingAgendas, meetingActions:K.meetingActions };
     // Support functional updates to prevent stale-state race conditions:
     // When value is a function, it receives the latest state (like setState(prev => ...))
