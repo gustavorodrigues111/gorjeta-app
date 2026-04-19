@@ -10429,6 +10429,18 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                   </div>
                 </div>
               )}
+              {dpMgrForm.profile === "custom" && (
+                <div style={{borderTop:"1px solid var(--border)",paddingTop:12}}>
+                  <button onClick={()=>setDpMgrForm({...dpMgrForm,isDP:!dpMgrForm.isDP})}
+                    style={{width:"100%",padding:"12px 14px",borderRadius:10,border:`1px solid ${dpMgrForm.isDP?"var(--blue)":"var(--border)"}`,background:dpMgrForm.isDP?"var(--blue-bg)":"transparent",color:dpMgrForm.isDP?"var(--blue)":"var(--text3)",cursor:"pointer",fontFamily:"'DM Sans',sans-serif",fontSize:13,textAlign:"left",display:"flex",alignItems:"center",gap:10}}>
+                    <span style={{fontSize:18}}>📬</span>
+                    <div>
+                      <div style={{fontWeight:700}}>{dpMgrForm.isDP?"✓ Recebe mensagens do Fale com DP":"○ Não recebe mensagens do Fale com DP"}</div>
+                      <div style={{fontSize:11,opacity:0.7,marginTop:2}}>Recebe notificações de horários e mensagens do Fale com DP</div>
+                    </div>
+                  </button>
+                </div>
+              )}
 
               {/* Restaurantes */}
               {(currentUser?.restaurantIds??[]).length > 1 && (
@@ -11003,7 +11015,7 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }
                     <div style={{minWidth:0}}>
                       <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:2,flexWrap:"wrap"}}>
                         <span style={{color:"var(--text)",fontWeight:700,fontSize:isMobile?14:15}}>{m.name}</span>
-                        {m.profile==="dp" && <span style={{background:"var(--blue-bg)",color:"var(--blue)",borderRadius:6,padding:"2px 8px",fontSize:10,fontWeight:700}}>📬 DP</span>}
+                        {m.profile==="dp" && <span style={{background:"var(--blue-bg)",color:"var(--blue)",borderRadius:6,padding:"2px 8px",fontSize:10,fontWeight:700}}>📬 Gestor Adm.</span>}
                         {m.profile==="lider" && <span style={{background:"#f59e0b22",color:"#f59e0b",borderRadius:6,padding:"2px 8px",fontSize:10,fontWeight:700}}>👔 Líder Op.</span>}
                       </div>
                       <div style={{color:"var(--text3)",fontSize:isMobile?11:12,marginBottom:4}}>CPF: {isPrivate(selRestaurant) ? "•••.•••.•••-••" : (m.cpf||"—")}</div>
@@ -11014,7 +11026,7 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }
                         {[["tips","💸 Gorjetas"],["schedule","📅 Escala"],["roles","🏷️ Cargos"],["employees","👥 Equipe"],["comunicados","📢 Comuns."],["faq","❓ FAQ"],["dp","💬 DP"],["horarios","🕐 Horários"],["vt","🚌 VT"]].map(([k,lbl])=>
                           m.perms?.[k]!==false ? <span key={k} style={{background:"var(--green-bg)",color:"var(--green)",borderRadius:6,padding:"2px 6px",fontSize:isMobile?10:11,fontWeight:600}}>{lbl}</span> : null
                         )}
-                        {m.isDP && !m.profile && <span style={{background:"var(--blue-bg)",color:"var(--blue)",borderRadius:6,padding:"2px 6px",fontSize:isMobile?10:11,fontWeight:600}}>📬 DP</span>}
+                        {m.isDP && !m.profile && <span style={{background:"var(--blue-bg)",color:"var(--blue)",borderRadius:6,padding:"2px 6px",fontSize:isMobile?10:11,fontWeight:600}}>📬 Gestor Adm.</span>}
                       </div>
                       {(m.restaurantIds??[]).filter(rid=>rid!==selRestaurant).length > 0 && (
                         <div style={{color:"var(--text3)",fontSize:11}}>
@@ -11611,7 +11623,7 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }
                     style={{width:"100%",padding:"12px 14px",borderRadius:10,border:`1px solid ${mgrForm.isDP?"var(--blue)":"var(--border)"}`,background:mgrForm.isDP?"var(--blue-bg)":"transparent",color:mgrForm.isDP?"var(--blue)":"var(--text3)",cursor:"pointer",fontFamily:"'DM Sans',sans-serif",fontSize:13,textAlign:"left",display:"flex",alignItems:"center",gap:10}}>
                     <span style={{fontSize:18}}>📬</span>
                     <div>
-                      <div style={{fontWeight:700}}>{mgrForm.isDP?"✓ É gestor do DP":"○ Não é gestor do DP"}</div>
+                      <div style={{fontWeight:700}}>{mgrForm.isDP?"✓ Recebe mensagens do Fale com DP":"○ Não recebe mensagens do Fale com DP"}</div>
                       <div style={{fontSize:11,opacity:0.7,marginTop:2}}>Recebe notificações de horários e mensagens do Fale com DP</div>
                     </div>
                   </button>
@@ -12258,7 +12270,7 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }
                   <div style={{flex:1,minWidth:0}}>
                     <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:2,flexWrap:"wrap"}}>
                       <span style={{color:"var(--text)",fontWeight:700,fontSize:isMobile?13:15}}>{m.name}</span>
-                      {m.isDP && <span style={{background:"var(--blue-bg)",color:"var(--blue)",borderRadius:6,padding:"2px 8px",fontSize:isMobile?10:11,fontWeight:700}}>📬 DP</span>}
+                      {m.isDP && <span style={{background:"var(--blue-bg)",color:"var(--blue)",borderRadius:6,padding:"2px 8px",fontSize:isMobile?10:11,fontWeight:700}}>📬 Gestor Adm.</span>}
                       {m.profile && m.profile !== "custom" && <span style={{background:"var(--bg2)",color:"var(--text3)",borderRadius:6,padding:"2px 8px",fontSize:isMobile?10:11,fontWeight:600}}>{m.profile === "lider" ? "👑 Líder Op." : m.profile === "padrao" ? "📋 Padrão" : m.profile}</span>}
                     </div>
                     <div style={{color:"var(--text3)",fontSize:isMobile?11:12,marginBottom:6}}>CPF: {(m.restaurantIds??[]).some(rid=>isPrivate(rid)) ? maskCpfPriv(m.cpf, (m.restaurantIds??[])[0]) : (m.cpf||"—")}</div>
@@ -12857,12 +12869,12 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }
             </div>
 
             <div style={{borderTop:"1px solid var(--border)",paddingTop:12}}>
-              <label style={S.label}>Departamento Pessoal (DP)</label>
+              <label style={S.label}>Fale com DP</label>
               <button onClick={()=>setMgrForm({...mgrForm,isDP:!mgrForm.isDP})}
                 style={{width:"100%",padding:"12px 14px",borderRadius:10,border:`1px solid ${mgrForm.isDP?"#3b82f6":"var(--border)"}`,background:mgrForm.isDP?"#3b82f622":"transparent",color:mgrForm.isDP?"#3b82f6":"#555",cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:13,textAlign:"left",display:"flex",alignItems:"center",gap:10}}>
                 <span style={{fontSize:18}}>📬</span>
                 <div>
-                  <div style={{fontWeight:700}}>{mgrForm.isDP?"✓ É gestor do DP":"○ Não é gestor do DP"}</div>
+                  <div style={{fontWeight:700}}>{mgrForm.isDP?"✓ Recebe mensagens do Fale com DP":"○ Não recebe mensagens do Fale com DP"}</div>
                   <div style={{fontSize:11,opacity:0.7,marginTop:2}}>Recebe notificações de horários, mensagens do Fale com DP e avisos internos</div>
                 </div>
               </button>
@@ -12874,7 +12886,7 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }
       )}
 
       {showOwnerModal && (
-        <Modal title={editOwnerId?"Editar Admin AppTip":"Novo Admin AppTip"} onClose={()=>setShowOwnerModal(false)}>
+        <Modal title={editOwnerId?"Editar Gestor AppTip":"Novo Gestor AppTip"} onClose={()=>setShowOwnerModal(false)}>
           <div style={{display:"flex",flexDirection:"column",gap:12}}>
             <div><label style={S.label}>Nome completo</label><input value={ownerForm.name} onChange={e=>setOwnerForm({...ownerForm,name:e.target.value})} style={S.input}/></div>
             <div><label style={S.label}>CPF</label><input value={ownerForm.cpf} onChange={e=>setOwnerForm({...ownerForm,cpf:maskCpf(e.target.value)})} placeholder="000.000.000-00" style={S.input} inputMode="numeric"/></div>
@@ -12884,7 +12896,7 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }
               <label style={{display:"flex",alignItems:"center",gap:10,cursor:"pointer",padding:"12px 14px",borderRadius:10,border:`1px solid ${ownerForm.isMaster?"var(--ac)":"var(--border)"}`,background:ownerForm.isMaster?"var(--ac-bg)":"transparent"}}>
                 <input type="checkbox" checked={!!ownerForm.isMaster} onChange={e=>setOwnerForm({...ownerForm,isMaster:e.target.checked})} style={{width:16,height:16,accentColor:ac}}/>
                 <div>
-                  <div style={{color:"var(--text)",fontWeight:600,fontSize:14}}>👑 Admin Master</div>
+                  <div style={{color:"var(--text)",fontWeight:600,fontSize:14}}>👑 Gestor Master</div>
                   <div style={{color:"var(--text3)",fontSize:12}}>Pode ver lixeira e não pode ser excluído</div>
                 </div>
               </label>
