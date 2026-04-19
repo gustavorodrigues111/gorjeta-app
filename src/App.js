@@ -6352,7 +6352,7 @@ function MeetingPlannerSection({ restaurantId, employees, roles, areas, meetingP
   const [showIdeaForm, setShowIdeaForm] = useState(false);
   const [ideaTitle, setIdeaTitle] = useState("");
   const [ideaDesc, setIdeaDesc] = useState("");
-  const [ideaArea, setIdeaArea] = useState("");
+  const [ideaAreas, setIdeaAreas] = useState([]);
   // Pautas
   const [showPautaForm, setShowPautaForm] = useState(false);
   const [pautaTitle, setPautaTitle] = useState("");
@@ -6388,7 +6388,7 @@ function MeetingPlannerSection({ restaurantId, employees, roles, areas, meetingP
     ? meetingPlans.filter(p => (p.employeeIds ?? []).some(eid => filteredEmployees.find(e => e.id === eid)))
     : meetingPlans;
   const filteredIdeas = (isLider && !showAllAreas && managerAreas?.length > 0)
-    ? allIdeas.filter(i => !i.area || managerAreas.includes(i.area))
+    ? allIdeas.filter(i => { const ia = i.areas ?? (i.area ? [i.area] : []); return ia.length === 0 || ia.some(a => managerAreas.includes(a)); })
     : allIdeas;
 
   const toggleArea = (area) => {
@@ -6453,14 +6453,14 @@ function MeetingPlannerSection({ restaurantId, employees, roles, areas, meetingP
       restaurantId,
       title: ideaTitle.trim(),
       description: ideaDesc.trim(),
-      area: ideaArea || null,
+      areas: ideaAreas.length > 0 ? [...ideaAreas] : null,
       createdBy: currentUser?.name ?? (isOwner ? "Gestor AppTip" : "Gestor Adm."),
       createdAt: new Date().toISOString(),
       priority: false,
       status: "nova", // nova | na_pauta | descartada
     };
     onUpdate("meetingIdeas", [...getData("meetingIdeas"), idea]);
-    setIdeaTitle(""); setIdeaDesc(""); setIdeaArea(""); setShowIdeaForm(false);
+    setIdeaTitle(""); setIdeaDesc(""); setIdeaAreas([]); setShowIdeaForm(false);
   }
 
   function toggleIdeaPriority(ideaId) {
@@ -6779,13 +6779,14 @@ function MeetingPlannerSection({ restaurantId, employees, roles, areas, meetingP
                 <textarea value={ideaDesc} onChange={e=>setIdeaDesc(e.target.value)} rows={2} placeholder="Detalhes..." style={{...S.input,resize:"vertical"}}/>
               </div>
               <div style={{marginBottom:14}}>
-                <label style={S.label}>Área relacionada <span style={{fontWeight:400,color:"var(--text3)"}}>(opcional)</span></label>
+                <label style={S.label}>Áreas relacionadas <span style={{fontWeight:400,color:"var(--text3)"}}>(opcional, clique para selecionar várias)</span></label>
                 <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
-                  <button onClick={()=>setIdeaArea("")} style={{padding:"5px 12px",borderRadius:8,border:`1px solid ${!ideaArea?"var(--ac)":"var(--border)"}`,background:!ideaArea?"var(--ac)11":"transparent",color:!ideaArea?"var(--ac)":"var(--text3)",cursor:"pointer",fontSize:11,fontFamily:"'DM Sans',sans-serif"}}>Geral</button>
                   {filteredAreas.map(a => {
                     const col = AREA_COLORS[a] ?? "#888";
-                    return <button key={a} onClick={()=>setIdeaArea(a)} style={{padding:"5px 12px",borderRadius:8,border:`1px solid ${ideaArea===a?col:"var(--border)"}`,background:ideaArea===a?col+"18":"transparent",color:ideaArea===a?col:"var(--text3)",cursor:"pointer",fontSize:11,fontFamily:"'DM Sans',sans-serif"}}>{a}</button>;
+                    const active = ideaAreas.includes(a);
+                    return <button key={a} onClick={()=>setIdeaAreas(prev=>prev.includes(a)?prev.filter(x=>x!==a):[...prev,a])} style={{padding:"5px 12px",borderRadius:8,border:`1px solid ${active?col:"var(--border)"}`,background:active?col+"18":"transparent",color:active?col:"var(--text3)",cursor:"pointer",fontSize:11,fontFamily:"'DM Sans',sans-serif",fontWeight:active?600:400}}>{active?"✓ ":""}{a}</button>;
                   })}
+                  {ideaAreas.length > 0 && <button onClick={()=>setIdeaAreas([])} style={{padding:"5px 12px",borderRadius:8,border:"1px solid var(--border)",background:"transparent",color:"var(--text3)",cursor:"pointer",fontSize:11,fontFamily:"'DM Sans',sans-serif"}}>Limpar</button>}
                 </div>
               </div>
               <button onClick={handleCreateIdea} style={{...S.btnPrimary,width:"auto",padding:"10px 24px",background:"#f59e0b",borderColor:"#f59e0b"}}>Salvar ideia</button>
@@ -6802,14 +6803,14 @@ function MeetingPlannerSection({ restaurantId, employees, roles, areas, meetingP
 
           {/* Priority ideas first */}
           {filteredIdeas.filter(i=>i.status==="nova").sort((a,b) => (b.priority?1:0) - (a.priority?1:0) || (b.createdAt??"").localeCompare(a.createdAt??"")).map(idea => {
-            const col = idea.area ? (AREA_COLORS[idea.area] ?? "#888") : "#888";
+            const ideaAreaList = idea.areas ?? (idea.area ? [idea.area] : []);
             return (
               <div key={idea.id} style={{...S.card,padding:"12px 16px",marginBottom:8,border:`1px solid ${idea.priority?"#f59e0b33":"var(--border)"}`,background:idea.priority?"#f59e0b05":"var(--card-bg)"}}>
                 <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:8}}>
                   <div style={{flex:1,minWidth:0}}>
                     <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:4,flexWrap:"wrap"}}>
                       {idea.priority && <span style={{fontSize:10,padding:"2px 6px",borderRadius:4,background:"#f59e0b22",color:"#f59e0b",fontWeight:700}}>⚡ Prioridade</span>}
-                      {idea.area && <span style={{fontSize:10,padding:"2px 6px",borderRadius:4,background:col+"18",color:col}}>{idea.area}</span>}
+                      {ideaAreaList.map(a => { const col = AREA_COLORS[a] ?? "#888"; return <span key={a} style={{fontSize:10,padding:"2px 6px",borderRadius:4,background:col+"18",color:col}}>{a}</span>; })}
                     </div>
                     <div style={{color:"var(--text)",fontWeight:600,fontSize:13}}>{idea.title}</div>
                     {idea.description && <div style={{color:"var(--text3)",fontSize:11,marginTop:2}}>{idea.description}</div>}
