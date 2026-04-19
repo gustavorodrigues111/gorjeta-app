@@ -8913,7 +8913,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
   return (
     <div style={{ fontFamily:"'DM Sans',sans-serif" }}>
       {/* Tab groups — row 1: group pills */}
-      <div style={{ display:"flex", gap:2, padding:"8px 8px 0", background:"var(--header-bg)", justifyContent:"center" }}>
+      <div style={{ display:"flex", gap:2, padding:"8px 8px 0", background:"var(--header-bg)" }}>
         {TAB_GROUPS_FINAL.map(g => (
           <button key={g.id} onClick={() => switchGroup(g.id)}
             style={{ padding:"6px 10px", background:tabGroup===g.id?ac:"transparent", border:"none", borderRadius:16, color:tabGroup===g.id?"#fff":"var(--text3)", cursor:"pointer", fontSize:12, fontFamily:"'DM Sans',sans-serif", fontWeight:tabGroup===g.id?700:500, whiteSpace:"nowrap", transition:"all .15s" }}>
