@@ -620,6 +620,25 @@ const K = {
   meetingPendencias:   "v4:meetingPendencias",    // [{id, restaurantId, text, reason, type:"pendente"|"sem_resolucao", fromPautaId, fromItemId, createdAt, status:"ativa"|"na_pauta"|"resolvida"}]
   inbox:               "v4:inbox",                // [{id, tipo, de:{id,nome,role}, para:{id?,role?,restaurantId?}, restaurantId?, assunto, corpo, lido:bool, criadoEm, metadata:{}, folder:null|string, deletedAt:null|iso}]
   inboxFolders:        "v4:inboxFolders",         // {userId: [{id, nome, cor, ordem}]}
+  // ═══ AppMise — Contagens (estoques por perfil de usuário) ═══
+  miseCategories:      "v4:miseCategories",       // [{id, restaurantId, name}]   ex: Vinhos, Bar, Cozinha
+  miseStocks:          "v4:miseStocks",           // [{id, restaurantId, name, location?}]   ex: Estoque 1, Adega
+  miseAssignments:     "v4:miseAssignments",      // [{id, restaurantId, categoryId, stockId, userId}]  unicidade por tripla
+  miseItems:           "v4:miseItems",            // [{id, restaurantId, categoryId, name, unit, expectedQty?}]
+  miseCycles:          "v4:miseCycles",           // [{id, restaurantId, name, startDate, endDate?, status:"open"|"closed", closedAt?, closedBy?}]
+  miseCounts:          "v4:miseCounts",           // [{id, restaurantId, cycleId, itemId, stockId, userId, qty, countedAt, note?}]
+  miseSuppliers:       "v4:miseSuppliers",        // [{id, restaurantId, name, whatsapp, notes}]
+  miseProductSuppliers:"v4:miseProductSuppliers", // [{id, restaurantId, productId, supplierId, conversionFactor, price?, preferred}]
+  miseSupplierOrders:  "v4:miseSupplierOrders",   // [{id, restaurantId, cycleId, supplierId, status, items:[{productId,qtySuggested,qtyApproved?,qtyReceived?,notes?}], createdAt, approvedAt?, sentAt?, receivedAt?, receivedBy?, receivedByName?, messageText?, history:[{status,ts,by,note}]}]
+  miseChecklistTemplates: "v4:miseChecklistTemplates", // [{id, restaurantId, name, description?, items:[{id,text,order}], active}]
+  miseChecklistRuns:      "v4:miseChecklistRuns",      // [{id, restaurantId, templateId, userId, userName, date, items:[{itemId,done,doneAt?,note?}], completedAt?}]
+  // ═══ Pessoas (entidade unificada: empregados + gestores → uma só) ═══
+  pessoas:             "v4:pessoas",              // [{id, restaurantIds:[], name, cpf, pin, mustChangePin, email?, whatsapp?, isTeam:{[rid]:bool}, teamData:{[rid]:{empCode,roleId,admission,...}}, linkedEmployeeId?, linkedManagerId?, permissions:{[rid]:{operational:{},admin:{},special:{}}}}]
+  pessoasMigratedAt:   "v4:pessoasMigratedAt",    // ISO date da última migração (para idempotência)
+  // ═══ AppMise — Fichas Técnicas (portado do projeto fichastecnicas-c3829) ═══
+  miseFtInsumos:       "v4:miseFtInsumos",        // [{id, restaurantId, name, unit, price}]
+  miseFtEquipamentos:  "v4:miseFtEquipamentos",   // {[restaurantId]: [string]}
+  miseFtDishes:        "v4:miseFtDishes",         // [{id, restaurantId, name, description, louca, equipamentos:[], markup, sub_fichas:[{id,name,rendimento,rendimento_qty,rendimento_unit,modo_preparo,subproduto?:{name},ingredientes:[{insumo_id?,insumo_name?,subref_id?,qty,unit,qty_raw?,is_qb?,fc?}]}], photos:[]}]
 };
 
 // ── Inbox helpers ──
@@ -9627,12 +9646,13 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
       (isOwner || (perms.vt !== false && tabVisible("vt"))) && ["vt","Vale Transporte"],
     ].filter(Boolean) },
     { id:"equipe", label:"👥 Pessoas", icon:"👥", tabs: [
+      (isOwner || canTips) && ["pessoas","Pessoas"],
+      (isOwner || canTips) && ["permissoes","Permissões"],
       (isOwner || canTips || tabVisible("employees")) && ["employees","Equipe"],
       (isOwner || tabVisible("roles")) && ["roles","Cargos"],
       (isOwner || tabVisible("horarios")) && ["horarios","Horários"],
       canSched && ["schedule","Escala"],
       (isOwner || canTips || tabVisible("employees")) && ["reunioes","Reuniões"],
-      (isOwner || canTips) && ["permissoes","Permissões Op."],
     ].filter(Boolean) },
     { id:"comunicacao", label:"📢 Comunicação", icon:"📢", tabs: [
       (isOwner || tabVisible("comunicados")) && ["comunicados","Comunicados"],
@@ -9642,7 +9662,13 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
     ].filter(Boolean) },
     { id:"config", label:"⚙️ Config", icon:"⚙️", tabs: [
       (canTips || isOwner) && ["config","Configurações"],
-      (isDP || isOwner) && ["dp_gestores","Gestores"],
+      // Aba "Gestores" removida — substituída pelo fluxo Pessoas + Permissões.
+      // Render block de dp_gestores mantido por compat — não alcançável pela navegação.
+    ].filter(Boolean) },
+    { id:"mise", label:"📦 Mise", icon:"📦", tabs: [
+      (canTips || isOwner) && ["mise_contagens","Contagens"],
+      (canTips || isOwner) && ["mise_checklists","Checklists"],
+      (canTips || isOwner) && ["mise_fichas","Fichas Técnicas"],
     ].filter(Boolean) },
   ].filter(g => g.tabs.length > 0);
 
@@ -10966,68 +10992,82 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
           </div>
         )}
 
-        {/* PERMISSÕES OPERACIONAIS */}
+        {/* PESSOAS — CRUD unificado */}
+        {tab === "pessoas" && (
+          <PessoasAdmin
+            restaurantId={rid}
+            pessoas={data?.pessoas ?? []}
+            roles={roles}
+            onUpdate={onUpdate}
+            mobileOnly={mobileOnly}
+          />
+        )}
+
+        {/* PERMISSÕES — matriz unificada */}
         {tab === "permissoes" && (
+          <PermissoesMatrix
+            restaurantId={rid}
+            pessoas={data?.pessoas ?? []}
+            employees={employees}
+            managers={data?.managers ?? []}
+            onUpdate={onUpdate}
+            mobileOnly={mobileOnly}
+          />
+        )}
+
+        {/* MISE — CONTAGENS (admin) */}
+        {tab === "mise_contagens" && (
           <div>
             <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:12,marginBottom:8}}>
-              <h3 style={{color:"var(--text)",margin:0,fontSize:mobileOnly?16:20}}>⚙️ Permissões Operacionais</h3>
+              <h3 style={{color:"var(--text)",margin:0,fontSize:mobileOnly?16:20}}>📦 Contagens <span style={{fontSize:11,color:"#7c9e5e",fontWeight:700,textTransform:"uppercase",letterSpacing:0.4,marginLeft:6}}>Mise</span></h3>
             </div>
-            <p style={{color:"var(--text3)",fontSize:13,lineHeight:1.5,margin:"0 0 16px",maxWidth:720}}>
-              Conceda áreas específicas do Portal do Gestor Operacional a funcionários da equipe. Quem tiver pelo menos uma área marcada verá um botão ⚙️ no Portal do Empregado para alternar para o Gestor Operacional, sem novo login.
-            </p>
+            <MiseContagensAdmin
+              restaurantId={rid}
+              employees={employees}
+              miseCategories={data?.miseCategories ?? []}
+              miseStocks={data?.miseStocks ?? []}
+              miseAssignments={data?.miseAssignments ?? []}
+              miseItems={data?.miseItems ?? []}
+              miseCycles={data?.miseCycles ?? []}
+              miseCounts={data?.miseCounts ?? []}
+              miseSuppliers={data?.miseSuppliers ?? []}
+              miseProductSuppliers={data?.miseProductSuppliers ?? []}
+              onUpdate={onUpdate}
+              mobileOnly={mobileOnly}
+            />
+          </div>
+        )}
 
-            <div style={{overflowX:"auto",border:"1px solid var(--border)",borderRadius:12,background:"var(--card-bg)"}}>
-              <table style={{width:"100%",borderCollapse:"collapse",fontSize:13}}>
-                <thead>
-                  <tr style={{background:"var(--bg2)",borderBottom:"1px solid var(--border)"}}>
-                    <th style={{padding:"10px 12px",textAlign:"left",color:"var(--text)",fontWeight:700,position:"sticky",left:0,background:"var(--bg2)",zIndex:1,minWidth:180}}>Funcionário</th>
-                    {OPERATIONAL_AREA_DEFS.map(def => (
-                      <th key={def.key} style={{padding:"10px 8px",textAlign:"center",color:"var(--text)",fontWeight:600,minWidth:90}}>
-                        <div style={{fontSize:16,marginBottom:2}}>{def.icon}</div>
-                        <div style={{fontSize:9,color:def.module==="mise"?"#7c9e5e":"var(--ac)",fontWeight:700,textTransform:"uppercase",letterSpacing:0.4}}>{def.module==="mise"?"Mise":"Tip"}</div>
-                        <div style={{fontSize:11,color:"var(--text2)",fontWeight:500}}>{def.label}</div>
-                      </th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {restEmps.length === 0 ? (
-                    <tr><td colSpan={OPERATIONAL_AREA_DEFS.length+1} style={{padding:"32px 16px",textAlign:"center",color:"var(--text3)"}}>Nenhum funcionário cadastrado</td></tr>
-                  ) : [...restEmps].sort((a,b)=>a.name.localeCompare(b.name)).map(emp => {
-                    const areas = emp.operationalAreas ?? {};
-                    return (
-                      <tr key={emp.id} style={{borderTop:"1px solid var(--border)"}}>
-                        <td style={{padding:"8px 12px",color:"var(--text)",fontWeight:500,position:"sticky",left:0,background:"var(--card-bg)",zIndex:1}}>{emp.name}</td>
-                        {OPERATIONAL_AREA_DEFS.map(def => {
-                          const checked = areas[def.key] === true;
-                          return (
-                            <td key={def.key} style={{padding:"8px",textAlign:"center"}}>
-                              <input type="checkbox" checked={checked}
-                                onChange={e => {
-                                  const nextAreas = {...(emp.operationalAreas ?? {})};
-                                  if (e.target.checked) nextAreas[def.key] = true;
-                                  else delete nextAreas[def.key];
-                                  const nextEmp = Object.keys(nextAreas).length
-                                    ? { ...emp, operationalAreas: nextAreas }
-                                    : (() => { const { operationalAreas:_omit, ...rest } = emp; return rest; })();
-                                  const nextList = employees.map(x => x.id === emp.id ? nextEmp : x);
-                                  onUpdate("employees", nextList);
-                                }}
-                                style={{cursor:"pointer",width:18,height:18,accentColor:def.module==="mise"?"#7c9e5e":"var(--ac)"}}
-                              />
-                            </td>
-                          );
-                        })}
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
+        {/* MISE — CHECKLISTS (admin) */}
+        {tab === "mise_checklists" && (
+          <div>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:12,marginBottom:8}}>
+              <h3 style={{color:"var(--text)",margin:0,fontSize:mobileOnly?16:20}}>✅ Checklists <span style={{fontSize:11,color:"#7c9e5e",fontWeight:700,textTransform:"uppercase",letterSpacing:0.4,marginLeft:6}}>Mise</span></h3>
             </div>
+            <MiseChecklistsAdmin
+              restaurantId={rid}
+              miseChecklistTemplates={data?.miseChecklistTemplates ?? []}
+              miseChecklistRuns={data?.miseChecklistRuns ?? []}
+              onUpdate={onUpdate}
+              mobileOnly={mobileOnly}
+            />
+          </div>
+        )}
 
-            <div style={{marginTop:12,fontSize:12,color:"var(--text3)",lineHeight:1.5}}>
-              💡 Alterações são salvas automaticamente a cada clique.
+        {/* MISE — FICHAS TÉCNICAS (admin) */}
+        {tab === "mise_fichas" && (
+          <div>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:12,marginBottom:8}}>
+              <h3 style={{color:"var(--text)",margin:0,fontSize:mobileOnly?16:20}}>📋 Fichas Técnicas <span style={{fontSize:11,color:"#7c9e5e",fontWeight:700,textTransform:"uppercase",letterSpacing:0.4,marginLeft:6}}>Mise</span></h3>
             </div>
+            <MiseFichasTecnicasAdmin
+              restaurantId={rid}
+              miseFtInsumos={data?.miseFtInsumos ?? []}
+              miseFtEquipamentos={data?.miseFtEquipamentos ?? {}}
+              miseFtDishes={data?.miseFtDishes ?? []}
+              onUpdate={onUpdate}
+              mobileOnly={mobileOnly}
+            />
           </div>
         )}
 
@@ -15993,6 +16033,7 @@ const OPERATIONAL_AREA_DEFS = [
   { key: "trilhas",        label: "Trilhas",         icon: "🎯", module: "tip"  },
   { key: "reunioes",       label: "Reuniões",        icon: "🗣️", module: "tip"  },
   { key: "contagens",      label: "Contagens",       icon: "📦", module: "mise" },
+  { key: "compras",        label: "Compras",         icon: "🛒", module: "mise" },
   { key: "checklists",     label: "Checklists",      icon: "✅", module: "mise" },
   { key: "fichasTecnicas", label: "Fichas Técnicas", icon: "📋", module: "mise" },
 ];
@@ -16087,17 +16128,4500 @@ function OperationalPortal({ employee, data, onUpdate, onBack, toggleTheme, them
       </div>
 
       {/* Body */}
-      <div style={{padding:"24px 20px",maxWidth:960,margin:"0 auto"}}>
-        <div style={{textAlign:"center",padding:"60px 24px",color:"var(--text3)"}}>
-          <div style={{fontSize:48,marginBottom:16}}>{activeArea?.icon}</div>
-          <h3 style={{color:"var(--text)",fontSize:18,fontWeight:700,margin:"0 0 8px"}}>{activeArea?.label}</h3>
-          <p style={{fontSize:14,lineHeight:1.6,maxWidth:420,margin:"0 auto"}}>
-            Em construção. Esta área do {activeArea?.module === "mise" ? "AppMise" : "AppTip"} será habilitada nos próximos passos da implantação.
-          </p>
-        </div>
+      <div style={{padding:"24px 20px",maxWidth:1040,margin:"0 auto"}}>
+        {tab === "contagens" ? (
+          <OperationalContagens
+            employee={employee}
+            miseCategories={data?.miseCategories ?? []}
+            miseStocks={data?.miseStocks ?? []}
+            miseAssignments={data?.miseAssignments ?? []}
+            miseItems={data?.miseItems ?? []}
+            miseCycles={data?.miseCycles ?? []}
+            miseCounts={data?.miseCounts ?? []}
+            onUpdate={onUpdate}
+          />
+        ) : tab === "fichasTecnicas" ? (
+          <OperationalFichasTecnicas
+            employee={employee}
+            miseFtInsumos={data?.miseFtInsumos ?? []}
+            miseFtDishes={data?.miseFtDishes ?? []}
+          />
+        ) : tab === "compras" ? (
+          <OperationalCompras
+            employee={employee}
+            data={data}
+            onUpdate={onUpdate}
+          />
+        ) : tab === "checklists" ? (
+          <OperationalChecklists
+            employee={employee}
+            miseChecklistTemplates={data?.miseChecklistTemplates ?? []}
+            miseChecklistRuns={data?.miseChecklistRuns ?? []}
+            onUpdate={onUpdate}
+          />
+        ) : activeArea?.module === "tip" ? (
+          <div style={{textAlign:"center",padding:"50px 24px",color:"var(--text3)"}}>
+            <div style={{fontSize:48,marginBottom:16}}>{activeArea?.icon}</div>
+            <h3 style={{color:"var(--text)",fontSize:18,fontWeight:700,margin:"0 0 8px"}}>{activeArea?.label}</h3>
+            <p style={{fontSize:14,lineHeight:1.6,maxWidth:460,margin:"0 auto 20px"}}>
+              Esta área do AppTip é acessível hoje pelo <b>Portal do Gestor Administrativo</b>. Use o botão <span style={{fontFamily:"monospace",background:"var(--bg2)",padding:"2px 6px",borderRadius:4,color:"var(--ac)"}}>📊</span> no cabeçalho acima para alternar — se você tiver também esse perfil.
+            </p>
+            <div style={{fontSize:12,color:"var(--text3)",background:"#fffbeb",border:"1px solid #f59e0b44",borderRadius:10,padding:"10px 16px",maxWidth:460,margin:"0 auto"}}>
+              💡 <b>Em evolução:</b> uma visão operacional dedicada (diferente do Gestor Adm) chega em iteração futura. Por enquanto, quem tem a permissão <b>{activeArea?.label}</b> no Gestor Operacional vê este aviso.
+            </div>
+          </div>
+        ) : (
+          <div style={{textAlign:"center",padding:"60px 24px",color:"var(--text3)"}}>
+            <div style={{fontSize:48,marginBottom:16}}>{activeArea?.icon}</div>
+            <h3 style={{color:"var(--text)",fontSize:18,fontWeight:700,margin:"0 0 8px"}}>{activeArea?.label}</h3>
+            <p style={{fontSize:14,lineHeight:1.6,maxWidth:420,margin:"0 auto"}}>
+              Em construção. Esta área do {activeArea?.module === "mise" ? "AppMise" : "AppTip"} será habilitada nos próximos passos da implantação.
+            </p>
+          </div>
+        )}
       </div>
     </div>
   );
+}
+
+// ═══════════════════════════════════════════════════════════════
+// ──  MISE CONTAGENS — ADMIN (Gestor Administrativo)            ──
+// ═══════════════════════════════════════════════════════════════
+function MiseContagensAdmin({ restaurantId, employees, miseCategories, miseStocks, miseAssignments, miseItems, miseCycles, miseCounts, miseSuppliers, miseProductSuppliers, onUpdate, mobileOnly }) {
+  const [subTab, setSubTab] = useState("atribuicoes");
+  const restCategories = miseCategories.filter(c => c.restaurantId === restaurantId);
+  const restStocks = miseStocks.filter(s => s.restaurantId === restaurantId);
+  const restAssignments = miseAssignments.filter(a => a.restaurantId === restaurantId);
+  const restItems = miseItems.filter(i => i.restaurantId === restaurantId);
+  const restSuppliers = (miseSuppliers || []).filter(s => s.restaurantId === restaurantId);
+  const restProductSuppliers = (miseProductSuppliers || []).filter(ps => ps.restaurantId === restaurantId);
+  const restCycles = miseCycles.filter(c => c.restaurantId === restaurantId).sort((a,b) => (b.startDate||"").localeCompare(a.startDate||""));
+  const restEmps = employees.filter(e => e.restaurantId === restaurantId && !(e.inactive && e.inactiveFrom && e.inactiveFrom <= today()));
+  // Só empregados que têm a área "contagens" concedida aparecem como responsáveis
+  const eligibleEmps = restEmps.filter(e => e.operationalAreas?.contagens === true);
+
+  const [newCatName, setNewCatName] = useState("");
+  const [newCatType, setNewCatType] = useState("ambos");
+  const [editingCatId, setEditingCatId] = useState(null);
+  const [editingCatName, setEditingCatName] = useState("");
+  const [newStockName, setNewStockName] = useState("");
+  const [newStockLoc, setNewStockLoc] = useState("");
+  const [editingStockId, setEditingStockId] = useState(null);
+  const [editingStockName, setEditingStockName] = useState("");
+  const [editingStockLoc, setEditingStockLoc] = useState("");
+  const [newItemCat, setNewItemCat] = useState("");
+  const [newItemName, setNewItemName] = useState("");
+  const [newItemUnit, setNewItemUnit] = useState("un");
+  const [newItemMinStock, setNewItemMinStock] = useState("");
+  const [itemFilter, setItemFilter] = useState("");
+  const [newCycleName, setNewCycleName] = useState("");
+  const [assignMatrixCat, setAssignMatrixCat] = useState(null); // categoria selecionada na matriz
+  // Fornecedores
+  const [newSupName, setNewSupName] = useState("");
+  const [newSupWhats, setNewSupWhats] = useState("");
+  const [newSupNotes, setNewSupNotes] = useState("");
+  const [editingSupId, setEditingSupId] = useState(null);
+  const [editingSupForm, setEditingSupForm] = useState({ name: "", whatsapp: "", notes: "" });
+  // Modal de vínculos Produto → Fornecedores
+  const [linkModalProductId, setLinkModalProductId] = useState(null);
+  // Modal de vínculos em lote: um fornecedor × muitos produtos
+  const [bulkLinkSupplierId, setBulkLinkSupplierId] = useState(null);
+  const [bulkFilter, setBulkFilter] = useState({ categoryId: "", search: "" });
+  const [bulkSelected, setBulkSelected] = useState({}); // productId → true
+  const [bulkDefaults, setBulkDefaults] = useState({ factor: "1", price: "", markPreferred: false });
+
+  const mkId = () => Date.now().toString() + "_" + Math.random().toString(36).slice(2, 8);
+  const openCycle = restCycles.find(c => c.status === "open");
+  const miseAc = "#7c9e5e";
+
+  // Actions — Categorias
+  function addCategory() {
+    const nm = newCatName.trim();
+    if (!nm) return;
+    if (restCategories.some(c => c.name.toLowerCase() === nm.toLowerCase())) { alert("Já existe categoria com esse nome."); return; }
+    onUpdate("miseCategories", [...miseCategories, { id: mkId(), restaurantId, name: nm, type: newCatType || "ambos" }]);
+    setNewCatName("");
+    setNewCatType("ambos");
+  }
+  function saveCatEdit() {
+    const nm = editingCatName.trim();
+    if (!nm || !editingCatId) return;
+    onUpdate("miseCategories", miseCategories.map(c => c.id === editingCatId ? { ...c, name: nm } : c));
+    setEditingCatId(null); setEditingCatName("");
+  }
+  function updateCatType(catId, type) {
+    onUpdate("miseCategories", miseCategories.map(c => c.id === catId ? { ...c, type } : c));
+  }
+  function delCategory(id) {
+    const cat = restCategories.find(c => c.id === id);
+    const linkedItems = restItems.filter(i => i.categoryId === id).length;
+    const linkedAssigns = restAssignments.filter(a => a.categoryId === id).length;
+    if (!window.confirm(`Remover categoria "${cat?.name}"?\n${linkedItems} item(ns) e ${linkedAssigns} atribuição(ões) vinculadas serão apagadas.`)) return;
+    onUpdate("miseCategories", miseCategories.filter(c => c.id !== id));
+    onUpdate("miseItems", miseItems.filter(i => i.categoryId !== id));
+    onUpdate("miseAssignments", miseAssignments.filter(a => a.categoryId !== id));
+  }
+
+  // Actions — Estoques
+  function addStock() {
+    const nm = newStockName.trim();
+    if (!nm) return;
+    if (restStocks.some(s => s.name.toLowerCase() === nm.toLowerCase())) { alert("Já existe estoque com esse nome."); return; }
+    onUpdate("miseStocks", [...miseStocks, { id: mkId(), restaurantId, name: nm, location: newStockLoc.trim() || null }]);
+    setNewStockName(""); setNewStockLoc("");
+  }
+  function saveStockEdit() {
+    const nm = editingStockName.trim();
+    if (!nm || !editingStockId) return;
+    onUpdate("miseStocks", miseStocks.map(s => s.id === editingStockId ? { ...s, name: nm, location: editingStockLoc.trim() || null } : s));
+    setEditingStockId(null); setEditingStockName(""); setEditingStockLoc("");
+  }
+  function delStock(id) {
+    const st = restStocks.find(s => s.id === id);
+    const linkedAssigns = restAssignments.filter(a => a.stockId === id).length;
+    if (!window.confirm(`Remover estoque "${st?.name}"?\n${linkedAssigns} atribuição(ões) vinculadas serão apagadas.`)) return;
+    onUpdate("miseStocks", miseStocks.filter(s => s.id !== id));
+    onUpdate("miseAssignments", miseAssignments.filter(a => a.stockId !== id));
+  }
+
+  // Actions — Itens
+  function addItem() {
+    const nm = newItemName.trim();
+    if (!nm || !newItemCat) return;
+    const minStock = newItemMinStock === "" ? null : parseFloat(String(newItemMinStock).replace(",","."));
+    onUpdate("miseItems", [...miseItems, { id: mkId(), restaurantId, categoryId: newItemCat, name: nm, unit: newItemUnit.trim() || "un", minStock: isNaN(minStock) ? null : minStock }]);
+    setNewItemName(""); setNewItemMinStock("");
+  }
+  function delItem(id) {
+    if (!window.confirm("Remover este item? Vínculos com fornecedores também serão removidos.")) return;
+    onUpdate("miseItems", miseItems.filter(i => i.id !== id));
+    onUpdate("miseProductSuppliers", (miseProductSuppliers || []).filter(ps => ps.productId !== id));
+  }
+  function updateItemMinStock(id, v) {
+    const minStock = v === "" ? null : parseFloat(String(v).replace(",","."));
+    onUpdate("miseItems", miseItems.map(i => i.id === id ? { ...i, minStock: isNaN(minStock) ? null : minStock } : i));
+  }
+
+  // Actions — Fornecedores
+  function addSupplier() {
+    const nm = newSupName.trim();
+    if (!nm) return;
+    if (restSuppliers.some(s => ftNrm(s.name) === ftNrm(nm))) { alert("Já existe fornecedor com esse nome."); return; }
+    onUpdate("miseSuppliers", [...(miseSuppliers || []), { id: mkId(), restaurantId, name: nm, whatsapp: newSupWhats.trim() || null, notes: newSupNotes.trim() || null }]);
+    setNewSupName(""); setNewSupWhats(""); setNewSupNotes("");
+  }
+  function startEditSup(s) {
+    setEditingSupId(s.id);
+    setEditingSupForm({ name: s.name, whatsapp: s.whatsapp ?? "", notes: s.notes ?? "" });
+  }
+  function saveSupEdit() {
+    const nm = editingSupForm.name.trim();
+    if (!nm || !editingSupId) return;
+    onUpdate("miseSuppliers", (miseSuppliers || []).map(s => s.id === editingSupId ? { ...s, name: nm, whatsapp: editingSupForm.whatsapp.trim() || null, notes: editingSupForm.notes.trim() || null } : s));
+    setEditingSupId(null);
+  }
+  function delSupplier(id) {
+    const s = restSuppliers.find(x => x.id === id);
+    const linked = restProductSuppliers.filter(ps => ps.supplierId === id).length;
+    if (!window.confirm(`Remover fornecedor "${s?.name}"?\n${linked} vínculo(s) com produtos serão removidos.`)) return;
+    onUpdate("miseSuppliers", (miseSuppliers || []).filter(x => x.id !== id));
+    onUpdate("miseProductSuppliers", (miseProductSuppliers || []).filter(ps => ps.supplierId !== id));
+  }
+
+  // Actions — Vínculos Produto-Fornecedor
+  function toggleProductSupplierLink(productId, supplierId) {
+    const existing = restProductSuppliers.find(ps => ps.productId === productId && ps.supplierId === supplierId);
+    if (existing) {
+      onUpdate("miseProductSuppliers", (miseProductSuppliers || []).filter(ps => ps.id !== existing.id));
+    } else {
+      const linksForProduct = restProductSuppliers.filter(ps => ps.productId === productId);
+      const isFirst = linksForProduct.length === 0;
+      onUpdate("miseProductSuppliers", [...(miseProductSuppliers || []), { id: mkId(), restaurantId, productId, supplierId, conversionFactor: 1, price: null, preferred: isFirst }]);
+    }
+  }
+  function updateProductSupplier(linkId, patch) {
+    onUpdate("miseProductSuppliers", (miseProductSuppliers || []).map(ps => ps.id === linkId ? { ...ps, ...patch } : ps));
+  }
+  function setPreferred(productId, linkId) {
+    // Desmarca outros vínculos do mesmo produto, marca só esse
+    onUpdate("miseProductSuppliers", (miseProductSuppliers || []).map(ps => {
+      if (ps.productId !== productId) return ps;
+      return { ...ps, preferred: ps.id === linkId };
+    }));
+  }
+
+  // Abre modal de vínculo em lote para um fornecedor
+  function openBulkLink(supplierId) {
+    setBulkLinkSupplierId(supplierId);
+    // Pré-seleciona produtos já vinculados a esse fornecedor
+    const preSelected = {};
+    restProductSuppliers.filter(ps => ps.supplierId === supplierId).forEach(ps => { preSelected[ps.productId] = true; });
+    setBulkSelected(preSelected);
+    setBulkFilter({ categoryId: "", search: "" });
+    setBulkDefaults({ factor: "1", price: "", markPreferred: false });
+  }
+
+  // Aplica os vínculos em lote: para cada produto selecionado, cria vínculo se não existe; se existe, atualiza com defaults
+  function applyBulkLink() {
+    if (!bulkLinkSupplierId) return;
+    const factor = parseFloat(String(bulkDefaults.factor).replace(",",".")) || 1;
+    const price = bulkDefaults.price === "" ? null : (parseFloat(String(bulkDefaults.price).replace(",",".")) || 0);
+    const markPreferred = !!bulkDefaults.markPreferred;
+    const selectedProductIds = Object.keys(bulkSelected).filter(pid => bulkSelected[pid]);
+    if (selectedProductIds.length === 0) { alert("Nenhum produto selecionado."); return; }
+
+    let next = [...(miseProductSuppliers || [])];
+    let added = 0, updated = 0;
+    selectedProductIds.forEach(productId => {
+      const existing = next.find(ps => ps.productId === productId && ps.supplierId === bulkLinkSupplierId && ps.restaurantId === restaurantId);
+      if (existing) {
+        next = next.map(ps => ps.id === existing.id ? { ...ps, conversionFactor: factor, price, preferred: markPreferred ? true : ps.preferred } : ps);
+        updated++;
+      } else {
+        const hasPreferred = next.some(ps => ps.productId === productId && ps.restaurantId === restaurantId && ps.preferred);
+        next.push({
+          id: mkId(),
+          restaurantId,
+          productId,
+          supplierId: bulkLinkSupplierId,
+          conversionFactor: factor,
+          price,
+          preferred: markPreferred || !hasPreferred, // se for o primeiro vínculo do produto, marca preferencial
+        });
+        added++;
+      }
+    });
+
+    // Se markPreferred, desmarca preferred dos outros fornecedores nesses produtos
+    if (markPreferred) {
+      next = next.map(ps => {
+        if (selectedProductIds.includes(ps.productId) && ps.supplierId !== bulkLinkSupplierId && ps.preferred) {
+          return { ...ps, preferred: false };
+        }
+        return ps;
+      });
+    }
+
+    // Remove vínculos de produtos que foram DES-selecionados (estavam marcados na abertura, mas foram desmarcados agora)
+    const originalLinked = new Set(restProductSuppliers.filter(ps => ps.supplierId === bulkLinkSupplierId).map(ps => ps.productId));
+    const toUnlink = [...originalLinked].filter(pid => !bulkSelected[pid]);
+    if (toUnlink.length > 0) {
+      next = next.filter(ps => !(ps.supplierId === bulkLinkSupplierId && toUnlink.includes(ps.productId)));
+    }
+
+    onUpdate("miseProductSuppliers", next);
+    setBulkLinkSupplierId(null);
+    alert(`Vínculos atualizados: ${added} novo(s), ${updated} atualizado(s)${toUnlink.length?`, ${toUnlink.length} removido(s)`:""}.`);
+  }
+
+  // Vincula categoria inteira: seleciona todos os produtos da categoria no modal
+  function selectCategory(categoryId) {
+    const productsInCat = restItems.filter(i => i.categoryId === categoryId);
+    const next = { ...bulkSelected };
+    productsInCat.forEach(p => { next[p.id] = true; });
+    setBulkSelected(next);
+  }
+  function deselectCategory(categoryId) {
+    const productsInCat = restItems.filter(i => i.categoryId === categoryId);
+    const next = { ...bulkSelected };
+    productsInCat.forEach(p => { delete next[p.id]; });
+    setBulkSelected(next);
+  }
+
+  // Actions — Atribuições (toggle de célula do grid)
+  function toggleAssignment(categoryId, stockId, userId) {
+    const existing = restAssignments.find(a => a.categoryId === categoryId && a.stockId === stockId && a.userId === userId);
+    if (existing) {
+      onUpdate("miseAssignments", miseAssignments.filter(a => a.id !== existing.id));
+    } else {
+      onUpdate("miseAssignments", [...miseAssignments, { id: mkId(), restaurantId, categoryId, stockId, userId }]);
+    }
+  }
+
+  // Actions — Ciclos
+  function openNewCycle() {
+    const nm = newCycleName.trim() || `Contagem ${new Date().toLocaleDateString("pt-BR")}`;
+    const hasOpen = restCycles.find(c => c.status === "open");
+    if (hasOpen && !window.confirm(`Já existe ciclo aberto: "${hasOpen.name}".\nFechar e abrir um novo?`)) return;
+    let next = [...miseCycles];
+    if (hasOpen) next = next.map(c => c.id === hasOpen.id ? { ...c, status: "closed", endDate: today(), closedAt: new Date().toISOString() } : c);
+    next.push({ id: mkId(), restaurantId, name: nm, startDate: today(), status: "open" });
+    onUpdate("miseCycles", next);
+    setNewCycleName("");
+  }
+  function closeCycle(id) {
+    const c = restCycles.find(x => x.id === id);
+    if (!window.confirm(`Fechar o ciclo "${c?.name}"? Depois de fechado, não pode receber novas contagens.`)) return;
+    onUpdate("miseCycles", miseCycles.map(x => x.id === id ? { ...x, status: "closed", endDate: today(), closedAt: new Date().toISOString() } : x));
+  }
+  function reopenCycle(id) {
+    if (!window.confirm("Reabrir este ciclo? Ele volta a aceitar contagens.")) return;
+    onUpdate("miseCycles", miseCycles.map(x => x.id === id ? { ...x, status: "open", endDate: null, closedAt: null } : x));
+  }
+  function delCycle(id) {
+    const c = restCycles.find(x => x.id === id);
+    const linked = miseCounts.filter(cnt => cnt.cycleId === id).length;
+    if (!window.confirm(`Apagar ciclo "${c?.name}" e ${linked} contagem(ns) vinculadas?`)) return;
+    onUpdate("miseCycles", miseCycles.filter(x => x.id !== id));
+    onUpdate("miseCounts", miseCounts.filter(cnt => cnt.cycleId !== id));
+  }
+
+  const SUB_TABS = [
+    { id: "atribuicoes",  label: "Atribuições" },
+    { id: "categorias",   label: "Categorias"  },
+    { id: "estoques",     label: "Estoques"    },
+    { id: "itens",        label: "Itens"       },
+    { id: "fornecedores", label: "Fornecedores"},
+    { id: "ciclos",       label: "Ciclos"      },
+  ];
+
+  // Para matriz de atribuições
+  const selectedCat = assignMatrixCat ? restCategories.find(c => c.id === assignMatrixCat) : null;
+
+  // Import template JSON (ex: extraído do JotForm Sororoca)
+  function handleImportTemplate(e) {
+    const file = e.target.files[0];
+    e.target.value = "";
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = ev => {
+      try {
+        const data = JSON.parse(ev.target.result);
+        const srcStocks = Array.isArray(data.stocks) ? data.stocks : [];
+        const srcCategories = Array.isArray(data.categories) ? data.categories : [];
+        if (!srcStocks.length && !srcCategories.length) {
+          alert("Arquivo sem stocks ou categories. Verifique o formato do template.");
+          return;
+        }
+        const totalItems = srcCategories.reduce((s, c) => s + (c.items?.length || 0), 0);
+        const msg =
+          `Importar template de contagem:\n\n` +
+          `  • ${srcStocks.length} estoque(s)\n` +
+          `  • ${srcCategories.length} categoria(s)\n` +
+          `  • ${totalItems} item(ns)\n\n` +
+          (restCategories.length || restStocks.length || restItems.length
+            ? `⚠ O restaurante já tem ${restCategories.length} categoria(s), ${restStocks.length} estoque(s), ${restItems.length} item(ns). Duplicatas por nome serão detectadas; novos serão adicionados.\n\n`
+            : ``) +
+          `Continuar?`;
+        if (!window.confirm(msg)) return;
+
+        // 1. Stocks — merge por nome (case-insensitive)
+        const stocksNext = [...miseStocks];
+        let stocksAdded = 0;
+        srcStocks.forEach(name => {
+          const nm = String(name).trim();
+          if (!nm) return;
+          const existing = stocksNext.find(s => s.restaurantId === restaurantId && ftNrm(s.name) === ftNrm(nm));
+          if (!existing) {
+            stocksNext.push({ id: ftUid(), restaurantId, name: nm, location: null });
+            stocksAdded++;
+          }
+        });
+
+        // 2. Categorias — merge por nome
+        const categoriesNext = [...miseCategories];
+        const catIdMap = {}; // srcId/srcName → AppTip category id
+        let catsAdded = 0;
+        srcCategories.forEach(src => {
+          const nm = (src.name || "").trim();
+          if (!nm) return;
+          const existing = categoriesNext.find(c => c.restaurantId === restaurantId && ftNrm(c.name) === ftNrm(nm));
+          if (existing) {
+            catIdMap[src.id || nm] = existing.id;
+          } else {
+            const newId = ftUid();
+            const next = { id: newId, restaurantId, name: nm };
+            if (src.group) next.group = src.group;
+            if (src.team) next.team = src.team;
+            categoriesNext.push(next);
+            catIdMap[src.id || nm] = newId;
+            catsAdded++;
+          }
+        });
+
+        // 3. Itens — merge por (categoria, nome)
+        const itemsNext = [...miseItems];
+        let itemsAdded = 0;
+        srcCategories.forEach(src => {
+          const catId = catIdMap[src.id || src.name];
+          if (!catId) return;
+          (src.items || []).forEach(it => {
+            const nm = (it.name || "").trim();
+            if (!nm) return;
+            const existing = itemsNext.find(x => x.restaurantId === restaurantId && x.categoryId === catId && ftNrm(x.name) === ftNrm(nm));
+            if (!existing) {
+              itemsNext.push({
+                id: ftUid(), restaurantId, categoryId: catId,
+                name: nm,
+                unit: it.unit || "un",
+                expectedQty: typeof it.expectedQty === "number" ? it.expectedQty : null,
+              });
+              itemsAdded++;
+            }
+          });
+        });
+
+        if (stocksAdded) onUpdate("miseStocks", stocksNext);
+        if (catsAdded) onUpdate("miseCategories", categoriesNext);
+        if (itemsAdded) onUpdate("miseItems", itemsNext);
+
+        alert(
+          `Template importado:\n\n` +
+          `  • Estoques: +${stocksAdded} novo(s)\n` +
+          `  • Categorias: +${catsAdded} nova(s)\n` +
+          `  • Itens: +${itemsAdded} novo(s)\n\n` +
+          `Próximo: atribuir funcionários por (categoria × estoque) na aba Atribuições.`
+        );
+      } catch (err) {
+        alert("Erro ao processar arquivo: " + err.message);
+      }
+    };
+    reader.readAsText(file);
+  }
+
+  return (
+    <div>
+      {/* Sub-tabs + import */}
+      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",flexWrap:"wrap",gap:8,marginBottom:12}}>
+        <div style={{display:"flex",gap:4,borderBottom:"1px solid var(--border)",overflowX:"auto"}}>
+          {SUB_TABS.map(t => (
+            <button key={t.id} onClick={()=>setSubTab(t.id)}
+              style={{background:"none",border:"none",borderBottom: subTab===t.id ? `2px solid ${miseAc}` : "2px solid transparent",padding:"8px 14px",cursor:"pointer",fontSize:13,fontWeight: subTab===t.id ? 700 : 500,color: subTab===t.id ? "var(--text)" : "var(--text3)",whiteSpace:"nowrap",flexShrink:0}}>
+              {t.label}
+            </button>
+          ))}
+        </div>
+        <label style={{...S.btnSecondary,fontSize:11,padding:"6px 12px",cursor:"pointer",display:"inline-flex",alignItems:"center",color:miseAc,borderColor:miseAc+"66"}}>
+          ⬆ Importar template (JSON)
+          <input type="file" accept=".json,application/json" onChange={handleImportTemplate} style={{display:"none"}} />
+        </label>
+      </div>
+
+      {/* ATRIBUIÇÕES */}
+      {subTab === "atribuicoes" && (
+        <div>
+          <p style={{color:"var(--text3)",fontSize:13,lineHeight:1.5,margin:"0 0 16px",maxWidth:720}}>
+            Defina quem conta cada categoria em cada estoque. Uma mesma categoria pode ter responsáveis diferentes em estoques diferentes (ex: Vinhos no estoque 1 com João; Vinhos no estoque 2 com Maria).
+          </p>
+          {eligibleEmps.length === 0 && (
+            <div style={{padding:"12px 16px",background:"#fffbeb",border:"1px solid #f59e0b44",borderRadius:10,marginBottom:16,fontSize:13,color:"#92400e",lineHeight:1.5}}>
+              ⚠️ Nenhum funcionário tem a área <b>Contagens</b> concedida. Primeiro marque a área em <b>Pessoas → Permissões Op.</b> para os funcionários elegíveis.
+            </div>
+          )}
+          {restCategories.length === 0 || restStocks.length === 0 ? (
+            <div style={{padding:"32px 16px",textAlign:"center",color:"var(--text3)",fontSize:14,background:"var(--card-bg)",borderRadius:12,border:"1px solid var(--border)"}}>
+              {restCategories.length === 0 ? "Cadastre ao menos uma categoria na aba Categorias." : "Cadastre ao menos um estoque na aba Estoques."}
+            </div>
+          ) : (
+            <>
+              <div style={{marginBottom:12,display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
+                <label style={{fontSize:13,color:"var(--text2)",fontWeight:600}}>Categoria:</label>
+                <select value={assignMatrixCat ?? ""} onChange={e=>setAssignMatrixCat(e.target.value || null)} style={{...S.input,maxWidth:260,width:"auto"}}>
+                  <option value="">— Selecione —</option>
+                  {restCategories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                </select>
+              </div>
+              {!selectedCat ? (
+                <div style={{padding:"32px 16px",textAlign:"center",color:"var(--text3)",fontSize:14,background:"var(--card-bg)",borderRadius:12,border:"1px solid var(--border)"}}>
+                  Selecione uma categoria para atribuir responsáveis por estoque.
+                </div>
+              ) : (selectedCat.type === "pedido") ? (
+                // Categoria de Pedido puro — sem dimensão de estoque
+                <div style={{border:"1px solid var(--border)",borderRadius:12,background:"var(--card-bg)"}}>
+                  <div style={{padding:"10px 14px",background:"var(--bg2)",borderBottom:"1px solid var(--border)",fontSize:12,color:"var(--text3)"}}>
+                    Categoria <b>{selectedCat.name}</b> é do tipo <b>Pedido</b> — não tem estoque. Marque quem pode solicitar produtos dessa categoria.
+                  </div>
+                  {eligibleEmps.length === 0 ? (
+                    <div style={{padding:"32px 16px",textAlign:"center",color:"var(--text3)"}}>Nenhum funcionário com a área Contagens concedida.</div>
+                  ) : [...eligibleEmps].sort((a,b)=>a.name.localeCompare(b.name)).map(emp => {
+                    const checked = !!restAssignments.find(a => a.categoryId === selectedCat.id && a.stockId === null && a.userId === emp.id);
+                    return (
+                      <div key={emp.id} style={{display:"flex",alignItems:"center",gap:10,padding:"8px 14px",borderTop:"1px solid var(--border)"}}>
+                        <input type="checkbox" checked={checked}
+                          onChange={() => toggleAssignment(selectedCat.id, null, emp.id)}
+                          style={{cursor:"pointer",width:18,height:18,accentColor:miseAc}} />
+                        <span style={{color:"var(--text)",fontWeight:500}}>{emp.name}</span>
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : (
+                <div style={{overflowX:"auto",border:"1px solid var(--border)",borderRadius:12,background:"var(--card-bg)"}}>
+                  <table style={{width:"100%",borderCollapse:"collapse",fontSize:13}}>
+                    <thead>
+                      <tr style={{background:"var(--bg2)",borderBottom:"1px solid var(--border)"}}>
+                        <th style={{padding:"10px 12px",textAlign:"left",color:"var(--text)",fontWeight:700,position:"sticky",left:0,background:"var(--bg2)",zIndex:1,minWidth:140}}>Funcionário</th>
+                        {restStocks.map(s => (
+                          <th key={s.id} style={{padding:"10px 8px",textAlign:"center",color:"var(--text)",fontWeight:700,minWidth:100}}>
+                            <div>{s.name}</div>
+                            {s.location && <div style={{fontSize:10,color:"var(--text3)",fontWeight:400,marginTop:2}}>{s.location}</div>}
+                          </th>
+                        ))}
+                        {(selectedCat.type === "ambos") && (
+                          <th style={{padding:"10px 8px",textAlign:"center",color:"var(--text)",fontWeight:700,minWidth:100,background:"#fffbeb"}}>
+                            <div>🛒 Pedido direto</div>
+                            <div style={{fontSize:10,color:"var(--text3)",fontWeight:400,marginTop:2}}>além da contagem</div>
+                          </th>
+                        )}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {eligibleEmps.length === 0 ? (
+                        <tr><td colSpan={restStocks.length + 1 + (selectedCat.type==="ambos"?1:0)} style={{padding:"32px 16px",textAlign:"center",color:"var(--text3)"}}>Nenhum funcionário com a área Contagens concedida.</td></tr>
+                      ) : [...eligibleEmps].sort((a,b)=>a.name.localeCompare(b.name)).map(emp => (
+                        <tr key={emp.id} style={{borderTop:"1px solid var(--border)"}}>
+                          <td style={{padding:"8px 12px",color:"var(--text)",fontWeight:500,position:"sticky",left:0,background:"var(--card-bg)",zIndex:1}}>{emp.name}</td>
+                          {restStocks.map(st => {
+                            const checked = !!restAssignments.find(a => a.categoryId === selectedCat.id && a.stockId === st.id && a.userId === emp.id);
+                            return (
+                              <td key={st.id} style={{padding:"8px",textAlign:"center"}}>
+                                <input type="checkbox" checked={checked}
+                                  onChange={() => toggleAssignment(selectedCat.id, st.id, emp.id)}
+                                  style={{cursor:"pointer",width:18,height:18,accentColor:miseAc}}
+                                />
+                              </td>
+                            );
+                          })}
+                          {(selectedCat.type === "ambos") && (() => {
+                            const checked = !!restAssignments.find(a => a.categoryId === selectedCat.id && a.stockId === null && a.userId === emp.id);
+                            return (
+                              <td style={{padding:"8px",textAlign:"center",background:"#fffbeb"}}>
+                                <input type="checkbox" checked={checked}
+                                  onChange={() => toggleAssignment(selectedCat.id, null, emp.id)}
+                                  style={{cursor:"pointer",width:18,height:18,accentColor:"#d97706"}} />
+                              </td>
+                            );
+                          })()}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+              {selectedCat && (
+                <div style={{marginTop:12,fontSize:12,color:"var(--text3)",lineHeight:1.5}}>
+                  💡 Tipo atual: <b>{selectedCat.type === "pedido" ? "Pedido (sem estoque)" : selectedCat.type === "ambos" ? "Ambos (contagem + pedido direto)" : "Contagem (por estoque)"}</b>. Trocar o tipo em <b>Categorias</b>.
+                </div>
+              )}
+            </>
+          )}
+        </div>
+      )}
+
+      {/* CATEGORIAS */}
+      {subTab === "categorias" && (
+        <div>
+          <h3 style={{color:"var(--text)",margin:"0 0 12px",fontSize:mobileOnly?16:18}}>📂 Categorias</h3>
+          <div style={{padding:"12px",background:"var(--card-bg)",border:"1px solid var(--border)",borderRadius:10,marginBottom:16}}>
+            <div style={{display:"grid",gridTemplateColumns:mobileOnly?"1fr":"2fr 1.5fr auto",gap:10,alignItems:"end"}}>
+              <div>
+                <label style={{...S.label,fontSize:11}}>Nome da categoria</label>
+                <input value={newCatName} onChange={e=>setNewCatName(e.target.value)} placeholder="ex: Vinhos, Bar, Cozinha" style={S.input} onKeyDown={e=>e.key==="Enter"&&addCategory()} />
+              </div>
+              <div>
+                <label style={{...S.label,fontSize:11}}>Tipo</label>
+                <div style={{display:"flex",gap:4,background:"var(--bg2)",padding:3,borderRadius:8,border:"1px solid var(--border)"}}>
+                  {[["contagem","📦 Contagem"],["pedido","🛒 Pedido"],["ambos","📦🛒 Ambos"]].map(([v,l]) => (
+                    <button key={v} type="button" onClick={()=>setNewCatType(v)}
+                      style={{flex:1,background:newCatType===v?miseAc:"transparent",color:newCatType===v?"#fff":"var(--text2)",border:"none",borderRadius:6,padding:"6px 10px",fontSize:11,fontWeight:newCatType===v?700:500,cursor:"pointer",fontFamily:"'DM Sans',sans-serif"}}>
+                      {l}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <button onClick={addCategory} style={{...S.btnPrimary,fontSize:13,padding:"8px 16px"}}>+ Adicionar</button>
+            </div>
+            <div style={{marginTop:8,fontSize:11,color:"var(--text3)"}}>
+              💡 <b>Contagem</b>: usuário conta estoque físico. <b>Pedido</b>: usuário informa direto o que pedir. <b>Ambos</b>: faz as duas.
+            </div>
+          </div>
+          {restCategories.length === 0 ? (
+            <div style={{padding:"32px 16px",textAlign:"center",color:"var(--text3)",fontSize:14,background:"var(--card-bg)",borderRadius:12,border:"1px solid var(--border)"}}>Nenhuma categoria cadastrada</div>
+          ) : (
+            <div style={{display:"flex",flexDirection:"column",gap:8}}>
+              {[...restCategories].sort((a,b)=>a.name.localeCompare(b.name)).map(c => {
+                const nItems = restItems.filter(i => i.categoryId === c.id).length;
+                const isEditing = editingCatId === c.id;
+                const cType = c.type ?? "ambos";
+                return (
+                  <div key={c.id} style={{display:"flex",alignItems:"center",gap:10,padding:"10px 14px",background:"var(--card-bg)",border:"1px solid var(--border)",borderRadius:10,flexWrap:"wrap"}}>
+                    {isEditing ? (
+                      <>
+                        <input value={editingCatName} onChange={e=>setEditingCatName(e.target.value)} style={{...S.input,flex:1,minWidth:160}} onKeyDown={e=>e.key==="Enter"&&saveCatEdit()} autoFocus />
+                        <button onClick={saveCatEdit} style={{...S.btnPrimary,fontSize:12,padding:"6px 12px"}}>Salvar</button>
+                        <button onClick={()=>{setEditingCatId(null);setEditingCatName("");}} style={{...S.btnSecondary,fontSize:12,padding:"6px 12px"}}>Cancelar</button>
+                      </>
+                    ) : (
+                      <>
+                        <div style={{flex:1,minWidth:140,color:"var(--text)",fontWeight:600}}>{c.name}</div>
+                        <select value={cType} onChange={e=>updateCatType(c.id, e.target.value)} style={{...S.input,width:"auto",fontSize:11,padding:"4px 8px"}} title="Tipo da categoria">
+                          <option value="contagem">📦 Contagem</option>
+                          <option value="pedido">🛒 Pedido</option>
+                          <option value="ambos">📦🛒 Ambos</option>
+                        </select>
+                        <div style={{fontSize:12,color:"var(--text3)"}}>{nItems} {nItems===1?"item":"itens"}</div>
+                        <button onClick={()=>{setEditingCatId(c.id);setEditingCatName(c.name);}} style={{...S.btnSecondary,fontSize:12,padding:"6px 12px"}}>Editar</button>
+                        <button onClick={()=>delCategory(c.id)} style={{...S.btnSecondary,fontSize:12,padding:"6px 12px",color:"var(--red)",borderColor:"var(--red)44"}}>Remover</button>
+                      </>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ESTOQUES */}
+      {subTab === "estoques" && (
+        <div>
+          <h3 style={{color:"var(--text)",margin:"0 0 12px",fontSize:mobileOnly?16:18}}>🏬 Estoques</h3>
+          <div style={{display:"flex",gap:8,marginBottom:16,flexWrap:"wrap"}}>
+            <input value={newStockName} onChange={e=>setNewStockName(e.target.value)} placeholder="Nome do estoque (ex: Adega)" style={{...S.input,maxWidth:240,flex:"1 1 180px"}} onKeyDown={e=>e.key==="Enter"&&addStock()} />
+            <input value={newStockLoc} onChange={e=>setNewStockLoc(e.target.value)} placeholder="Localização (opcional)" style={{...S.input,maxWidth:260,flex:"1 1 180px"}} onKeyDown={e=>e.key==="Enter"&&addStock()} />
+            <button onClick={addStock} style={{...S.btnPrimary,fontSize:13,padding:"8px 16px"}}>+ Adicionar</button>
+          </div>
+          {restStocks.length === 0 ? (
+            <div style={{padding:"32px 16px",textAlign:"center",color:"var(--text3)",fontSize:14,background:"var(--card-bg)",borderRadius:12,border:"1px solid var(--border)"}}>Nenhum estoque cadastrado</div>
+          ) : (
+            <div style={{display:"flex",flexDirection:"column",gap:8}}>
+              {[...restStocks].sort((a,b)=>a.name.localeCompare(b.name)).map(s => {
+                const isEditing = editingStockId === s.id;
+                return (
+                  <div key={s.id} style={{display:"flex",alignItems:"center",gap:10,padding:"10px 14px",background:"var(--card-bg)",border:"1px solid var(--border)",borderRadius:10,flexWrap:"wrap"}}>
+                    {isEditing ? (
+                      <>
+                        <input value={editingStockName} onChange={e=>setEditingStockName(e.target.value)} style={{...S.input,flex:"1 1 160px"}} autoFocus />
+                        <input value={editingStockLoc} onChange={e=>setEditingStockLoc(e.target.value)} placeholder="Localização" style={{...S.input,flex:"1 1 160px"}} />
+                        <button onClick={saveStockEdit} style={{...S.btnPrimary,fontSize:12,padding:"6px 12px"}}>Salvar</button>
+                        <button onClick={()=>{setEditingStockId(null);setEditingStockName("");setEditingStockLoc("");}} style={{...S.btnSecondary,fontSize:12,padding:"6px 12px"}}>Cancelar</button>
+                      </>
+                    ) : (
+                      <>
+                        <div style={{flex:1,minWidth:160}}>
+                          <div style={{color:"var(--text)",fontWeight:600}}>{s.name}</div>
+                          {s.location && <div style={{fontSize:12,color:"var(--text3)",marginTop:2}}>📍 {s.location}</div>}
+                        </div>
+                        <button onClick={()=>{setEditingStockId(s.id);setEditingStockName(s.name);setEditingStockLoc(s.location??"");}} style={{...S.btnSecondary,fontSize:12,padding:"6px 12px"}}>Editar</button>
+                        <button onClick={()=>delStock(s.id)} style={{...S.btnSecondary,fontSize:12,padding:"6px 12px",color:"var(--red)",borderColor:"var(--red)44"}}>Remover</button>
+                      </>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ITENS */}
+      {subTab === "itens" && (
+        <div>
+          <h3 style={{color:"var(--text)",margin:"0 0 12px",fontSize:mobileOnly?16:18}}>🍷 Itens</h3>
+          {restCategories.length === 0 ? (
+            <div style={{padding:"12px 16px",background:"#fffbeb",border:"1px solid #f59e0b44",borderRadius:10,marginBottom:16,fontSize:13,color:"#92400e"}}>
+              Cadastre ao menos uma categoria antes de criar itens.
+            </div>
+          ) : (
+            <div style={{padding:"12px",background:"var(--card-bg)",border:"1px solid var(--border)",borderRadius:10,marginBottom:16}}>
+              <div style={{display:"grid",gridTemplateColumns:mobileOnly?"1fr":"2fr 2fr 1fr 1fr auto",gap:8,alignItems:"end"}}>
+                <div>
+                  <label style={{...S.label,fontSize:11}}>Categoria</label>
+                  <select value={newItemCat} onChange={e=>setNewItemCat(e.target.value)} style={{...S.input}}>
+                    <option value="">— Selecione —</option>
+                    {restCategories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label style={{...S.label,fontSize:11}}>Nome do produto</label>
+                  <input value={newItemName} onChange={e=>setNewItemName(e.target.value)} placeholder="ex: Vinho Malbec 750ml" style={{...S.input}} />
+                </div>
+                <div>
+                  <label style={{...S.label,fontSize:11}}>Unidade</label>
+                  <input value={newItemUnit} onChange={e=>setNewItemUnit(e.target.value)} placeholder="un, kg, L" style={{...S.input}} />
+                </div>
+                <div>
+                  <label style={{...S.label,fontSize:11}} title="Mínimo em estoque para gerar reposição">Mínimo</label>
+                  <input type="number" step="0.01" value={newItemMinStock} onChange={e=>setNewItemMinStock(e.target.value)} placeholder="opc." style={{...S.input,fontFamily:"'DM Mono',monospace"}} />
+                </div>
+                <button onClick={addItem} disabled={!newItemCat||!newItemName.trim()} style={{...S.btnPrimary,fontSize:13,padding:"8px 16px",opacity:(!newItemCat||!newItemName.trim())?0.5:1,cursor:(!newItemCat||!newItemName.trim())?"not-allowed":"pointer"}}>+ Adicionar</button>
+              </div>
+              <div style={{marginTop:6,fontSize:11,color:"var(--text3)"}}>
+                💡 Mínimo é usado pela área de Compras para calcular reposição automática. Não é exibido ao contador.
+              </div>
+            </div>
+          )}
+          <div style={{marginBottom:10}}>
+            <input value={itemFilter} onChange={e=>setItemFilter(e.target.value)} placeholder="🔍 Buscar item ou categoria..." style={{...S.input,maxWidth:360}} />
+          </div>
+          {restItems.length === 0 ? (
+            <div style={{padding:"32px 16px",textAlign:"center",color:"var(--text3)",fontSize:14,background:"var(--card-bg)",borderRadius:12,border:"1px solid var(--border)"}}>Nenhum item cadastrado</div>
+          ) : (
+            <div style={{overflowX:"auto",border:"1px solid var(--border)",borderRadius:12,background:"var(--card-bg)"}}>
+              <table style={{width:"100%",borderCollapse:"collapse",fontSize:13}}>
+                <thead>
+                  <tr style={{background:"var(--bg2)",borderBottom:"1px solid var(--border)"}}>
+                    <th style={{padding:"10px 12px",textAlign:"left",color:"var(--text)",fontWeight:700}}>Categoria</th>
+                    <th style={{padding:"10px 12px",textAlign:"left",color:"var(--text)",fontWeight:700}}>Produto</th>
+                    <th style={{padding:"10px 12px",textAlign:"center",color:"var(--text)",fontWeight:700}}>Unid.</th>
+                    <th style={{padding:"10px 12px",textAlign:"right",color:"var(--text)",fontWeight:700}} title="Estoque mínimo — usado pela área de Compras para gerar reposição automática">Mínimo</th>
+                    <th style={{padding:"10px 12px",textAlign:"center",color:"var(--text)",fontWeight:700}}>Forn.</th>
+                    <th style={{padding:"10px 12px",textAlign:"right",color:"var(--text)",fontWeight:700}}></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {(() => {
+                    const q = itemFilter.trim().toLowerCase();
+                    const filtered = q
+                      ? restItems.filter(i => {
+                          const cat = restCategories.find(c => c.id === i.categoryId);
+                          return i.name.toLowerCase().includes(q) || (cat?.name??"").toLowerCase().includes(q);
+                        })
+                      : restItems;
+                    return [...filtered].sort((a,b) => {
+                      const ca = restCategories.find(c => c.id === a.categoryId)?.name ?? "";
+                      const cb = restCategories.find(c => c.id === b.categoryId)?.name ?? "";
+                      return ca.localeCompare(cb) || a.name.localeCompare(b.name);
+                    }).map(i => {
+                      const cat = restCategories.find(c => c.id === i.categoryId);
+                      const supLinksCount = restProductSuppliers.filter(ps => ps.productId === i.id).length;
+                      return (
+                        <tr key={i.id} style={{borderTop:"1px solid var(--border)"}}>
+                          <td style={{padding:"8px 12px",color:"var(--text3)",fontSize:12}}>{cat?.name ?? "—"}</td>
+                          <td style={{padding:"8px 12px",color:"var(--text)",fontWeight:500}}>{i.name}</td>
+                          <td style={{padding:"8px 12px",textAlign:"center",color:"var(--text2)",fontSize:12}}>{i.unit ?? "un"}</td>
+                          <td style={{padding:"4px 12px",textAlign:"right"}}>
+                            <input type="number" step="0.01" value={i.minStock ?? ""} onChange={e=>updateItemMinStock(i.id, e.target.value)} placeholder="—" style={{...S.input,width:80,textAlign:"right",fontFamily:"'DM Mono',monospace",fontSize:12,padding:"4px 8px"}} />
+                          </td>
+                          <td style={{padding:"8px 12px",textAlign:"center"}}>
+                            <button onClick={()=>setLinkModalProductId(i.id)} title="Vínculos com fornecedores"
+                              style={{...S.btnSecondary,fontSize:11,padding:"4px 10px",color:supLinksCount>0?miseAc:"var(--text3)",borderColor:supLinksCount>0?miseAc+"66":"var(--border)"}}>
+                              🔗 {supLinksCount > 0 ? supLinksCount : "+"}
+                            </button>
+                          </td>
+                          <td style={{padding:"8px 12px",textAlign:"right"}}>
+                            <button onClick={()=>delItem(i.id)} style={{...S.btnSecondary,fontSize:11,padding:"4px 10px",color:"var(--red)",borderColor:"var(--red)44"}}>Remover</button>
+                          </td>
+                        </tr>
+                      );
+                    });
+                  })()}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* FORNECEDORES */}
+      {subTab === "fornecedores" && (
+        <div>
+          <h3 style={{color:"var(--text)",margin:"0 0 12px",fontSize:mobileOnly?16:18}}>🚚 Fornecedores</h3>
+          <div style={{padding:"12px",background:"var(--card-bg)",border:"1px solid var(--border)",borderRadius:10,marginBottom:16}}>
+            <div style={{display:"grid",gridTemplateColumns:mobileOnly?"1fr":"2fr 1.5fr 2fr auto",gap:8,alignItems:"end"}}>
+              <div>
+                <label style={{...S.label,fontSize:11}}>Nome</label>
+                <input value={newSupName} onChange={e=>setNewSupName(e.target.value)} placeholder="ex: Heineken" style={S.input} onKeyDown={e=>e.key==="Enter"&&addSupplier()} />
+              </div>
+              <div>
+                <label style={{...S.label,fontSize:11}}>WhatsApp <span style={{color:"var(--text3)",fontWeight:400,fontSize:10}}>(com DDD+55)</span></label>
+                <input value={newSupWhats} onChange={e=>setNewSupWhats(e.target.value)} placeholder="5511987654321" style={{...S.input,fontFamily:"'DM Mono',monospace"}} />
+              </div>
+              <div>
+                <label style={{...S.label,fontSize:11}}>Observações</label>
+                <input value={newSupNotes} onChange={e=>setNewSupNotes(e.target.value)} placeholder="opcional" style={S.input} />
+              </div>
+              <button onClick={addSupplier} disabled={!newSupName.trim()} style={{...S.btnPrimary,fontSize:13,padding:"8px 16px",opacity:!newSupName.trim()?0.5:1}}>+ Adicionar</button>
+            </div>
+            <div style={{marginTop:6,fontSize:11,color:"var(--text3)"}}>
+              💡 O WhatsApp é usado para abrir o link <code style={{background:"var(--bg2)",padding:"1px 4px",borderRadius:4,fontFamily:"'DM Mono',monospace"}}>wa.me/NÚMERO</code> ao enviar o pedido. Inclua o código do país (ex: 55 para Brasil).
+            </div>
+          </div>
+          {restSuppliers.length === 0 ? (
+            <div style={{padding:"32px 16px",textAlign:"center",color:"var(--text3)",fontSize:14,background:"var(--card-bg)",borderRadius:12,border:"1px solid var(--border)"}}>Nenhum fornecedor cadastrado</div>
+          ) : (
+            <div style={{display:"flex",flexDirection:"column",gap:8}}>
+              {[...restSuppliers].sort((a,b)=>a.name.localeCompare(b.name)).map(s => {
+                const isEditing = editingSupId === s.id;
+                const linkedProductsCount = restProductSuppliers.filter(ps => ps.supplierId === s.id).length;
+                return (
+                  <div key={s.id} style={{display:"flex",alignItems:"center",gap:10,padding:"10px 14px",background:"var(--card-bg)",border:"1px solid var(--border)",borderRadius:10,flexWrap:"wrap"}}>
+                    {isEditing ? (
+                      <>
+                        <input value={editingSupForm.name} onChange={e=>setEditingSupForm({...editingSupForm,name:e.target.value})} style={{...S.input,flex:"1 1 140px"}} autoFocus />
+                        <input value={editingSupForm.whatsapp} onChange={e=>setEditingSupForm({...editingSupForm,whatsapp:e.target.value})} placeholder="WhatsApp" style={{...S.input,flex:"1 1 140px",fontFamily:"'DM Mono',monospace"}} />
+                        <input value={editingSupForm.notes} onChange={e=>setEditingSupForm({...editingSupForm,notes:e.target.value})} placeholder="Obs." style={{...S.input,flex:"1 1 200px"}} />
+                        <button onClick={saveSupEdit} style={{...S.btnPrimary,fontSize:12,padding:"6px 12px"}}>Salvar</button>
+                        <button onClick={()=>setEditingSupId(null)} style={{...S.btnSecondary,fontSize:12,padding:"6px 12px"}}>Cancelar</button>
+                      </>
+                    ) : (
+                      <>
+                        <div style={{flex:1,minWidth:160}}>
+                          <div style={{color:"var(--text)",fontWeight:600}}>{s.name}</div>
+                          <div style={{fontSize:11,color:"var(--text3)",marginTop:2,display:"flex",gap:10,flexWrap:"wrap"}}>
+                            {s.whatsapp && <span style={{fontFamily:"'DM Mono',monospace"}}>📱 {s.whatsapp}</span>}
+                            {s.notes && <span>📝 {s.notes}</span>}
+                            <span>{linkedProductsCount} produto(s) vinculado(s)</span>
+                          </div>
+                        </div>
+                        <button onClick={()=>openBulkLink(s.id)} style={{...S.btnSecondary,fontSize:12,padding:"6px 12px",color:miseAc,borderColor:miseAc+"66"}}>🔗 Produtos</button>
+                        <button onClick={()=>startEditSup(s)} style={{...S.btnSecondary,fontSize:12,padding:"6px 12px"}}>Editar</button>
+                        <button onClick={()=>delSupplier(s.id)} style={{...S.btnSecondary,fontSize:12,padding:"6px 12px",color:"var(--red)",borderColor:"var(--red)44"}}>Remover</button>
+                      </>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* CICLOS */}
+      {subTab === "ciclos" && (
+        <div>
+          <h3 style={{color:"var(--text)",margin:"0 0 4px",fontSize:mobileOnly?16:18}}>🔄 Ciclos de contagem</h3>
+          <p style={{color:"var(--text3)",fontSize:13,lineHeight:1.5,margin:"0 0 16px"}}>
+            Um ciclo agrupa as contagens feitas num período (ex: inventário semanal). Apenas um ciclo pode estar aberto por vez.
+          </p>
+          {openCycle ? (
+            <div style={{padding:"14px 16px",background:"#f0fdf4",border:"1px solid #10b98144",borderRadius:10,marginBottom:16,display:"flex",alignItems:"center",justifyContent:"space-between",gap:12,flexWrap:"wrap"}}>
+              <div>
+                <div style={{fontSize:11,color:"#15803d",fontWeight:700,textTransform:"uppercase",letterSpacing:0.4}}>Ciclo aberto</div>
+                <div style={{fontSize:15,color:"var(--text)",fontWeight:700,marginTop:2}}>{openCycle.name}</div>
+                <div style={{fontSize:12,color:"var(--text3)",marginTop:2}}>Iniciado em {fmtDate(openCycle.startDate)} • {miseCounts.filter(c=>c.cycleId===openCycle.id).length} contagem(ns) registradas</div>
+              </div>
+              <button onClick={()=>closeCycle(openCycle.id)} style={{...S.btnSecondary,fontSize:12,padding:"8px 14px"}}>Fechar ciclo</button>
+            </div>
+          ) : (
+            <div style={{padding:"14px 16px",background:"var(--card-bg)",border:"1px solid var(--border)",borderRadius:10,marginBottom:16}}>
+              <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
+                <input value={newCycleName} onChange={e=>setNewCycleName(e.target.value)} placeholder="Nome do ciclo (ex: Inventário abril)" style={{...S.input,maxWidth:320,flex:"1 1 200px"}} onKeyDown={e=>e.key==="Enter"&&openNewCycle()} />
+                <button onClick={openNewCycle} style={{...S.btnPrimary,fontSize:13,padding:"8px 16px"}}>▶ Abrir ciclo</button>
+              </div>
+            </div>
+          )}
+          {restCycles.length === 0 ? (
+            <div style={{padding:"32px 16px",textAlign:"center",color:"var(--text3)",fontSize:14,background:"var(--card-bg)",borderRadius:12,border:"1px solid var(--border)"}}>Nenhum ciclo criado ainda</div>
+          ) : (
+            <div style={{display:"flex",flexDirection:"column",gap:8}}>
+              {restCycles.map(c => {
+                const nCounts = miseCounts.filter(cnt => cnt.cycleId === c.id).length;
+                return (
+                  <div key={c.id} style={{display:"flex",alignItems:"center",gap:10,padding:"10px 14px",background:"var(--card-bg)",border:"1px solid var(--border)",borderRadius:10,flexWrap:"wrap"}}>
+                    <div style={{flex:1,minWidth:180}}>
+                      <div style={{display:"flex",alignItems:"center",gap:8}}>
+                        <span style={{color:"var(--text)",fontWeight:600}}>{c.name}</span>
+                        {c.status === "open"
+                          ? <span style={{fontSize:10,padding:"2px 8px",borderRadius:10,background:"#10b98122",color:"#15803d",fontWeight:700}}>ABERTO</span>
+                          : <span style={{fontSize:10,padding:"2px 8px",borderRadius:10,background:"var(--border)",color:"var(--text3)",fontWeight:700}}>FECHADO</span>}
+                      </div>
+                      <div style={{fontSize:12,color:"var(--text3)",marginTop:2}}>
+                        {fmtDate(c.startDate)}{c.endDate ? ` — ${fmtDate(c.endDate)}` : ""} • {nCounts} contagem(ns)
+                      </div>
+                    </div>
+                    {c.status === "open"
+                      ? <button onClick={()=>closeCycle(c.id)} style={{...S.btnSecondary,fontSize:12,padding:"6px 12px"}}>Fechar</button>
+                      : <button onClick={()=>reopenCycle(c.id)} style={{...S.btnSecondary,fontSize:12,padding:"6px 12px"}}>Reabrir</button>
+                    }
+                    <button onClick={()=>delCycle(c.id)} style={{...S.btnSecondary,fontSize:12,padding:"6px 12px",color:"var(--red)",borderColor:"var(--red)44"}}>Apagar</button>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* MODAL: Vínculos Produto → Fornecedores */}
+      {linkModalProductId && (() => {
+        const product = restItems.find(i => i.id === linkModalProductId);
+        if (!product) { setTimeout(()=>setLinkModalProductId(null),0); return null; }
+        const links = restProductSuppliers.filter(ps => ps.productId === product.id);
+        return (
+          <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.5)",zIndex:1000,display:"flex",alignItems:"center",justifyContent:"center",padding:20}}>
+            <div style={{background:"var(--card-bg)",borderRadius:14,maxWidth:720,width:"100%",maxHeight:"85vh",overflow:"auto",boxShadow:"0 10px 40px rgba(0,0,0,0.3)"}}>
+              <div style={{padding:"14px 18px",borderBottom:"1px solid var(--border)",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                <div>
+                  <div style={{fontSize:11,color:"var(--text3)",fontWeight:700,textTransform:"uppercase",letterSpacing:0.4}}>Vínculos</div>
+                  <div style={{fontSize:15,color:"var(--text)",fontWeight:700}}>{product.name}</div>
+                </div>
+                <button onClick={()=>setLinkModalProductId(null)} style={{...S.btnSecondary,fontSize:12,padding:"6px 12px"}}>Fechar</button>
+              </div>
+              <div style={{padding:"14px 18px"}}>
+                {restSuppliers.length === 0 ? (
+                  <div style={{padding:"24px",textAlign:"center",color:"var(--text3)",fontSize:13}}>
+                    Cadastre ao menos um fornecedor na aba <b>Fornecedores</b> antes de vincular.
+                  </div>
+                ) : (
+                  <>
+                    <div style={{fontSize:12,color:"var(--text3)",marginBottom:10,lineHeight:1.5}}>
+                      Marque os fornecedores que vendem este produto. Para cada vinculado, defina o <b>fator de conversão</b> (ex: cerveja vendida em fardo de 12 = fator 12), o <b>preço</b> (opcional, permite comparar) e marque <b>um</b> deles como preferencial (usado na sugestão automática de compra).
+                    </div>
+                    <table style={{width:"100%",borderCollapse:"collapse",fontSize:13}}>
+                      <thead>
+                        <tr style={{background:"var(--bg2)",borderBottom:"1px solid var(--border)"}}>
+                          <th style={{padding:"8px 10px",textAlign:"left",fontSize:10,color:"var(--text3)",fontWeight:700,textTransform:"uppercase",letterSpacing:0.4,width:36}}></th>
+                          <th style={{padding:"8px 10px",textAlign:"left",fontSize:10,color:"var(--text3)",fontWeight:700,textTransform:"uppercase",letterSpacing:0.4}}>Fornecedor</th>
+                          <th style={{padding:"8px 10px",textAlign:"right",fontSize:10,color:"var(--text3)",fontWeight:700,textTransform:"uppercase",letterSpacing:0.4,width:90}} title="Quantas unidades de contagem cabem em 1 unidade de compra">Fator</th>
+                          <th style={{padding:"8px 10px",textAlign:"right",fontSize:10,color:"var(--text3)",fontWeight:700,textTransform:"uppercase",letterSpacing:0.4,width:100}}>Preço (R$)</th>
+                          <th style={{padding:"8px 10px",textAlign:"center",fontSize:10,color:"var(--text3)",fontWeight:700,textTransform:"uppercase",letterSpacing:0.4,width:90}}>Preferencial</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {[...restSuppliers].sort((a,b)=>a.name.localeCompare(b.name)).map(s => {
+                          const link = links.find(ps => ps.supplierId === s.id);
+                          const isLinked = !!link;
+                          return (
+                            <tr key={s.id} style={{borderTop:"1px solid var(--border)"}}>
+                              <td style={{padding:"6px 10px",textAlign:"center"}}>
+                                <input type="checkbox" checked={isLinked} onChange={()=>toggleProductSupplierLink(product.id, s.id)} style={{cursor:"pointer",width:18,height:18,accentColor:miseAc}} />
+                              </td>
+                              <td style={{padding:"6px 10px",color:"var(--text)",fontWeight:500}}>{s.name}</td>
+                              <td style={{padding:"4px 10px"}}>
+                                <input type="number" step="0.01" disabled={!isLinked} value={link?.conversionFactor ?? 1}
+                                  onChange={e=>updateProductSupplier(link.id, { conversionFactor: parseFloat(e.target.value.replace(",",".")) || 1 })}
+                                  style={{...S.input,width:"100%",textAlign:"right",fontFamily:"'DM Mono',monospace",fontSize:12,opacity:isLinked?1:0.4}} />
+                              </td>
+                              <td style={{padding:"4px 10px"}}>
+                                <input type="number" step="0.01" disabled={!isLinked} value={link?.price ?? ""}
+                                  onChange={e=>updateProductSupplier(link.id, { price: e.target.value === "" ? null : parseFloat(e.target.value.replace(",",".")) || 0 })}
+                                  placeholder={isLinked ? "opc." : "—"}
+                                  style={{...S.input,width:"100%",textAlign:"right",fontFamily:"'DM Mono',monospace",fontSize:12,opacity:isLinked?1:0.4}} />
+                              </td>
+                              <td style={{padding:"4px 10px",textAlign:"center"}}>
+                                <input type="radio" name={`pref-${product.id}`} disabled={!isLinked} checked={!!link?.preferred}
+                                  onChange={()=>setPreferred(product.id, link.id)}
+                                  style={{cursor:isLinked?"pointer":"not-allowed",width:18,height:18,accentColor:miseAc,opacity:isLinked?1:0.3}} />
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                    {links.length > 0 && !links.some(l => l.preferred) && (
+                      <div style={{marginTop:10,padding:"8px 12px",background:"#fffbeb",border:"1px solid #f59e0b44",borderRadius:8,fontSize:12,color:"#92400e"}}>
+                        ⚠ Nenhum fornecedor marcado como preferencial. Marque um para que a sugestão automática de compra funcione.
+                      </div>
+                    )}
+                  </>
+                )}
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* MODAL: Vínculo em lote (Fornecedor × Muitos Produtos) */}
+      {bulkLinkSupplierId && (() => {
+        const sup = restSuppliers.find(s => s.id === bulkLinkSupplierId);
+        if (!sup) { setTimeout(()=>setBulkLinkSupplierId(null),0); return null; }
+        // Filtros
+        const q = bulkFilter.search.trim().toLowerCase();
+        const filteredProducts = restItems.filter(i => {
+          if (bulkFilter.categoryId && i.categoryId !== bulkFilter.categoryId) return false;
+          if (q && !i.name.toLowerCase().includes(q)) return false;
+          return true;
+        });
+        const totalSelected = Object.values(bulkSelected).filter(Boolean).length;
+        // Agrupa por categoria para exibição
+        const byCategory = {};
+        filteredProducts.forEach(p => {
+          const cid = p.categoryId;
+          if (!byCategory[cid]) byCategory[cid] = [];
+          byCategory[cid].push(p);
+        });
+        const sortedCatIds = Object.keys(byCategory).sort((a,b) => {
+          const nameA = restCategories.find(c => c.id === a)?.name || "";
+          const nameB = restCategories.find(c => c.id === b)?.name || "";
+          return nameA.localeCompare(nameB);
+        });
+        return (
+          <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.5)",zIndex:1000,display:"flex",alignItems:"center",justifyContent:"center",padding:20}}>
+            <div style={{background:"var(--card-bg)",borderRadius:14,maxWidth:900,width:"100%",maxHeight:"90vh",overflow:"hidden",boxShadow:"0 10px 40px rgba(0,0,0,0.3)",display:"flex",flexDirection:"column"}}>
+              <div style={{padding:"14px 18px",borderBottom:"1px solid var(--border)",display:"flex",justifyContent:"space-between",alignItems:"center",flexShrink:0}}>
+                <div>
+                  <div style={{fontSize:11,color:"var(--text3)",fontWeight:700,textTransform:"uppercase",letterSpacing:0.4}}>Vincular produtos em lote</div>
+                  <div style={{fontSize:15,color:"var(--text)",fontWeight:700}}>🚚 {sup.name}</div>
+                </div>
+                <button onClick={()=>setBulkLinkSupplierId(null)} style={{...S.btnSecondary,fontSize:12,padding:"6px 12px"}}>Cancelar</button>
+              </div>
+              {/* Filtros e defaults */}
+              <div style={{padding:"12px 18px",borderBottom:"1px solid var(--border)",background:"var(--bg2)",flexShrink:0}}>
+                <div style={{display:"grid",gridTemplateColumns:mobileOnly?"1fr":"2fr 2fr 1fr 1fr 1fr",gap:10,alignItems:"end"}}>
+                  <div>
+                    <label style={{...S.label,fontSize:11}}>Filtrar por categoria</label>
+                    <select value={bulkFilter.categoryId} onChange={e=>setBulkFilter({...bulkFilter,categoryId:e.target.value})} style={S.input}>
+                      <option value="">— Todas —</option>
+                      {[...restCategories].sort((a,b)=>a.name.localeCompare(b.name)).map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <label style={{...S.label,fontSize:11}}>Buscar produto</label>
+                    <input value={bulkFilter.search} onChange={e=>setBulkFilter({...bulkFilter,search:e.target.value})} placeholder="nome..." style={S.input} />
+                  </div>
+                  <div>
+                    <label style={{...S.label,fontSize:11}} title="Fator de conversão contagem → compra (ex: fardo de 12)">Fator padrão</label>
+                    <input type="number" step="0.1" value={bulkDefaults.factor} onChange={e=>setBulkDefaults({...bulkDefaults,factor:e.target.value})} style={{...S.input,fontFamily:"'DM Mono',monospace"}} />
+                  </div>
+                  <div>
+                    <label style={{...S.label,fontSize:11}}>Preço (R$)</label>
+                    <input type="number" step="0.01" value={bulkDefaults.price} onChange={e=>setBulkDefaults({...bulkDefaults,price:e.target.value})} placeholder="opc." style={{...S.input,fontFamily:"'DM Mono',monospace"}} />
+                  </div>
+                  <div style={{display:"flex",alignItems:"center",gap:6,paddingBottom:8}}>
+                    <input type="checkbox" id="bulk-pref" checked={bulkDefaults.markPreferred} onChange={e=>setBulkDefaults({...bulkDefaults,markPreferred:e.target.checked})} style={{cursor:"pointer",accentColor:miseAc}} />
+                    <label htmlFor="bulk-pref" style={{fontSize:11,color:"var(--text2)",cursor:"pointer"}}>Preferencial</label>
+                  </div>
+                </div>
+                {bulkFilter.categoryId && (
+                  <div style={{display:"flex",gap:6,marginTop:10,flexWrap:"wrap"}}>
+                    <button onClick={()=>selectCategory(bulkFilter.categoryId)} style={{...S.btnSecondary,fontSize:11,padding:"4px 12px"}}>✓ Selecionar toda categoria</button>
+                    <button onClick={()=>deselectCategory(bulkFilter.categoryId)} style={{...S.btnSecondary,fontSize:11,padding:"4px 12px"}}>✕ Desmarcar categoria</button>
+                  </div>
+                )}
+              </div>
+              {/* Lista de produtos */}
+              <div style={{flex:1,overflowY:"auto",padding:"4px 0"}}>
+                {sortedCatIds.length === 0 ? (
+                  <div style={{padding:"32px 16px",textAlign:"center",color:"var(--text3)",fontSize:13}}>
+                    {restItems.length === 0 ? "Nenhum produto cadastrado." : "Nenhum produto no filtro atual."}
+                  </div>
+                ) : sortedCatIds.map(catId => {
+                  const cat = restCategories.find(c => c.id === catId);
+                  const prods = byCategory[catId].sort((a,b)=>a.name.localeCompare(b.name));
+                  const allSelected = prods.every(p => !!bulkSelected[p.id]);
+                  const someSelected = prods.some(p => !!bulkSelected[p.id]);
+                  return (
+                    <div key={catId}>
+                      <div style={{padding:"8px 18px",background:"var(--bg2)",borderTop:"1px solid var(--border)",borderBottom:"1px solid var(--border)",display:"flex",alignItems:"center",gap:10,position:"sticky",top:0}}>
+                        <input type="checkbox" checked={allSelected} ref={el => { if (el) el.indeterminate = !allSelected && someSelected; }}
+                          onChange={e => { if (e.target.checked) selectCategory(catId); else deselectCategory(catId); }}
+                          style={{cursor:"pointer",width:16,height:16,accentColor:miseAc}} />
+                        <span style={{fontSize:12,color:"var(--text)",fontWeight:700,flex:1}}>{cat?.name || "—"}</span>
+                        <span style={{fontSize:11,color:"var(--text3)"}}>{prods.filter(p => bulkSelected[p.id]).length}/{prods.length}</span>
+                      </div>
+                      {prods.map(p => {
+                        const existingLink = restProductSuppliers.find(ps => ps.productId === p.id && ps.supplierId === bulkLinkSupplierId);
+                        const hasOtherSuppliers = restProductSuppliers.some(ps => ps.productId === p.id && ps.supplierId !== bulkLinkSupplierId);
+                        return (
+                          <label key={p.id} style={{display:"flex",alignItems:"center",gap:10,padding:"6px 18px 6px 42px",fontSize:13,cursor:"pointer",borderBottom:"1px solid var(--border)"}}>
+                            <input type="checkbox" checked={!!bulkSelected[p.id]}
+                              onChange={e => setBulkSelected(prev => {
+                                const next = { ...prev };
+                                if (e.target.checked) next[p.id] = true; else delete next[p.id];
+                                return next;
+                              })}
+                              style={{cursor:"pointer",width:16,height:16,accentColor:miseAc}} />
+                            <span style={{flex:1,color:"var(--text)"}}>{p.name}</span>
+                            <span style={{fontSize:10,color:"var(--text3)"}}>{p.unit}</span>
+                            {existingLink && <span style={{fontSize:10,padding:"1px 6px",borderRadius:6,background:miseAc+"22",color:"#15803d",fontWeight:700}}>JÁ VINCULADO</span>}
+                            {hasOtherSuppliers && <span style={{fontSize:10,color:"var(--text3)"}}>(+outros)</span>}
+                          </label>
+                        );
+                      })}
+                    </div>
+                  );
+                })}
+              </div>
+              {/* Rodapé */}
+              <div style={{padding:"12px 18px",borderTop:"1px solid var(--border)",background:"var(--bg2)",display:"flex",justifyContent:"space-between",alignItems:"center",flexShrink:0,flexWrap:"wrap",gap:10}}>
+                <div style={{fontSize:12,color:"var(--text2)"}}>
+                  <b>{totalSelected}</b> produto(s) selecionado(s)
+                </div>
+                <div style={{display:"flex",gap:8}}>
+                  <button onClick={()=>setBulkLinkSupplierId(null)} style={{...S.btnSecondary,fontSize:12,padding:"8px 14px"}}>Cancelar</button>
+                  <button onClick={applyBulkLink} disabled={totalSelected===0}
+                    style={{background:totalSelected>0?miseAc:"var(--border)",color:totalSelected>0?"#fff":"var(--text3)",border:"none",borderRadius:8,padding:"8px 18px",fontSize:13,fontWeight:700,cursor:totalSelected>0?"pointer":"not-allowed",fontFamily:"'DM Sans',sans-serif"}}>
+                    ✓ Aplicar vínculos
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════
+// ──  MISE CONTAGENS — USER (Gestor Operacional)                ──
+// ═══════════════════════════════════════════════════════════════
+function OperationalContagens({ employee, miseCategories, miseStocks, miseAssignments, miseItems, miseCycles, miseCounts, onUpdate }) {
+  const restaurantId = employee.restaurantId;
+  const openCycle = miseCycles.find(c => c.restaurantId === restaurantId && c.status === "open");
+  const myAssignments = miseAssignments.filter(a => a.restaurantId === restaurantId && a.userId === employee.id);
+  const [drafts, setDrafts] = useState({});
+  const [justSavedKey, setJustSavedKey] = useState(null);
+
+  if (myAssignments.length === 0) {
+    return (
+      <div style={{padding:"60px 24px",textAlign:"center",color:"var(--text3)"}}>
+        <div style={{fontSize:48,marginBottom:16}}>📦</div>
+        <h3 style={{color:"var(--text)",fontSize:18,fontWeight:700,margin:"0 0 8px"}}>Sem atribuições</h3>
+        <p style={{fontSize:14,lineHeight:1.6,maxWidth:420,margin:"0 auto"}}>
+          O gestor ainda não atribuiu nenhuma categoria × estoque para você contar.
+        </p>
+      </div>
+    );
+  }
+
+  if (!openCycle) {
+    return (
+      <div style={{padding:"60px 24px",textAlign:"center",color:"var(--text3)"}}>
+        <div style={{fontSize:48,marginBottom:16}}>🔒</div>
+        <h3 style={{color:"var(--text)",fontSize:18,fontWeight:700,margin:"0 0 8px"}}>Nenhum ciclo aberto</h3>
+        <p style={{fontSize:14,lineHeight:1.6,maxWidth:420,margin:"0 auto"}}>
+          Ainda não há um ciclo de contagem aberto. O gestor precisa abrir um ciclo antes que você possa lançar contagens.
+        </p>
+      </div>
+    );
+  }
+
+  const saveGroup = (categoryId, stockId) => {
+    // stockId pode ser null (pedido-direto) ou uma string válida (contagem por estoque)
+    const stockKeyId = stockId === null || stockId === undefined ? "__pedido__" : stockId;
+    const key = `${categoryId}_${stockKeyId}`;
+    const items = miseItems.filter(i => i.restaurantId === restaurantId && i.categoryId === categoryId);
+    const now = new Date().toISOString();
+    let newCounts = [...miseCounts];
+    let changed = 0;
+    items.forEach((it, idx) => {
+      const draftKey = `${it.id}_${stockKeyId}`;
+      const draft = drafts[draftKey];
+      if (draft === undefined || draft === "") return;
+      const qty = parseFloat(String(draft).replace(",","."));
+      if (isNaN(qty)) return;
+      const existingIdx = newCounts.findIndex(c => c.cycleId === openCycle.id && c.itemId === it.id && c.stockId === stockId && c.userId === employee.id);
+      if (existingIdx >= 0) {
+        newCounts[existingIdx] = { ...newCounts[existingIdx], qty, countedAt: now };
+      } else {
+        newCounts.push({
+          id: Date.now().toString() + "_" + Math.random().toString(36).slice(2,8) + "_" + idx,
+          restaurantId, cycleId: openCycle.id, itemId: it.id, stockId: stockId ?? null, userId: employee.id, qty, countedAt: now
+        });
+      }
+      changed++;
+    });
+    if (changed > 0) {
+      onUpdate("miseCounts", newCounts);
+      setDrafts(prev => {
+        const next = {...prev};
+        items.forEach(it => { delete next[`${it.id}_${stockKeyId}`]; });
+        return next;
+      });
+      setJustSavedKey(key);
+      setTimeout(() => setJustSavedKey(null), 2000);
+    }
+  };
+
+  return (
+    <div style={{display:"flex",flexDirection:"column",gap:20}}>
+      <div style={{padding:"14px 16px",background:"#f0fdf4",border:"1px solid #10b98144",borderRadius:10}}>
+        <div style={{fontSize:11,color:"#15803d",fontWeight:700,textTransform:"uppercase",letterSpacing:0.4}}>Ciclo em andamento</div>
+        <div style={{fontSize:15,color:"var(--text)",fontWeight:700,marginTop:2}}>{openCycle.name}</div>
+        <div style={{fontSize:12,color:"var(--text3)",marginTop:2}}>Aberto em {fmtDate(openCycle.startDate)}</div>
+      </div>
+
+      {myAssignments.map(a => {
+        const cat = miseCategories.find(c => c.id === a.categoryId);
+        const isPedidoOnly = a.stockId === null || a.stockId === undefined;
+        const stock = !isPedidoOnly ? miseStocks.find(s => s.id === a.stockId) : null;
+        if (!cat) return null;
+        if (!isPedidoOnly && !stock) return null;
+        const items = miseItems.filter(i => i.restaurantId === restaurantId && i.categoryId === cat.id);
+        const stockKeyId = isPedidoOnly ? "__pedido__" : stock.id;
+        const key = `${cat.id}_${stockKeyId}`;
+        const hasDrafts = items.some(i => {
+          const d = drafts[`${i.id}_${stockKeyId}`];
+          return d !== undefined && d !== "";
+        });
+        const wasJustSaved = justSavedKey === key;
+        return (
+          <div key={a.id} style={{background:"var(--card-bg)",border:`1px solid ${isPedidoOnly ? "#d9770644" : "var(--border)"}`,borderRadius:12,overflow:"hidden"}}>
+            <div style={{padding:"12px 16px",background: isPedidoOnly ? "#fffbeb" : "var(--bg2)",borderBottom:"1px solid var(--border)",display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:8}}>
+              <div>
+                <div style={{fontSize:15,color:"var(--text)",fontWeight:700}}>
+                  {isPedidoOnly ? (
+                    <>🛒 Pedido direto — <span style={{color:"var(--text3)",fontWeight:400}}>categoria</span> {cat.name}</>
+                  ) : (
+                    <>{cat.name} <span style={{color:"var(--text3)",fontWeight:400}}>em</span> {stock.name}</>
+                  )}
+                </div>
+                {!isPedidoOnly && stock.location && <div style={{fontSize:11,color:"var(--text3)",marginTop:2}}>📍 {stock.location}</div>}
+                {isPedidoOnly && <div style={{fontSize:11,color:"#92400e",marginTop:2}}>Informe diretamente a quantidade que deseja pedir (sem contagem de estoque).</div>}
+              </div>
+              <div style={{fontSize:12,color:"var(--text3)"}}>{items.length} {items.length===1?"item":"itens"}</div>
+            </div>
+            {items.length === 0 ? (
+              <div style={{padding:"24px 16px",textAlign:"center",color:"var(--text3)",fontSize:13}}>
+                Nenhum item cadastrado nessa categoria ainda. Peça ao gestor para cadastrar.
+              </div>
+            ) : (
+              <>
+                <div style={{overflowX:"auto"}}>
+                  <table style={{width:"100%",borderCollapse:"collapse",fontSize:13}}>
+                    <thead>
+                      <tr style={{borderBottom:"1px solid var(--border)"}}>
+                        <th style={{padding:"8px 16px",textAlign:"left",color:"var(--text3)",fontWeight:600,fontSize:11,textTransform:"uppercase",letterSpacing:0.4}}>Item</th>
+                        <th style={{padding:"8px 12px",textAlign:"center",color:"var(--text3)",fontWeight:600,fontSize:11,textTransform:"uppercase",letterSpacing:0.4}}>Unid.</th>
+                        <th style={{padding:"8px 12px",textAlign:"right",color:"var(--text3)",fontWeight:600,fontSize:11,textTransform:"uppercase",letterSpacing:0.4}}>Última sua</th>
+                        <th style={{padding:"8px 12px",textAlign:"right",color:"var(--text3)",fontWeight:600,fontSize:11,textTransform:"uppercase",letterSpacing:0.4,minWidth:120}}>{isPedidoOnly ? "Qtd a pedir" : "Contagem"}</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {[...items].sort((a,b)=>a.name.localeCompare(b.name)).map(it => {
+                        const existing = miseCounts.find(c => c.cycleId === openCycle.id && c.itemId === it.id && c.stockId === (isPedidoOnly ? null : stock.id) && c.userId === employee.id);
+                        const draftKey = `${it.id}_${stockKeyId}`;
+                        const draftVal = drafts[draftKey];
+                        return (
+                          <tr key={it.id} style={{borderTop:"1px solid var(--border)"}}>
+                            <td style={{padding:"10px 16px",color:"var(--text)",fontWeight:500}}>{it.name}</td>
+                            <td style={{padding:"10px 12px",textAlign:"center",color:"var(--text2)"}}>{it.unit ?? "un"}</td>
+                            <td style={{padding:"10px 12px",textAlign:"right",color:existing?"var(--text2)":"var(--text3)",fontFamily:"'DM Mono',monospace",fontSize:12}}>
+                              {existing ? existing.qty : "—"}
+                            </td>
+                            <td style={{padding:"6px 12px",textAlign:"right"}}>
+                              <input type="number" step="0.01" inputMode="decimal"
+                                value={draftVal ?? ""}
+                                onChange={e=>setDrafts(prev=>({...prev, [draftKey]: e.target.value}))}
+                                placeholder={existing ? String(existing.qty) : "—"}
+                                style={{...S.input,width:100,textAlign:"right",fontFamily:"'DM Mono',monospace"}}/>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+                <div style={{padding:"10px 16px",borderTop:"1px solid var(--border)",display:"flex",justifyContent:"flex-end",alignItems:"center",gap:12}}>
+                  {wasJustSaved && <span style={{fontSize:12,color:"#15803d",fontWeight:600}}>✓ Salvo</span>}
+                  <button
+                    onClick={()=>saveGroup(cat.id, isPedidoOnly ? null : stock.id)}
+                    disabled={!hasDrafts}
+                    style={{background:hasDrafts?(isPedidoOnly?"#d97706":"#7c9e5e"):"var(--border)",color:hasDrafts?"#fff":"var(--text3)",border:"none",borderRadius:8,padding:"8px 18px",fontSize:13,fontWeight:700,cursor:hasDrafts?"pointer":"not-allowed",fontFamily:"'DM Sans',sans-serif",transition:"background 0.15s"}}>
+                    💾 {isPedidoOnly ? "Salvar pedido" : "Salvar contagens"}
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════
+// ──  PESSOAS — MIGRAÇÃO + ACESSORS                              ──
+// ═══════════════════════════════════════════════════════════════
+// Gera pessoas.json a partir dos employees + managers existentes.
+// Idempotente: passando os mesmos inputs, produz o mesmo output (IDs determinísticos).
+function pessoasMigrate(employees, managers) {
+  const pessoas = [];
+  const byId = {}; // pessoaId → pessoa (pra merge rápido)
+
+  // 1. Cada employee vira pessoa (isTeam=true no restaurante dele)
+  (employees || []).forEach(emp => {
+    const rid = emp.restaurantId;
+    const pinFromCpf = (emp.cpf || "").replace(/\D/g, "").slice(0, 4).padEnd(4, "0");
+    const p = {
+      id: `pes_emp_${emp.id}`,
+      restaurantIds: rid ? [rid] : [],
+      name: emp.name || "",
+      cpf: emp.cpf || "",
+      pin: pinFromCpf,
+      mustChangePin: true,
+      email: emp.email || null,
+      whatsapp: emp.whatsapp || null,
+      isTeam: rid ? { [rid]: true } : {},
+      teamData: rid ? {
+        [rid]: {
+          empCode: emp.empCode ?? null,
+          roleId: emp.roleId ?? null,
+          admission: emp.admission ?? null,
+          inactive: !!emp.inactive,
+          inactiveFrom: emp.inactiveFrom ?? null,
+          demitidoEm: emp.demitidoEm ?? null,
+          isFreela: !!emp.isFreela,
+        }
+      } : {},
+      linkedEmployeeId: emp.id,
+      permissions: rid ? {
+        [rid]: {
+          operational: emp.operationalAreas || {},
+          admin: {},
+          special: {},
+        }
+      } : {},
+      createdAt: emp.createdAt || new Date().toISOString(),
+    };
+    pessoas.push(p);
+    byId[p.id] = p;
+  });
+
+  // 2. Cada manager: merge se tem linkedEmpId/CPF coincidente, senão cria pessoa nova
+  (managers || []).forEach(mgr => {
+    let target = null;
+    if (mgr.linkedEmpId) target = pessoas.find(p => p.linkedEmployeeId === mgr.linkedEmpId);
+    if (!target && mgr.cpf) {
+      const cpfDigits = mgr.cpf.replace(/\D/g, "");
+      if (cpfDigits.length > 0) {
+        target = pessoas.find(p => (p.cpf || "").replace(/\D/g, "") === cpfDigits);
+      }
+    }
+
+    if (!target) {
+      const pinFromCpf = (mgr.cpf || "").replace(/\D/g, "").slice(0, 4).padEnd(4, "0");
+      target = {
+        id: `pes_mgr_${mgr.id}`,
+        restaurantIds: [],
+        name: mgr.name || "",
+        cpf: mgr.cpf || "",
+        pin: pinFromCpf,
+        mustChangePin: true,
+        email: mgr.email || null,
+        whatsapp: mgr.whatsapp || null,
+        isTeam: {},
+        teamData: {},
+        linkedManagerId: mgr.id,
+        permissions: {},
+        createdAt: mgr.createdAt || new Date().toISOString(),
+      };
+      pessoas.push(target);
+      byId[target.id] = target;
+    } else {
+      target.linkedManagerId = mgr.id;
+    }
+
+    // Union de restaurantIds
+    const mgrRids = mgr.restaurantIds ?? (mgr.restaurantId ? [mgr.restaurantId] : []);
+    mgrRids.forEach(rid => {
+      if (!target.restaurantIds.includes(rid)) target.restaurantIds.push(rid);
+      if (!target.permissions[rid]) target.permissions[rid] = { operational: {}, admin: {}, special: {} };
+      const perms = target.permissions[rid];
+      // Admin permissions derivadas de manager.perms
+      if (mgr.perms?.tips) perms.admin.tips = true;
+      if (mgr.perms?.schedule) perms.admin.schedule = true;
+      if (mgr.perms?.vt !== false) perms.admin.vt = true;
+      if (mgr.perms?.roles !== false) perms.admin.roles = true;
+      if (mgr.perms?.employees !== false) perms.admin.employees = true;
+      if (mgr.perms?.comunicados !== false) perms.admin.comunicados = true;
+      if (mgr.perms?.faq !== false) perms.admin.faq = true;
+      if (mgr.perms?.config !== false) perms.admin.config = true;
+      // Especiais
+      if (mgr.isDP) perms.special.isDP = true;
+      if (mgr.profile === "lider") {
+        perms.special.profile = "lider";
+        perms.special.areas = mgr.areas || [];
+      }
+      if (mgr.isMaster) perms.special.isMaster = true;
+      // Preserva PIN do manager se existir (mais "oficial" que o derivado do CPF do empregado)
+      if (mgr.pin && typeof mgr.pin === "string" && mgr.pin.length === 4) {
+        target.pin = mgr.pin;
+        target.mustChangePin = !!mgr.mustChangePin;
+      }
+    });
+  });
+
+  return pessoas;
+}
+
+// Helpers acessores
+/* eslint-disable no-unused-vars */
+function pessoaIsTeamFor(pessoa, restaurantId) {
+  return !!(pessoa?.isTeam?.[restaurantId]);
+}
+function pessoaPermsFor(pessoa, restaurantId) {
+  return pessoa?.permissions?.[restaurantId] || { operational: {}, admin: {}, special: {} };
+}
+function pessoaHasAnyAdminArea(pessoa, restaurantId) {
+  const a = pessoaPermsFor(pessoa, restaurantId).admin || {};
+  return Object.values(a).some(v => v === true);
+}
+function pessoaHasAnyOperationalArea(pessoa, restaurantId) {
+  const a = pessoaPermsFor(pessoa, restaurantId).operational || {};
+  return Object.values(a).some(v => v === true);
+}
+/* eslint-enable no-unused-vars */
+
+// ═══════════════════════════════════════════════════════════════
+// ──  PESSOAS — CRUD                                             ──
+// ═══════════════════════════════════════════════════════════════
+function PessoasAdmin({ restaurantId, pessoas, roles, onUpdate, mobileOnly }) {
+  const restPessoas = (pessoas || []).filter(p => (p.restaurantIds || []).includes(restaurantId));
+  const [filter, setFilter] = useState("");
+  const [form, setForm] = useState({ name: "", cpf: "", email: "", whatsapp: "", pin: "" });
+  const [editingId, setEditingId] = useState(null);
+  const [editForm, setEditForm] = useState({ name: "", cpf: "", email: "", whatsapp: "", pin: "", isTeam: false, roleId: "", admission: "" });
+  const miseAc = "#7c9e5e";
+
+  function pinFromCpf(cpf) {
+    const d = (cpf || "").replace(/\D/g, "").slice(0, 4);
+    return d.padEnd(4, "0");
+  }
+
+  function addPessoa() {
+    const nm = form.name.trim();
+    const cpfRaw = (form.cpf || "").replace(/\D/g, "");
+    if (!nm) { alert("Nome é obrigatório."); return; }
+    if (cpfRaw.length !== 11) { alert("CPF inválido — precisa ter 11 dígitos."); return; }
+    const existing = restPessoas.find(p => (p.cpf || "").replace(/\D/g, "") === cpfRaw);
+    if (existing) { alert(`Já existe uma pessoa com esse CPF neste restaurante: ${existing.name}.`); return; }
+    // Verifica se existe em outro restaurante (pessoa com mesmo CPF)
+    const globalExisting = (pessoas || []).find(p => (p.cpf || "").replace(/\D/g, "") === cpfRaw);
+    if (globalExisting) {
+      if (!window.confirm(`Já existe uma pessoa com esse CPF cadastrada em outro restaurante: ${globalExisting.name}. Adicionar este restaurante à pessoa existente?`)) return;
+      const next = (pessoas || []).map(p => p.id === globalExisting.id ? {
+        ...p,
+        restaurantIds: [...p.restaurantIds, restaurantId],
+        permissions: { ...p.permissions, [restaurantId]: { operational: {}, admin: {}, special: {} } },
+      } : p);
+      onUpdate("pessoas", next);
+      return;
+    }
+    const id = `pes_${Date.now().toString(36)}${Math.random().toString(36).slice(2,6)}`;
+    const newP = {
+      id,
+      restaurantIds: [restaurantId],
+      name: nm,
+      cpf: cpfRaw,
+      pin: form.pin.trim() || pinFromCpf(cpfRaw),
+      mustChangePin: true,
+      email: form.email.trim() || null,
+      whatsapp: form.whatsapp.trim() || null,
+      isTeam: {},
+      teamData: {},
+      permissions: { [restaurantId]: { operational: {}, admin: {}, special: {} } },
+      createdAt: new Date().toISOString(),
+    };
+    onUpdate("pessoas", [...(pessoas || []), newP]);
+    setForm({ name: "", cpf: "", email: "", whatsapp: "", pin: "" });
+  }
+
+  function startEdit(p) {
+    const td = p.teamData?.[restaurantId] || {};
+    setEditingId(p.id);
+    setEditForm({
+      name: p.name ?? "",
+      cpf: p.cpf ?? "",
+      email: p.email ?? "",
+      whatsapp: p.whatsapp ?? "",
+      pin: p.pin ?? "",
+      isTeam: !!p.isTeam?.[restaurantId],
+      roleId: td.roleId ?? "",
+      admission: td.admission ?? "",
+    });
+  }
+  function saveEdit() {
+    if (!editingId) return;
+    const nm = editForm.name.trim();
+    if (!nm) { alert("Nome é obrigatório."); return; }
+    const cpfRaw = (editForm.cpf || "").replace(/\D/g, "");
+    const next = (pessoas || []).map(p => {
+      if (p.id !== editingId) return p;
+      const updated = {
+        ...p,
+        name: nm,
+        cpf: cpfRaw,
+        email: editForm.email.trim() || null,
+        whatsapp: editForm.whatsapp.trim() || null,
+        pin: editForm.pin.trim() || p.pin,
+        isTeam: { ...(p.isTeam || {}), [restaurantId]: !!editForm.isTeam },
+        teamData: {
+          ...(p.teamData || {}),
+          [restaurantId]: editForm.isTeam ? {
+            ...(p.teamData?.[restaurantId] || {}),
+            roleId: editForm.roleId || null,
+            admission: editForm.admission || null,
+          } : (p.teamData?.[restaurantId] || {}),
+        },
+      };
+      return updated;
+    });
+    onUpdate("pessoas", next);
+    setEditingId(null);
+  }
+  function delPessoa(id) {
+    const p = restPessoas.find(x => x.id === id);
+    if (!p) return;
+    if (p.restaurantIds.length > 1) {
+      if (!window.confirm(`Remover ${p.name} apenas deste restaurante? A pessoa continua em outros ${p.restaurantIds.length - 1} restaurante(s).`)) return;
+      const next = (pessoas || []).map(x => x.id === id ? {
+        ...x,
+        restaurantIds: x.restaurantIds.filter(r => r !== restaurantId),
+        isTeam: Object.fromEntries(Object.entries(x.isTeam || {}).filter(([r]) => r !== restaurantId)),
+        teamData: Object.fromEntries(Object.entries(x.teamData || {}).filter(([r]) => r !== restaurantId)),
+        permissions: Object.fromEntries(Object.entries(x.permissions || {}).filter(([r]) => r !== restaurantId)),
+      } : x);
+      onUpdate("pessoas", next);
+    } else {
+      if (!window.confirm(`Apagar ${p.name} definitivamente? Esta pessoa não está em nenhum outro restaurante.`)) return;
+      onUpdate("pessoas", (pessoas || []).filter(x => x.id !== id));
+    }
+  }
+
+  const q = filter.trim().toLowerCase();
+  const filtered = q ? restPessoas.filter(p => p.name.toLowerCase().includes(q) || (p.cpf || "").includes(q)) : restPessoas;
+  const restRoles = (roles || []).filter(r => r.restaurantId === restaurantId);
+
+  return (
+    <div>
+      <h3 style={{color:"var(--text)",margin:"0 0 12px",fontSize:mobileOnly?16:18}}>👤 Pessoas do restaurante</h3>
+      {/* Form adicionar */}
+      <div style={{padding:"12px",background:"var(--card-bg)",border:"1px solid var(--border)",borderRadius:10,marginBottom:16}}>
+        <div style={{display:"grid",gridTemplateColumns:mobileOnly?"1fr":"2fr 1.5fr 1fr 1.5fr 1.5fr auto",gap:8,alignItems:"end"}}>
+          <div>
+            <label style={{...S.label,fontSize:11}}>Nome completo</label>
+            <input value={form.name} onChange={e=>setForm({...form,name:e.target.value})} placeholder="ex: João Silva" style={S.input} />
+          </div>
+          <div>
+            <label style={{...S.label,fontSize:11}}>CPF</label>
+            <input value={form.cpf} onChange={e=>setForm({...form,cpf:maskCpf(e.target.value),pin: form.pin || pinFromCpf(e.target.value)})} placeholder="000.000.000-00" style={{...S.input,fontFamily:"'DM Mono',monospace"}} />
+          </div>
+          <div>
+            <label style={{...S.label,fontSize:11}}>PIN <span style={{color:"var(--text3)",fontWeight:400,fontSize:10}}>(auto)</span></label>
+            <input maxLength={4} value={form.pin} onChange={e=>setForm({...form,pin:e.target.value.replace(/\D/g,"").slice(0,4)})} placeholder="0000" style={{...S.input,fontFamily:"'DM Mono',monospace",textAlign:"center",letterSpacing:4}} />
+          </div>
+          <div>
+            <label style={{...S.label,fontSize:11}}>Email</label>
+            <input value={form.email} onChange={e=>setForm({...form,email:e.target.value})} placeholder="opc." style={S.input} />
+          </div>
+          <div>
+            <label style={{...S.label,fontSize:11}}>WhatsApp</label>
+            <input value={form.whatsapp} onChange={e=>setForm({...form,whatsapp:e.target.value})} placeholder="opc." style={S.input} />
+          </div>
+          <button onClick={addPessoa} disabled={!form.name.trim()} style={{...S.btnPrimary,fontSize:13,padding:"8px 16px",opacity:!form.name.trim()?0.5:1}}>+ Adicionar</button>
+        </div>
+        <div style={{marginTop:8,fontSize:11,color:"var(--text3)",lineHeight:1.5}}>
+          💡 Uma pessoa é qualquer indivíduo com acesso ao sistema neste restaurante — membro da equipe, gestor, contador externo, consultor, etc. Marcar "é equipe" em Editar para dados operacionais (cargo, admissão). Permissões na aba ao lado.
+        </div>
+      </div>
+
+      {/* Filter */}
+      <div style={{marginBottom:10,display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
+        <input value={filter} onChange={e=>setFilter(e.target.value)} placeholder="🔍 Buscar por nome ou CPF..." style={{...S.input,maxWidth:360,flex:"1 1 220px"}} />
+        <div style={{fontSize:11,color:"var(--text3)"}}>{restPessoas.length} pessoa(s) · {restPessoas.filter(p => p.isTeam?.[restaurantId]).length} na equipe</div>
+      </div>
+
+      {/* Lista */}
+      {filtered.length === 0 ? (
+        <div style={{padding:"32px 16px",textAlign:"center",color:"var(--text3)",fontSize:14,background:"var(--card-bg)",borderRadius:12,border:"1px solid var(--border)"}}>
+          {q ? "Nenhuma pessoa encontrada" : "Nenhuma pessoa cadastrada"}
+        </div>
+      ) : (
+        <div style={{display:"flex",flexDirection:"column",gap:8}}>
+          {[...filtered].sort((a,b)=>a.name.localeCompare(b.name)).map(p => {
+            const isEditing = editingId === p.id;
+            const isTeam = !!p.isTeam?.[restaurantId];
+            const td = p.teamData?.[restaurantId] || {};
+            const role = restRoles.find(r => r.id === td.roleId);
+            if (isEditing) {
+              return (
+                <div key={p.id} style={{padding:"14px",background:"var(--bg2)",border:`1px solid ${miseAc}66`,borderRadius:10}}>
+                  <div style={{display:"grid",gridTemplateColumns:mobileOnly?"1fr":"2fr 1.5fr 1fr 1.5fr 1.5fr",gap:8,marginBottom:10}}>
+                    <div>
+                      <label style={{...S.label,fontSize:11}}>Nome</label>
+                      <input value={editForm.name} onChange={e=>setEditForm({...editForm,name:e.target.value})} style={S.input} autoFocus />
+                    </div>
+                    <div>
+                      <label style={{...S.label,fontSize:11}}>CPF</label>
+                      <input value={maskCpf(editForm.cpf)} onChange={e=>setEditForm({...editForm,cpf:maskCpf(e.target.value)})} style={{...S.input,fontFamily:"'DM Mono',monospace"}} />
+                    </div>
+                    <div>
+                      <label style={{...S.label,fontSize:11}}>PIN</label>
+                      <input maxLength={4} value={editForm.pin} onChange={e=>setEditForm({...editForm,pin:e.target.value.replace(/\D/g,"").slice(0,4)})} style={{...S.input,fontFamily:"'DM Mono',monospace",textAlign:"center",letterSpacing:4}} />
+                    </div>
+                    <div>
+                      <label style={{...S.label,fontSize:11}}>Email</label>
+                      <input value={editForm.email} onChange={e=>setEditForm({...editForm,email:e.target.value})} style={S.input} />
+                    </div>
+                    <div>
+                      <label style={{...S.label,fontSize:11}}>WhatsApp</label>
+                      <input value={editForm.whatsapp} onChange={e=>setEditForm({...editForm,whatsapp:e.target.value})} style={S.input} />
+                    </div>
+                  </div>
+                  {/* Campos de equipe */}
+                  <div style={{padding:"10px 12px",background:"var(--card-bg)",border:"1px solid var(--border)",borderRadius:8,marginBottom:10}}>
+                    <label style={{display:"flex",alignItems:"center",gap:8,cursor:"pointer",marginBottom:editForm.isTeam?10:0}}>
+                      <input type="checkbox" checked={editForm.isTeam} onChange={e=>setEditForm({...editForm,isTeam:e.target.checked})} style={{cursor:"pointer",accentColor:miseAc,width:18,height:18}} />
+                      <span style={{fontSize:13,color:"var(--text)",fontWeight:600}}>É membro da equipe deste restaurante</span>
+                      <span style={{fontSize:11,color:"var(--text3)",fontWeight:400}}>(entra em escala, recebe gorjeta, etc.)</span>
+                    </label>
+                    {editForm.isTeam && (
+                      <div style={{display:"grid",gridTemplateColumns:mobileOnly?"1fr":"2fr 1fr",gap:8}}>
+                        <div>
+                          <label style={{...S.label,fontSize:11}}>Cargo</label>
+                          <select value={editForm.roleId} onChange={e=>setEditForm({...editForm,roleId:e.target.value})} style={S.input}>
+                            <option value="">— Sem cargo definido —</option>
+                            {restRoles.map(r => <option key={r.id} value={r.id}>{r.name} ({r.area})</option>)}
+                          </select>
+                        </div>
+                        <div>
+                          <label style={{...S.label,fontSize:11}}>Data de admissão</label>
+                          <input type="date" value={editForm.admission} onChange={e=>setEditForm({...editForm,admission:e.target.value})} style={S.input} />
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                  <div style={{display:"flex",gap:8,justifyContent:"flex-end"}}>
+                    <button onClick={()=>setEditingId(null)} style={{...S.btnSecondary,fontSize:12,padding:"6px 14px"}}>Cancelar</button>
+                    <button onClick={saveEdit} style={{...S.btnPrimary,fontSize:12,padding:"6px 14px"}}>💾 Salvar</button>
+                  </div>
+                </div>
+              );
+            }
+            return (
+              <div key={p.id} style={{display:"flex",alignItems:"center",gap:10,padding:"10px 14px",background:"var(--card-bg)",border:"1px solid var(--border)",borderRadius:10,flexWrap:"wrap"}}>
+                <div style={{flex:1,minWidth:180}}>
+                  <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
+                    <span style={{color:"var(--text)",fontWeight:600}}>{p.name}</span>
+                    {isTeam && <span style={{fontSize:10,padding:"1px 8px",borderRadius:10,background:miseAc+"22",color:"#15803d",fontWeight:700,letterSpacing:0.4}}>EQUIPE</span>}
+                    {p.linkedManagerId && <span style={{fontSize:10,padding:"1px 8px",borderRadius:10,background:"var(--ac)22",color:"var(--ac)",fontWeight:700,letterSpacing:0.4}}>GESTOR</span>}
+                    {p.restaurantIds.length > 1 && <span style={{fontSize:10,padding:"1px 8px",borderRadius:10,background:"var(--bg2)",color:"var(--text3)",fontWeight:700}}>{p.restaurantIds.length}× rest.</span>}
+                    {p.mustChangePin && <span style={{fontSize:10,padding:"1px 8px",borderRadius:10,background:"#fffbeb",color:"#d97706",fontWeight:700,letterSpacing:0.4}}>PIN INICIAL</span>}
+                  </div>
+                  <div style={{fontSize:11,color:"var(--text3)",marginTop:2,display:"flex",gap:10,flexWrap:"wrap"}}>
+                    {p.cpf && <span style={{fontFamily:"'DM Mono',monospace"}}>{maskCpf(p.cpf)}</span>}
+                    {p.whatsapp && <span>📱 {p.whatsapp}</span>}
+                    {p.email && <span>✉ {p.email}</span>}
+                    {isTeam && role && <span>💼 {role.name}</span>}
+                    {isTeam && td.admission && <span>📅 desde {fmtDate(td.admission)}</span>}
+                  </div>
+                </div>
+                <button onClick={()=>startEdit(p)} style={{...S.btnSecondary,fontSize:12,padding:"6px 12px"}}>Editar</button>
+                <button onClick={()=>delPessoa(p.id)} style={{...S.btnSecondary,fontSize:12,padding:"6px 12px",color:"var(--red)",borderColor:"var(--red)44"}}>Remover</button>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════
+// ──  PERMISSÕES — MATRIZ COM SANFONA                            ──
+// ═══════════════════════════════════════════════════════════════
+const PERM_GROUPS = [
+  {
+    id: "tip_op", label: "AppTip Operacional", color: "var(--ac)", bg: "var(--ac)22",
+    perms: [
+      { key: "operational.escalas",  label: "Escalas",  icon: "📅" },
+      { key: "operational.gorjetas", label: "Gorjetas", icon: "💰" },
+      { key: "operational.trilhas",  label: "Trilhas",  icon: "🎯" },
+      { key: "operational.reunioes", label: "Reuniões", icon: "🗣️" },
+    ],
+  },
+  {
+    id: "tip_adm", label: "AppTip Admin", color: "#0284c7", bg: "#0284c722",
+    perms: [
+      { key: "admin.tips",        label: "Lançar Gorjetas",  icon: "💰" },
+      { key: "admin.schedule",    label: "Fechar Escala",    icon: "📅" },
+      { key: "admin.employees",   label: "Equipe",           icon: "👥" },
+      { key: "admin.roles",       label: "Cargos",           icon: "🏷️" },
+      { key: "admin.vt",          label: "Vale Transporte",  icon: "🚌" },
+      { key: "admin.comunicados", label: "Comunicados",      icon: "📢" },
+      { key: "admin.faq",         label: "FAQ",              icon: "❓" },
+      { key: "admin.config",      label: "Configurações",    icon: "⚙️" },
+      { key: "admin.pessoas",     label: "Gerenciar Pessoas",icon: "🛂" },
+    ],
+  },
+  {
+    id: "mise", label: "AppMise", color: "#7c9e5e", bg: "#7c9e5e22",
+    perms: [
+      { key: "operational.contagens",      label: "Contagens",      icon: "📦" },
+      { key: "operational.compras",        label: "Compras",        icon: "🛒" },
+      { key: "operational.checklists",     label: "Checklists",     icon: "✅" },
+      { key: "operational.fichasTecnicas", label: "Fichas Técnicas",icon: "📋" },
+    ],
+  },
+  {
+    id: "esp", label: "Especiais", color: "#a855f7", bg: "#a855f722",
+    perms: [
+      { key: "special.isDP",    label: "Master DP",     icon: "🛂" },
+      { key: "special.isLider", label: "Líder de Área", icon: "⭐" },
+    ],
+  },
+];
+
+function permGet(pessoa, restaurantId, key) {
+  const [group, name] = key.split(".");
+  return !!pessoa?.permissions?.[restaurantId]?.[group]?.[name];
+}
+function permSet(pessoa, restaurantId, key, value) {
+  const [group, name] = key.split(".");
+  const perms = { ...(pessoa.permissions || {}) };
+  const byRest = { ...(perms[restaurantId] || {}) };
+  const byGroup = { ...(byRest[group] || {}) };
+  if (value) byGroup[name] = true; else delete byGroup[name];
+  byRest[group] = byGroup;
+  perms[restaurantId] = byRest;
+  return { ...pessoa, permissions: perms };
+}
+
+function PermissoesMatrix({ restaurantId, pessoas, employees, managers, onUpdate, mobileOnly }) {
+  const restPessoas = (pessoas || []).filter(p => (p.restaurantIds || []).includes(restaurantId));
+  const [expanded, setExpanded] = useState({ tip_op: true, tip_adm: false, mise: false, esp: false });
+  const [filter, setFilter] = useState("");
+  const [liderAreasModal, setLiderAreasModal] = useState(null); // pessoaId
+
+  function saveLiderAreas(pessoaId, newAreas) {
+    const updated = (pessoas || []).map(p => {
+      if (p.id !== pessoaId) return p;
+      const perms = { ...(p.permissions || {}) };
+      const byRest = { ...(perms[restaurantId] || {}) };
+      const special = { ...(byRest.special || {}) };
+      special.areas = newAreas;
+      byRest.special = special;
+      perms[restaurantId] = byRest;
+      return { ...p, permissions: perms };
+    });
+    onUpdate("pessoas", updated);
+    // Sincroniza no manager legado
+    const p = pessoas.find(x => x.id === pessoaId);
+    if (p?.linkedManagerId) {
+      onUpdate("managers", (managers || []).map(m => m.id === p.linkedManagerId ? { ...m, areas: newAreas } : m));
+    }
+  }
+
+  function toggleGroup(gid) {
+    setExpanded(prev => ({ ...prev, [gid]: !prev[gid] }));
+  }
+  function expandAll() { setExpanded({ tip_op: true, tip_adm: true, mise: true, esp: true }); }
+  function collapseAll() { setExpanded({ tip_op: false, tip_adm: false, mise: false, esp: false }); }
+
+  function togglePerm(pessoa, permKey) {
+    const current = permGet(pessoa, restaurantId, permKey);
+    const updated = permSet(pessoa, restaurantId, permKey, !current);
+    const [group, name] = permKey.split(".");
+    const value = !current;
+
+    // Caso especial: marcar admin/special em pessoa sem linkedManagerId → auto-cria manager record
+    // (assim as telas antigas de ManagerPortal conseguem renderizar quando a pessoa logar como admin)
+    if (value === true && (group === "admin" || group === "special") && !pessoa.linkedManagerId) {
+      const newMgrId = `mgr_auto_${pessoa.id}_${Date.now().toString(36).slice(-4)}`;
+      const newManager = {
+        id: newMgrId,
+        name: pessoa.name,
+        cpf: pessoa.cpf || "",
+        pin: pessoa.pin || "0000",
+        mustChangePin: !!pessoa.mustChangePin,
+        restaurantIds: [restaurantId],
+        perms: group === "admin" ? { [name]: true } : {},
+        profile: (group === "special" && name === "isLider") ? "lider" : "custom",
+        areas: [],
+        isDP: !!(group === "special" && name === "isDP"),
+        isMaster: false,
+        linkedPessoaId: pessoa.id,
+        createdAt: new Date().toISOString(),
+      };
+      onUpdate("managers", [...(managers || []), newManager]);
+      const linkedPessoa = { ...updated, linkedManagerId: newMgrId };
+      onUpdate("pessoas", (pessoas || []).map(p => p.id === pessoa.id ? linkedPessoa : p));
+      return;
+    }
+
+    // Atualiza pessoa normalmente
+    onUpdate("pessoas", (pessoas || []).map(p => p.id === pessoa.id ? updated : p));
+
+    // Sincroniza no legado para compatibilidade com telas antigas
+    if (group === "operational" && pessoa.linkedEmployeeId) {
+      const empId = pessoa.linkedEmployeeId;
+      const newEmps = (employees || []).map(e => e.id === empId ? {
+        ...e,
+        operationalAreas: { ...(e.operationalAreas || {}), [name]: value || undefined },
+      } : e);
+      onUpdate("employees", newEmps);
+    } else if (group === "admin" && pessoa.linkedManagerId) {
+      const mgrId = pessoa.linkedManagerId;
+      const newMgrs = (managers || []).map(m => m.id === mgrId ? {
+        ...m,
+        perms: { ...(m.perms || {}), [name]: value },
+      } : m);
+      onUpdate("managers", newMgrs);
+    } else if (group === "special" && pessoa.linkedManagerId) {
+      const mgrId = pessoa.linkedManagerId;
+      const newMgrs = (managers || []).map(m => {
+        if (m.id !== mgrId) return m;
+        const next = { ...m };
+        if (name === "isDP") next.isDP = value;
+        if (name === "isLider") {
+          next.profile = value ? "lider" : "custom";
+        }
+        return next;
+      });
+      onUpdate("managers", newMgrs);
+    }
+  }
+
+  const q = filter.trim().toLowerCase();
+  const filtered = q ? restPessoas.filter(p => p.name.toLowerCase().includes(q)) : restPessoas;
+  const sorted = [...filtered].sort((a,b)=>a.name.localeCompare(b.name));
+
+  return (
+    <div>
+      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",flexWrap:"wrap",gap:8,marginBottom:12}}>
+        <h3 style={{color:"var(--text)",margin:0,fontSize:mobileOnly?16:18}}>🛂 Permissões</h3>
+        <div style={{display:"flex",gap:6}}>
+          <button onClick={expandAll} style={{...S.btnSecondary,fontSize:11,padding:"5px 10px"}}>Expandir todos</button>
+          <button onClick={collapseAll} style={{...S.btnSecondary,fontSize:11,padding:"5px 10px"}}>Colapsar todos</button>
+        </div>
+      </div>
+
+      <div style={{marginBottom:10}}>
+        <input value={filter} onChange={e=>setFilter(e.target.value)} placeholder="🔍 Buscar pessoa..." style={{...S.input,maxWidth:360}} />
+      </div>
+
+      {sorted.length === 0 ? (
+        <div style={{padding:"32px 16px",textAlign:"center",color:"var(--text3)",fontSize:14,background:"var(--card-bg)",borderRadius:12,border:"1px solid var(--border)"}}>
+          {restPessoas.length === 0 ? "Nenhuma pessoa cadastrada. Vá na aba Pessoas para começar." : "Nenhuma pessoa encontrada."}
+        </div>
+      ) : (
+        <div style={{overflowX:"auto",border:"1px solid var(--border)",borderRadius:12,background:"var(--card-bg)"}}>
+          <table style={{width:"100%",borderCollapse:"collapse",fontSize:12}}>
+            <thead>
+              <tr style={{background:"var(--bg2)",borderBottom:"1px solid var(--border)"}}>
+                <th style={{padding:"8px 12px",textAlign:"left",color:"var(--text)",fontWeight:700,position:"sticky",left:0,background:"var(--bg2)",zIndex:2,minWidth:180}}>Pessoa</th>
+                {PERM_GROUPS.map(g => (
+                  expanded[g.id] ? (
+                    g.perms.map(p => (
+                      <th key={p.key} style={{padding:"8px 6px",textAlign:"center",color:"var(--text)",fontWeight:600,minWidth:58,background:g.bg,borderLeft:"1px solid var(--border)"}} title={`${g.label} · ${p.label}`}>
+                        <div style={{fontSize:14,marginBottom:2}}>{p.icon}</div>
+                        <div style={{fontSize:9,color:g.color,fontWeight:700,textTransform:"uppercase",letterSpacing:0.3,lineHeight:1.1}}>{p.label.length > 10 ? p.label.slice(0,10)+'…' : p.label}</div>
+                      </th>
+                    ))
+                  ) : (
+                    <th key={g.id} onClick={()=>toggleGroup(g.id)} style={{padding:"8px 10px",textAlign:"center",cursor:"pointer",color:g.color,fontWeight:700,fontSize:11,textTransform:"uppercase",letterSpacing:0.4,borderLeft:"1px solid var(--border)",background:g.bg,minWidth:90}} title={`Clique para expandir ${g.label}`}>
+                      ▶ {g.label}
+                    </th>
+                  )
+                ))}
+              </tr>
+              {/* Row de grupos (sempre exibida, com botão de colapsar) */}
+              <tr style={{background:"var(--bg2)",borderBottom:"1px solid var(--border)"}}>
+                <th style={{padding:"4px 12px",textAlign:"left",color:"var(--text3)",fontWeight:500,fontSize:10,position:"sticky",left:0,background:"var(--bg2)",zIndex:2}}>
+                  {sorted.length} pessoa{sorted.length===1?"":"s"}
+                </th>
+                {PERM_GROUPS.map(g => (
+                  expanded[g.id] ? (
+                    <th key={g.id+"_collapse"} colSpan={g.perms.length} onClick={()=>toggleGroup(g.id)} style={{padding:"4px 8px",cursor:"pointer",color:g.color,fontWeight:700,fontSize:10,textTransform:"uppercase",letterSpacing:0.4,borderLeft:"1px solid var(--border)",background:g.bg,textAlign:"center"}} title="Clique para colapsar">
+                      ▼ {g.label}
+                    </th>
+                  ) : (
+                    <th key={g.id+"_stub"} style={{borderLeft:"1px solid var(--border)",background:g.bg}}></th>
+                  )
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {sorted.map(p => (
+                <tr key={p.id} style={{borderTop:"1px solid var(--border)"}}>
+                  <td style={{padding:"8px 12px",color:"var(--text)",fontWeight:500,position:"sticky",left:0,background:"var(--card-bg)",zIndex:1,minWidth:180}}>
+                    {p.name}
+                    {(!p.linkedEmployeeId && !p.linkedManagerId) && <div style={{fontSize:10,color:"var(--text3)",marginTop:2}}>não vinculada ao legado</div>}
+                  </td>
+                  {PERM_GROUPS.map(g => {
+                    if (!expanded[g.id]) {
+                      const count = g.perms.filter(perm => permGet(p, restaurantId, perm.key)).length;
+                      return (
+                        <td key={g.id+"_count"} onClick={()=>toggleGroup(g.id)} style={{padding:"8px",textAlign:"center",color:count>0?g.color:"var(--text3)",fontWeight:count>0?700:400,fontFamily:"'DM Mono',monospace",fontSize:13,cursor:"pointer",borderLeft:"1px solid var(--border)",background:count>0?g.bg:"transparent"}} title="Clique para expandir">
+                          {count > 0 ? count : "—"}
+                        </td>
+                      );
+                    }
+                    return g.perms.map(perm => {
+                      const checked = permGet(p, restaurantId, perm.key);
+                      const isLiderKey = perm.key === "special.isLider";
+                      const areas = (p.permissions?.[restaurantId]?.special?.areas) || [];
+                      return (
+                        <td key={perm.key} style={{padding:"6px",textAlign:"center",borderLeft:"1px solid var(--border)"}}>
+                          <input type="checkbox" checked={checked} onChange={()=>togglePerm(p, perm.key)} style={{cursor:"pointer",width:16,height:16,accentColor:g.color}} />
+                          {isLiderKey && checked && (
+                            <div style={{marginTop:4}}>
+                              <button onClick={()=>setLiderAreasModal(p.id)}
+                                style={{background:"none",border:`1px solid ${g.color}66`,borderRadius:6,padding:"2px 6px",cursor:"pointer",fontSize:10,color:g.color,fontWeight:600,fontFamily:"'DM Sans',sans-serif"}}
+                                title="Editar áreas que esta pessoa lidera">
+                                {areas.length > 0 ? `${areas.length} área${areas.length===1?"":"s"}` : "+ áreas"}
+                              </button>
+                            </div>
+                          )}
+                        </td>
+                      );
+                    });
+                  })}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+      <div style={{marginTop:10,fontSize:11,color:"var(--text3)",lineHeight:1.5}}>
+        💡 Clique num cabeçalho de grupo pra expandir/colapsar suas colunas. O número na célula colapsada mostra quantas permissões do grupo estão concedidas. Alterações são salvas automaticamente.
+      </div>
+
+      {/* MODAL: editor de áreas do Líder */}
+      {liderAreasModal && (() => {
+        const p = restPessoas.find(x => x.id === liderAreasModal);
+        if (!p) { setTimeout(()=>setLiderAreasModal(null),0); return null; }
+        const currentAreas = p.permissions?.[restaurantId]?.special?.areas ?? [];
+        return (
+          <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.5)",zIndex:1000,display:"flex",alignItems:"center",justifyContent:"center",padding:20}}>
+            <div style={{background:"var(--card-bg)",borderRadius:14,maxWidth:440,width:"100%",boxShadow:"0 10px 40px rgba(0,0,0,0.3)"}}>
+              <div style={{padding:"14px 18px",borderBottom:"1px solid var(--border)"}}>
+                <div style={{fontSize:11,color:"var(--text3)",fontWeight:700,textTransform:"uppercase",letterSpacing:0.4}}>Áreas lideradas</div>
+                <div style={{fontSize:15,color:"var(--text)",fontWeight:700,marginTop:2}}>⭐ {p.name}</div>
+              </div>
+              <div style={{padding:"14px 18px"}}>
+                <p style={{color:"var(--text3)",fontSize:12,lineHeight:1.5,margin:"0 0 14px"}}>
+                  Selecione as áreas que esta pessoa lidera. Como Líder, ela verá e atuará apenas em funcionários dessas áreas (filtro automático nas telas de Escala, Equipe, etc.).
+                </p>
+                <div style={{display:"flex",flexDirection:"column",gap:8}}>
+                  {AREAS.map(area => {
+                    const checked = currentAreas.includes(area);
+                    return (
+                      <label key={area} style={{display:"flex",alignItems:"center",gap:10,padding:"8px 12px",background:checked?AREA_COLORS[area]+"22":"var(--bg2)",border:`1px solid ${checked?AREA_COLORS[area]:"var(--border)"}`,borderRadius:10,cursor:"pointer"}}>
+                        <input type="checkbox" checked={checked}
+                          onChange={e => {
+                            const next = e.target.checked
+                              ? [...currentAreas, area]
+                              : currentAreas.filter(a => a !== area);
+                            saveLiderAreas(p.id, next);
+                          }}
+                          style={{cursor:"pointer",width:18,height:18,accentColor:AREA_COLORS[area]}} />
+                        <span style={{fontSize:14,color:"var(--text)",fontWeight:600,flex:1}}>{area}</span>
+                        <span style={{fontSize:11,color:checked?AREA_COLORS[area]:"var(--text3)",fontWeight:700}}>
+                          {checked ? "✓ Lidera" : "—"}
+                        </span>
+                      </label>
+                    );
+                  })}
+                </div>
+              </div>
+              <div style={{padding:"10px 18px",borderTop:"1px solid var(--border)",display:"flex",justifyContent:"flex-end"}}>
+                <button onClick={()=>setLiderAreasModal(null)} style={{...S.btnPrimary,fontSize:13,padding:"8px 18px"}}>Fechar</button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════
+// ──  MISE COMPRAS — STATUS E CÁLCULOS                           ──
+// ═══════════════════════════════════════════════════════════════
+const MISE_ORDER_STATUS = {
+  draft:                   { label: "Rascunho",         color: "#7a6e5a", bg: "#7a6e5a22", terminal: false },
+  approved:                { label: "Aprovado",         color: "#d97706", bg: "#fffbeb",    terminal: false },
+  sent:                    { label: "Enviado",          color: "#2563eb", bg: "#eff6ff",    terminal: false },
+  received_ok:             { label: "Recebido OK",      color: "#15803d", bg: "#f0fdf4",    terminal: true  },
+  received_with_divergence:{ label: "Divergência aceita",color: "#15803d",bg: "#f0fdf4",    terminal: true  },
+  awaiting_correction:     { label: "Aguardando correção",color: "#dc2626",bg:"#fef2f2",    terminal: false },
+  rejected:                { label: "Recusado/Devolvido",color: "#6b7280",bg:"#f9fafb",     terminal: true  },
+};
+
+// Calcula pedidos sugeridos para um ciclo baseado nas contagens já lançadas.
+// Retorna: [{ supplierId, supplier, items:[{productId,product,totalCounted,minStock,necessidade,linkId,link,conversionFactor,qtySuggested,estimatedCost}], totalCost }]
+// `overrides` é um mapa { [productId]: linkId } que força um vínculo específico
+function miseComputeSuggestedOrders({ cycle, restaurantId, items, counts, categories, productSuppliers, suppliers, overrides = {} }) {
+  if (!cycle) return [];
+  const restItems = items.filter(i => i.restaurantId === restaurantId);
+  const restCounts = counts.filter(c => c.restaurantId === restaurantId && c.cycleId === cycle.id);
+  const restLinks = productSuppliers.filter(ps => ps.restaurantId === restaurantId);
+  const restCats = categories.filter(c => c.restaurantId === restaurantId);
+
+  // Soma contagens por produto, separando contagem de estoque (stockId != null) de pedido direto (stockId === null)
+  const countedPerProduct = {};
+  const directPedidoPerProduct = {};
+  restCounts.forEach(cnt => {
+    if (cnt.stockId === null || cnt.stockId === undefined) {
+      directPedidoPerProduct[cnt.itemId] = (directPedidoPerProduct[cnt.itemId] || 0) + (cnt.qty || 0);
+    } else {
+      countedPerProduct[cnt.itemId] = (countedPerProduct[cnt.itemId] || 0) + (cnt.qty || 0);
+    }
+  });
+
+  // Agrupa por fornecedor escolhido (preferencial OU override)
+  const bySupplier = {};
+  restItems.forEach(prod => {
+    const cat = restCats.find(c => c.id === prod.categoryId);
+    const catType = cat?.type ?? "contagem";
+    const total = countedPerProduct[prod.id] || 0;
+    const directQty = directPedidoPerProduct[prod.id] || 0;
+    const min = typeof prod.minStock === "number" ? prod.minStock : null;
+
+    // Necessidade base via min/contagem (aplicável a contagem e ambos)
+    let necessidadeBase = 0;
+    let mustUseDirect = false;
+    if (catType === "pedido") {
+      // Só pedido direto conta
+      mustUseDirect = true;
+    } else {
+      // contagem ou ambos: usa min vs contagem
+      if (min != null && min > 0) {
+        necessidadeBase = Math.max(0, min - total);
+      }
+    }
+    const necessidade = necessidadeBase + (catType === "pedido" || catType === "ambos" ? directQty : 0);
+    if (necessidade <= 0) return; // nada a pedir
+    // Se é pedido puro e não tem direct, nada sugere
+    if (mustUseDirect && directQty <= 0) return;
+    const linksOfProd = restLinks.filter(ps => ps.productId === prod.id);
+    if (linksOfProd.length === 0) return; // sem fornecedor → não sugere
+    let link = null;
+    const overrideLinkId = overrides[prod.id];
+    if (overrideLinkId) link = linksOfProd.find(l => l.id === overrideLinkId) || null;
+    if (!link) link = linksOfProd.find(l => l.preferred) || linksOfProd[0];
+    const fator = typeof link.conversionFactor === "number" && link.conversionFactor > 0 ? link.conversionFactor : 1;
+    const qtySuggested = Math.ceil(necessidade / fator) * fator;
+    const estimatedCost = typeof link.price === "number" ? link.price * (qtySuggested / fator) : null;
+    const row = { productId: prod.id, product: prod, totalCounted: total, directPedido: directQty, minStock: min, necessidade, linkId: link.id, link, conversionFactor: fator, qtySuggested, estimatedCost, source: mustUseDirect ? "pedido_direto" : (directQty > 0 ? "misto" : "contagem") };
+    if (!bySupplier[link.supplierId]) bySupplier[link.supplierId] = { supplierId: link.supplierId, supplier: suppliers.find(s => s.id === link.supplierId), items: [], totalCost: 0 };
+    bySupplier[link.supplierId].items.push(row);
+    if (typeof estimatedCost === "number") bySupplier[link.supplierId].totalCost += estimatedCost;
+  });
+
+  return Object.values(bySupplier).filter(g => g.supplier).sort((a,b) => a.supplier.name.localeCompare(b.supplier.name));
+}
+
+// Gera mensagem de WhatsApp pre-formatada para um pedido ao fornecedor
+function miseBuildWhatsMessage({ order, supplier, items, restaurantName, cycleDate }) {
+  const lines = [];
+  lines.push(`*Pedido — ${restaurantName || "Restaurante"}*`);
+  if (cycleDate) lines.push(`Data: ${cycleDate}`);
+  lines.push(`Fornecedor: ${supplier.name}`);
+  lines.push("");
+  lines.push("Itens:");
+  items.forEach(it => {
+    const qty = it.qtyApproved ?? it.qtySuggested ?? 0;
+    const nome = it.productName || "—";
+    const fator = it.conversionFactor && it.conversionFactor !== 1 ? ` (${it.conversionFactor}× / emb.)` : "";
+    lines.push(`• ${nome}: ${qty}${fator}`);
+  });
+  lines.push("");
+  lines.push("Obrigado!");
+  return lines.join("\n");
+}
+
+function miseWhatsLink(whatsapp, message) {
+  const digits = (whatsapp || "").replace(/\D/g, "");
+  if (!digits) return null;
+  return `https://wa.me/${digits}?text=${encodeURIComponent(message)}`;
+}
+
+// ═══════════════════════════════════════════════════════════════
+// ──  MISE CHECKLISTS — ADMIN + USER                             ──
+// ═══════════════════════════════════════════════════════════════
+function MiseChecklistsAdmin({ restaurantId, miseChecklistTemplates, miseChecklistRuns, onUpdate, mobileOnly }) {
+  const restTemplates = (miseChecklistTemplates || []).filter(t => t.restaurantId === restaurantId);
+  const restRuns = (miseChecklistRuns || []).filter(r => r.restaurantId === restaurantId);
+  const [editingTplId, setEditingTplId] = useState(null);
+  const [view, setView] = useState("templates"); // templates | historico
+  const [newTplName, setNewTplName] = useState("");
+  const miseAc = "#7c9e5e";
+  const mkId = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+
+  function addTemplate() {
+    const nm = newTplName.trim();
+    if (!nm) return;
+    if (restTemplates.some(t => t.name.toLowerCase() === nm.toLowerCase())) { alert("Já existe template com esse nome."); return; }
+    const t = { id: mkId(), restaurantId, name: nm, description: "", items: [], active: true };
+    onUpdate("miseChecklistTemplates", [...(miseChecklistTemplates || []), t]);
+    setNewTplName("");
+    setEditingTplId(t.id);
+  }
+  function delTemplate(id) {
+    const t = restTemplates.find(x => x.id === id);
+    const linkedRuns = restRuns.filter(r => r.templateId === id).length;
+    if (!window.confirm(`Apagar template "${t?.name}"?\n${linkedRuns} execução(ões) também serão apagadas.`)) return;
+    onUpdate("miseChecklistTemplates", (miseChecklistTemplates || []).filter(x => x.id !== id));
+    onUpdate("miseChecklistRuns", (miseChecklistRuns || []).filter(r => r.templateId !== id));
+  }
+  function updateTpl(id, patch) {
+    onUpdate("miseChecklistTemplates", (miseChecklistTemplates || []).map(t => t.id === id ? { ...t, ...patch } : t));
+  }
+  function toggleActive(id) {
+    const t = restTemplates.find(x => x.id === id);
+    updateTpl(id, { active: !t.active });
+  }
+
+  if (editingTplId) {
+    const tpl = restTemplates.find(t => t.id === editingTplId);
+    if (!tpl) { setTimeout(()=>setEditingTplId(null),0); return null; }
+    return <MiseChecklistTemplateEditor
+      tpl={tpl}
+      updateTpl={(patch) => updateTpl(tpl.id, patch)}
+      onBack={() => setEditingTplId(null)}
+      mobileOnly={mobileOnly}
+      mkId={mkId}
+    />;
+  }
+
+  const VIEWS = [
+    { id: "templates", label: "Templates" },
+    { id: "historico", label: "Histórico" },
+  ];
+
+  return (
+    <div>
+      <div style={{display:"flex",gap:4,marginBottom:16,borderBottom:"1px solid var(--border)",overflowX:"auto"}}>
+        {VIEWS.map(v => (
+          <button key={v.id} onClick={()=>setView(v.id)}
+            style={{background:"none",border:"none",borderBottom: view===v.id ? `2px solid ${miseAc}` : "2px solid transparent",padding:"8px 14px",cursor:"pointer",fontSize:13,fontWeight: view===v.id ? 700 : 500,color: view===v.id ? "var(--text)" : "var(--text3)",whiteSpace:"nowrap",flexShrink:0}}>
+            {v.label}
+          </button>
+        ))}
+      </div>
+
+      {view === "templates" && (
+        <div>
+          <div style={{padding:"12px",background:"var(--card-bg)",border:"1px solid var(--border)",borderRadius:10,marginBottom:16}}>
+            <div style={{display:"flex",gap:8,alignItems:"end",flexWrap:"wrap"}}>
+              <div style={{flex:"1 1 220px"}}>
+                <label style={{...S.label,fontSize:11}}>Nome do template</label>
+                <input value={newTplName} onChange={e=>setNewTplName(e.target.value)} placeholder="ex: Abertura de Caixa, Limpeza Fim de Expediente" style={S.input} onKeyDown={e=>e.key==="Enter"&&addTemplate()} />
+              </div>
+              <button onClick={addTemplate} disabled={!newTplName.trim()} style={{...S.btnPrimary,fontSize:13,padding:"8px 16px",opacity:!newTplName.trim()?0.5:1}}>+ Novo</button>
+            </div>
+          </div>
+          {restTemplates.length === 0 ? (
+            <div style={{padding:"40px 24px",textAlign:"center",color:"var(--text3)",fontSize:14,background:"var(--card-bg)",borderRadius:12,border:"1px solid var(--border)"}}>
+              <div style={{fontSize:40,marginBottom:12}}>✅</div>
+              <div style={{color:"var(--text)",fontWeight:600,fontSize:16,marginBottom:6}}>Nenhum template criado</div>
+              <div>Templates são listas reutilizáveis (ex: abertura, fechamento, limpeza).</div>
+            </div>
+          ) : (
+            <div style={{display:"flex",flexDirection:"column",gap:8}}>
+              {[...restTemplates].sort((a,b)=>a.name.localeCompare(b.name)).map(t => {
+                const runsCount = restRuns.filter(r => r.templateId === t.id).length;
+                return (
+                  <div key={t.id} style={{display:"flex",alignItems:"center",gap:10,padding:"12px 14px",background:"var(--card-bg)",border:`1px solid ${t.active?"var(--border)":"#f59e0b44"}`,borderRadius:10,opacity:t.active?1:0.6,flexWrap:"wrap"}}>
+                    <div style={{flex:1,minWidth:180,cursor:"pointer"}} onClick={()=>setEditingTplId(t.id)}>
+                      <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
+                        <span style={{color:"var(--text)",fontWeight:700}}>{t.name}</span>
+                        {!t.active && <span style={{fontSize:10,padding:"1px 8px",borderRadius:10,background:"#fffbeb",color:"#92400e",fontWeight:700}}>INATIVO</span>}
+                      </div>
+                      <div style={{fontSize:11,color:"var(--text3)",marginTop:2}}>
+                        {(t.items||[]).length} item(ns) · {runsCount} execução(ões)
+                      </div>
+                    </div>
+                    <button onClick={()=>setEditingTplId(t.id)} style={{...S.btnSecondary,fontSize:12,padding:"6px 12px"}}>Editar</button>
+                    <button onClick={()=>toggleActive(t.id)} style={{...S.btnSecondary,fontSize:12,padding:"6px 12px"}}>{t.active?"Desativar":"Ativar"}</button>
+                    <button onClick={()=>delTemplate(t.id)} style={{...S.btnSecondary,fontSize:12,padding:"6px 12px",color:"var(--red)",borderColor:"var(--red)44"}}>Apagar</button>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
+
+      {view === "historico" && (
+        <div>
+          {restRuns.length === 0 ? (
+            <div style={{padding:"40px 24px",textAlign:"center",color:"var(--text3)",fontSize:14,background:"var(--card-bg)",borderRadius:12,border:"1px solid var(--border)"}}>
+              Nenhuma execução registrada ainda.
+            </div>
+          ) : (
+            <div style={{display:"flex",flexDirection:"column",gap:8}}>
+              {[...restRuns].sort((a,b)=>(b.date||"").localeCompare(a.date||"")).slice(0, 100).map(r => {
+                const tpl = restTemplates.find(t => t.id === r.templateId);
+                const doneCount = (r.items || []).filter(i => i.done).length;
+                const totalCount = (r.items || []).length;
+                const pct = totalCount > 0 ? Math.round(doneCount/totalCount*100) : 0;
+                return (
+                  <div key={r.id} style={{padding:"10px 14px",background:"var(--card-bg)",border:"1px solid var(--border)",borderRadius:10}}>
+                    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:8}}>
+                      <div style={{flex:1,minWidth:180}}>
+                        <div style={{color:"var(--text)",fontWeight:600}}>{tpl?.name ?? "Template removido"}</div>
+                        <div style={{fontSize:11,color:"var(--text3)",marginTop:2}}>
+                          {r.userName || "—"} · {fmtDate(r.date)}
+                          {r.completedAt && <span style={{marginLeft:6,color:"#15803d",fontWeight:600}}>✓ Finalizado</span>}
+                        </div>
+                      </div>
+                      <div style={{textAlign:"right"}}>
+                        <div style={{fontSize:13,fontWeight:700,color:pct===100?"#15803d":"var(--text)",fontFamily:"'DM Mono',monospace"}}>{doneCount}/{totalCount}</div>
+                        <div style={{width:80,height:4,background:"var(--bg2)",borderRadius:2,marginTop:4,overflow:"hidden"}}>
+                          <div style={{width:`${pct}%`,height:"100%",background:pct===100?"#15803d":miseAc}}/>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Editor de um template
+function MiseChecklistTemplateEditor({ tpl, updateTpl, onBack, mobileOnly, mkId }) {
+  const [local, setLocal] = useState(tpl);
+  useEffect(() => { setLocal(tpl); }, [tpl.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  const dirty = JSON.stringify(local) !== JSON.stringify(tpl);
+  const miseAc = "#7c9e5e";
+
+  function save() { updateTpl(local); }
+  function handleBack() {
+    if (dirty && !window.confirm("Descartar alterações e voltar?")) return;
+    onBack();
+  }
+  function addItem() {
+    const text = window.prompt("Texto do item:");
+    if (!text || !text.trim()) return;
+    setLocal(l => ({ ...l, items: [...(l.items || []), { id: mkId(), text: text.trim(), order: (l.items || []).length }] }));
+  }
+  function updateItem(id, patch) {
+    setLocal(l => ({ ...l, items: (l.items || []).map(i => i.id === id ? { ...i, ...patch } : i) }));
+  }
+  function delItem(id) {
+    setLocal(l => ({ ...l, items: (l.items || []).filter(i => i.id !== id) }));
+  }
+  function moveItem(id, dir) {
+    setLocal(l => {
+      const arr = [...(l.items || [])];
+      const idx = arr.findIndex(i => i.id === id);
+      const ni = idx + dir;
+      if (ni < 0 || ni >= arr.length) return l;
+      [arr[idx], arr[ni]] = [arr[ni], arr[idx]];
+      return { ...l, items: arr.map((i, k) => ({ ...i, order: k })) };
+    });
+  }
+
+  return (
+    <div>
+      <div style={{display:"flex",gap:8,marginBottom:16,alignItems:"center",flexWrap:"wrap"}}>
+        <button onClick={handleBack} style={{...S.btnSecondary,fontSize:13,padding:"8px 14px"}}>← Voltar</button>
+        <div style={{flex:1,minWidth:0}}>
+          <div style={{fontSize:11,color:"var(--text3)",fontWeight:700,textTransform:"uppercase",letterSpacing:0.4}}>Editando template</div>
+          <div style={{fontSize:15,color:"var(--text)",fontWeight:700}}>{local.name}</div>
+        </div>
+        {dirty && <span style={{color:"#f59e0b",fontSize:11,fontWeight:700,padding:"3px 8px",background:"#fffbeb",border:"1px solid #f59e0b44",borderRadius:10}}>● Não salvo</span>}
+        <button onClick={save} disabled={!dirty} style={{background:dirty?miseAc:"var(--border)",color:dirty?"#fff":"var(--text3)",border:"none",borderRadius:8,padding:"8px 18px",fontSize:13,fontWeight:700,cursor:dirty?"pointer":"not-allowed",fontFamily:"'DM Sans',sans-serif"}}>💾 Salvar</button>
+      </div>
+
+      <div style={{marginBottom:14}}>
+        <label style={S.label}>Nome</label>
+        <input value={local.name ?? ""} onChange={e=>setLocal({...local, name: e.target.value})} style={S.input} />
+      </div>
+      <div style={{marginBottom:14}}>
+        <label style={S.label}>Descrição (opcional)</label>
+        <textarea value={local.description ?? ""} onChange={e=>setLocal({...local, description: e.target.value})} placeholder="Quando usar, instruções gerais..." style={{...S.input,minHeight:60,fontFamily:"inherit",resize:"vertical"}} />
+      </div>
+
+      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:10}}>
+        <h4 style={{color:"var(--text)",margin:0,fontSize:15,fontWeight:700}}>Itens ({(local.items || []).length})</h4>
+        <button onClick={addItem} style={{...S.btnSecondary,fontSize:12,padding:"6px 12px"}}>+ Adicionar item</button>
+      </div>
+
+      {(local.items || []).length === 0 ? (
+        <div style={{padding:"32px 16px",textAlign:"center",color:"var(--text3)",fontSize:14,background:"var(--card-bg)",borderRadius:12,border:"1px dashed var(--border)"}}>
+          Sem itens. Clique em "+ Adicionar item" pra começar.
+        </div>
+      ) : (
+        <div style={{display:"flex",flexDirection:"column",gap:8}}>
+          {(local.items || []).map((it, idx) => (
+            <div key={it.id} style={{display:"flex",alignItems:"center",gap:10,padding:"10px 14px",background:"var(--card-bg)",border:"1px solid var(--border)",borderRadius:10}}>
+              <span style={{fontSize:11,color:"var(--text3)",fontFamily:"'DM Mono',monospace",minWidth:24}}>{idx+1}.</span>
+              <input value={it.text} onChange={e=>updateItem(it.id, { text: e.target.value })} style={{...S.input,flex:1}} />
+              <button onClick={()=>moveItem(it.id, -1)} disabled={idx===0} style={{...S.btnSecondary,fontSize:11,padding:"4px 8px",opacity:idx===0?0.3:1}}>↑</button>
+              <button onClick={()=>moveItem(it.id, 1)} disabled={idx===(local.items||[]).length-1} style={{...S.btnSecondary,fontSize:11,padding:"4px 8px",opacity:idx===(local.items||[]).length-1?0.3:1}}>↓</button>
+              <button onClick={()=>delItem(it.id)} style={{...S.btnSecondary,fontSize:11,padding:"4px 10px",color:"var(--red)",borderColor:"var(--red)44"}}>×</button>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── CHECKLISTS — USER (Gestor Operacional) ──
+function OperationalChecklists({ employee, miseChecklistTemplates, miseChecklistRuns, onUpdate }) {
+  const restaurantId = employee.restaurantId;
+  const today_ = today();
+  const templates = (miseChecklistTemplates || []).filter(t => t.restaurantId === restaurantId && t.active !== false);
+  const myRunsToday = (miseChecklistRuns || []).filter(r =>
+    r.restaurantId === restaurantId && r.userId === employee.id && r.date === today_
+  );
+  const [expandedTpl, setExpandedTpl] = useState(null);
+  const miseAc = "#7c9e5e";
+
+  function toggleItem(tpl, itemId) {
+    const now = new Date().toISOString();
+    const existing = (miseChecklistRuns || []).find(r => r.restaurantId === restaurantId && r.templateId === tpl.id && r.userId === employee.id && r.date === today_);
+    if (!existing) {
+      // cria run novo com esse item marcado
+      const run = {
+        id: `clrun_${Date.now().toString(36)}${Math.random().toString(36).slice(2,6)}`,
+        restaurantId, templateId: tpl.id, userId: employee.id, userName: employee.name,
+        date: today_,
+        items: (tpl.items || []).map(it => ({ itemId: it.id, done: it.id === itemId, doneAt: it.id === itemId ? now : undefined })),
+      };
+      onUpdate("miseChecklistRuns", [...(miseChecklistRuns || []), run]);
+      return;
+    }
+    const newItems = (existing.items || []).map(i =>
+      i.itemId === itemId ? { ...i, done: !i.done, doneAt: !i.done ? now : undefined } : i
+    );
+    // Garante que todos os itens do template estão no run
+    (tpl.items || []).forEach(tit => {
+      if (!newItems.find(i => i.itemId === tit.id)) newItems.push({ itemId: tit.id, done: false });
+    });
+    onUpdate("miseChecklistRuns", (miseChecklistRuns || []).map(r => r.id === existing.id ? { ...r, items: newItems } : r));
+  }
+
+  function finalizeRun(tpl) {
+    const run = myRunsToday.find(r => r.templateId === tpl.id);
+    if (!run) { alert("Marque pelo menos um item antes de finalizar."); return; }
+    if (!window.confirm("Finalizar este checklist? Depois de finalizado, não pode ser alterado hoje.")) return;
+    onUpdate("miseChecklistRuns", (miseChecklistRuns || []).map(r => r.id === run.id ? { ...r, completedAt: new Date().toISOString() } : r));
+  }
+
+  if (templates.length === 0) {
+    return (
+      <div style={{padding:"60px 24px",textAlign:"center",color:"var(--text3)"}}>
+        <div style={{fontSize:48,marginBottom:16}}>✅</div>
+        <h3 style={{color:"var(--text)",fontSize:18,fontWeight:700,margin:"0 0 8px"}}>Sem checklists disponíveis</h3>
+        <p style={{fontSize:14,lineHeight:1.6,maxWidth:420,margin:"0 auto"}}>
+          O gestor ainda não criou nenhum template de checklist para este restaurante.
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <div style={{display:"flex",flexDirection:"column",gap:16}}>
+      <div style={{padding:"12px 16px",background:"#f0fdf4",border:"1px solid #10b98144",borderRadius:10}}>
+        <div style={{fontSize:11,color:"#15803d",fontWeight:700,textTransform:"uppercase",letterSpacing:0.4}}>Checklists de hoje</div>
+        <div style={{fontSize:13,color:"var(--text)",marginTop:2}}>{fmtDate(today_)} · {employee.name}</div>
+      </div>
+
+      {templates.map(tpl => {
+        const run = myRunsToday.find(r => r.templateId === tpl.id);
+        const isCompleted = !!run?.completedAt;
+        const items = tpl.items || [];
+        const runItems = run?.items || [];
+        const doneCount = runItems.filter(i => i.done).length;
+        const pct = items.length > 0 ? Math.round(doneCount/items.length*100) : 0;
+        const isExpanded = expandedTpl === tpl.id || (!run && items.length > 0);
+        return (
+          <div key={tpl.id} style={{background:"var(--card-bg)",border:`1px solid ${isCompleted?"#10b98144":"var(--border)"}`,borderRadius:12,overflow:"hidden"}}>
+            <div style={{padding:"12px 16px",background:isCompleted?"#f0fdf4":"var(--bg2)",borderBottom:"1px solid var(--border)",display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:8,cursor:"pointer"}}
+              onClick={()=>setExpandedTpl(isExpanded ? null : tpl.id)}>
+              <div style={{flex:1,minWidth:180}}>
+                <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
+                  <span style={{fontSize:15,color:"var(--text)",fontWeight:700}}>{tpl.name}</span>
+                  {isCompleted && <span style={{fontSize:10,padding:"1px 8px",borderRadius:10,background:"#10b98122",color:"#15803d",fontWeight:700}}>✓ FINALIZADO</span>}
+                </div>
+                {tpl.description && <div style={{fontSize:12,color:"var(--text3)",marginTop:3}}>{tpl.description}</div>}
+                <div style={{display:"flex",alignItems:"center",gap:8,marginTop:6}}>
+                  <div style={{width:120,height:5,background:"var(--bg2)",borderRadius:3,overflow:"hidden"}}>
+                    <div style={{width:`${pct}%`,height:"100%",background:pct===100?"#15803d":miseAc,transition:"width 0.2s"}}/>
+                  </div>
+                  <span style={{fontSize:11,color:"var(--text3)",fontFamily:"'DM Mono',monospace"}}>{doneCount}/{items.length}</span>
+                </div>
+              </div>
+              <span style={{color:"var(--text3)",fontSize:14}}>{isExpanded ? "▼" : "▶"}</span>
+            </div>
+            {isExpanded && (
+              <div style={{padding:"12px 16px"}}>
+                {items.length === 0 ? (
+                  <div style={{padding:"16px",textAlign:"center",color:"var(--text3)",fontSize:13,background:"var(--bg2)",borderRadius:8}}>
+                    Este template não tem itens. Peça ao gestor pra configurar.
+                  </div>
+                ) : (
+                  <>
+                    <div style={{display:"flex",flexDirection:"column",gap:6}}>
+                      {items.map((it, idx) => {
+                        const runItem = runItems.find(ri => ri.itemId === it.id);
+                        const done = !!runItem?.done;
+                        return (
+                          <label key={it.id} onClick={e => isCompleted && e.preventDefault()}
+                            style={{display:"flex",alignItems:"center",gap:10,padding:"10px 14px",background:done?"#f0fdf4":"var(--bg2)",border:`1px solid ${done?"#10b98144":"var(--border)"}`,borderRadius:8,cursor:isCompleted?"default":"pointer",opacity:isCompleted?0.7:1}}>
+                            <input type="checkbox" checked={done} disabled={isCompleted}
+                              onChange={()=>!isCompleted && toggleItem(tpl, it.id)}
+                              style={{cursor:isCompleted?"default":"pointer",width:18,height:18,accentColor:"#15803d"}} />
+                            <span style={{fontSize:11,color:"var(--text3)",fontFamily:"'DM Mono',monospace",minWidth:24}}>{idx+1}.</span>
+                            <span style={{fontSize:14,color:done?"var(--text3)":"var(--text)",fontWeight:500,flex:1,textDecoration:done?"line-through":"none"}}>{it.text}</span>
+                            {done && runItem?.doneAt && <span style={{fontSize:10,color:"var(--text3)",fontFamily:"'DM Mono',monospace"}}>{new Date(runItem.doneAt).toLocaleTimeString("pt-BR",{hour:"2-digit",minute:"2-digit"})}</span>}
+                          </label>
+                        );
+                      })}
+                    </div>
+                    {!isCompleted && (
+                      <div style={{marginTop:14,display:"flex",justifyContent:"flex-end"}}>
+                        <button onClick={()=>finalizeRun(tpl)}
+                          disabled={doneCount===0}
+                          style={{background:doneCount>0?"#15803d":"var(--border)",color:doneCount>0?"#fff":"var(--text3)",border:"none",borderRadius:8,padding:"8px 18px",fontSize:13,fontWeight:700,cursor:doneCount>0?"pointer":"not-allowed",fontFamily:"'DM Sans',sans-serif"}}>
+                          ✓ Finalizar checklist
+                        </button>
+                      </div>
+                    )}
+                  </>
+                )}
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════
+// ──  MISE FICHAS TÉCNICAS — UTILITIES (portado do AppMise)      ──
+// ═══════════════════════════════════════════════════════════════
+/* eslint-disable no-unused-vars */
+const FT_WEIGHT_G = ['g','gr','gram','grama','gramas'];
+const FT_WEIGHT_MG = ['mg'];
+const FT_WEIGHT_KG = ['kg','quilo','quilos','quilograma','quilogramas'];
+const FT_VOL_ML = ['ml','millilitro','mililitro'];
+const FT_VOL_L = ['l','lt','litro','litros'];
+const FT_CANONICAL_UNITS = ['kg', 'l', 'und', 'folhas', 'fatias', 'colher de sopa'];
+
+function ftFmtNum(v, d = 2) {
+  return (typeof v === 'number' && isFinite(v))
+    ? v.toLocaleString('pt-BR', { minimumFractionDigits: d, maximumFractionDigits: d })
+    : '—';
+}
+function ftPickWeightDisplay(qty_kg) {
+  if (qty_kg >= 1) return { qty: qty_kg, unit: 'kg', text: ftFmtNum(qty_kg, 3) };
+  const g = qty_kg * 1000;
+  const dec = g >= 10 ? 1 : (g >= 1 ? 2 : 3);
+  return { qty: g, unit: 'g', text: ftFmtNum(g, dec) };
+}
+function ftPickVolumeDisplay(qty_l) {
+  if (qty_l >= 1) return { qty: qty_l, unit: 'l', text: ftFmtNum(qty_l, 3) };
+  const ml = qty_l * 1000;
+  const dec = ml >= 10 ? 1 : (ml >= 1 ? 2 : 3);
+  return { qty: ml, unit: 'ml', text: ftFmtNum(ml, dec) };
+}
+function ftNormUnitForDisplay(qty, unit) {
+  if (qty == null) return { qty: null, unit: unit || '', text: '—' };
+  const u = (unit || '').toLowerCase().trim().replace(/\s+/g, '');
+  if (FT_WEIGHT_G.includes(u)) return ftPickWeightDisplay(qty / 1000);
+  if (FT_WEIGHT_MG.includes(u)) return ftPickWeightDisplay(qty / 1e6);
+  if (FT_WEIGHT_KG.includes(u)) return ftPickWeightDisplay(qty);
+  if (FT_VOL_ML.includes(u)) return ftPickVolumeDisplay(qty / 1000);
+  if (FT_VOL_L.includes(u)) return ftPickVolumeDisplay(qty);
+  const dec = qty % 1 === 0 ? 0 : 2;
+  return { qty, unit: unit || '', text: ftFmtNum(qty, dec) };
+}
+function ftFormatIngQty(ing, scaleFactor = 1) {
+  if (ing?.is_qb) return { text: 'Q.B', unit: '' };
+  if (ing?.qty == null) return { text: ing?.qty_raw || '—', unit: ing?.unit || '' };
+  const scaled = ing.qty * (scaleFactor || 1);
+  const n = ftNormUnitForDisplay(scaled, ing.unit);
+  return { text: n.text, unit: n.unit };
+}
+function ftFormatRendimento(rendStr, scaleFactor = 1) {
+  if (!rendStr) return '';
+  const s = String(rendStr).trim();
+  const m = s.match(/^(\d+(?:[.,]\d+)?)\s*([a-zA-Zµ/\u00c0-\u024f]*)(.*)$/);
+  if (!m) return rendStr;
+  const rawQty = parseFloat(m[1].replace(',', '.'));
+  const originalUnit = m[2] || '';
+  const qty = rawQty * (scaleFactor || 1);
+  const n = ftNormUnitForDisplay(qty, originalUnit);
+  const unitChanged = n.unit.toLowerCase() !== originalUnit.toLowerCase();
+  const unitDisplay = unitChanged ? n.unit : originalUnit;
+  const suffix = m[3].trim();
+  return `${n.text} ${unitDisplay}${suffix ? ' ' + suffix : ''}`.trim();
+}
+function ftNrm(s) {
+  if (!s) return '';
+  return String(s).trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .replace(/\(.*?\)/g, '').replace(/\s+/g, ' ').trim().replace(/[,.;:\s]+$/, '');
+}
+function ftSlugify(s) {
+  return (s || '').toString().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'item';
+}
+function ftUid() { return Date.now().toString(36) + Math.random().toString(36).slice(2, 7); }
+
+function ftParseRendimentoQty(rendStr) {
+  if (!rendStr) return { qty: 1, unit: '' };
+  const s = String(rendStr).trim();
+  const m = s.match(/^(\d+(?:[.,]\d+)?)\s*([a-zA-Zµ/\u00c0-\u024f]*)/);
+  if (m) return { qty: parseFloat(m[1].replace(',', '.')), unit: (m[2] || '').toLowerCase() };
+  return { qty: 1, unit: '' };
+}
+function ftGetSfRendimento(sf) {
+  if (!sf) return { qty: 1, unit: '' };
+  if (typeof sf.rendimento_qty === 'number' && sf.rendimento_qty > 0) {
+    return { qty: sf.rendimento_qty, unit: (sf.rendimento_unit || '').toLowerCase().trim() };
+  }
+  return ftParseRendimentoQty(sf.rendimento);
+}
+function ftSfRendimentoText(sf, scale = 1) {
+  const r = ftGetSfRendimento(sf);
+  const q = r.qty * scale;
+  const n = ftNormUnitForDisplay(q, r.unit);
+  return `${n.text} ${n.unit}`.trim();
+}
+function ftNormalizeSubrefQty(qty, ingUnit, subUnit) {
+  const iu = (ingUnit || '').toLowerCase().trim();
+  const su = (subUnit || '').toLowerCase().trim();
+  if (iu === su || !iu || !su) return [qty, qty];
+  if (iu === 'g' && su === 'kg') return [qty / 1000, qty];
+  if (iu === 'kg' && su === 'g') return [qty * 1000, qty];
+  if (iu === 'ml' && (su === 'l' || su === 'lt' || su === 'litro')) return [qty / 1000, qty];
+  if (iu === 'l' && su === 'ml') return [qty * 1000, qty];
+  return [qty, qty];
+}
+function ftNormalizeQtyPrice(ing, insumo) {
+  if (!insumo || ing.qty == null) return [null, null];
+  const iu = (ing.unit || '').toLowerCase().trim();
+  const pu = (insumo.unit || '').toLowerCase().trim();
+  const q = ing.qty;
+  const p = insumo.price || 0;
+  if (iu === pu || !iu || !pu) return [q, p];
+  if (iu === 'g' && pu === 'kg') return [q / 1000, p];
+  if (iu === 'kg' && pu === 'g') return [q * 1000, p];
+  if (iu === 'ml' && (pu === 'l' || pu === 'lt' || pu === 'litro')) return [q / 1000, p];
+  if (iu === 'l' && pu === 'ml') return [q * 1000, p];
+  return [q, p];
+}
+function ftParsePortions(rendStr) {
+  if (!rendStr) return 1;
+  const s = String(rendStr).toLowerCase();
+  const m = s.match(/(\d+(?:[.,]\d+)?)\s*(?:und|unidades?|por[cç][oõ]es?|por[cç][aã]o)/);
+  if (m) return parseFloat(m[1].replace(',', '.'));
+  const m2 = s.match(/^(\d+(?:[.,]\d+)?)/);
+  if (m2) return parseFloat(m2[1].replace(',', '.'));
+  return 1;
+}
+function ftDetectSubref(dish, currentSfIdx, ingredientName) {
+  const ingClean = ftNrm(ingredientName);
+  if (ingClean.length < 4) return null;
+  let best = null, bestScore = 0;
+  for (let j = 0; j < currentSfIdx; j++) {
+    const other = dish.sub_fichas[j];
+    const otherN = ftNrm(other.name);
+    if (!otherN) continue;
+    if (otherN === ingClean) return other;
+    if (otherN.includes(ingClean) || ingClean.includes(otherN)) {
+      const ratio = Math.min(otherN.length, ingClean.length) / Math.max(otherN.length, ingClean.length);
+      if (ratio > bestScore) { bestScore = ratio; best = other; }
+    }
+  }
+  return bestScore > 0.55 ? best : null;
+}
+function ftFindSubproduto(dishes, name) {
+  if (!name) return null;
+  const target = ftNrm(name);
+  if (target.length < 3) return null;
+  for (const dish of dishes || []) {
+    for (const sf of dish.sub_fichas || []) {
+      if (!sf.subproduto || !sf.subproduto.name) continue;
+      if (ftNrm(sf.subproduto.name) === target) {
+        return { dish, sf, subproduto: sf.subproduto };
+      }
+    }
+  }
+  return null;
+}
+function ftSubfichaCost(sf, dish, insumos, dishes, cache, visited) {
+  cache = cache || new Map();
+  visited = visited || new Set();
+  if (cache.has(sf.id)) return cache.get(sf.id);
+  if (visited.has(sf.id)) return { rows: [], total: 0 };
+  visited.add(sf.id);
+  const sfIdx = dish.sub_fichas.findIndex(s => s.id === sf.id);
+  let total = 0;
+  const rows = (sf.ingredientes || []).map(ing => {
+    let subSf = null;
+    if (ing.subref_id) subSf = dish.sub_fichas.find(s => s.id === ing.subref_id);
+    if (!subSf && sfIdx > 0) subSf = ftDetectSubref(dish, sfIdx, ing.insumo_name);
+    if (subSf) {
+      const subResult = ftSubfichaCost(subSf, dish, insumos, dishes, cache, new Set(visited));
+      const subRend = ftGetSfRendimento(subSf);
+      const ingQty = ing.qty;
+      let cost = 0;
+      if (ingQty != null && subRend.qty > 0) {
+        const [qConverted] = ftNormalizeSubrefQty(ingQty, ing.unit, subRend.unit);
+        cost = (qConverted / subRend.qty) * subResult.total;
+      }
+      total += cost;
+      return { ing, insumo: null, cost, subSf, isSubref: true };
+    }
+    const subprodHit = ftFindSubproduto(dishes, ing.insumo_name);
+    if (subprodHit && !(subprodHit.dish.id === dish.id && subprodHit.sf.id === sf.id)) {
+      return { ing, insumo: null, cost: 0, isSubref: false, isSubproduto: true, subprodHit };
+    }
+    const insumo = insumos.find(i => i.id === ing.insumo_id);
+    const isReutilizavel = !!(insumo && insumo.reutilizavel);
+    const [qNorm, priceNorm] = ftNormalizeQtyPrice(ing, insumo);
+    const fc = (typeof ing.fc === 'number' && ing.fc > 0) ? ing.fc : 1;
+    const cost = isReutilizavel ? 0 : ((qNorm != null && priceNorm != null) ? qNorm * priceNorm * fc : 0);
+    total += cost;
+    return { ing, insumo, cost, isSubref: false, fc: isReutilizavel ? 1 : fc, isReutilizavel };
+  });
+  const result = { rows, total };
+  cache.set(sf.id, result);
+  return result;
+}
+function ftDishCost(dish, insumos, dishes) {
+  const cache = new Map();
+  const sfCosts = (dish.sub_fichas || []).map(sf => {
+    const r = ftSubfichaCost(sf, dish, insumos, dishes, cache);
+    return { ...r, sf };
+  });
+  const finalSf = (dish.sub_fichas || [])[dish.sub_fichas.length - 1];
+  const finalResult = finalSf ? sfCosts.find(x => x.sf.id === finalSf.id) : null;
+  const total = finalResult ? finalResult.total : 0;
+  const portions = ftParsePortions(finalSf ? finalSf.rendimento : '');
+  const costPerPortion = portions > 0 ? total / portions : 0;
+  let suggestedPrice, cmv, markup;
+  if (typeof dish.target_cmv === 'number' && dish.target_cmv > 0) {
+    cmv = dish.target_cmv;
+    suggestedPrice = costPerPortion / (cmv / 100);
+    markup = costPerPortion > 0 ? ((suggestedPrice / costPerPortion) - 1) * 100 : 0;
+  } else {
+    markup = dish.markup || 300;
+    suggestedPrice = costPerPortion * (1 + markup / 100);
+    cmv = suggestedPrice > 0 ? (costPerPortion / suggestedPrice) * 100 : 0;
+  }
+  return { sfCosts, total, portions, costPerPortion, suggestedPrice, cmv, markup };
+}
+
+// Export PDF de uma ficha (usa jsPDF + autoTable, carregados via CDN no index.html)
+function ftExportDishPDF(dish, insumos, dishes, restaurantName) {
+  const jsPDF = window.jspdf?.jsPDF;
+  if (!jsPDF) { alert("Biblioteca PDF ainda não foi carregada. Aguarde ou recarregue a página."); return; }
+  const pdf = new jsPDF({ unit: 'mm', format: 'a4' });
+  const costInfo = ftDishCost(dish, insumos, dishes);
+  const margin = 15;
+  let y = 18;
+
+  pdf.setFont('helvetica', 'bold');
+  pdf.setFontSize(18);
+  pdf.text(dish.name || 'Ficha Técnica', margin, y);
+  y += 7;
+  if (restaurantName) {
+    pdf.setFont('helvetica', 'normal');
+    pdf.setFontSize(9);
+    pdf.setTextColor(120);
+    pdf.text(restaurantName, margin, y);
+    pdf.setTextColor(0);
+    y += 5;
+  }
+  if (dish.description) {
+    pdf.setFont('helvetica', 'normal');
+    pdf.setFontSize(10);
+    const wrapped = pdf.splitTextToSize(dish.description, 180);
+    pdf.text(wrapped, margin, y);
+    y += wrapped.length * 5 + 2;
+  }
+
+  const lastSf = (dish.sub_fichas || [])[(dish.sub_fichas || []).length - 1];
+  pdf.setFontSize(9);
+  pdf.setTextColor(100);
+  const meta = [];
+  if (lastSf?.rendimento) meta.push(`Rend.: ${ftFormatRendimento(lastSf.rendimento)}`);
+  if (dish.louca) meta.push(`Louça: ${dish.louca}`);
+  if ((dish.equipamentos || []).length) meta.push(`Equip.: ${dish.equipamentos.join(', ')}`);
+  if (meta.length) {
+    pdf.text(meta.join(' · '), margin, y);
+    y += 6;
+  }
+  pdf.setTextColor(60, 120, 80);
+  const priceLine = `Custo: ${(costInfo.total).toLocaleString('pt-BR',{style:'currency',currency:'BRL'})} · Custo/porção: ${costInfo.costPerPortion.toLocaleString('pt-BR',{style:'currency',currency:'BRL'})} · Preço sug.: ${costInfo.suggestedPrice.toLocaleString('pt-BR',{style:'currency',currency:'BRL'})} · CMV: ${costInfo.cmv.toFixed(1)}%`;
+  pdf.text(priceLine, margin, y);
+  pdf.setTextColor(0);
+  y += 9;
+
+  (dish.sub_fichas || []).forEach((sf, sfIdx) => {
+    if (y > 260) { pdf.addPage(); y = 18; }
+    pdf.setFont('helvetica', 'bold');
+    pdf.setFontSize(12);
+    const isFinal = sfIdx === dish.sub_fichas.length - 1;
+    pdf.text(`${sfIdx+1}. ${sf.name}${isFinal ? ' — FINAL' : ''}`, margin, y);
+    y += 6;
+    if (sf.rendimento) {
+      pdf.setFont('helvetica', 'italic');
+      pdf.setFontSize(9);
+      pdf.setTextColor(100);
+      pdf.text(`Rend.: ${ftFormatRendimento(sf.rendimento)}`, margin, y);
+      pdf.setTextColor(0);
+      y += 5;
+    }
+    const body = (sf.ingredientes || []).map(ing => {
+      const q = ftFormatIngQty(ing);
+      return [
+        (ing.subref_id ? '↳ ' : '') + (ing.insumo_name || ''),
+        ing.is_qb ? 'Q.B' : `${q.text} ${q.unit}`.trim(),
+      ];
+    });
+    if (body.length && pdf.autoTable) {
+      pdf.autoTable({
+        startY: y,
+        head: [['Ingrediente', 'Quantidade']],
+        body,
+        margin: { left: margin, right: margin },
+        theme: 'grid',
+        headStyles: { fillColor: [232, 226, 216], textColor: 30, fontSize: 9 },
+        bodyStyles: { fontSize: 9, textColor: 30 },
+        columnStyles: { 1: { halign: 'right', cellWidth: 45 } },
+      });
+      y = pdf.lastAutoTable.finalY + 4;
+    }
+    if (sf.modo_preparo) {
+      if (y > 260) { pdf.addPage(); y = 18; }
+      pdf.setFont('helvetica', 'bold');
+      pdf.setFontSize(9);
+      pdf.text('Modo de preparo:', margin, y);
+      y += 5;
+      pdf.setFont('helvetica', 'normal');
+      const wrapped = pdf.splitTextToSize(sf.modo_preparo, 180);
+      if (y + wrapped.length * 4 > 280) { pdf.addPage(); y = 18; }
+      pdf.text(wrapped, margin, y);
+      y += wrapped.length * 4 + 6;
+    }
+    y += 3;
+  });
+
+  pdf.save(`${ftSlugify(dish.name || 'ficha')}.pdf`);
+}
+
+// Export XLSX com lista de insumos
+function ftExportInsumosXLSX(insumos, restaurantName) {
+  const XLSX = window.XLSX;
+  if (!XLSX) { alert("Biblioteca XLSX ainda não foi carregada. Aguarde ou recarregue a página."); return; }
+  const data = [["Nome", "Unidade", "Preço (R$)", "Reutilizável"]];
+  insumos.forEach(i => data.push([i.name, i.unit || "kg", i.price || 0, i.reutilizavel ? "sim" : ""]));
+  const ws = XLSX.utils.aoa_to_sheet(data);
+  ws['!cols'] = [{ wch: 30 }, { wch: 10 }, { wch: 12 }, { wch: 12 }];
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, "Insumos");
+  XLSX.writeFile(wb, `insumos-${ftSlugify(restaurantName || "restaurante")}.xlsx`);
+}
+
+// Download template XLSX vazio para importação
+function ftDownloadInsumosTemplateXLSX() {
+  const XLSX = window.XLSX;
+  if (!XLSX) { alert("Biblioteca XLSX ainda não foi carregada."); return; }
+  const data = [
+    ["Nome", "Unidade", "Preço (R$)", "Reutilizável"],
+    ["Farinha de trigo", "kg", 5.90, ""],
+    ["Azeite de oliva", "l", 42.00, ""],
+    ["Óleo de fritura", "l", 12.50, "sim"],
+  ];
+  const ws = XLSX.utils.aoa_to_sheet(data);
+  ws['!cols'] = [{ wch: 30 }, { wch: 10 }, { wch: 12 }, { wch: 12 }];
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, "Insumos");
+  XLSX.writeFile(wb, "template-insumos.xlsx");
+}
+
+// Import XLSX de insumos (merge por nome; cria/atualiza)
+function ftImportInsumosXLSX(file, existingInsumos, restaurantId, onResult) {
+  const XLSX = window.XLSX;
+  if (!XLSX) { alert("Biblioteca XLSX ainda não foi carregada."); return; }
+  const reader = new FileReader();
+  reader.onload = e => {
+    try {
+      const wb = XLSX.read(e.target.result, { type: "binary" });
+      const ws = wb.Sheets[wb.SheetNames[0]];
+      const rows = XLSX.utils.sheet_to_json(ws, { header: 1 });
+      if (!rows || rows.length < 2) { alert("Arquivo vazio ou sem dados."); return; }
+      const headers = (rows[0] || []).map(h => (h || "").toString().toLowerCase().trim());
+      const idxName = headers.findIndex(h => h.includes("nome"));
+      const idxUnit = headers.findIndex(h => h.includes("unid"));
+      const idxPrice = headers.findIndex(h => h.includes("pre") || h.includes("prc"));
+      const idxReut = headers.findIndex(h => h.includes("reut"));
+      if (idxName < 0 || idxPrice < 0) {
+        alert("Formato inválido. Esperado colunas: Nome, Unidade, Preço, Reutilizável.");
+        return;
+      }
+      const parsed = [];
+      for (let i = 1; i < rows.length; i++) {
+        const r = rows[i] || [];
+        const name = (r[idxName] || "").toString().trim();
+        if (!name) continue;
+        const unit = (((idxUnit >= 0 ? r[idxUnit] : "") || "kg").toString().trim().toLowerCase()) || "kg";
+        const priceVal = r[idxPrice];
+        const price = typeof priceVal === "number" ? priceVal : (parseFloat(String(priceVal || "").replace(",",".")) || 0);
+        const reutRaw = idxReut >= 0 ? (r[idxReut] ?? "") : "";
+        const reutilizavel = /sim|yes|true|reutiliz|^x$|^1$/i.test(String(reutRaw));
+        parsed.push({ name, unit, price, reutilizavel });
+      }
+      let updated = 0, added = 0;
+      const next = [...existingInsumos];
+      parsed.forEach(p => {
+        const existingIdx = next.findIndex(x => x.restaurantId === restaurantId && ftNrm(x.name) === ftNrm(p.name));
+        if (existingIdx >= 0) {
+          const cur = next[existingIdx];
+          const nx = { ...cur, unit: p.unit || cur.unit, price: p.price };
+          if (p.reutilizavel) nx.reutilizavel = true; else delete nx.reutilizavel;
+          next[existingIdx] = nx;
+          updated++;
+        } else {
+          const ni = { id: ftUid(), restaurantId, name: p.name, unit: p.unit || "kg", price: p.price };
+          if (p.reutilizavel) ni.reutilizavel = true;
+          next.push(ni);
+          added++;
+        }
+      });
+      onResult({ next, updated, added, total: parsed.length });
+    } catch (err) {
+      alert("Erro ao ler arquivo: " + err.message);
+    }
+  };
+  reader.readAsBinaryString(file);
+}
+/* eslint-enable no-unused-vars */
+
+// ═══════════════════════════════════════════════════════════════
+// ──  MISE FICHAS TÉCNICAS — ADMIN SHELL + INSUMOS + EQUIPAMENTOS
+// ═══════════════════════════════════════════════════════════════
+function MiseFichasTecnicasAdmin({ restaurantId, miseFtInsumos, miseFtEquipamentos, miseFtDishes, onUpdate, mobileOnly }) {
+  const [subTab, setSubTab] = useState("fichas");
+  const miseAc = "#7c9e5e";
+  const SUB_TABS = [
+    { id: "fichas",       label: "Fichas" },
+    { id: "insumos",      label: "Insumos" },
+    { id: "equipamentos", label: "Equipamentos" },
+  ];
+
+  function handleImportJSON(e) {
+    const file = e.target.files[0];
+    e.target.value = "";
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = ev => {
+      try {
+        const data = JSON.parse(ev.target.result);
+        const dishes = data.dishes || [];
+        const insumos = data.insumos || [];
+        const equipamentosList = data.equipamentos_disponiveis || [];
+        if (!dishes.length && !insumos.length && !equipamentosList.length) {
+          alert("Arquivo não tem dishes, insumos ou equipamentos. Verifique se é o data.json correto do AppMise.");
+          return;
+        }
+        const existingDishes = miseFtDishes.filter(d => d.restaurantId === restaurantId).length;
+        const existingInsumos = miseFtInsumos.filter(i => i.restaurantId === restaurantId).length;
+        const confirmMsg =
+          `Importar para este restaurante:\n\n` +
+          `  • ${dishes.length} ficha(s)\n` +
+          `  • ${insumos.length} insumo(s)\n` +
+          `  • ${equipamentosList.length} equipamento(s)\n\n` +
+          (existingDishes || existingInsumos
+            ? `⚠ O restaurante já tem ${existingDishes} ficha(s) e ${existingInsumos} insumo(s). Itens com mesmo ID/nome serão sobrescritos; novos serão adicionados.\n\n`
+            : ``) +
+          `Continuar?`;
+        if (!window.confirm(confirmMsg)) return;
+
+        // ── Insumos: merge por ID; se não tem mesmo ID mas tem mesmo nome em outra origem, mantém o do arquivo
+        const insumosNext = [...miseFtInsumos];
+        let insAdded = 0, insUpdated = 0;
+        insumos.forEach(src => {
+          const id = src.id || ftUid();
+          const mapped = {
+            id, restaurantId,
+            name: src.name || id,
+            unit: src.unit || "kg",
+            price: typeof src.price === "number" ? src.price : (parseFloat(src.price) || 0),
+          };
+          if (src.reutilizavel) mapped.reutilizavel = true;
+          const idx = insumosNext.findIndex(x => x.id === id && x.restaurantId === restaurantId);
+          if (idx >= 0) { insumosNext[idx] = mapped; insUpdated++; }
+          else { insumosNext.push(mapped); insAdded++; }
+        });
+
+        // ── Dishes: merge por ID
+        const dishesNext = [...miseFtDishes];
+        let dishAdded = 0, dishUpdated = 0;
+        dishes.forEach(src => {
+          const id = src.id || ftUid();
+          const mapped = {
+            id, restaurantId,
+            name: src.name || id,
+            description: src.description || "",
+            louca: src.louca || "",
+            equipamentos: Array.isArray(src.equipamentos) ? src.equipamentos : [],
+            markup: typeof src.markup === "number" ? src.markup : 300,
+            sub_fichas: (src.sub_fichas || []).map(sf => ({
+              id: sf.id || ftUid(),
+              name: sf.name || "",
+              rendimento: sf.rendimento || "",
+              rendimento_qty: typeof sf.rendimento_qty === "number" ? sf.rendimento_qty : null,
+              rendimento_unit: sf.rendimento_unit || "",
+              modo_preparo: sf.modo_preparo || "",
+              subproduto: sf.subproduto || undefined,
+              ingredientes: (sf.ingredientes || []).map(ing => {
+                const mi = {
+                  qty: typeof ing.qty === "number" ? ing.qty : (ing.qty === null ? null : (parseFloat(ing.qty) || null)),
+                  unit: ing.unit || "",
+                };
+                if (ing.insumo_id) mi.insumo_id = ing.insumo_id;
+                if (ing.insumo_name) mi.insumo_name = ing.insumo_name;
+                if (ing.subref_id) mi.subref_id = ing.subref_id;
+                if (ing.qty_raw) mi.qty_raw = ing.qty_raw;
+                if (ing.observacao) mi.observacao = ing.observacao;
+                if (ing.is_qb) mi.is_qb = true;
+                if (typeof ing.fc === "number" && ing.fc > 0) mi.fc = ing.fc;
+                return mi;
+              }),
+            })),
+            photos: Array.isArray(src.photos) ? src.photos : [],
+          };
+          if (typeof src.target_cmv === "number" && src.target_cmv > 0) mapped.target_cmv = src.target_cmv;
+          const idx = dishesNext.findIndex(x => x.id === id && x.restaurantId === restaurantId);
+          if (idx >= 0) { dishesNext[idx] = mapped; dishUpdated++; }
+          else { dishesNext.push(mapped); dishAdded++; }
+        });
+
+        // ── Equipamentos: merge com o set existente
+        const currentEquip = (miseFtEquipamentos?.[restaurantId] ?? []);
+        const merged = Array.from(new Set([...currentEquip, ...equipamentosList.filter(e => typeof e === "string")]));
+        const equipNext = { ...(miseFtEquipamentos ?? {}), [restaurantId]: merged };
+
+        // Commit
+        if (insumos.length) onUpdate("miseFtInsumos", insumosNext);
+        if (dishes.length) onUpdate("miseFtDishes", dishesNext);
+        if (equipamentosList.length) onUpdate("miseFtEquipamentos", equipNext);
+
+        alert(
+          `Importação concluída:\n\n` +
+          `  • Insumos: ${insAdded} novo(s), ${insUpdated} atualizado(s)\n` +
+          `  • Fichas: ${dishAdded} nova(s), ${dishUpdated} atualizada(s)\n` +
+          `  • Equipamentos: ${merged.length - currentEquip.length} novo(s) (total ${merged.length})`
+        );
+      } catch (err) {
+        alert("Erro ao processar arquivo: " + err.message);
+      }
+    };
+    reader.readAsText(file);
+  }
+
+  return (
+    <div>
+      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",flexWrap:"wrap",gap:8,marginBottom:12}}>
+        <div style={{display:"flex",gap:4,borderBottom:"1px solid var(--border)",overflowX:"auto"}}>
+          {SUB_TABS.map(t => (
+            <button key={t.id} onClick={()=>setSubTab(t.id)}
+              style={{background:"none",border:"none",borderBottom: subTab===t.id ? `2px solid ${miseAc}` : "2px solid transparent",padding:"8px 14px",cursor:"pointer",fontSize:13,fontWeight: subTab===t.id ? 700 : 500,color: subTab===t.id ? "var(--text)" : "var(--text3)",whiteSpace:"nowrap",flexShrink:0}}>
+              {t.label}
+            </button>
+          ))}
+        </div>
+        <label style={{...S.btnSecondary,fontSize:11,padding:"6px 12px",cursor:"pointer",display:"inline-flex",alignItems:"center",color:miseAc,borderColor:miseAc+"66"}}>
+          ⬆ Importar do AppMise (JSON)
+          <input type="file" accept=".json,application/json" onChange={handleImportJSON} style={{display:"none"}} />
+        </label>
+      </div>
+
+      {subTab === "fichas" && (
+        <MiseFtDishesAdmin
+          restaurantId={restaurantId}
+          miseFtInsumos={miseFtInsumos}
+          miseFtEquipamentos={miseFtEquipamentos}
+          miseFtDishes={miseFtDishes}
+          onUpdate={onUpdate}
+          mobileOnly={mobileOnly}
+        />
+      )}
+      {subTab === "insumos" && (
+        <MiseFtInsumos
+          restaurantId={restaurantId}
+          miseFtInsumos={miseFtInsumos}
+          onUpdate={onUpdate}
+          mobileOnly={mobileOnly}
+        />
+      )}
+      {subTab === "equipamentos" && (
+        <MiseFtEquipamentos
+          restaurantId={restaurantId}
+          miseFtEquipamentos={miseFtEquipamentos}
+          onUpdate={onUpdate}
+          mobileOnly={mobileOnly}
+        />
+      )}
+    </div>
+  );
+}
+
+// ── INSUMOS (CRUD) ──
+function MiseFtInsumos({ restaurantId, miseFtInsumos, onUpdate, mobileOnly }) {
+  const restInsumos = miseFtInsumos.filter(i => i.restaurantId === restaurantId);
+  const [filter, setFilter] = useState("");
+  const [form, setForm] = useState({ name: "", unit: "kg", price: "", reutilizavel: false });
+  const [editingId, setEditingId] = useState(null);
+  const [editForm, setEditForm] = useState({ name: "", unit: "kg", price: "", reutilizavel: false });
+  const miseAc = "#7c9e5e";
+
+  function addInsumo() {
+    const nm = form.name.trim();
+    if (!nm) return;
+    if (restInsumos.some(i => ftNrm(i.name) === ftNrm(nm))) { alert("Já existe insumo com esse nome."); return; }
+    const price = parseFloat(String(form.price).replace(",","."));
+    const newI = { id: ftUid(), restaurantId, name: nm, unit: form.unit || "kg", price: isNaN(price) ? 0 : price };
+    if (form.reutilizavel) newI.reutilizavel = true;
+    onUpdate("miseFtInsumos", [...miseFtInsumos, newI]);
+    setForm({ name: "", unit: "kg", price: "", reutilizavel: false });
+  }
+  function startEdit(i) {
+    setEditingId(i.id);
+    setEditForm({ name: i.name, unit: i.unit ?? "kg", price: i.price ?? "", reutilizavel: !!i.reutilizavel });
+  }
+  function saveEdit() {
+    if (!editingId) return;
+    const nm = editForm.name.trim();
+    if (!nm) return;
+    const price = parseFloat(String(editForm.price).replace(",","."));
+    onUpdate("miseFtInsumos", miseFtInsumos.map(x => {
+      if (x.id !== editingId) return x;
+      const next = { ...x, name: nm, unit: editForm.unit || "kg", price: isNaN(price) ? 0 : price };
+      if (editForm.reutilizavel) next.reutilizavel = true; else delete next.reutilizavel;
+      return next;
+    }));
+    setEditingId(null);
+  }
+  function delInsumo(id) {
+    const i = restInsumos.find(x => x.id === id);
+    if (!window.confirm(`Remover insumo "${i?.name}"?`)) return;
+    onUpdate("miseFtInsumos", miseFtInsumos.filter(x => x.id !== id));
+  }
+
+  const q = filter.trim().toLowerCase();
+  const filtered = q ? restInsumos.filter(i => i.name.toLowerCase().includes(q)) : restInsumos;
+
+  function handleImport(e) {
+    const file = e.target.files[0];
+    if (!file) return;
+    ftImportInsumosXLSX(file, miseFtInsumos, restaurantId, ({ next, updated, added, total }) => {
+      onUpdate("miseFtInsumos", next);
+      alert(`Importação concluída: ${added} novo(s), ${updated} atualizado(s), ${total} total.`);
+    });
+    e.target.value = "";
+  }
+
+  return (
+    <div>
+      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",flexWrap:"wrap",gap:8,marginBottom:12}}>
+        <h3 style={{color:"var(--text)",margin:0,fontSize:mobileOnly?16:18}}>🧂 Insumos</h3>
+        <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+          <label style={{...S.btnSecondary,fontSize:11,padding:"6px 12px",cursor:"pointer",display:"inline-flex",alignItems:"center"}}>
+            ⬆ Importar Excel
+            <input type="file" accept=".xlsx,.xls" onChange={handleImport} style={{display:"none"}} />
+          </label>
+          <button onClick={()=>ftExportInsumosXLSX(restInsumos, "restaurante")} disabled={restInsumos.length===0} style={{...S.btnSecondary,fontSize:11,padding:"6px 12px",opacity:restInsumos.length===0?0.5:1}}>⬇ Exportar Excel</button>
+          <button onClick={ftDownloadInsumosTemplateXLSX} style={{...S.btnSecondary,fontSize:11,padding:"6px 12px"}}>📋 Template</button>
+        </div>
+      </div>
+      {/* Form */}
+      <div style={{padding:"12px",background:"var(--card-bg)",border:"1px solid var(--border)",borderRadius:10,marginBottom:16}}>
+        <div style={{display:"grid",gridTemplateColumns:mobileOnly?"1fr":"2fr 1fr 1fr auto auto",gap:8,alignItems:"end"}}>
+          <div>
+            <label style={{...S.label,fontSize:11}}>Nome do insumo</label>
+            <input value={form.name} onChange={e=>setForm({...form,name:e.target.value})} placeholder="ex: Farinha de trigo" style={{...S.input}} onKeyDown={e=>e.key==="Enter"&&addInsumo()} />
+          </div>
+          <div>
+            <label style={{...S.label,fontSize:11}}>Unidade</label>
+            <select value={form.unit} onChange={e=>setForm({...form,unit:e.target.value})} style={{...S.input}}>
+              {FT_CANONICAL_UNITS.map(u => <option key={u} value={u}>{u}</option>)}
+            </select>
+          </div>
+          <div>
+            <label style={{...S.label,fontSize:11}}>Preço (R$)</label>
+            <input type="number" step="0.01" value={form.price} onChange={e=>setForm({...form,price:e.target.value})} placeholder="0,00" style={{...S.input,fontFamily:"'DM Mono',monospace"}} />
+          </div>
+          <div style={{display:"flex",alignItems:"center",gap:6,paddingBottom:8}}>
+            <input type="checkbox" id="new-reut" checked={form.reutilizavel} onChange={e=>setForm({...form,reutilizavel:e.target.checked})} style={{cursor:"pointer",accentColor:miseAc}} />
+            <label htmlFor="new-reut" style={{fontSize:12,color:"var(--text2)",cursor:"pointer"}} title="Insumos reutilizáveis (óleo de fritura, etc) não entram no custo das fichas">Reut.</label>
+          </div>
+          <button onClick={addInsumo} disabled={!form.name.trim()} style={{...S.btnPrimary,fontSize:13,padding:"8px 16px",opacity:!form.name.trim()?0.5:1,cursor:!form.name.trim()?"not-allowed":"pointer"}}>+ Adicionar</button>
+        </div>
+      </div>
+      {/* Filter */}
+      <div style={{marginBottom:10}}>
+        <input value={filter} onChange={e=>setFilter(e.target.value)} placeholder="🔍 Buscar..." style={{...S.input,maxWidth:360}} />
+      </div>
+      {/* List */}
+      {filtered.length === 0 ? (
+        <div style={{padding:"32px 16px",textAlign:"center",color:"var(--text3)",fontSize:14,background:"var(--card-bg)",borderRadius:12,border:"1px solid var(--border)"}}>
+          {q ? "Nenhum insumo encontrado para esse filtro" : "Nenhum insumo cadastrado"}
+        </div>
+      ) : (
+        <div style={{overflowX:"auto",border:"1px solid var(--border)",borderRadius:12,background:"var(--card-bg)"}}>
+          <table style={{width:"100%",borderCollapse:"collapse",fontSize:13}}>
+            <thead>
+              <tr style={{background:"var(--bg2)",borderBottom:"1px solid var(--border)"}}>
+                <th style={{padding:"10px 12px",textAlign:"left",color:"var(--text)",fontWeight:700}}>Nome</th>
+                <th style={{padding:"10px 12px",textAlign:"center",color:"var(--text)",fontWeight:700}}>Unid.</th>
+                <th style={{padding:"10px 12px",textAlign:"right",color:"var(--text)",fontWeight:700}}>Preço</th>
+                <th style={{padding:"10px 12px",textAlign:"right",color:"var(--text)",fontWeight:700}}>Preço/un canônica</th>
+                <th style={{padding:"10px 12px",textAlign:"center",color:"var(--text)",fontWeight:700}}>Reut.</th>
+                <th style={{padding:"10px 12px",textAlign:"right",color:"var(--text)",fontWeight:700}}></th>
+              </tr>
+            </thead>
+            <tbody>
+              {[...filtered].sort((a,b)=>a.name.localeCompare(b.name)).map(i => {
+                const isEditing = editingId === i.id;
+                if (isEditing) {
+                  return (
+                    <tr key={i.id} style={{borderTop:"1px solid var(--border)",background:"var(--bg2)"}}>
+                      <td style={{padding:"6px 12px"}}>
+                        <input value={editForm.name} onChange={e=>setEditForm({...editForm,name:e.target.value})} style={{...S.input}} autoFocus />
+                      </td>
+                      <td style={{padding:"6px 12px"}}>
+                        <select value={editForm.unit} onChange={e=>setEditForm({...editForm,unit:e.target.value})} style={{...S.input}}>
+                          {FT_CANONICAL_UNITS.map(u => <option key={u} value={u}>{u}</option>)}
+                        </select>
+                      </td>
+                      <td style={{padding:"6px 12px"}}>
+                        <input type="number" step="0.01" value={editForm.price} onChange={e=>setEditForm({...editForm,price:e.target.value})} style={{...S.input,textAlign:"right",fontFamily:"'DM Mono',monospace"}} />
+                      </td>
+                      <td style={{padding:"6px 12px",textAlign:"right",color:"var(--text3)",fontFamily:"'DM Mono',monospace",fontSize:11}}>
+                        {(() => { const n = FT_WEIGHT_G.concat(FT_WEIGHT_KG,FT_VOL_ML,FT_VOL_L).includes((editForm.unit||"").toLowerCase()); return n ? "calc." : "—"; })()}
+                      </td>
+                      <td style={{padding:"6px 12px",textAlign:"center"}}>
+                        <input type="checkbox" checked={editForm.reutilizavel} onChange={e=>setEditForm({...editForm,reutilizavel:e.target.checked})} style={{cursor:"pointer",accentColor:miseAc}}/>
+                      </td>
+                      <td style={{padding:"6px 12px",textAlign:"right",whiteSpace:"nowrap"}}>
+                        <button onClick={saveEdit} style={{...S.btnPrimary,fontSize:11,padding:"5px 10px",marginRight:4}}>Salvar</button>
+                        <button onClick={()=>setEditingId(null)} style={{...S.btnSecondary,fontSize:11,padding:"5px 10px"}}>Cancelar</button>
+                      </td>
+                    </tr>
+                  );
+                }
+                const norm = (() => {
+                  const u = (i.unit || "").toLowerCase().trim();
+                  const p = i.price || 0;
+                  if (FT_WEIGHT_G.includes(u)) return { price: p * 1000, unit: 'kg' };
+                  if (FT_WEIGHT_MG.includes(u)) return { price: p * 1e6, unit: 'kg' };
+                  if (FT_WEIGHT_KG.includes(u)) return { price: p, unit: 'kg' };
+                  if (FT_VOL_ML.includes(u)) return { price: p * 1000, unit: 'l' };
+                  if (FT_VOL_L.includes(u)) return { price: p, unit: 'l' };
+                  return null;
+                })();
+                return (
+                  <tr key={i.id} style={{borderTop:"1px solid var(--border)"}}>
+                    <td style={{padding:"8px 12px",color:"var(--text)",fontWeight:500}}>{i.name}</td>
+                    <td style={{padding:"8px 12px",textAlign:"center",color:"var(--text2)"}}>{i.unit ?? "—"}</td>
+                    <td style={{padding:"8px 12px",textAlign:"right",color:"var(--text2)",fontFamily:"'DM Mono',monospace"}}>{fmt(i.price ?? 0)}</td>
+                    <td style={{padding:"8px 12px",textAlign:"right",color:"var(--text3)",fontFamily:"'DM Mono',monospace",fontSize:11}}>{norm ? `${fmt(norm.price)}/${norm.unit}` : "—"}</td>
+                    <td style={{padding:"8px 12px",textAlign:"center"}}>{i.reutilizavel ? <span style={{color:"#a855f7",fontSize:14}} title="Insumo reutilizável — não entra no custo">♻️</span> : ""}</td>
+                    <td style={{padding:"8px 12px",textAlign:"right",whiteSpace:"nowrap"}}>
+                      <button onClick={()=>startEdit(i)} style={{...S.btnSecondary,fontSize:11,padding:"4px 10px",marginRight:4}}>Editar</button>
+                      <button onClick={()=>delInsumo(i.id)} style={{...S.btnSecondary,fontSize:11,padding:"4px 10px",color:"var(--red)",borderColor:"var(--red)44"}}>Remover</button>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+      <div style={{marginTop:10,fontSize:11,color:"var(--text3)"}}>{restInsumos.length} insumo(s) cadastrado(s)</div>
+    </div>
+  );
+}
+
+// ── EQUIPAMENTOS (CRUD) ──
+function MiseFtEquipamentos({ restaurantId, miseFtEquipamentos, onUpdate, mobileOnly }) {
+  const list = miseFtEquipamentos?.[restaurantId] ?? [];
+  const [newName, setNewName] = useState("");
+  const [editingIdx, setEditingIdx] = useState(null);
+  const [editName, setEditName] = useState("");
+
+  function save(newList) {
+    onUpdate("miseFtEquipamentos", { ...(miseFtEquipamentos ?? {}), [restaurantId]: newList });
+  }
+  function add() {
+    const nm = newName.trim();
+    if (!nm) return;
+    if (list.some(x => ftNrm(x) === ftNrm(nm))) { alert("Já existe equipamento com esse nome."); return; }
+    save([...list, nm]);
+    setNewName("");
+  }
+  function saveEdit() {
+    const nm = editName.trim();
+    if (!nm || editingIdx == null) return;
+    const next = [...list];
+    next[editingIdx] = nm;
+    save(next);
+    setEditingIdx(null);
+    setEditName("");
+  }
+  function remove(idx) {
+    if (!window.confirm(`Remover equipamento "${list[idx]}"?`)) return;
+    save(list.filter((_, i) => i !== idx));
+  }
+
+  return (
+    <div>
+      <h3 style={{color:"var(--text)",margin:"0 0 12px",fontSize:mobileOnly?16:18}}>🔧 Equipamentos</h3>
+      <div style={{display:"flex",gap:8,marginBottom:16,flexWrap:"wrap"}}>
+        <input value={newName} onChange={e=>setNewName(e.target.value)} placeholder="ex: Forno combinado" style={{...S.input,maxWidth:360,flex:"1 1 220px"}} onKeyDown={e=>e.key==="Enter"&&add()} />
+        <button onClick={add} style={{...S.btnPrimary,fontSize:13,padding:"8px 16px"}}>+ Adicionar</button>
+      </div>
+      {list.length === 0 ? (
+        <div style={{padding:"32px 16px",textAlign:"center",color:"var(--text3)",fontSize:14,background:"var(--card-bg)",borderRadius:12,border:"1px solid var(--border)"}}>Nenhum equipamento cadastrado</div>
+      ) : (
+        <div style={{display:"flex",flexDirection:"column",gap:8}}>
+          {[...list].map((nm, idx) => {
+            const isEditing = editingIdx === idx;
+            return (
+              <div key={idx} style={{display:"flex",alignItems:"center",gap:10,padding:"10px 14px",background:"var(--card-bg)",border:"1px solid var(--border)",borderRadius:10}}>
+                {isEditing ? (
+                  <>
+                    <input value={editName} onChange={e=>setEditName(e.target.value)} style={{...S.input,flex:1}} autoFocus onKeyDown={e=>e.key==="Enter"&&saveEdit()} />
+                    <button onClick={saveEdit} style={{...S.btnPrimary,fontSize:12,padding:"6px 12px"}}>Salvar</button>
+                    <button onClick={()=>setEditingIdx(null)} style={{...S.btnSecondary,fontSize:12,padding:"6px 12px"}}>Cancelar</button>
+                  </>
+                ) : (
+                  <>
+                    <div style={{flex:1,color:"var(--text)",fontWeight:500}}>{nm}</div>
+                    <button onClick={()=>{setEditingIdx(idx);setEditName(nm);}} style={{...S.btnSecondary,fontSize:12,padding:"6px 12px"}}>Editar</button>
+                    <button onClick={()=>remove(idx)} style={{...S.btnSecondary,fontSize:12,padding:"6px 12px",color:"var(--red)",borderColor:"var(--red)44"}}>Remover</button>
+                  </>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+      <div style={{marginTop:10,fontSize:11,color:"var(--text3)"}}>{list.length} equipamento(s) cadastrado(s)</div>
+    </div>
+  );
+}
+
+// ── DISHES LIST (Admin) ──
+function MiseFtDishesAdmin({ restaurantId, miseFtInsumos, miseFtEquipamentos, miseFtDishes, onUpdate, mobileOnly }) {
+  const [editingDishId, setEditingDishId] = useState(null);
+  const [filter, setFilter] = useState("");
+  const restDishes = miseFtDishes.filter(d => d.restaurantId === restaurantId);
+  const restInsumos = miseFtInsumos.filter(i => i.restaurantId === restaurantId);
+  const equipList = miseFtEquipamentos?.[restaurantId] ?? [];
+
+  if (editingDishId) {
+    const dish = restDishes.find(d => d.id === editingDishId);
+    if (!dish) { setTimeout(() => setEditingDishId(null), 0); return null; }
+    return (
+      <MiseFtDishEditor
+        dish={dish}
+        restaurantId={restaurantId}
+        restDishes={restDishes}
+        insumos={restInsumos}
+        equipamentos={equipList}
+        miseFtInsumos={miseFtInsumos}
+        miseFtDishes={miseFtDishes}
+        onUpdate={onUpdate}
+        onBack={()=>setEditingDishId(null)}
+        mobileOnly={mobileOnly}
+      />
+    );
+  }
+
+  function newDish() {
+    const name = window.prompt("Nome da nova ficha técnica:");
+    if (!name || !name.trim()) return;
+    const id = ftUid();
+    const firstSfId = ftUid();
+    const firstSf = { id: firstSfId, name: name.trim(), rendimento: "", rendimento_qty: null, rendimento_unit: "", ingredientes: [], modo_preparo: "" };
+    const dish = { id, restaurantId, name: name.trim(), description: "", louca: "", equipamentos: [], markup: 300, sub_fichas: [firstSf], photos: [] };
+    onUpdate("miseFtDishes", [...miseFtDishes, dish]);
+    setEditingDishId(id);
+  }
+  function delDish(id) {
+    const d = restDishes.find(x => x.id === id);
+    if (!window.confirm(`Apagar ficha "${d?.name}"? Esta ação não pode ser desfeita.`)) return;
+    onUpdate("miseFtDishes", miseFtDishes.filter(x => x.id !== id));
+  }
+  function duplicateDish(id) {
+    const src = restDishes.find(x => x.id === id);
+    if (!src) return;
+    const nm = window.prompt("Nome da cópia:", `${src.name} (cópia)`);
+    if (!nm || !nm.trim()) return;
+    const sfIdMap = {};
+    const newSubFichas = (src.sub_fichas || []).map(sf => {
+      const newSfId = ftUid();
+      sfIdMap[sf.id] = newSfId;
+      return { ...sf, id: newSfId, ingredientes: (sf.ingredientes || []).map(ing => ({...ing})) };
+    });
+    // Re-map subref_ids to point to new sf ids
+    newSubFichas.forEach(sf => {
+      sf.ingredientes = sf.ingredientes.map(ing => ing.subref_id && sfIdMap[ing.subref_id] ? {...ing, subref_id: sfIdMap[ing.subref_id]} : ing);
+    });
+    const copy = { ...src, id: ftUid(), name: nm.trim(), sub_fichas: newSubFichas };
+    onUpdate("miseFtDishes", [...miseFtDishes, copy]);
+  }
+
+  const q = filter.trim().toLowerCase();
+  const filtered = q ? restDishes.filter(d => d.name.toLowerCase().includes(q)) : restDishes;
+
+  return (
+    <div>
+      <div style={{display:"flex",gap:8,marginBottom:16,flexWrap:"wrap",alignItems:"center"}}>
+        <button onClick={newDish} style={{...S.btnPrimary,fontSize:13,padding:"8px 16px"}}>+ Nova ficha</button>
+        <input value={filter} onChange={e=>setFilter(e.target.value)} placeholder="🔍 Buscar ficha..." style={{...S.input,maxWidth:320,flex:"1 1 200px"}} />
+        <div style={{flex:1}} />
+        <div style={{fontSize:11,color:"var(--text3)"}}>{restInsumos.length} insumo(s) · {restDishes.length} ficha(s)</div>
+      </div>
+
+      {filtered.length === 0 ? (
+        <div style={{padding:"48px 16px",textAlign:"center",color:"var(--text3)",fontSize:14,background:"var(--card-bg)",borderRadius:12,border:"1px solid var(--border)"}}>
+          {q ? "Nenhuma ficha encontrada" : (
+            <>
+              <div style={{fontSize:40,marginBottom:12}}>📋</div>
+              <div style={{color:"var(--text)",fontWeight:600,fontSize:16,marginBottom:6}}>Nenhuma ficha cadastrada</div>
+              <div>Clique em "+ Nova ficha" para começar.</div>
+            </>
+          )}
+        </div>
+      ) : (
+        <div style={{overflowX:"auto",border:"1px solid var(--border)",borderRadius:12,background:"var(--card-bg)"}}>
+          <table style={{width:"100%",borderCollapse:"collapse",fontSize:13}}>
+            <thead>
+              <tr style={{background:"var(--bg2)",borderBottom:"1px solid var(--border)"}}>
+                <th style={{padding:"10px 12px",textAlign:"left",color:"var(--text)",fontWeight:700}}>Ficha</th>
+                <th style={{padding:"10px 12px",textAlign:"center",color:"var(--text)",fontWeight:700}}>Sub-fichas</th>
+                <th style={{padding:"10px 12px",textAlign:"right",color:"var(--text)",fontWeight:700}}>Rendimento</th>
+                <th style={{padding:"10px 12px",textAlign:"right",color:"var(--text)",fontWeight:700}}>Custo/porção</th>
+                <th style={{padding:"10px 12px",textAlign:"right",color:"var(--text)",fontWeight:700}}>Preço sug.</th>
+                <th style={{padding:"10px 12px",textAlign:"right",color:"var(--text)",fontWeight:700}}>CMV</th>
+                <th style={{padding:"10px 12px",textAlign:"right",color:"var(--text)",fontWeight:700}}></th>
+              </tr>
+            </thead>
+            <tbody>
+              {[...filtered].sort((a,b)=>a.name.localeCompare(b.name)).map(d => {
+                const cost = ftDishCost(d, restInsumos, restDishes);
+                const lastSf = (d.sub_fichas || [])[(d.sub_fichas || []).length - 1];
+                const rendDisplay = lastSf?.rendimento ? ftFormatRendimento(lastSf.rendimento) : "—";
+                return (
+                  <tr key={d.id} style={{borderTop:"1px solid var(--border)"}}>
+                    <td style={{padding:"10px 12px",color:"var(--text)",fontWeight:600,cursor:"pointer"}} onClick={()=>setEditingDishId(d.id)}>{d.name}</td>
+                    <td style={{padding:"10px 12px",textAlign:"center",color:"var(--text3)"}}>{(d.sub_fichas||[]).length}</td>
+                    <td style={{padding:"10px 12px",textAlign:"right",color:"var(--text2)",fontSize:12}}>{rendDisplay}</td>
+                    <td style={{padding:"10px 12px",textAlign:"right",color:"var(--text2)",fontFamily:"'DM Mono',monospace"}}>{fmt(cost.costPerPortion)}</td>
+                    <td style={{padding:"10px 12px",textAlign:"right",color:"#15803d",fontWeight:700,fontFamily:"'DM Mono',monospace"}}>{fmt(cost.suggestedPrice)}</td>
+                    <td style={{padding:"10px 12px",textAlign:"right",color:"var(--text2)",fontFamily:"'DM Mono',monospace"}}>{cost.cmv ? cost.cmv.toFixed(1)+"%" : "—"}</td>
+                    <td style={{padding:"10px 12px",textAlign:"right",whiteSpace:"nowrap"}}>
+                      <button onClick={()=>setEditingDishId(d.id)} style={{...S.btnSecondary,fontSize:11,padding:"4px 10px",marginRight:4}}>Editar</button>
+                      <button onClick={()=>ftExportDishPDF(d, restInsumos, restDishes, "")} style={{...S.btnSecondary,fontSize:11,padding:"4px 10px",marginRight:4}} title="Exportar PDF">📄</button>
+                      <button onClick={()=>duplicateDish(d.id)} style={{...S.btnSecondary,fontSize:11,padding:"4px 10px",marginRight:4}} title="Duplicar">⎘</button>
+                      <button onClick={()=>delDish(d.id)} style={{...S.btnSecondary,fontSize:11,padding:"4px 10px",color:"var(--red)",borderColor:"var(--red)44"}}>×</button>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── DISH EDITOR (Admin) ──
+function MiseFtDishEditor({ dish, restaurantId, restDishes, insumos, equipamentos, miseFtInsumos, miseFtDishes, onUpdate, onBack, mobileOnly }) {
+  const [local, setLocal] = useState(dish);
+  // Reset local when dish prop changes (e.g. after save)
+  useEffect(() => { setLocal(dish); }, [dish.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  const dirty = JSON.stringify(local) !== JSON.stringify(dish);
+  const miseAc = "#7c9e5e";
+
+  function save() {
+    onUpdate("miseFtDishes", miseFtDishes.map(d => d.id === local.id ? local : d));
+  }
+  function handleBack() {
+    if (dirty && !window.confirm("Descartar alterações e voltar?")) return;
+    onBack();
+  }
+
+  function updateSubFicha(sfId, patch) {
+    setLocal(l => ({ ...l, sub_fichas: (l.sub_fichas || []).map(sf => sf.id === sfId ? { ...sf, ...patch } : sf) }));
+  }
+  function addSubFicha() {
+    setLocal(l => {
+      const n = (l.sub_fichas || []).length + 1;
+      return { ...l, sub_fichas: [...(l.sub_fichas || []), { id: ftUid(), name: `Sub-ficha ${n}`, rendimento: "", rendimento_qty: null, rendimento_unit: "", ingredientes: [], modo_preparo: "" }] };
+    });
+  }
+  function delSubFicha(sfId) {
+    if (!window.confirm("Apagar essa sub-ficha?")) return;
+    setLocal(l => ({ ...l, sub_fichas: (l.sub_fichas || []).filter(sf => sf.id !== sfId) }));
+  }
+  function moveSf(sfId, dir) {
+    setLocal(l => {
+      const arr = [...(l.sub_fichas || [])];
+      const idx = arr.findIndex(s => s.id === sfId);
+      const ni = idx + dir;
+      if (idx < 0 || ni < 0 || ni >= arr.length) return l;
+      [arr[idx], arr[ni]] = [arr[ni], arr[idx]];
+      return { ...l, sub_fichas: arr };
+    });
+  }
+
+  function quickAddInsumo(name) {
+    const nm = name.trim();
+    if (!nm) return null;
+    const existing = insumos.find(i => ftNrm(i.name) === ftNrm(nm));
+    if (existing) return existing;
+    const newI = { id: ftUid(), restaurantId, name: nm, unit: "kg", price: 0 };
+    onUpdate("miseFtInsumos", [...miseFtInsumos, newI]);
+    return newI;
+  }
+
+  const costInfo = ftDishCost(local, insumos, restDishes);
+  const insumoListId = `ft-insumos-${local.id}`;
+
+  return (
+    <div>
+      {/* Toolbar */}
+      <div style={{display:"flex",gap:8,marginBottom:16,alignItems:"center",flexWrap:"wrap",position:"sticky",top:0,background:"var(--bg)",zIndex:10,paddingTop:4,paddingBottom:8,borderBottom:"1px solid var(--border)"}}>
+        <button onClick={handleBack} style={{...S.btnSecondary,fontSize:13,padding:"8px 14px"}}>← Voltar</button>
+        <div style={{flex:1,minWidth:0}}>
+          <div style={{fontSize:11,color:"var(--text3)",fontWeight:700,textTransform:"uppercase",letterSpacing:0.4}}>Editando ficha</div>
+          <div style={{fontSize:15,color:"var(--text)",fontWeight:700,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{local.name}</div>
+        </div>
+        {dirty && <span style={{color:"#f59e0b",fontSize:11,fontWeight:700,padding:"3px 8px",background:"#fffbeb",border:"1px solid #f59e0b44",borderRadius:10,whiteSpace:"nowrap"}}>● Não salvo</span>}
+        <button onClick={()=>ftExportDishPDF(local, insumos, restDishes, "")} style={{...S.btnSecondary,fontSize:12,padding:"7px 12px"}} title="Exportar PDF">📄 PDF</button>
+        <button onClick={save} disabled={!dirty} style={{background: dirty ? miseAc : "var(--border)",color: dirty?"#fff":"var(--text3)",border:"none",borderRadius:8,padding:"8px 18px",fontSize:13,fontWeight:700,cursor:dirty?"pointer":"not-allowed",fontFamily:"'DM Sans',sans-serif"}}>💾 Salvar</button>
+      </div>
+
+      {/* Insumos datalist for autocomplete */}
+      <datalist id={insumoListId}>
+        {insumos.map(i => <option key={i.id} value={i.name} />)}
+      </datalist>
+
+      {/* Ficha main fields */}
+      <div style={{display:"grid",gridTemplateColumns:mobileOnly?"1fr":"2fr 1fr 1fr",gap:12,marginBottom:16}}>
+        <div>
+          <label style={S.label}>Nome da ficha</label>
+          <input value={local.name ?? ""} onChange={e=>setLocal({...local, name: e.target.value})} style={S.input} />
+        </div>
+        <div>
+          <label style={S.label}>Markup (%)</label>
+          <input type="number" step="1" value={local.markup ?? 300} onChange={e=>setLocal({...local, markup: parseFloat(e.target.value)||0})} style={{...S.input,fontFamily:"'DM Mono',monospace"}} />
+        </div>
+        <div>
+          <label style={S.label}>CMV alvo (%) <span style={{color:"var(--text3)",fontWeight:400,fontSize:10}}>opcional</span></label>
+          <input type="number" step="1" value={local.target_cmv ?? ""} onChange={e=>{
+            const v = e.target.value;
+            const n = {...local};
+            if (v === "") delete n.target_cmv;
+            else n.target_cmv = parseFloat(v) || 0;
+            setLocal(n);
+          }} placeholder="—" style={{...S.input,fontFamily:"'DM Mono',monospace"}} />
+        </div>
+      </div>
+
+      {/* Descrição */}
+      <div style={{marginBottom:16}}>
+        <label style={S.label}>Descrição</label>
+        <textarea value={local.description ?? ""} onChange={e=>setLocal({...local, description: e.target.value})} placeholder="Breve descrição do prato..." style={{...S.input, minHeight:60, fontFamily:"inherit", resize:"vertical"}} />
+      </div>
+
+      {/* Louça + Equipamentos */}
+      <div style={{display:"grid",gridTemplateColumns:mobileOnly?"1fr":"1fr 2fr",gap:12,marginBottom:20}}>
+        <div>
+          <label style={S.label}>Louça</label>
+          <input value={local.louca ?? ""} onChange={e=>setLocal({...local, louca: e.target.value})} placeholder="ex: Prato fundo 22cm" style={S.input} />
+        </div>
+        <div>
+          <label style={S.label}>Equipamentos</label>
+          {equipamentos.length === 0 ? (
+            <div style={{padding:"8px 12px",fontSize:11,color:"var(--text3)",background:"var(--bg2)",border:"1px dashed var(--border)",borderRadius:8}}>
+              Nenhum equipamento cadastrado. Cadastre na aba Equipamentos.
+            </div>
+          ) : (
+            <div style={{display:"flex",flexWrap:"wrap",gap:6}}>
+              {equipamentos.map(eq => {
+                const checked = (local.equipamentos || []).includes(eq);
+                return (
+                  <label key={eq} style={{display:"inline-flex",alignItems:"center",gap:4,padding:"4px 10px",background: checked?miseAc+"22":"var(--bg2)",border:`1px solid ${checked?miseAc:"var(--border)"}`,borderRadius:20,fontSize:12,cursor:"pointer",color:checked?"var(--text)":"var(--text2)"}}>
+                    <input type="checkbox" checked={checked} onChange={e=>{
+                      const s = new Set(local.equipamentos || []);
+                      if (e.target.checked) s.add(eq); else s.delete(eq);
+                      setLocal({...local, equipamentos: [...s]});
+                    }} style={{margin:0,cursor:"pointer",accentColor:miseAc}} />
+                    {eq}
+                  </label>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Cost summary */}
+      <div style={{padding:"14px 18px",background:miseAc+"11",border:`1px solid ${miseAc}44`,borderRadius:10,marginBottom:20,display:"grid",gridTemplateColumns:mobileOnly?"1fr 1fr":"repeat(4,1fr)",gap:16}}>
+        <div>
+          <div style={{fontSize:10,color:"var(--text3)",textTransform:"uppercase",letterSpacing:0.4,fontWeight:700}}>Custo total</div>
+          <div style={{fontSize:16,color:"var(--text)",fontWeight:700,fontFamily:"'DM Mono',monospace",marginTop:2}}>{fmt(costInfo.total)}</div>
+        </div>
+        <div>
+          <div style={{fontSize:10,color:"var(--text3)",textTransform:"uppercase",letterSpacing:0.4,fontWeight:700}}>Custo/porção</div>
+          <div style={{fontSize:16,color:"var(--text)",fontWeight:700,fontFamily:"'DM Mono',monospace",marginTop:2}}>{fmt(costInfo.costPerPortion)}</div>
+          <div style={{fontSize:10,color:"var(--text3)",marginTop:1}}>{costInfo.portions} porç.</div>
+        </div>
+        <div>
+          <div style={{fontSize:10,color:"var(--text3)",textTransform:"uppercase",letterSpacing:0.4,fontWeight:700}}>Preço sugerido</div>
+          <div style={{fontSize:16,color:"#15803d",fontWeight:700,fontFamily:"'DM Mono',monospace",marginTop:2}}>{fmt(costInfo.suggestedPrice)}</div>
+        </div>
+        <div>
+          <div style={{fontSize:10,color:"var(--text3)",textTransform:"uppercase",letterSpacing:0.4,fontWeight:700}}>CMV · Markup</div>
+          <div style={{fontSize:15,color:"var(--text)",fontWeight:700,fontFamily:"'DM Mono',monospace",marginTop:2}}>{costInfo.cmv ? costInfo.cmv.toFixed(1)+"%" : "—"} · {costInfo.markup?.toFixed(0) ?? 0}%</div>
+        </div>
+      </div>
+
+      {/* Sub-fichas */}
+      <div>
+        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:12}}>
+          <h4 style={{color:"var(--text)",margin:0,fontSize:15,fontWeight:700}}>Sub-fichas <span style={{fontSize:11,color:"var(--text3)",fontWeight:400,marginLeft:6}}>(a última é a ficha final)</span></h4>
+          <button onClick={addSubFicha} style={{...S.btnSecondary,fontSize:12,padding:"6px 12px"}}>+ Nova sub-ficha</button>
+        </div>
+
+        {(local.sub_fichas || []).length === 0 ? (
+          <div style={{padding:"32px 16px",textAlign:"center",color:"var(--text3)",fontSize:14,background:"var(--card-bg)",borderRadius:12,border:"1px dashed var(--border)"}}>
+            A ficha precisa de pelo menos uma sub-ficha. Clique em "+ Nova sub-ficha".
+          </div>
+        ) : (
+          <div style={{display:"flex",flexDirection:"column",gap:12}}>
+            {local.sub_fichas.map((sf, sfIdx) => {
+              const isFinal = sfIdx === local.sub_fichas.length - 1;
+              const sfCost = costInfo.sfCosts.find(x => x.sf.id === sf.id);
+              return (
+                <MiseFtSubFichaEditor
+                  key={sf.id}
+                  sf={sf} sfIdx={sfIdx} total={local.sub_fichas.length}
+                  isFinal={isFinal}
+                  sfCost={sfCost}
+                  insumos={insumos}
+                  allSfs={local.sub_fichas}
+                  insumoListId={insumoListId}
+                  updateSubFicha={(patch)=>updateSubFicha(sf.id, patch)}
+                  delSubFicha={()=>delSubFicha(sf.id)}
+                  moveSf={(dir)=>moveSf(sf.id, dir)}
+                  quickAddInsumo={quickAddInsumo}
+                  mobileOnly={mobileOnly}
+                />
+              );
+            })}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ── SUB-FICHA EDITOR (inside dish editor) ──
+function MiseFtSubFichaEditor({ sf, sfIdx, total, isFinal, sfCost, insumos, allSfs, insumoListId, updateSubFicha, delSubFicha, moveSf, quickAddInsumo, mobileOnly }) {
+  const [expanded, setExpanded] = useState(true);
+  const miseAc = "#7c9e5e";
+
+  function updateIng(idx, patch) {
+    const newIngs = (sf.ingredientes || []).map((ing, i) => i === idx ? { ...ing, ...patch } : ing);
+    updateSubFicha({ ingredientes: newIngs });
+  }
+  function addIng() {
+    updateSubFicha({ ingredientes: [...(sf.ingredientes || []), { insumo_id: null, insumo_name: "", qty: null, unit: "" }] });
+  }
+  function delIngAt(idx) {
+    updateSubFicha({ ingredientes: (sf.ingredientes || []).filter((_, i) => i !== idx) });
+  }
+  function moveIng(idx, dir) {
+    const arr = [...(sf.ingredientes || [])];
+    const ni = idx + dir;
+    if (ni < 0 || ni >= arr.length) return;
+    [arr[idx], arr[ni]] = [arr[ni], arr[idx]];
+    updateSubFicha({ ingredientes: arr });
+  }
+
+  // Available sub-fichas for subref linking (exclude self + forward-only: subrefs must point earlier)
+  const availableSubrefs = allSfs.filter((s, i) => s.id !== sf.id && i < sfIdx);
+
+  return (
+    <div style={{background:"var(--card-bg)",border:`1px solid ${isFinal ? miseAc+"66" : "var(--border)"}`,borderRadius:12,overflow:"hidden"}}>
+      <div style={{padding:"10px 14px",background: isFinal ? miseAc+"11" : "var(--bg2)",borderBottom:"1px solid var(--border)",display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
+        <button onClick={()=>setExpanded(!expanded)} style={{background:"none",border:"none",cursor:"pointer",fontSize:14,color:"var(--text3)",padding:"2px 6px"}}>{expanded?"▼":"▶"}</button>
+        <input value={sf.name ?? ""} onChange={e=>updateSubFicha({name: e.target.value})} style={{...S.input,flex:"1 1 200px",minWidth:140,fontWeight:600}} />
+        {isFinal && <span style={{fontSize:10,padding:"2px 8px",borderRadius:10,background:miseAc+"22",color:"#15803d",fontWeight:700,letterSpacing:0.4}}>FINAL</span>}
+        <div style={{fontSize:11,color:"var(--text3)",fontFamily:"'DM Mono',monospace"}} title="Custo desta sub-ficha">
+          {sfCost ? fmt(sfCost.total) : "—"} · {(sf.ingredientes||[]).length} ings
+        </div>
+        <button onClick={()=>moveSf(-1)} disabled={sfIdx===0} style={{...S.btnSecondary,fontSize:11,padding:"4px 8px",opacity:sfIdx===0?0.3:1}} title="Mover para cima">↑</button>
+        <button onClick={()=>moveSf(1)} disabled={sfIdx===total-1} style={{...S.btnSecondary,fontSize:11,padding:"4px 8px",opacity:sfIdx===total-1?0.3:1}} title="Mover para baixo">↓</button>
+        <button onClick={delSubFicha} style={{...S.btnSecondary,fontSize:11,padding:"4px 10px",color:"var(--red)",borderColor:"var(--red)44"}} title="Apagar sub-ficha">×</button>
+      </div>
+
+      {expanded && (
+        <div style={{padding:"14px"}}>
+          {/* Rendimento + Subproduto */}
+          <div style={{display:"grid",gridTemplateColumns:mobileOnly?"1fr":"2fr 1fr 1fr 2fr",gap:8,marginBottom:14}}>
+            <div>
+              <label style={{...S.label,fontSize:11}}>Rendimento (texto)</label>
+              <input value={sf.rendimento ?? ""} onChange={e=>updateSubFicha({rendimento: e.target.value})} placeholder="ex: 4 porções, 1 kg" style={S.input} />
+            </div>
+            <div>
+              <label style={{...S.label,fontSize:11}}>Qtd base</label>
+              <input type="number" step="0.001" value={sf.rendimento_qty ?? ""} onChange={e=>updateSubFicha({rendimento_qty: e.target.value ? parseFloat(e.target.value.replace(",",".")) : null})} placeholder="0" style={{...S.input,fontFamily:"'DM Mono',monospace"}} />
+            </div>
+            <div>
+              <label style={{...S.label,fontSize:11}}>Unid. base</label>
+              <select value={sf.rendimento_unit ?? ""} onChange={e=>updateSubFicha({rendimento_unit: e.target.value})} style={S.input}>
+                <option value="">—</option>
+                {FT_CANONICAL_UNITS.map(u => <option key={u} value={u}>{u}</option>)}
+              </select>
+            </div>
+            <div>
+              <label style={{...S.label,fontSize:11}}>Subproduto gerado <span style={{color:"var(--text3)",fontWeight:400,fontSize:10}}>opcional</span></label>
+              <input value={sf.subproduto?.name ?? ""} onChange={e=>{
+                const v = e.target.value;
+                updateSubFicha({subproduto: v.trim() ? { name: v } : undefined});
+              }} placeholder="nome do produto pronto" style={S.input} />
+            </div>
+          </div>
+
+          {/* Ingredientes */}
+          <div style={{marginBottom:14}}>
+            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:6}}>
+              <label style={{fontSize:11,fontWeight:700,color:"var(--text2)",textTransform:"uppercase",letterSpacing:0.4}}>Ingredientes</label>
+              <div style={{display:"flex",gap:6}}>
+                {availableSubrefs.length > 0 && (
+                  <select onChange={e=>{
+                    const subId = e.target.value;
+                    if (!subId) return;
+                    const subSf = availableSubrefs.find(s => s.id === subId);
+                    if (!subSf) return;
+                    updateSubFicha({ ingredientes: [...(sf.ingredientes || []), { subref_id: subSf.id, insumo_name: subSf.name, qty: null, unit: subSf.rendimento_unit || "" }] });
+                    e.target.value = "";
+                  }} style={{...S.input,fontSize:11,width:"auto",padding:"4px 8px"}}>
+                    <option value="">+ Sub-ref</option>
+                    {availableSubrefs.map(s => <option key={s.id} value={s.id}>↳ {s.name}</option>)}
+                  </select>
+                )}
+                <button onClick={addIng} style={{...S.btnSecondary,fontSize:11,padding:"4px 10px"}}>+ Ingrediente</button>
+              </div>
+            </div>
+            {(sf.ingredientes || []).length === 0 ? (
+              <div style={{padding:"16px",textAlign:"center",color:"var(--text3)",fontSize:12,background:"var(--bg2)",borderRadius:8,border:"1px dashed var(--border)"}}>
+                Sem ingredientes. Clique em "+ Ingrediente" para adicionar.
+              </div>
+            ) : (
+              <div style={{overflowX:"auto",border:"1px solid var(--border)",borderRadius:8}}>
+                <table style={{width:"100%",borderCollapse:"collapse",fontSize:12}}>
+                  <thead>
+                    <tr style={{background:"var(--bg2)"}}>
+                      <th style={{padding:"6px 8px",textAlign:"left",fontSize:10,color:"var(--text3)",fontWeight:700,textTransform:"uppercase",letterSpacing:0.4}}>Ingrediente</th>
+                      <th style={{padding:"6px 8px",textAlign:"right",fontSize:10,color:"var(--text3)",fontWeight:700,textTransform:"uppercase",letterSpacing:0.4,width:90}}>Qtd</th>
+                      <th style={{padding:"6px 8px",textAlign:"left",fontSize:10,color:"var(--text3)",fontWeight:700,textTransform:"uppercase",letterSpacing:0.4,width:90}}>Unid.</th>
+                      <th style={{padding:"6px 8px",textAlign:"center",fontSize:10,color:"var(--text3)",fontWeight:700,textTransform:"uppercase",letterSpacing:0.4,width:50}} title="Quanto Baste (sem quantidade definida)">QB</th>
+                      <th style={{padding:"6px 8px",textAlign:"right",fontSize:10,color:"var(--text3)",fontWeight:700,textTransform:"uppercase",letterSpacing:0.4,width:60}} title="Fator de Correção">FC</th>
+                      <th style={{padding:"6px 8px",textAlign:"right",fontSize:10,color:"var(--text3)",fontWeight:700,textTransform:"uppercase",letterSpacing:0.4,width:90}}>Custo</th>
+                      <th style={{padding:"6px 8px",width:80}}></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(sf.ingredientes || []).map((ing, idx) => {
+                      const costRow = sfCost?.rows?.[idx];
+                      const isSubref = !!ing.subref_id;
+                      return (
+                        <tr key={idx} style={{borderTop:"1px solid var(--border)"}}>
+                          <td style={{padding:"4px 8px"}}>
+                            {isSubref ? (
+                              <div style={{display:"flex",alignItems:"center",gap:4}}>
+                                <span style={{fontSize:10,padding:"2px 6px",borderRadius:8,background:miseAc+"22",color:"#15803d",fontWeight:700,whiteSpace:"nowrap"}}>↳ SUB</span>
+                                <span style={{color:"var(--text)",fontWeight:500,fontSize:12}}>{ing.insumo_name || "—"}</span>
+                              </div>
+                            ) : (
+                              <input list={insumoListId} value={ing.insumo_name ?? ""}
+                                onChange={e=>{
+                                  const v = e.target.value;
+                                  const match = insumos.find(i => ftNrm(i.name) === ftNrm(v));
+                                  if (match) {
+                                    updateIng(idx, { insumo_name: match.name, insumo_id: match.id, unit: ing.unit || match.unit || "" });
+                                  } else {
+                                    updateIng(idx, { insumo_name: v, insumo_id: null });
+                                  }
+                                }}
+                                onBlur={e => {
+                                  const v = e.target.value.trim();
+                                  if (!v || ing.insumo_id) return;
+                                  if (insumos.some(i => ftNrm(i.name) === ftNrm(v))) return;
+                                  if (window.confirm(`Criar novo insumo "${v}" (preço 0, unidade kg)? Você pode editá-lo depois em Insumos.`)) {
+                                    const ins = quickAddInsumo(v);
+                                    if (ins) updateIng(idx, { insumo_id: ins.id, insumo_name: ins.name, unit: ing.unit || ins.unit });
+                                  }
+                                }}
+                                placeholder="nome do insumo..." style={{...S.input,width:"100%",fontSize:12}} />
+                            )}
+                          </td>
+                          <td style={{padding:"4px 8px"}}>
+                            <input type="number" step="0.001" value={ing.qty ?? ""}
+                              onChange={e=>{
+                                const v = e.target.value;
+                                updateIng(idx, { qty: v === "" ? null : parseFloat(v.replace(",",".")) });
+                              }}
+                              disabled={!!ing.is_qb}
+                              style={{...S.input,width:"100%",textAlign:"right",fontFamily:"'DM Mono',monospace",fontSize:12,opacity:ing.is_qb?0.4:1}} />
+                          </td>
+                          <td style={{padding:"4px 8px"}}>
+                            <select value={ing.unit ?? ""} onChange={e=>updateIng(idx, { unit: e.target.value })} style={{...S.input,width:"100%",fontSize:12}} disabled={isSubref}>
+                              <option value="">—</option>
+                              {FT_CANONICAL_UNITS.map(u => <option key={u} value={u}>{u}</option>)}
+                              {ing.unit && !FT_CANONICAL_UNITS.includes((ing.unit||"").toLowerCase()) && <option value={ing.unit}>{ing.unit}</option>}
+                            </select>
+                          </td>
+                          <td style={{padding:"4px 8px",textAlign:"center"}}>
+                            <input type="checkbox" checked={!!ing.is_qb} onChange={e=>updateIng(idx, { is_qb: e.target.checked || undefined, qty: e.target.checked ? null : ing.qty })} style={{cursor:"pointer",accentColor:miseAc}} />
+                          </td>
+                          <td style={{padding:"4px 8px"}}>
+                            <input type="number" step="0.1" min="0.1" value={ing.fc ?? ""} onChange={e=>{
+                              const v = e.target.value;
+                              updateIng(idx, { fc: v === "" ? undefined : parseFloat(v) });
+                            }} placeholder="1.0" style={{...S.input,width:"100%",textAlign:"right",fontFamily:"'DM Mono',monospace",fontSize:12}} />
+                          </td>
+                          <td style={{padding:"4px 8px",textAlign:"right",color:costRow?.isReutilizavel?"#a855f7":(costRow?.isSubproduto?"var(--text3)":"var(--text2)"),fontFamily:"'DM Mono',monospace",fontSize:11}}>
+                            {ing.is_qb ? "Q.B" : (costRow?.isReutilizavel ? "♻" : (costRow?.isSubproduto ? "0" : (costRow ? fmt(costRow.cost) : "—")))}
+                          </td>
+                          <td style={{padding:"4px 6px",textAlign:"center",whiteSpace:"nowrap"}}>
+                            <button onClick={()=>moveIng(idx,-1)} disabled={idx===0} style={{background:"none",border:"none",cursor:"pointer",fontSize:12,color:"var(--text3)",opacity:idx===0?0.3:1,padding:"2px 4px"}}>↑</button>
+                            <button onClick={()=>moveIng(idx,1)} disabled={idx===(sf.ingredientes||[]).length-1} style={{background:"none",border:"none",cursor:"pointer",fontSize:12,color:"var(--text3)",opacity:idx===(sf.ingredientes||[]).length-1?0.3:1,padding:"2px 4px"}}>↓</button>
+                            <button onClick={()=>delIngAt(idx)} style={{background:"none",border:"none",cursor:"pointer",color:"var(--red)",fontSize:14,padding:"2px 4px"}}>×</button>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+
+          {/* Modo de preparo */}
+          <div>
+            <label style={{...S.label,fontSize:11}}>Modo de preparo</label>
+            <textarea value={sf.modo_preparo ?? ""} onChange={e=>updateSubFicha({modo_preparo: e.target.value})} placeholder="Passo a passo..." style={{...S.input,minHeight:70,fontFamily:"inherit",resize:"vertical"}} />
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════
+// ──  MISE FICHAS TÉCNICAS — USER (Gestor Operacional)           ──
+// ═══════════════════════════════════════════════════════════════
+function OperationalFichasTecnicas({ employee, miseFtInsumos, miseFtDishes }) {
+  const restaurantId = employee.restaurantId;
+  const restDishes = miseFtDishes.filter(d => d.restaurantId === restaurantId);
+  const restInsumos = miseFtInsumos.filter(i => i.restaurantId === restaurantId);
+  const [openDishId, setOpenDishId] = useState(null);
+  const [filter, setFilter] = useState("");
+  const [scaleFactor, setScaleFactor] = useState(1);
+
+  const openDish = openDishId ? restDishes.find(d => d.id === openDishId) : null;
+
+  if (openDish) {
+    const costInfo = ftDishCost(openDish, restInsumos, restDishes);
+    const lastSf = (openDish.sub_fichas || [])[(openDish.sub_fichas || []).length - 1];
+    return (
+      <div>
+        {/* Toolbar */}
+        <div style={{display:"flex",gap:8,marginBottom:16,alignItems:"center",flexWrap:"wrap"}}>
+          <button onClick={()=>{setOpenDishId(null);setScaleFactor(1);}} style={{...S.btnSecondary,fontSize:13,padding:"8px 14px"}}>← Voltar</button>
+          <div style={{flex:1,minWidth:0}}>
+            <div style={{fontSize:11,color:"var(--text3)",fontWeight:700,textTransform:"uppercase",letterSpacing:0.4}}>Ficha técnica</div>
+            <div style={{fontSize:17,color:"var(--text)",fontWeight:700,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{openDish.name}</div>
+          </div>
+          <div style={{display:"flex",alignItems:"center",gap:6,background:"var(--card-bg)",border:"1px solid var(--border)",borderRadius:8,padding:"4px 8px"}}>
+            <span style={{fontSize:11,color:"var(--text3)",fontWeight:600}}>Escala:</span>
+            {[0.5, 1, 2, 4].map(f => (
+              <button key={f} onClick={()=>setScaleFactor(f)}
+                style={{background:scaleFactor===f?"#7c9e5e":"transparent",color:scaleFactor===f?"#fff":"var(--text2)",border:"none",borderRadius:6,padding:"4px 10px",fontSize:12,cursor:"pointer",fontWeight:scaleFactor===f?700:500}}>
+                {f}×
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {openDish.description && <p style={{color:"var(--text3)",fontSize:14,lineHeight:1.6,margin:"0 0 20px",maxWidth:720}}>{openDish.description}</p>}
+
+        {/* Metadata row */}
+        <div style={{display:"flex",flexWrap:"wrap",gap:12,marginBottom:20}}>
+          {openDish.louca && (
+            <div style={{padding:"6px 12px",background:"var(--card-bg)",border:"1px solid var(--border)",borderRadius:8,fontSize:12}}>
+              <span style={{color:"var(--text3)",fontWeight:600}}>Louça: </span>
+              <span style={{color:"var(--text)"}}>{openDish.louca}</span>
+            </div>
+          )}
+          {(openDish.equipamentos || []).length > 0 && (
+            <div style={{padding:"6px 12px",background:"var(--card-bg)",border:"1px solid var(--border)",borderRadius:8,fontSize:12}}>
+              <span style={{color:"var(--text3)",fontWeight:600}}>Equipamentos: </span>
+              <span style={{color:"var(--text)"}}>{openDish.equipamentos.join(", ")}</span>
+            </div>
+          )}
+          {lastSf?.rendimento && (
+            <div style={{padding:"6px 12px",background:"var(--card-bg)",border:"1px solid var(--border)",borderRadius:8,fontSize:12}}>
+              <span style={{color:"var(--text3)",fontWeight:600}}>Rendimento: </span>
+              <span style={{color:"var(--text)",fontFamily:"'DM Mono',monospace"}}>{ftFormatRendimento(lastSf.rendimento, scaleFactor)}</span>
+            </div>
+          )}
+        </div>
+
+        {/* Cost summary */}
+        <div style={{padding:"14px 18px",background:"#7c9e5e11",border:"1px solid #7c9e5e44",borderRadius:10,marginBottom:20,display:"grid",gridTemplateColumns:"repeat(auto-fit, minmax(140px, 1fr))",gap:14}}>
+          <div>
+            <div style={{fontSize:10,color:"var(--text3)",textTransform:"uppercase",letterSpacing:0.4,fontWeight:700}}>Custo total</div>
+            <div style={{fontSize:15,color:"var(--text)",fontWeight:700,fontFamily:"'DM Mono',monospace",marginTop:2}}>{fmt(costInfo.total * scaleFactor)}</div>
+          </div>
+          <div>
+            <div style={{fontSize:10,color:"var(--text3)",textTransform:"uppercase",letterSpacing:0.4,fontWeight:700}}>Custo/porção</div>
+            <div style={{fontSize:15,color:"var(--text)",fontWeight:700,fontFamily:"'DM Mono',monospace",marginTop:2}}>{fmt(costInfo.costPerPortion)}</div>
+          </div>
+          <div>
+            <div style={{fontSize:10,color:"var(--text3)",textTransform:"uppercase",letterSpacing:0.4,fontWeight:700}}>Preço sugerido</div>
+            <div style={{fontSize:15,color:"#15803d",fontWeight:700,fontFamily:"'DM Mono',monospace",marginTop:2}}>{fmt(costInfo.suggestedPrice)}</div>
+          </div>
+          <div>
+            <div style={{fontSize:10,color:"var(--text3)",textTransform:"uppercase",letterSpacing:0.4,fontWeight:700}}>CMV</div>
+            <div style={{fontSize:15,color:"var(--text)",fontWeight:700,fontFamily:"'DM Mono',monospace",marginTop:2}}>{costInfo.cmv ? costInfo.cmv.toFixed(1)+"%" : "—"}</div>
+          </div>
+        </div>
+
+        {/* Sub-fichas */}
+        <div style={{display:"flex",flexDirection:"column",gap:16}}>
+          {(openDish.sub_fichas || []).map((sf, sfIdx) => {
+            const isFinal = sfIdx === openDish.sub_fichas.length - 1;
+            const sfCost = costInfo.sfCosts.find(x => x.sf.id === sf.id);
+            return (
+              <div key={sf.id} style={{background:"var(--card-bg)",border:`1px solid ${isFinal?"#7c9e5e66":"var(--border)"}`,borderRadius:12,overflow:"hidden"}}>
+                <div style={{padding:"12px 16px",background: isFinal ? "#7c9e5e11" : "var(--bg2)",borderBottom:"1px solid var(--border)",display:"flex",alignItems:"center",justifyContent:"space-between",flexWrap:"wrap",gap:8}}>
+                  <div>
+                    <div style={{display:"flex",alignItems:"center",gap:8}}>
+                      <span style={{fontSize:15,color:"var(--text)",fontWeight:700}}>{sfIdx+1}. {sf.name}</span>
+                      {isFinal && <span style={{fontSize:10,padding:"2px 8px",borderRadius:10,background:"#7c9e5e22",color:"#15803d",fontWeight:700,letterSpacing:0.4}}>FINAL</span>}
+                    </div>
+                    {sf.rendimento && <div style={{fontSize:12,color:"var(--text3)",marginTop:2,fontFamily:"'DM Mono',monospace"}}>Rend.: {ftFormatRendimento(sf.rendimento, scaleFactor)}</div>}
+                  </div>
+                  <div style={{fontSize:12,color:"var(--text3)",fontFamily:"'DM Mono',monospace"}}>{sfCost ? fmt(sfCost.total * scaleFactor) : "—"}</div>
+                </div>
+                <div style={{padding:"14px 16px"}}>
+                  {/* Ingredientes */}
+                  {(sf.ingredientes || []).length > 0 ? (
+                    <div style={{marginBottom: sf.modo_preparo ? 16 : 0}}>
+                      <div style={{fontSize:11,fontWeight:700,color:"var(--text2)",textTransform:"uppercase",letterSpacing:0.4,marginBottom:8}}>Ingredientes</div>
+                      <div style={{overflowX:"auto",border:"1px solid var(--border)",borderRadius:8}}>
+                        <table style={{width:"100%",borderCollapse:"collapse",fontSize:13}}>
+                          <thead>
+                            <tr style={{background:"var(--bg2)"}}>
+                              <th style={{padding:"6px 10px",textAlign:"left",fontSize:10,color:"var(--text3)",fontWeight:700,textTransform:"uppercase",letterSpacing:0.4}}>Item</th>
+                              <th style={{padding:"6px 10px",textAlign:"right",fontSize:10,color:"var(--text3)",fontWeight:700,textTransform:"uppercase",letterSpacing:0.4,width:100}}>Quantidade</th>
+                              <th style={{padding:"6px 10px",textAlign:"right",fontSize:10,color:"var(--text3)",fontWeight:700,textTransform:"uppercase",letterSpacing:0.4,width:90}}>Custo</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {(sf.ingredientes || []).map((ing, idx) => {
+                              const costRow = sfCost?.rows?.[idx];
+                              const isSubref = !!ing.subref_id;
+                              const fmtQ = ftFormatIngQty(ing, scaleFactor);
+                              return (
+                                <tr key={idx} style={{borderTop:"1px solid var(--border)"}}>
+                                  <td style={{padding:"8px 10px",color:"var(--text)"}}>
+                                    {isSubref && <span style={{fontSize:10,padding:"1px 6px",borderRadius:6,background:"#7c9e5e22",color:"#15803d",fontWeight:700,marginRight:6}}>↳ SUB</span>}
+                                    {ing.insumo_name || "—"}
+                                  </td>
+                                  <td style={{padding:"8px 10px",textAlign:"right",color:"var(--text2)",fontFamily:"'DM Mono',monospace"}}>
+                                    {fmtQ.text} {fmtQ.unit}
+                                  </td>
+                                  <td style={{padding:"8px 10px",textAlign:"right",color:costRow?.isReutilizavel?"#a855f7":(costRow?.isSubproduto?"var(--text3)":"var(--text2)"),fontFamily:"'DM Mono',monospace",fontSize:11}}>
+                                    {ing.is_qb ? "Q.B" : (costRow?.isReutilizavel ? "♻" : (costRow?.isSubproduto ? "—" : (costRow ? fmt(costRow.cost * scaleFactor) : "—")))}
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  ) : (
+                    <div style={{padding:"12px",textAlign:"center",fontSize:12,color:"var(--text3)",background:"var(--bg2)",borderRadius:8,marginBottom:sf.modo_preparo?16:0}}>
+                      Nenhum ingrediente listado.
+                    </div>
+                  )}
+                  {/* Modo de preparo */}
+                  {sf.modo_preparo && (
+                    <div>
+                      <div style={{fontSize:11,fontWeight:700,color:"var(--text2)",textTransform:"uppercase",letterSpacing:0.4,marginBottom:8}}>Modo de preparo</div>
+                      <div style={{fontSize:13,color:"var(--text2)",lineHeight:1.7,whiteSpace:"pre-wrap",background:"var(--bg2)",padding:"12px 14px",borderRadius:8,border:"1px solid var(--border)"}}>{sf.modo_preparo}</div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    );
+  }
+
+  // List view
+  const q = filter.trim().toLowerCase();
+  const filtered = q ? restDishes.filter(d => d.name.toLowerCase().includes(q)) : restDishes;
+
+  if (restDishes.length === 0) {
+    return (
+      <div style={{padding:"60px 24px",textAlign:"center",color:"var(--text3)"}}>
+        <div style={{fontSize:48,marginBottom:16}}>📋</div>
+        <h3 style={{color:"var(--text)",fontSize:18,fontWeight:700,margin:"0 0 8px"}}>Sem fichas cadastradas</h3>
+        <p style={{fontSize:14,lineHeight:1.6,maxWidth:420,margin:"0 auto"}}>
+          O gestor ainda não cadastrou nenhuma ficha técnica para esse restaurante.
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      <div style={{marginBottom:16}}>
+        <input value={filter} onChange={e=>setFilter(e.target.value)} placeholder="🔍 Buscar ficha..." style={{...S.input,maxWidth:360}} />
+      </div>
+      {filtered.length === 0 ? (
+        <div style={{padding:"32px 16px",textAlign:"center",color:"var(--text3)",fontSize:14,background:"var(--card-bg)",borderRadius:12,border:"1px solid var(--border)"}}>
+          Nenhuma ficha encontrada para "{filter}"
+        </div>
+      ) : (
+        <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill, minmax(280px, 1fr))",gap:12}}>
+          {[...filtered].sort((a,b)=>a.name.localeCompare(b.name)).map(d => {
+            const cost = ftDishCost(d, restInsumos, restDishes);
+            const lastSf = (d.sub_fichas || [])[(d.sub_fichas || []).length - 1];
+            const rendDisplay = lastSf?.rendimento ? ftFormatRendimento(lastSf.rendimento) : "";
+            return (
+              <button key={d.id} onClick={()=>setOpenDishId(d.id)}
+                style={{textAlign:"left",background:"var(--card-bg)",border:"1px solid var(--border)",borderRadius:12,padding:"14px 16px",cursor:"pointer",fontFamily:"inherit",transition:"border-color 0.15s"}}
+                onMouseEnter={e=>e.currentTarget.style.borderColor="#7c9e5e"}
+                onMouseLeave={e=>e.currentTarget.style.borderColor="var(--border)"}>
+                <div style={{fontSize:15,color:"var(--text)",fontWeight:700,marginBottom:6}}>{d.name}</div>
+                {rendDisplay && <div style={{fontSize:11,color:"var(--text3)",marginBottom:8,fontFamily:"'DM Mono',monospace"}}>{rendDisplay}</div>}
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-end",marginTop:12,paddingTop:12,borderTop:"1px solid var(--border)"}}>
+                  <div>
+                    <div style={{fontSize:10,color:"var(--text3)",fontWeight:600,textTransform:"uppercase",letterSpacing:0.4}}>Custo/porç.</div>
+                    <div style={{fontSize:13,color:"var(--text)",fontWeight:700,fontFamily:"'DM Mono',monospace"}}>{fmt(cost.costPerPortion)}</div>
+                  </div>
+                  <div style={{textAlign:"right"}}>
+                    <div style={{fontSize:10,color:"var(--text3)",fontWeight:600,textTransform:"uppercase",letterSpacing:0.4}}>Preço sug.</div>
+                    <div style={{fontSize:13,color:"#15803d",fontWeight:700,fontFamily:"'DM Mono',monospace"}}>{fmt(cost.suggestedPrice)}</div>
+                  </div>
+                </div>
+              </button>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════
+// ──  MISE COMPRAS — USER (Gestor Operacional)                   ──
+// ═══════════════════════════════════════════════════════════════
+function OperationalCompras({ employee, data, onUpdate }) {
+  const restaurantId = employee.restaurantId;
+  const [view, setView] = useState("sugestoes");
+  const [overrides, setOverrides] = useState({}); // productId → linkId override para sugestão
+  const [qtyEdits, setQtyEdits] = useState({}); // productId → qty manual override
+  const [expandedOrder, setExpandedOrder] = useState(null); // orderId
+  const [receiveFormOrder, setReceiveFormOrder] = useState(null); // orderId do pedido sendo recebido
+  const [receiveDrafts, setReceiveDrafts] = useState({}); // itemIdx → qtyReceived
+  const [receiveNote, setReceiveNote] = useState("");
+
+  const miseAc = "#7c9e5e";
+
+  const cycles = (data.miseCycles || []).filter(c => c.restaurantId === restaurantId);
+  const openCycle = cycles.find(c => c.status === "open");
+  const items = data.miseItems || [];
+  const counts = data.miseCounts || [];
+  const categories = data.miseCategories || [];
+  const suppliers = (data.miseSuppliers || []).filter(s => s.restaurantId === restaurantId);
+  const productSuppliers = data.miseProductSuppliers || [];
+  const orders = (data.miseSupplierOrders || []).filter(o => o.restaurantId === restaurantId);
+  const restaurantName = (data.restaurants || []).find(r => r.id === restaurantId)?.name || "Restaurante";
+
+  if (!openCycle) {
+    return (
+      <div style={{padding:"60px 24px",textAlign:"center",color:"var(--text3)"}}>
+        <div style={{fontSize:48,marginBottom:16}}>🔒</div>
+        <h3 style={{color:"var(--text)",fontSize:18,fontWeight:700,margin:"0 0 8px"}}>Nenhum ciclo aberto</h3>
+        <p style={{fontSize:14,lineHeight:1.6,maxWidth:420,margin:"0 auto"}}>
+          Ainda não há um ciclo de abastecimento aberto. Peça a um contador ou ao gestor para abrir o ciclo do dia na área <b>Contagens</b>.
+        </p>
+      </div>
+    );
+  }
+
+  const cycleOrders = orders.filter(o => o.cycleId === openCycle.id);
+  const activeOrders = cycleOrders.filter(o => !MISE_ORDER_STATUS[o.status]?.terminal);
+  const terminalOrders = cycleOrders.filter(o => MISE_ORDER_STATUS[o.status]?.terminal);
+  const productsAlreadyOrdered = new Set(
+    cycleOrders.flatMap(o => (o.items || []).map(it => it.productId))
+  );
+
+  const suggested = miseComputeSuggestedOrders({
+    cycle: openCycle, restaurantId, items, counts, categories,
+    productSuppliers, suppliers, overrides
+  }).map(g => ({ ...g, items: g.items.filter(it => !productsAlreadyOrdered.has(it.productId)) }))
+    .filter(g => g.items.length > 0);
+
+  const totalSuggestedItems = suggested.reduce((s, g) => s + g.items.length, 0);
+
+  // Opções de troca de fornecedor para um produto (só retorna quando tem >1 vínculo)
+  function getSupplierOptions(productId) {
+    return productSuppliers
+      .filter(ps => ps.productId === productId && ps.restaurantId === restaurantId)
+      .map(ps => ({ link: ps, supplier: suppliers.find(s => s.id === ps.supplierId) }))
+      .filter(o => o.supplier);
+  }
+
+  function approveGroup(group) {
+    if (!window.confirm(`Aprovar pedido com ${group.items.length} ite${group.items.length===1?"m":"ns"} para ${group.supplier.name}?`)) return;
+    const order = {
+      id: `ord_${Date.now()}_${Math.random().toString(36).slice(2,7)}`,
+      restaurantId,
+      cycleId: openCycle.id,
+      supplierId: group.supplierId,
+      status: "approved",
+      items: group.items.map(it => ({
+        productId: it.productId,
+        productName: it.product.name,
+        productUnit: it.product.unit,
+        qtySuggested: it.qtySuggested,
+        qtyApproved: qtyEdits[it.productId] != null ? qtyEdits[it.productId] : it.qtySuggested,
+        conversionFactor: it.conversionFactor,
+        unitPrice: it.link?.price ?? null,
+        linkId: it.linkId,
+      })),
+      createdAt: new Date().toISOString(),
+      approvedAt: new Date().toISOString(),
+      approvedBy: employee.id,
+      approvedByName: employee.name,
+      history: [{ status: "approved", ts: new Date().toISOString(), by: employee.name }],
+    };
+    onUpdate("miseSupplierOrders", [...(data.miseSupplierOrders || []), order]);
+    // Limpa overrides e qty edits dos produtos aprovados
+    const clearedOverrides = { ...overrides };
+    const clearedQtys = { ...qtyEdits };
+    group.items.forEach(it => { delete clearedOverrides[it.productId]; delete clearedQtys[it.productId]; });
+    setOverrides(clearedOverrides);
+    setQtyEdits(clearedQtys);
+  }
+
+  function approveAll() {
+    if (suggested.length === 0) return;
+    if (!window.confirm(`Aprovar ${suggested.length} pedido(s) sugerido(s) (${totalSuggestedItems} ite${totalSuggestedItems===1?"m":"ns"} no total)?`)) return;
+    const now = new Date().toISOString();
+    const newOrders = suggested.map(group => ({
+      id: `ord_${Date.now()}_${Math.random().toString(36).slice(2,7)}_${group.supplierId.slice(0,5)}`,
+      restaurantId,
+      cycleId: openCycle.id,
+      supplierId: group.supplierId,
+      status: "approved",
+      items: group.items.map(it => ({
+        productId: it.productId,
+        productName: it.product.name,
+        productUnit: it.product.unit,
+        qtySuggested: it.qtySuggested,
+        qtyApproved: qtyEdits[it.productId] != null ? qtyEdits[it.productId] : it.qtySuggested,
+        conversionFactor: it.conversionFactor,
+        unitPrice: it.link?.price ?? null,
+        linkId: it.linkId,
+      })),
+      createdAt: now,
+      approvedAt: now,
+      approvedBy: employee.id,
+      approvedByName: employee.name,
+      history: [{ status: "approved", ts: now, by: employee.name }],
+    }));
+    onUpdate("miseSupplierOrders", [...(data.miseSupplierOrders || []), ...newOrders]);
+    setOverrides({});
+    setQtyEdits({});
+  }
+
+  function sendOrder(order) {
+    const supplier = suppliers.find(s => s.id === order.supplierId);
+    if (!supplier) { alert("Fornecedor não encontrado."); return; }
+    if (!supplier.whatsapp) {
+      if (!window.confirm(`Fornecedor "${supplier.name}" não tem WhatsApp cadastrado. Apenas marcar como enviado?`)) return;
+    } else {
+      const msg = miseBuildWhatsMessage({
+        order, supplier, items: order.items,
+        restaurantName,
+        cycleDate: openCycle.startDate,
+      });
+      const link = miseWhatsLink(supplier.whatsapp, msg);
+      if (link) window.open(link, "_blank", "noopener");
+    }
+    const now = new Date().toISOString();
+    onUpdate("miseSupplierOrders", (data.miseSupplierOrders || []).map(o => o.id === order.id ? {
+      ...o,
+      status: "sent",
+      sentAt: now,
+      sentBy: employee.id,
+      sentByName: employee.name,
+      history: [...(o.history || []), { status: "sent", ts: now, by: employee.name }],
+    } : o));
+  }
+
+  function openReceiveForm(order) {
+    setReceiveFormOrder(order.id);
+    const drafts = {};
+    (order.items || []).forEach((it, idx) => { drafts[idx] = it.qtyApproved; });
+    setReceiveDrafts(drafts);
+    setReceiveNote("");
+  }
+
+  function submitReceipt(order, terminalStatus) {
+    const now = new Date().toISOString();
+    const receivedItems = (order.items || []).map((it, idx) => ({
+      ...it,
+      qtyReceived: receiveDrafts[idx] != null ? parseFloat(String(receiveDrafts[idx]).replace(",",".")) : it.qtyApproved,
+    }));
+    const hasDivergence = receivedItems.some(it => (it.qtyReceived || 0) !== (it.qtyApproved || 0));
+    const finalStatus = terminalStatus || (hasDivergence ? "received_with_divergence" : "received_ok");
+
+    // Calcula próximo estado completo antes de persistir (sem setTimeout / sem race)
+    const nextOrders = (data.miseSupplierOrders || []).map(o => o.id === order.id ? {
+      ...o,
+      status: finalStatus,
+      items: receivedItems,
+      receivedAt: now,
+      receivedBy: employee.id,
+      receivedByName: employee.name,
+      receiveNote: receiveNote || null,
+      history: [...(o.history || []), { status: finalStatus, ts: now, by: employee.name, note: receiveNote || null }],
+    } : o);
+    onUpdate("miseSupplierOrders", nextOrders);
+
+    // Encerramento automático do ciclo com base no próximo estado
+    const ordersOfCycle = nextOrders.filter(o => o.cycleId === openCycle.id);
+    const allTerminal = ordersOfCycle.length > 0 && ordersOfCycle.every(o => MISE_ORDER_STATUS[o.status]?.terminal);
+    if (allTerminal && openCycle.status === "open") {
+      onUpdate("miseCycles", (data.miseCycles || []).map(c => c.id === openCycle.id ? { ...c, status: "closed", endDate: today(), closedAt: now, closedBy: "auto" } : c));
+    }
+
+    setReceiveFormOrder(null);
+    setReceiveDrafts({});
+    setReceiveNote("");
+  }
+
+  const VIEWS = [
+    { id: "sugestoes",    label: `Sugestões${suggested.length?` (${suggested.length})`:""}` },
+    { id: "andamento",    label: `Em andamento${activeOrders.length?` (${activeOrders.length})`:""}` },
+    { id: "historico",    label: `Histórico${terminalOrders.length?` (${terminalOrders.length})`:""}` },
+  ];
+
+  return (
+    <div>
+      {/* Banner do ciclo */}
+      <div style={{padding:"12px 16px",background:"#f0fdf4",border:"1px solid #10b98144",borderRadius:10,marginBottom:16,display:"flex",alignItems:"center",justifyContent:"space-between",flexWrap:"wrap",gap:8}}>
+        <div>
+          <div style={{fontSize:11,color:"#15803d",fontWeight:700,textTransform:"uppercase",letterSpacing:0.4}}>Ciclo em andamento</div>
+          <div style={{fontSize:14,color:"var(--text)",fontWeight:700,marginTop:2}}>{openCycle.name}</div>
+        </div>
+        <div style={{fontSize:12,color:"var(--text3)"}}>
+          Aberto em {fmtDate(openCycle.startDate)} · {activeOrders.length} ativo(s) · {terminalOrders.length} fechado(s)
+        </div>
+      </div>
+
+      {/* Sub-views */}
+      <div style={{display:"flex",gap:4,marginBottom:16,borderBottom:"1px solid var(--border)",overflowX:"auto"}}>
+        {VIEWS.map(v => (
+          <button key={v.id} onClick={()=>setView(v.id)}
+            style={{background:"none",border:"none",borderBottom: view===v.id ? `2px solid ${miseAc}` : "2px solid transparent",padding:"8px 14px",cursor:"pointer",fontSize:13,fontWeight: view===v.id ? 700 : 500,color: view===v.id ? "var(--text)" : "var(--text3)",whiteSpace:"nowrap",flexShrink:0}}>
+            {v.label}
+          </button>
+        ))}
+      </div>
+
+      {/* SUGESTÕES */}
+      {view === "sugestoes" && (
+        <div>
+          {suggested.length === 0 ? (
+            <div style={{padding:"40px 24px",textAlign:"center",color:"var(--text3)",fontSize:14,background:"var(--card-bg)",border:"1px solid var(--border)",borderRadius:12}}>
+              <div style={{fontSize:40,marginBottom:12}}>✅</div>
+              <div style={{color:"var(--text)",fontWeight:600,fontSize:16,marginBottom:6}}>Nenhuma reposição sugerida</div>
+              <div style={{lineHeight:1.6,maxWidth:420,margin:"0 auto"}}>
+                Significa que o estoque atual está igual ou acima do mínimo para todos os produtos cadastrados. Se faltam produtos, confirme:
+                <ul style={{textAlign:"left",display:"inline-block",margin:"8px auto 0",paddingLeft:20,fontSize:13}}>
+                  <li>O mínimo está preenchido (aba Itens)</li>
+                  <li>O produto tem fornecedor vinculado</li>
+                  <li>Existe fornecedor preferencial</li>
+                  <li>Há contagem lançada no ciclo atual</li>
+                </ul>
+              </div>
+            </div>
+          ) : (
+            <>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12,flexWrap:"wrap",gap:8}}>
+                <div style={{fontSize:13,color:"var(--text2)"}}>
+                  <b>{totalSuggestedItems}</b> ite{totalSuggestedItems===1?"m":"ns"} em <b>{suggested.length}</b> pedido(s) sugerido(s)
+                </div>
+                <button onClick={approveAll} style={{background:miseAc,color:"#fff",border:"none",borderRadius:8,padding:"8px 18px",fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:"'DM Sans',sans-serif"}}>
+                  ✓ Aprovar todos
+                </button>
+              </div>
+              <div style={{display:"flex",flexDirection:"column",gap:14}}>
+                {suggested.map(group => (
+                  <div key={group.supplierId} style={{background:"var(--card-bg)",border:"1px solid var(--border)",borderRadius:12,overflow:"hidden"}}>
+                    <div style={{padding:"12px 16px",background:"var(--bg2)",borderBottom:"1px solid var(--border)",display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:8}}>
+                      <div>
+                        <div style={{fontSize:14,color:"var(--text)",fontWeight:700}}>🚚 {group.supplier.name}</div>
+                        <div style={{fontSize:11,color:"var(--text3)",marginTop:2}}>
+                          {group.items.length} ite{group.items.length===1?"m":"ns"}
+                          {group.totalCost > 0 && <span style={{marginLeft:8,fontFamily:"'DM Mono',monospace"}}>· est. {fmt(group.totalCost)}</span>}
+                          {group.supplier.whatsapp && <span style={{marginLeft:8,fontFamily:"'DM Mono',monospace"}}>· 📱 {group.supplier.whatsapp}</span>}
+                        </div>
+                      </div>
+                      <button onClick={()=>approveGroup(group)} style={{...S.btnSecondary,fontSize:12,padding:"8px 16px",color:miseAc,borderColor:miseAc+"66",fontWeight:700}}>✓ Aprovar</button>
+                    </div>
+                    <div style={{overflowX:"auto"}}>
+                      <table style={{width:"100%",borderCollapse:"collapse",fontSize:12}}>
+                        <thead>
+                          <tr style={{borderBottom:"1px solid var(--border)"}}>
+                            <th style={{padding:"8px 12px",textAlign:"left",fontSize:10,color:"var(--text3)",fontWeight:700,textTransform:"uppercase",letterSpacing:0.4}}>Produto</th>
+                            <th style={{padding:"8px 10px",textAlign:"right",fontSize:10,color:"var(--text3)",fontWeight:700,textTransform:"uppercase",letterSpacing:0.4}}>Contado</th>
+                            <th style={{padding:"8px 10px",textAlign:"right",fontSize:10,color:"var(--text3)",fontWeight:700,textTransform:"uppercase",letterSpacing:0.4}}>Mín.</th>
+                            <th style={{padding:"8px 10px",textAlign:"right",fontSize:10,color:"var(--text3)",fontWeight:700,textTransform:"uppercase",letterSpacing:0.4}}>Qtd a pedir</th>
+                            <th style={{padding:"8px 10px",textAlign:"left",fontSize:10,color:"var(--text3)",fontWeight:700,textTransform:"uppercase",letterSpacing:0.4,width:160}}>Fornecedor</th>
+                            <th style={{padding:"8px 10px",textAlign:"right",fontSize:10,color:"var(--text3)",fontWeight:700,textTransform:"uppercase",letterSpacing:0.4}}>Custo est.</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {group.items.map(it => {
+                            const opts = getSupplierOptions(it.productId);
+                            const multi = opts.length > 1;
+                            const isDirect = it.source === "pedido_direto";
+                            const isMisto = it.source === "misto";
+                            return (
+                              <tr key={it.productId} style={{borderTop:"1px solid var(--border)"}}>
+                                <td style={{padding:"8px 12px",color:"var(--text)",fontWeight:500}}>
+                                  {it.product.name}
+                                  <span style={{color:"var(--text3)",fontWeight:400,marginLeft:6,fontSize:11}}>({it.product.unit})</span>
+                                  {isDirect && <span style={{marginLeft:6,fontSize:10,padding:"1px 6px",borderRadius:6,background:"#fffbeb",color:"#d97706",fontWeight:700}}>🛒 direto</span>}
+                                  {isMisto && <span style={{marginLeft:6,fontSize:10,padding:"1px 6px",borderRadius:6,background:"#fffbeb",color:"#d97706",fontWeight:700}}>+{ftFmtNum(it.directPedido,0)} direto</span>}
+                                </td>
+                                <td style={{padding:"8px 10px",textAlign:"right",color:"var(--text3)",fontFamily:"'DM Mono',monospace"}}>{isDirect ? "—" : ftFmtNum(it.totalCounted,0)}</td>
+                                <td style={{padding:"8px 10px",textAlign:"right",color:"var(--text3)",fontFamily:"'DM Mono',monospace"}}>{isDirect ? "—" : (it.minStock != null ? ftFmtNum(it.minStock,0) : "—")}</td>
+                                <td style={{padding:"4px 10px",textAlign:"right"}}>
+                                  <input type="number" step="0.01" value={qtyEdits[it.productId] ?? it.qtySuggested}
+                                    onChange={e=>setQtyEdits(prev=>({...prev, [it.productId]: parseFloat(e.target.value.replace(",",".")) }))}
+                                    style={{...S.input,width:80,textAlign:"right",fontFamily:"'DM Mono',monospace",fontSize:12}} />
+                                  {it.conversionFactor > 1 && <div style={{fontSize:10,color:"var(--text3)",marginTop:2}}>(fator {it.conversionFactor})</div>}
+                                </td>
+                                <td style={{padding:"4px 10px"}}>
+                                  {multi ? (
+                                    <select value={it.linkId} onChange={e=>setOverrides(prev=>({...prev, [it.productId]: e.target.value}))}
+                                      style={{...S.input,fontSize:11,padding:"4px 6px",width:"100%"}}>
+                                      {opts.map(o => <option key={o.link.id} value={o.link.id}>{o.supplier.name}{o.link.preferred?" ★":""}</option>)}
+                                    </select>
+                                  ) : (
+                                    <span style={{fontSize:12,color:"var(--text3)"}}>{group.supplier.name}{it.link.preferred?" ★":""}</span>
+                                  )}
+                                </td>
+                                <td style={{padding:"8px 10px",textAlign:"right",color:it.estimatedCost?"var(--text2)":"var(--text3)",fontFamily:"'DM Mono',monospace",fontSize:11}}>
+                                  {it.estimatedCost ? fmt(it.estimatedCost) : "—"}
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
+        </div>
+      )}
+
+      {/* EM ANDAMENTO */}
+      {view === "andamento" && (
+        <div>
+          {activeOrders.length === 0 ? (
+            <div style={{padding:"40px 24px",textAlign:"center",color:"var(--text3)",fontSize:14,background:"var(--card-bg)",border:"1px solid var(--border)",borderRadius:12}}>
+              Nenhum pedido em andamento.
+            </div>
+          ) : (
+            <div style={{display:"flex",flexDirection:"column",gap:12}}>
+              {activeOrders.map(order => renderOrderCard(order, { showActions: true }))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* HISTÓRICO */}
+      {view === "historico" && (
+        <div>
+          {terminalOrders.length === 0 ? (
+            <div style={{padding:"40px 24px",textAlign:"center",color:"var(--text3)",fontSize:14,background:"var(--card-bg)",border:"1px solid var(--border)",borderRadius:12}}>
+              Nenhum pedido fechado neste ciclo.
+            </div>
+          ) : (
+            <div style={{display:"flex",flexDirection:"column",gap:12}}>
+              {terminalOrders.map(order => renderOrderCard(order, { showActions: false }))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* MODAL de Recebimento */}
+      {receiveFormOrder && (() => {
+        const order = (data.miseSupplierOrders || []).find(o => o.id === receiveFormOrder);
+        if (!order) { setTimeout(()=>setReceiveFormOrder(null),0); return null; }
+        const supplier = suppliers.find(s => s.id === order.supplierId);
+        return (
+          <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.5)",zIndex:1000,display:"flex",alignItems:"center",justifyContent:"center",padding:20}}>
+            <div style={{background:"var(--card-bg)",borderRadius:14,maxWidth:760,width:"100%",maxHeight:"85vh",overflow:"auto",boxShadow:"0 10px 40px rgba(0,0,0,0.3)"}}>
+              <div style={{padding:"14px 18px",borderBottom:"1px solid var(--border)",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                <div>
+                  <div style={{fontSize:11,color:"var(--text3)",fontWeight:700,textTransform:"uppercase",letterSpacing:0.4}}>Registrar recebimento</div>
+                  <div style={{fontSize:15,color:"var(--text)",fontWeight:700}}>{supplier?.name}</div>
+                </div>
+                <button onClick={()=>setReceiveFormOrder(null)} style={{...S.btnSecondary,fontSize:12,padding:"6px 12px"}}>Cancelar</button>
+              </div>
+              <div style={{padding:"14px 18px"}}>
+                <p style={{color:"var(--text3)",fontSize:12,lineHeight:1.5,margin:"0 0 14px"}}>
+                  Informe o que foi <b>recebido de fato</b> para cada item. Se bater com o aprovado, status = Recebido OK. Se houver diferença, você escolhe o status final.
+                </p>
+                <table style={{width:"100%",borderCollapse:"collapse",fontSize:13,marginBottom:14}}>
+                  <thead>
+                    <tr style={{background:"var(--bg2)",borderBottom:"1px solid var(--border)"}}>
+                      <th style={{padding:"8px 10px",textAlign:"left",fontSize:10,color:"var(--text3)",fontWeight:700,textTransform:"uppercase",letterSpacing:0.4}}>Produto</th>
+                      <th style={{padding:"8px 10px",textAlign:"right",fontSize:10,color:"var(--text3)",fontWeight:700,textTransform:"uppercase",letterSpacing:0.4,width:80}}>Aprovado</th>
+                      <th style={{padding:"8px 10px",textAlign:"right",fontSize:10,color:"var(--text3)",fontWeight:700,textTransform:"uppercase",letterSpacing:0.4,width:100}}>Recebido</th>
+                      <th style={{padding:"8px 10px",textAlign:"right",fontSize:10,color:"var(--text3)",fontWeight:700,textTransform:"uppercase",letterSpacing:0.4,width:60}}>Diff</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(order.items || []).map((it, idx) => {
+                      const received = receiveDrafts[idx] != null ? parseFloat(String(receiveDrafts[idx]).replace(",",".")) : it.qtyApproved;
+                      const diff = (received || 0) - (it.qtyApproved || 0);
+                      return (
+                        <tr key={idx} style={{borderTop:"1px solid var(--border)"}}>
+                          <td style={{padding:"8px 10px",color:"var(--text)",fontWeight:500}}>{it.productName}</td>
+                          <td style={{padding:"8px 10px",textAlign:"right",color:"var(--text2)",fontFamily:"'DM Mono',monospace"}}>{it.qtyApproved}</td>
+                          <td style={{padding:"4px 10px"}}>
+                            <input type="number" step="0.01" value={receiveDrafts[idx] ?? it.qtyApproved}
+                              onChange={e=>setReceiveDrafts(prev=>({...prev, [idx]: e.target.value}))}
+                              style={{...S.input,width:"100%",textAlign:"right",fontFamily:"'DM Mono',monospace",fontSize:12}} />
+                          </td>
+                          <td style={{padding:"8px 10px",textAlign:"right",color:diff===0?"var(--text3)":(diff<0?"#dc2626":"#d97706"),fontFamily:"'DM Mono',monospace",fontWeight:diff===0?400:700,fontSize:11}}>
+                            {diff === 0 ? "0" : (diff > 0 ? `+${diff}` : diff)}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+                <div style={{marginBottom:14}}>
+                  <label style={{...S.label,fontSize:11}}>Observação (opcional)</label>
+                  <textarea value={receiveNote} onChange={e=>setReceiveNote(e.target.value)} placeholder="Detalhes sobre a entrega, divergências, etc." style={{...S.input,minHeight:60,fontFamily:"inherit",resize:"vertical"}} />
+                </div>
+                <div style={{display:"flex",gap:8,flexWrap:"wrap",justifyContent:"flex-end"}}>
+                  <button onClick={()=>submitReceipt(order, "rejected")} style={{...S.btnSecondary,fontSize:12,padding:"8px 14px",color:"var(--red)",borderColor:"var(--red)44"}}>Recusar / Devolvido</button>
+                  <button onClick={()=>submitReceipt(order, "awaiting_correction")} style={{...S.btnSecondary,fontSize:12,padding:"8px 14px",color:"#d97706",borderColor:"#d9770644"}}>Aguardando correção</button>
+                  <button onClick={()=>submitReceipt(order)} style={{background:miseAc,color:"#fff",border:"none",borderRadius:8,padding:"8px 18px",fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:"'DM Sans',sans-serif"}}>✓ Confirmar recebimento</button>
+                </div>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+    </div>
+  );
+
+  function renderOrderCard(order, { showActions }) {
+    const supplier = suppliers.find(s => s.id === order.supplierId);
+    const st = MISE_ORDER_STATUS[order.status] || { label: order.status, color: "var(--text3)", bg: "var(--bg2)" };
+    const isExpanded = expandedOrder === order.id;
+    const totalApproved = (order.items || []).reduce((sum, it) => sum + (it.qtyApproved || 0), 0);
+    const estCost = (order.items || []).reduce((sum, it) => sum + ((typeof it.unitPrice === "number" ? it.unitPrice : 0) * ((it.qtyApproved || 0) / (it.conversionFactor || 1))), 0);
+    return (
+      <div key={order.id} style={{background:"var(--card-bg)",border:"1px solid var(--border)",borderRadius:12,overflow:"hidden"}}>
+        <div style={{padding:"12px 16px",display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:8,cursor:"pointer"}} onClick={()=>setExpandedOrder(isExpanded ? null : order.id)}>
+          <div style={{flex:1,minWidth:160}}>
+            <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
+              <span style={{fontSize:14,color:"var(--text)",fontWeight:700}}>🚚 {supplier?.name ?? "Fornecedor removido"}</span>
+              <span style={{fontSize:10,padding:"2px 8px",borderRadius:10,background:st.bg,color:st.color,fontWeight:700,letterSpacing:0.4}}>{st.label.toUpperCase()}</span>
+            </div>
+            <div style={{fontSize:11,color:"var(--text3)",marginTop:2}}>
+              {(order.items || []).length} ite{(order.items||[]).length===1?"m":"ns"} · {totalApproved} unidades
+              {estCost > 0 && <span style={{marginLeft:6,fontFamily:"'DM Mono',monospace"}}>· est. {fmt(estCost)}</span>}
+              {order.sentAt && <span style={{marginLeft:6}}>· enviado {fmtDate(order.sentAt.slice(0,10))}</span>}
+              {order.receivedAt && <span style={{marginLeft:6}}>· recebido {fmtDate(order.receivedAt.slice(0,10))}</span>}
+            </div>
+          </div>
+          {showActions && (
+            <div style={{display:"flex",gap:6,flexWrap:"wrap"}} onClick={e=>e.stopPropagation()}>
+              {order.status === "approved" && (
+                <button onClick={()=>sendOrder(order)} style={{...S.btnSecondary,fontSize:11,padding:"6px 12px",color:"#2563eb",borderColor:"#2563eb66"}}>📱 Enviar WhatsApp</button>
+              )}
+              {(order.status === "sent" || order.status === "awaiting_correction") && (
+                <button onClick={()=>openReceiveForm(order)} style={{background:miseAc,color:"#fff",border:"none",borderRadius:8,padding:"6px 12px",fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"'DM Sans',sans-serif"}}>📦 Registrar recebimento</button>
+              )}
+              {order.status === "approved" && (
+                <button onClick={()=>{ if(window.confirm("Descartar este pedido aprovado?")) onUpdate("miseSupplierOrders", (data.miseSupplierOrders || []).filter(o => o.id !== order.id)); }} style={{...S.btnSecondary,fontSize:11,padding:"6px 10px",color:"var(--red)",borderColor:"var(--red)44"}}>✕</button>
+              )}
+            </div>
+          )}
+          <span style={{color:"var(--text3)",fontSize:14}}>{isExpanded ? "▼" : "▶"}</span>
+        </div>
+        {isExpanded && (
+          <div style={{borderTop:"1px solid var(--border)",padding:"10px 16px"}}>
+            <table style={{width:"100%",borderCollapse:"collapse",fontSize:12}}>
+              <thead>
+                <tr style={{background:"var(--bg2)"}}>
+                  <th style={{padding:"6px 10px",textAlign:"left",fontSize:10,color:"var(--text3)",fontWeight:700,textTransform:"uppercase",letterSpacing:0.4}}>Produto</th>
+                  <th style={{padding:"6px 10px",textAlign:"right",fontSize:10,color:"var(--text3)",fontWeight:700,textTransform:"uppercase",letterSpacing:0.4}}>Aprovado</th>
+                  {order.items?.some(it => it.qtyReceived != null) && <th style={{padding:"6px 10px",textAlign:"right",fontSize:10,color:"var(--text3)",fontWeight:700,textTransform:"uppercase",letterSpacing:0.4}}>Recebido</th>}
+                  {order.items?.some(it => it.qtyReceived != null) && <th style={{padding:"6px 10px",textAlign:"right",fontSize:10,color:"var(--text3)",fontWeight:700,textTransform:"uppercase",letterSpacing:0.4}}>Diff</th>}
+                </tr>
+              </thead>
+              <tbody>
+                {(order.items || []).map((it, idx) => {
+                  const hasReceived = it.qtyReceived != null;
+                  const diff = hasReceived ? (it.qtyReceived - it.qtyApproved) : null;
+                  return (
+                    <tr key={idx} style={{borderTop:"1px solid var(--border)"}}>
+                      <td style={{padding:"6px 10px",color:"var(--text)"}}>{it.productName}</td>
+                      <td style={{padding:"6px 10px",textAlign:"right",color:"var(--text2)",fontFamily:"'DM Mono',monospace"}}>{it.qtyApproved}</td>
+                      {hasReceived && <td style={{padding:"6px 10px",textAlign:"right",color:"var(--text)",fontWeight:600,fontFamily:"'DM Mono',monospace"}}>{it.qtyReceived}</td>}
+                      {hasReceived && <td style={{padding:"6px 10px",textAlign:"right",color:diff===0?"var(--text3)":(diff<0?"#dc2626":"#d97706"),fontFamily:"'DM Mono',monospace",fontWeight:diff===0?400:700}}>{diff===0?"0":(diff>0?`+${diff}`:diff)}</td>}
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+            {order.receiveNote && <div style={{marginTop:10,padding:"8px 12px",background:"var(--bg2)",borderRadius:8,fontSize:12,color:"var(--text2)"}}>📝 {order.receiveNote}</div>}
+            {order.history && order.history.length > 0 && (
+              <div style={{marginTop:10}}>
+                <div style={{fontSize:10,color:"var(--text3)",fontWeight:700,textTransform:"uppercase",letterSpacing:0.4,marginBottom:4}}>Histórico</div>
+                <div style={{display:"flex",flexDirection:"column",gap:2}}>
+                  {order.history.map((h, i) => (
+                    <div key={i} style={{fontSize:11,color:"var(--text3)"}}>
+                      <span style={{color:MISE_ORDER_STATUS[h.status]?.color || "var(--text3)",fontWeight:600}}>{MISE_ORDER_STATUS[h.status]?.label || h.status}</span>
+                      {" — "}{new Date(h.ts).toLocaleString("pt-BR")}
+                      {h.by && <span> por {h.by}</span>}
+                      {h.note && <span style={{fontStyle:"italic"}}> · {h.note}</span>}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    );
+  }
 }
 
 //
@@ -16147,7 +20671,7 @@ function ManagerPinChange({ manager, onDone, onBack }) {
 //
 // LOGIN
 //
-function UnifiedLogin({ owners, managers, employees, restaurants, onLoginOwner, onLoginManager, onLoginEmployee, onSetupFirst, onGoHome, toggleTheme, theme, dataLoaded }) {
+function UnifiedLogin({ owners, managers, employees, restaurants, pessoas, onLoginOwner, onLoginManager, onLoginEmployee, onLoginOperational, onSetupFirst, onGoHome, onUpdatePessoas, toggleTheme, theme, dataLoaded }) {
   const [credential, setCredential] = useState("");
   const [pin, setPin] = useState("");
   const [err, setErr] = useState("");
@@ -16155,6 +20679,11 @@ function UnifiedLogin({ owners, managers, employees, restaurants, onLoginOwner, 
   const [blockedUntil, setBlockedUntil] = useState(null);
   const [termsAccepted, setTermsAccepted] = useState(() => localStorage.getItem("apptip_terms") === "1");
   const [choices, setChoices] = useState(null); // { name, options: [{label, icon, action}] }
+  // PIN change obrigatório para pessoa migrada
+  const [pinChangePessoa, setPinChangePessoa] = useState(null); // pessoa
+  const [newPin1, setNewPin1] = useState("");
+  const [newPin2, setNewPin2] = useState("");
+  const [pinChangeErr, setPinChangeErr] = useState("");
 
   const isBlocked = blockedUntil && new Date() < blockedUntil;
   const isEmpId = /^[A-Za-z]{2,4}\d+$/.test(credential.trim());
@@ -16169,6 +20698,97 @@ function UnifiedLogin({ owners, managers, employees, restaurants, onLoginOwner, 
     return () => clearInterval(t);
   }, [blockedUntil]);
 
+  // Monta opções de login a partir das permissões da pessoa em cada restaurante onde ela tem acesso
+  function buildLoginChoicesFromPessoa(pessoa) {
+    const options = [];
+    const multiRestaurant = (pessoa.restaurantIds || []).length > 1;
+    (pessoa.restaurantIds || []).forEach(rid => {
+      const rest = restaurants.find(r => r.id === rid);
+      const restName = rest?.name || "Restaurante";
+      const inadimplente = rest?.financeiro?.status === "inadimplente";
+      const perms = pessoa.permissions?.[rid] || { operational: {}, admin: {}, special: {} };
+      const opKeys = Object.keys(perms.operational || {}).filter(k => perms.operational[k] === true);
+      const admKeys = Object.keys(perms.admin || {}).filter(k => perms.admin[k] === true);
+      const isTeam = !!pessoa.isTeam?.[rid];
+      // Empregado
+      if (isTeam && !inadimplente) {
+        options.push({
+          label: multiRestaurant ? `Empregado · ${restName}` : "Empregado",
+          icon: "👤",
+          action: () => {
+            setChoices(null);
+            // Usa linkedEmployeeId para localizar o employee no sistema legado
+            const emp = employees.find(e => e.id === pessoa.linkedEmployeeId) ||
+                         employees.find(e => e.restaurantId === rid && (e.cpf || "").replace(/\D/g,"") === (pessoa.cpf || "").replace(/\D/g,""));
+            if (emp) {
+              localStorage.setItem("apptip_empid", emp.id);
+              localStorage.setItem("apptip_userid", emp.id);
+              onLoginEmployee(emp);
+            } else {
+              alert("Não foi possível localizar seu registro de empregado. Avise o gestor.");
+            }
+          },
+        });
+      }
+      // Gestor Operacional
+      if (opKeys.length > 0 && !inadimplente) {
+        options.push({
+          label: multiRestaurant ? `Gestor Operacional · ${restName}` : "Gestor Operacional",
+          icon: "⚙️",
+          action: () => {
+            setChoices(null);
+            const emp = employees.find(e => e.id === pessoa.linkedEmployeeId) ||
+                         employees.find(e => e.restaurantId === rid && (e.cpf || "").replace(/\D/g,"") === (pessoa.cpf || "").replace(/\D/g,""));
+            if (emp && onLoginOperational) {
+              onLoginOperational(emp);
+            } else {
+              alert("Para entrar como Gestor Operacional, você precisa estar cadastrado como membro da equipe. Avise o gestor.");
+            }
+          },
+        });
+      }
+      // Gestor Administrativo
+      if (admKeys.length > 0) {
+        options.push({
+          label: multiRestaurant ? `Gestor Adm. · ${restName}` : "Gestor Adm.",
+          icon: "📊",
+          action: () => {
+            setChoices(null);
+            const mgr = managers.find(m => m.id === pessoa.linkedManagerId) ||
+                         managers.find(m => (m.restaurantIds || []).includes(rid) && (m.cpf || "").replace(/\D/g,"") === (pessoa.cpf || "").replace(/\D/g,""));
+            if (mgr) {
+              onLoginManager(mgr);
+            } else {
+              alert("Não foi possível localizar seu registro de gestor. Avise o administrador.");
+            }
+          },
+        });
+      }
+    });
+    return options;
+  }
+
+  function submitNewPin() {
+    if (newPin1.length !== 4 || !/^\d{4}$/.test(newPin1)) { setPinChangeErr("PIN deve ter exatamente 4 dígitos numéricos."); return; }
+    if (newPin1 !== newPin2) { setPinChangeErr("PINs não coincidem."); return; }
+    const cpfDigits = (pinChangePessoa.cpf || "").replace(/\D/g, "");
+    if (newPin1 === cpfDigits.slice(0, 4)) { setPinChangeErr("O novo PIN não pode ser igual aos 4 primeiros dígitos do seu CPF (ainda é o inicial)."); return; }
+
+    // Atualiza pessoa
+    const updated = pessoas.map(p => p.id === pinChangePessoa.id ? { ...p, pin: newPin1, mustChangePin: false } : p);
+    onUpdatePessoas(updated);
+    // Sincroniza no legado
+    if (pinChangePessoa.linkedEmployeeId) {
+      // App() vai se virar; aqui só atualizamos pessoa pra a UI continuar
+    }
+    // Prossegue com o login
+    const updatedPessoa = { ...pinChangePessoa, pin: newPin1, mustChangePin: false };
+    setPinChangePessoa(null);
+    const options = buildLoginChoicesFromPessoa(updatedPessoa);
+    if (options.length === 1) options[0].action();
+    else if (options.length > 1) setChoices({ name: updatedPessoa.name, options });
+  }
+
   function tryLogin() {
     if (isBlocked || !termsAccepted) return;
     const clean = credential.trim();
@@ -16180,6 +20800,26 @@ function UnifiedLogin({ owners, managers, employees, restaurants, onLoginOwner, 
     if (noData && !dataLoaded) {
       setErr("⚠️ Erro de conexão — os dados não foram carregados. Verifique sua internet e recarregue a página.");
       return;
+    }
+
+    // ── FLUXO NOVO (pessoas) ── Tenta primeiro; fallback para legado
+    if (!isEmpId && (pessoas || []).length > 0) {
+      const pessoa = pessoas.find(p => (p.cpf || "").replace(/\D/g, "") === cleanCpf && String(p.pin) === cleanPin);
+      if (pessoa) {
+        if (pessoa.mustChangePin) {
+          setErr(""); setAttempts(0);
+          setPinChangePessoa(pessoa);
+          setNewPin1(""); setNewPin2(""); setPinChangeErr("");
+          return;
+        }
+        // Monta opções a partir das permissões em cada restaurante
+        const options = buildLoginChoicesFromPessoa(pessoa);
+        if (options.length === 0) {
+          setErr("Você não tem acesso a nenhum perfil. Peça ao gestor para conceder permissões."); return;
+        }
+        if (options.length === 1) { setErr(""); setAttempts(0); options[0].action(); return; }
+        setErr(""); setAttempts(0); setChoices({ name: pessoa.name, options }); return;
+      }
     }
 
     if (!isEmpId) {
@@ -16275,6 +20915,34 @@ function UnifiedLogin({ owners, managers, employees, restaurants, onLoginOwner, 
       else setErr(`Credenciais incorretas. ${5-na} tentativa${5-na!==1?"s":""} restante${5-na!==1?"s":""}.`);
     }
   }
+
+  // Tela de troca obrigatória de PIN (primeiro login)
+  if (pinChangePessoa) return (
+    <div style={{minHeight:"100vh",background:"var(--bg)",display:"flex",alignItems:"center",justifyContent:"center",padding:24,fontFamily:"'DM Sans',sans-serif"}}>
+      <div style={{maxWidth:400,width:"100%",background:"var(--card-bg)",borderRadius:14,padding:28,boxShadow:"0 8px 32px rgba(0,0,0,0.08)"}}>
+        <div style={{textAlign:"center",marginBottom:24}}>
+          <div style={{fontSize:36,marginBottom:12}}>🔑</div>
+          <h2 style={{color:"var(--text)",margin:"0 0 8px",fontSize:22,fontWeight:800}}>Defina seu novo PIN</h2>
+          <p style={{color:"var(--text3)",fontSize:13,lineHeight:1.5}}>
+            Olá, {pinChangePessoa.name?.split(" ")[0]}! Este é seu primeiro acesso. Por segurança, defina um novo PIN de 4 dígitos que só você conhece.
+          </p>
+        </div>
+        <div style={{display:"flex",flexDirection:"column",gap:12}}>
+          <div>
+            <label style={S.label}>Novo PIN (4 dígitos)</label>
+            <input type="password" inputMode="numeric" maxLength={4} value={newPin1} onChange={e=>setNewPin1(e.target.value.replace(/\D/g,"").slice(0,4))} placeholder="••••" style={{...S.input,letterSpacing:8,fontSize:22,textAlign:"center",fontFamily:"'DM Mono',monospace"}}/>
+          </div>
+          <div>
+            <label style={S.label}>Confirmar PIN</label>
+            <input type="password" inputMode="numeric" maxLength={4} value={newPin2} onChange={e=>setNewPin2(e.target.value.replace(/\D/g,"").slice(0,4))} placeholder="••••" style={{...S.input,letterSpacing:8,fontSize:22,textAlign:"center",fontFamily:"'DM Mono',monospace"}} onKeyDown={e=>e.key==="Enter"&&submitNewPin()}/>
+          </div>
+          {pinChangeErr && <div style={{background:"var(--red-bg)",border:"1px solid var(--red)33",borderRadius:8,padding:"8px 12px",color:"var(--red)",fontSize:13}}>{pinChangeErr}</div>}
+          <button onClick={submitNewPin} style={S.btnPrimary}>Salvar e Continuar →</button>
+          <button onClick={()=>{setPinChangePessoa(null);setPin("");setNewPin1("");setNewPin2("");}} style={{...S.btnSecondary,textAlign:"center"}}>← Cancelar</button>
+        </div>
+      </div>
+    </div>
+  );
 
   // Tela de escolha de papel
   if (choices) return (
@@ -17599,6 +22267,24 @@ export default function App() {
   const [meetingPendencias,   setMeetingPendencias]   = useState([]);
   const [inbox,               setInbox]               = useState([]);
   const [inboxFolders,        setInboxFolders]        = useState({});
+  // AppMise — Contagens
+  const [miseCategories,  setMiseCategories]  = useState([]);
+  const [miseStocks,      setMiseStocks]      = useState([]);
+  const [miseAssignments, setMiseAssignments] = useState([]);
+  const [miseItems,       setMiseItems]       = useState([]);
+  const [miseCycles,      setMiseCycles]      = useState([]);
+  const [miseCounts,      setMiseCounts]      = useState([]);
+  const [miseSuppliers,       setMiseSuppliers]        = useState([]);
+  const [miseProductSuppliers,setMiseProductSuppliers] = useState([]);
+  const [miseSupplierOrders,  setMiseSupplierOrders]   = useState([]);
+  const [miseChecklistTemplates, setMiseChecklistTemplates] = useState([]);
+  const [miseChecklistRuns,      setMiseChecklistRuns]      = useState([]);
+  const [pessoas,             setPessoas]              = useState([]);
+  const [pessoasMigratedAt,   setPessoasMigratedAt]    = useState(null);
+  // AppMise — Fichas Técnicas
+  const [miseFtInsumos,      setMiseFtInsumos]      = useState([]);
+  const [miseFtEquipamentos, setMiseFtEquipamentos] = useState({});
+  const [miseFtDishes,       setMiseFtDishes]       = useState([]);
 
   useEffect(() => {
     const savedId = currentUserId;
@@ -17626,7 +22312,7 @@ export default function App() {
       setLoadProgress("Preparando o sistema...");
 
       const keys = keyNames;
-      const map = { owners:setOwners, managers:setManagers, restaurants:setRestaurants, employees:setEmployees, roles:setRoles, tips:setTips, splits:setSplits, schedules:setSchedules, communications:setCommunications, commAcks:setCommAcks, faq:setFaq, dpMessages:setDpMessages, workSchedules:setWorkSchedules, notifications:setNotifications, noTipDays:setNoTipDays, trash:setTrash, schedTemplates:setSchedTemplates, schedDrafts:setSchedDrafts, scheduleVersions:setScheduleVersions, tipVersions:setTipVersions, vtConfig:setVtConfig, vtMonthly:setVtMonthly, vtPayments:setVtPayments, incidents:setIncidents, feedbacks:setFeedbacks, devChecklists:setDevChecklists, scheduleAdjustments:setScheduleAdjustments, scheduleStatus:setScheduleStatus, schedulePrevista:setSchedulePrevista, employeeGoals:setEmployeeGoals, delays:setDelays, tipApprovals:setTipApprovals, meetingPlans:setMeetingPlans, meetingIdeas:setMeetingIdeas, meetingAgendas:setMeetingAgendas, meetingActions:setMeetingActions, meetingOccurrences:setMeetingOccurrences, meetingPendencias:setMeetingPendencias, inbox:setInbox, inboxFolders:setInboxFolders };
+      const map = { owners:setOwners, managers:setManagers, restaurants:setRestaurants, employees:setEmployees, roles:setRoles, tips:setTips, splits:setSplits, schedules:setSchedules, communications:setCommunications, commAcks:setCommAcks, faq:setFaq, dpMessages:setDpMessages, workSchedules:setWorkSchedules, notifications:setNotifications, noTipDays:setNoTipDays, trash:setTrash, schedTemplates:setSchedTemplates, schedDrafts:setSchedDrafts, scheduleVersions:setScheduleVersions, tipVersions:setTipVersions, vtConfig:setVtConfig, vtMonthly:setVtMonthly, vtPayments:setVtPayments, incidents:setIncidents, feedbacks:setFeedbacks, devChecklists:setDevChecklists, scheduleAdjustments:setScheduleAdjustments, scheduleStatus:setScheduleStatus, schedulePrevista:setSchedulePrevista, employeeGoals:setEmployeeGoals, delays:setDelays, tipApprovals:setTipApprovals, meetingPlans:setMeetingPlans, meetingIdeas:setMeetingIdeas, meetingAgendas:setMeetingAgendas, meetingActions:setMeetingActions, meetingOccurrences:setMeetingOccurrences, meetingPendencias:setMeetingPendencias, inbox:setInbox, inboxFolders:setInboxFolders, miseCategories:setMiseCategories, miseStocks:setMiseStocks, miseAssignments:setMiseAssignments, miseItems:setMiseItems, miseCycles:setMiseCycles, miseCounts:setMiseCounts, miseSuppliers:setMiseSuppliers, miseProductSuppliers:setMiseProductSuppliers, miseSupplierOrders:setMiseSupplierOrders, miseChecklistTemplates:setMiseChecklistTemplates, miseChecklistRuns:setMiseChecklistRuns, miseFtInsumos:setMiseFtInsumos, miseFtEquipamentos:setMiseFtEquipamentos, miseFtDishes:setMiseFtDishes, pessoas:setPessoas, pessoasMigratedAt:setPessoasMigratedAt };
       const loaded_data = {};
       let successCount = 0;
       keys.forEach((k, i) => {
@@ -17788,7 +22474,21 @@ export default function App() {
     return () => { clearTimeout(slowTimer); clearTimeout(verySlowTimer); };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const data = { owners, managers, restaurants, employees, roles, tips, splits, schedules, communications, commAcks, faq, dpMessages, workSchedules, notifications, noTipDays, trash, schedTemplates, schedDrafts, scheduleVersions, tipVersions, vtConfig, vtMonthly, vtPayments, incidents, feedbacks, devChecklists, scheduleAdjustments, scheduleStatus, schedulePrevista, employeeGoals, delays, tipApprovals, meetingPlans, meetingIdeas, meetingAgendas, meetingActions, meetingOccurrences, meetingPendencias, inbox, inboxFolders };
+  // Migração automática: employees + managers → pessoas
+  // Roda uma vez quando `loaded` vira true e `pessoas` está vazio
+  useEffect(() => {
+    if (!loaded) return;
+    if (pessoas && pessoas.length > 0) return; // já migrou
+    if ((employees || []).length === 0 && (managers || []).length === 0) return; // nada a migrar
+    const migrated = pessoasMigrate(employees, managers);
+    if (migrated.length > 0) {
+      console.log(`[pessoas] Migração automática: ${migrated.length} pessoa(s) geradas a partir de ${(employees||[]).length} employee(s) + ${(managers||[]).length} manager(s)`);
+      handleUpdate("pessoas", migrated);
+      handleUpdate("pessoasMigratedAt", new Date().toISOString());
+    }
+  }, [loaded, employees.length, managers.length]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const data = { owners, managers, restaurants, employees, roles, tips, splits, schedules, communications, commAcks, faq, dpMessages, workSchedules, notifications, noTipDays, trash, schedTemplates, schedDrafts, scheduleVersions, tipVersions, vtConfig, vtMonthly, vtPayments, incidents, feedbacks, devChecklists, scheduleAdjustments, scheduleStatus, schedulePrevista, employeeGoals, delays, tipApprovals, meetingPlans, meetingIdeas, meetingAgendas, meetingActions, meetingOccurrences, meetingPendencias, inbox, inboxFolders, miseCategories, miseStocks, miseAssignments, miseItems, miseCycles, miseCounts, miseSuppliers, miseProductSuppliers, miseSupplierOrders, miseChecklistTemplates, miseChecklistRuns, miseFtInsumos, miseFtEquipamentos, miseFtDishes, pessoas, pessoasMigratedAt };
 
   async function handleUpdate(field, value) {
     if (field === "_toast") { setToast(value); return; }
@@ -17797,8 +22497,8 @@ export default function App() {
       setToast("⚠️ Você está offline — conecte à internet para salvar alterações");
       return;
     }
-    const setters = { owners:setOwners, managers:setManagers, restaurants:setRestaurants, employees:setEmployees, roles:setRoles, tips:setTips, splits:setSplits, schedules:setSchedules, communications:setCommunications, commAcks:setCommAcks, faq:setFaq, dpMessages:setDpMessages, workSchedules:setWorkSchedules, notifications:setNotifications, noTipDays:setNoTipDays, trash:setTrash, schedTemplates:setSchedTemplates, schedDrafts:setSchedDrafts, scheduleVersions:setScheduleVersions, tipVersions:setTipVersions, vtConfig:setVtConfig, vtMonthly:setVtMonthly, vtPayments:setVtPayments, incidents:setIncidents, feedbacks:setFeedbacks, devChecklists:setDevChecklists, scheduleAdjustments:setScheduleAdjustments, scheduleStatus:setScheduleStatus, schedulePrevista:setSchedulePrevista, employeeGoals:setEmployeeGoals, delays:setDelays, tipApprovals:setTipApprovals, meetingPlans:setMeetingPlans, meetingIdeas:setMeetingIdeas, meetingAgendas:setMeetingAgendas, meetingActions:setMeetingActions, meetingOccurrences:setMeetingOccurrences, meetingPendencias:setMeetingPendencias, inbox:setInbox, inboxFolders:setInboxFolders };
-    const keys    = { owners:K.owners, managers:K.managers, restaurants:K.restaurants, employees:K.employees, roles:K.roles, tips:K.tips, splits:K.splits, schedules:K.schedules, communications:K.communications, commAcks:K.commAcks, faq:K.faq, dpMessages:K.dpMessages, workSchedules:K.workSchedules, notifications:K.notifications, noTipDays:K.noTipDays, trash:K.trash, schedTemplates:K.schedTemplates, schedDrafts:K.schedDrafts, scheduleVersions:K.scheduleVersions, tipVersions:K.tipVersions, vtConfig:K.vtConfig, vtMonthly:K.vtMonthly, vtPayments:K.vtPayments, incidents:K.incidents, feedbacks:K.feedbacks, devChecklists:K.devChecklists, scheduleAdjustments:K.scheduleAdjustments, scheduleStatus:K.scheduleStatus, schedulePrevista:K.schedulePrevista, employeeGoals:K.employeeGoals, delays:K.delays, tipApprovals:K.tipApprovals, meetingPlans:K.meetingPlans, meetingIdeas:K.meetingIdeas, meetingAgendas:K.meetingAgendas, meetingActions:K.meetingActions, inbox:K.inbox, inboxFolders:K.inboxFolders };
+    const setters = { owners:setOwners, managers:setManagers, restaurants:setRestaurants, employees:setEmployees, roles:setRoles, tips:setTips, splits:setSplits, schedules:setSchedules, communications:setCommunications, commAcks:setCommAcks, faq:setFaq, dpMessages:setDpMessages, workSchedules:setWorkSchedules, notifications:setNotifications, noTipDays:setNoTipDays, trash:setTrash, schedTemplates:setSchedTemplates, schedDrafts:setSchedDrafts, scheduleVersions:setScheduleVersions, tipVersions:setTipVersions, vtConfig:setVtConfig, vtMonthly:setVtMonthly, vtPayments:setVtPayments, incidents:setIncidents, feedbacks:setFeedbacks, devChecklists:setDevChecklists, scheduleAdjustments:setScheduleAdjustments, scheduleStatus:setScheduleStatus, schedulePrevista:setSchedulePrevista, employeeGoals:setEmployeeGoals, delays:setDelays, tipApprovals:setTipApprovals, meetingPlans:setMeetingPlans, meetingIdeas:setMeetingIdeas, meetingAgendas:setMeetingAgendas, meetingActions:setMeetingActions, meetingOccurrences:setMeetingOccurrences, meetingPendencias:setMeetingPendencias, inbox:setInbox, inboxFolders:setInboxFolders, miseCategories:setMiseCategories, miseStocks:setMiseStocks, miseAssignments:setMiseAssignments, miseItems:setMiseItems, miseCycles:setMiseCycles, miseCounts:setMiseCounts, miseSuppliers:setMiseSuppliers, miseProductSuppliers:setMiseProductSuppliers, miseSupplierOrders:setMiseSupplierOrders, miseChecklistTemplates:setMiseChecklistTemplates, miseChecklistRuns:setMiseChecklistRuns, miseFtInsumos:setMiseFtInsumos, miseFtEquipamentos:setMiseFtEquipamentos, miseFtDishes:setMiseFtDishes, pessoas:setPessoas, pessoasMigratedAt:setPessoasMigratedAt };
+    const keys    = { owners:K.owners, managers:K.managers, restaurants:K.restaurants, employees:K.employees, roles:K.roles, tips:K.tips, splits:K.splits, schedules:K.schedules, communications:K.communications, commAcks:K.commAcks, faq:K.faq, dpMessages:K.dpMessages, workSchedules:K.workSchedules, notifications:K.notifications, noTipDays:K.noTipDays, trash:K.trash, schedTemplates:K.schedTemplates, schedDrafts:K.schedDrafts, scheduleVersions:K.scheduleVersions, tipVersions:K.tipVersions, vtConfig:K.vtConfig, vtMonthly:K.vtMonthly, vtPayments:K.vtPayments, incidents:K.incidents, feedbacks:K.feedbacks, devChecklists:K.devChecklists, scheduleAdjustments:K.scheduleAdjustments, scheduleStatus:K.scheduleStatus, schedulePrevista:K.schedulePrevista, employeeGoals:K.employeeGoals, delays:K.delays, tipApprovals:K.tipApprovals, meetingPlans:K.meetingPlans, meetingIdeas:K.meetingIdeas, meetingAgendas:K.meetingAgendas, meetingActions:K.meetingActions, inbox:K.inbox, inboxFolders:K.inboxFolders, miseCategories:K.miseCategories, miseStocks:K.miseStocks, miseAssignments:K.miseAssignments, miseItems:K.miseItems, miseCycles:K.miseCycles, miseCounts:K.miseCounts, miseSuppliers:K.miseSuppliers, miseProductSuppliers:K.miseProductSuppliers, miseSupplierOrders:K.miseSupplierOrders, miseChecklistTemplates:K.miseChecklistTemplates, miseChecklistRuns:K.miseChecklistRuns, miseFtInsumos:K.miseFtInsumos, miseFtEquipamentos:K.miseFtEquipamentos, miseFtDishes:K.miseFtDishes, pessoas:K.pessoas, pessoasMigratedAt:K.pessoasMigratedAt };
     // Support functional updates to prevent stale-state race conditions:
     // When value is a function, it receives the latest state (like setState(prev => ...))
     let resolvedValue;
@@ -17875,6 +22575,7 @@ export default function App() {
       {view === "login" && (
         <UnifiedLogin
           owners={owners} managers={managers} employees={employees} restaurants={restaurants}
+          pessoas={pessoas}
           dataLoaded={_loadSuccess}
           onLoginOwner={u=>{setCurrentUser(u);setUserRole("super");setView("super");}}
           onLoginManager={u=>{setCurrentUser(u);setUserRole("manager");setView("manager");}}
@@ -17885,6 +22586,15 @@ export default function App() {
             setUserRole("employee");
             setView("employee");
           }}
+          onLoginOperational={emp=>{
+            localStorage.setItem("apptip_role", "operational");
+            localStorage.setItem("apptip_userid", emp.id);
+            localStorage.setItem("apptip_empid", emp.id);
+            setUserRole("operational");
+            setCurrentUser(emp);
+            setView("operational");
+          }}
+          onUpdatePessoas={next=>handleUpdate("pessoas", next)}
           onGoHome={()=>setView("home")}
           toggleTheme={toggleTheme} theme={theme}
         />
