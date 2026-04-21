@@ -9293,7 +9293,7 @@ function EmpTrilhaView({ empId, employees, roles, schedules, incidents, feedback
   );
 }
 
-function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, splits, schedules, onUpdate, perms, isOwner, data, currentUser, privacyMask, mobileOnly }) {
+function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, splits, schedules, onUpdate, perms, isOwner, data, currentUser, privacyMask, mobileOnly, onEnterOperational }) {
   const now = new Date();
   const [year, setYear] = useState(now.getFullYear());
   const [month, setMonth] = useState(now.getMonth());
@@ -9767,14 +9767,23 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
 
   return (
     <div style={{ fontFamily:"'DM Sans',sans-serif" }}>
-      {/* Tab groups — row 1: group pills */}
-      <div style={{ display:"flex", gap:2, padding:"8px 8px 0", background:"var(--header-bg)" }}>
+      {/* Tab groups — row 1: group pills + shortcut owner */}
+      <div style={{ display:"flex", gap:2, padding:"8px 8px 0", background:"var(--header-bg)", alignItems:"center" }}>
         {TAB_GROUPS_FINAL.map(g => (
           <button key={g.id} onClick={() => switchGroup(g.id)}
             style={{ padding:"6px 10px", background:tabGroup===g.id?ac:"transparent", border:"none", borderRadius:16, color:tabGroup===g.id?"#fff":"var(--text3)", cursor:"pointer", fontSize:12, fontFamily:"'DM Sans',sans-serif", fontWeight:tabGroup===g.id?700:500, whiteSpace:"nowrap", transition:"all .15s" }}>
             {g.label}
           </button>
         ))}
+        {isOwner && onEnterOperational && (
+          <>
+            <div style={{flex:1}} />
+            <button onClick={()=>onEnterOperational(rid)} title="Entrar no Portal do Gestor Operacional deste restaurante com todas as áreas desbloqueadas (master do AppTip)"
+              style={{padding:"6px 10px",background:"transparent",border:`1px solid #7c9e5e66`,borderRadius:16,color:"#7c9e5e",cursor:"pointer",fontSize:11,fontFamily:"'DM Sans',sans-serif",fontWeight:700,whiteSpace:"nowrap",marginRight:6}}>
+              ⚙️ Ver como Operacional
+            </button>
+          </>
+        )}
       </div>
       {/* Tab groups — row 2: sub-tab pills */}
       <div style={{ display:"flex", borderBottom:"1px solid var(--border)", background:"var(--header-bg)", overflowX:"auto", scrollbarWidth:"none", WebkitOverflowScrolling:"touch" }}>
@@ -13338,7 +13347,7 @@ function ArchitectureTab({ isMobile }) {
 
 // SUPER MANAGER PORTAL
 //
-function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }) {
+function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme, onEnterOperational }) {
   // eslint-disable-next-line no-unused-vars
   const { owners, managers, restaurants, employees, roles, tips, splits, schedules, noTipDays } = data;
   const [tab, setTab] = useState("financeiro_geral");
@@ -13554,7 +13563,7 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme }
 
         {/* Operacional */}
         {restTab === "operacional" && (
-          <RestaurantPanel restaurant={rest} restaurants={restaurants} employees={employees} roles={roles} tips={tips} splits={splits} schedules={schedules} onUpdate={onUpdate} perms={{ tips:true, schedule:true }} isOwner data={data} currentUser={currentUser} privacyMask={rest?.privacyMode === true} mobileOnly={isMobile} />
+          <RestaurantPanel restaurant={rest} restaurants={restaurants} employees={employees} roles={roles} tips={tips} splits={splits} schedules={schedules} onUpdate={onUpdate} perms={{ tips:true, schedule:true }} isOwner data={data} currentUser={currentUser} privacyMask={rest?.privacyMode === true} mobileOnly={isMobile} onEnterOperational={onEnterOperational} />
         )}
 
         {/* Gestores deste restaurante */}
@@ -16044,7 +16053,7 @@ function hasAnyOperationalArea(emp) {
   return OPERATIONAL_AREA_DEFS.some(def => a[def.key] === true);
 }
 
-function OperationalPortal({ employee, data, onUpdate, onBack, toggleTheme, theme, onSwitchToEmployee }) {
+function OperationalPortal({ employee, data, onUpdate, onBack, toggleTheme, theme, onSwitchToEmployee, onReturnToOwner }) {
   const { restaurants } = data;
   const restaurant = restaurants.find(r => r.id === employee.restaurantId);
   const areas = employee.operationalAreas ?? {};
@@ -16097,7 +16106,13 @@ function OperationalPortal({ employee, data, onUpdate, onBack, toggleTheme, them
           <button onClick={toggleTheme} style={{background:"none",border:"1px solid var(--border)",borderRadius:20,padding:"5px 8px",cursor:"pointer",fontSize:13,color:"var(--text2)"}}>
             {theme==="dark"?"☀️":"🌙"}
           </button>
-          {onSwitchToEmployee && <button onClick={onSwitchToEmployee} style={{...S.btnSecondary,fontSize:11,padding:"5px 10px",color:"var(--ac)",borderColor:"var(--ac)"}}>👤 Empregado</button>}
+          {employee?._isOwnerVirtual && onReturnToOwner && (
+            <button onClick={onReturnToOwner} title="Voltar ao Portal Super (master do AppTip)"
+              style={{...S.btnSecondary,fontSize:11,padding:"5px 10px",color:"#a855f7",borderColor:"#a855f7"}}>
+              ← Super
+            </button>
+          )}
+          {onSwitchToEmployee && !employee?._isOwnerVirtual && <button onClick={onSwitchToEmployee} style={{...S.btnSecondary,fontSize:11,padding:"5px 10px",color:"var(--ac)",borderColor:"var(--ac)"}}>👤 Empregado</button>}
           <button onClick={onBack} style={{...S.btnSecondary,fontSize:11,padding:"5px 10px"}}>Sair</button>
         </div>
       </div>
@@ -18002,6 +18017,31 @@ function PermissoesMatrix({ restaurantId, pessoas, employees, managers, onUpdate
     const updated = permSet(pessoa, restaurantId, permKey, !current);
     const [group, name] = permKey.split(".");
     const value = !current;
+
+    // Caso especial: marcar operational em pessoa sem linkedEmployeeId → auto-cria employee record
+    // (assim a pessoa consegue entrar como Gestor Operacional, que exige um emp com operationalAreas)
+    if (value === true && group === "operational" && !pessoa.linkedEmployeeId) {
+      const newEmpId = `emp_auto_${pessoa.id}_${Date.now().toString(36).slice(-4)}`;
+      const newEmployee = {
+        id: newEmpId,
+        restaurantId,
+        name: pessoa.name,
+        cpf: pessoa.cpf || "",
+        pin: pessoa.pin || "0000",
+        empCode: null,
+        roleId: null,
+        admission: today(),
+        operationalAreas: { [name]: true },
+        isFreela: false,
+        inactive: false,
+        linkedPessoaId: pessoa.id,
+        createdAt: new Date().toISOString(),
+      };
+      onUpdate("employees", [...(employees || []), newEmployee]);
+      const linkedPessoa = { ...updated, linkedEmployeeId: newEmpId, isTeam: { ...(pessoa.isTeam || {}), [restaurantId]: pessoa.isTeam?.[restaurantId] ?? false } };
+      onUpdate("pessoas", (pessoas || []).map(p => p.id === pessoa.id ? linkedPessoa : p));
+      return;
+    }
 
     // Caso especial: marcar admin/special em pessoa sem linkedManagerId → auto-cria manager record
     // (assim as telas antigas de ManagerPortal conseguem renderizar quando a pessoa logar como admin)
@@ -22898,7 +22938,34 @@ export default function App() {
       )}
       {/* Setup acessível apenas via /setup — protegido por senha de convite */}
       {view === "setup" && <FirstSetup onDone={sm=>{handleUpdate("owners",[...owners,sm]);setCurrentUser(sm);setUserRole("super");setView("super");}} />}
-      {view === "super" && currentUser && <OwnerPortal data={data} onUpdate={handleUpdate} onBack={doLogout} currentUser={currentUser} toggleTheme={toggleTheme} theme={theme} />}
+      {view === "super" && currentUser && <OwnerPortal data={data} onUpdate={handleUpdate} onBack={doLogout} currentUser={currentUser} toggleTheme={toggleTheme} theme={theme}
+        onEnterOperational={(rid)=>{
+          // Master do AppTip entra como Gestor Operacional do restaurante selecionado
+          // com TODAS as áreas operacionais desbloqueadas (empregado virtual)
+          const rest = restaurants.find(r => r.id === rid);
+          if (!rest) return;
+          const virtualEmp = {
+            id: `owner_virt_emp_${currentUser.id}_${rid}`,
+            restaurantId: rid,
+            name: currentUser.name + " (master)",
+            cpf: currentUser.cpf || "",
+            pin: currentUser.pin || "0000",
+            empCode: null,
+            roleId: null,
+            admission: today(),
+            operationalAreas: { escalas:true, gorjetas:true, trilhas:true, reunioes:true, contagens:true, compras:true, checklists:true, fichasTecnicas:true },
+            isFreela: false,
+            inactive: false,
+            _isOwnerVirtual: true,
+          };
+          // Guarda o owner atual pra voltar depois
+          localStorage.setItem("apptip_userid_owner", currentUser.id);
+          localStorage.setItem("apptip_owner_virtual_return", "1");
+          setCurrentUser(virtualEmp);
+          setUserRole("operational");
+          setView("operational");
+        }}
+      />}
       {view === "manager" && currentUser && (currentUser.mustChangePin ? (
         <ManagerPinChange manager={currentUser} onDone={newPin=>{
           const updated = {...currentUser, pin:newPin, mustChangePin:false};
@@ -22957,6 +23024,21 @@ export default function App() {
             localStorage.setItem("apptip_userid", currentUser.id);
             setView("employee");
           }}
+          onReturnToOwner={currentUser?._isOwnerVirtual ? () => {
+            // Owner virtual retornando ao Portal Super
+            const ownerRec = owners.find(o => o.isMaster || o.id === (localStorage.getItem("apptip_userid_owner") || ""));
+            const owner = ownerRec || owners[0];
+            if (owner) {
+              localStorage.removeItem("apptip_owner_virtual_return");
+              setCurrentUser(owner);
+              setUserRole("super");
+              localStorage.setItem("apptip_role", "super");
+              localStorage.setItem("apptip_userid", owner.id);
+              setView("super");
+            } else {
+              doLogout();
+            }
+          } : null}
         />
       )}
       {view === "fatura" && <FaturaPage faturaId={faturaId} restaurants={restaurants} onUpdate={handleUpdate} loaded={loaded} />}
