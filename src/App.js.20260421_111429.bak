@@ -3696,7 +3696,7 @@ function DpManagerTab({ restaurantId, dpMessages, onUpdate, isOwner }) {
   );
 }
 
-function EmployeePortal({ employees, roles, tips, schedules, splits, restaurants, communications, commAcks, faq, dpMessages, workSchedules, incidents, feedbacks, devChecklists, onBack, onUpdateEmployee, onUpdate, toggleTheme, theme, onSwitchToManager, onSwitchToOperational, employeeGoals, tipApprovals, delays, meetingPlans, inbox, inboxFolders }) {
+function EmployeePortal({ employees, roles, tips, schedules, splits, restaurants, communications, commAcks, faq, dpMessages, workSchedules, incidents, feedbacks, devChecklists, onBack, onUpdateEmployee, onUpdate, toggleTheme, theme, onSwitchToManager, employeeGoals, tipApprovals, delays, meetingPlans, inbox, inboxFolders }) {
   const [empId, setEmpId] = useState(() => localStorage.getItem("apptip_empid") || null);
 
   useEffect(() => {
@@ -3852,7 +3852,6 @@ function EmployeePortal({ employees, roles, tips, schedules, splits, restaurants
           <button onClick={toggleTheme} style={{background:"none",border:"1px solid var(--border)",borderRadius:20,padding:"5px 8px",cursor:"pointer",fontSize:14,color:"var(--text2)"}}>
             {theme==="dark"?"☀️":"🌙"}
           </button>
-          {onSwitchToOperational && <button onClick={onSwitchToOperational} title="Portal do Gestor Operacional" style={{...S.btnSecondary,fontSize:11,padding:"5px 10px",color:"#7c9e5e",borderColor:"#7c9e5e"}}>⚙️</button>}
           {onSwitchToManager && <button onClick={onSwitchToManager} style={{...S.btnSecondary,fontSize:11,padding:"5px 10px",color:"var(--ac)",borderColor:"var(--ac)"}}>📊</button>}
           <button onClick={() => { setEmpId(null); onBack(); }} style={{ ...S.btnSecondary, fontSize:11, padding:"5px 10px" }}>Sair</button>
         </div>
@@ -9632,7 +9631,6 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
       (isOwner || tabVisible("horarios")) && ["horarios","Horários"],
       canSched && ["schedule","Escala"],
       (isOwner || canTips || tabVisible("employees")) && ["reunioes","Reuniões"],
-      (isOwner || canTips) && ["permissoes","Permissões Op."],
     ].filter(Boolean) },
     { id:"comunicacao", label:"📢 Comunicação", icon:"📢", tabs: [
       (isOwner || tabVisible("comunicados")) && ["comunicados","Comunicados"],
@@ -10963,71 +10961,6 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
               restRoles={restRoles} rid={rid}
               roles={roles} employees={employees} onUpdate={onUpdate}
             />
-          </div>
-        )}
-
-        {/* PERMISSÕES OPERACIONAIS */}
-        {tab === "permissoes" && (
-          <div>
-            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:12,marginBottom:8}}>
-              <h3 style={{color:"var(--text)",margin:0,fontSize:mobileOnly?16:20}}>⚙️ Permissões Operacionais</h3>
-            </div>
-            <p style={{color:"var(--text3)",fontSize:13,lineHeight:1.5,margin:"0 0 16px",maxWidth:720}}>
-              Conceda áreas específicas do Portal do Gestor Operacional a funcionários da equipe. Quem tiver pelo menos uma área marcada verá um botão ⚙️ no Portal do Empregado para alternar para o Gestor Operacional, sem novo login.
-            </p>
-
-            <div style={{overflowX:"auto",border:"1px solid var(--border)",borderRadius:12,background:"var(--card-bg)"}}>
-              <table style={{width:"100%",borderCollapse:"collapse",fontSize:13}}>
-                <thead>
-                  <tr style={{background:"var(--bg2)",borderBottom:"1px solid var(--border)"}}>
-                    <th style={{padding:"10px 12px",textAlign:"left",color:"var(--text)",fontWeight:700,position:"sticky",left:0,background:"var(--bg2)",zIndex:1,minWidth:180}}>Funcionário</th>
-                    {OPERATIONAL_AREA_DEFS.map(def => (
-                      <th key={def.key} style={{padding:"10px 8px",textAlign:"center",color:"var(--text)",fontWeight:600,minWidth:90}}>
-                        <div style={{fontSize:16,marginBottom:2}}>{def.icon}</div>
-                        <div style={{fontSize:9,color:def.module==="mise"?"#7c9e5e":"var(--ac)",fontWeight:700,textTransform:"uppercase",letterSpacing:0.4}}>{def.module==="mise"?"Mise":"Tip"}</div>
-                        <div style={{fontSize:11,color:"var(--text2)",fontWeight:500}}>{def.label}</div>
-                      </th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {restEmps.length === 0 ? (
-                    <tr><td colSpan={OPERATIONAL_AREA_DEFS.length+1} style={{padding:"32px 16px",textAlign:"center",color:"var(--text3)"}}>Nenhum funcionário cadastrado</td></tr>
-                  ) : [...restEmps].sort((a,b)=>a.name.localeCompare(b.name)).map(emp => {
-                    const areas = emp.operationalAreas ?? {};
-                    return (
-                      <tr key={emp.id} style={{borderTop:"1px solid var(--border)"}}>
-                        <td style={{padding:"8px 12px",color:"var(--text)",fontWeight:500,position:"sticky",left:0,background:"var(--card-bg)",zIndex:1}}>{emp.name}</td>
-                        {OPERATIONAL_AREA_DEFS.map(def => {
-                          const checked = areas[def.key] === true;
-                          return (
-                            <td key={def.key} style={{padding:"8px",textAlign:"center"}}>
-                              <input type="checkbox" checked={checked}
-                                onChange={e => {
-                                  const nextAreas = {...(emp.operationalAreas ?? {})};
-                                  if (e.target.checked) nextAreas[def.key] = true;
-                                  else delete nextAreas[def.key];
-                                  const nextEmp = Object.keys(nextAreas).length
-                                    ? { ...emp, operationalAreas: nextAreas }
-                                    : (() => { const { operationalAreas:_omit, ...rest } = emp; return rest; })();
-                                  const nextList = employees.map(x => x.id === emp.id ? nextEmp : x);
-                                  onUpdate("employees", nextList);
-                                }}
-                                style={{cursor:"pointer",width:18,height:18,accentColor:def.module==="mise"?"#7c9e5e":"var(--ac)"}}
-                              />
-                            </td>
-                          );
-                        })}
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-
-            <div style={{marginTop:12,fontSize:12,color:"var(--text3)",lineHeight:1.5}}>
-              💡 Alterações são salvas automaticamente a cada clique.
-            </div>
           </div>
         )}
 
@@ -15976,130 +15909,6 @@ function ManagerPortal({ manager, data, onUpdate, onBack, toggleTheme, theme, on
   );
 }
 
-// ═══════════════════════════════════════════════════════════════
-// ──  OPERATIONAL PORTAL (Gestor Operacional)                   ──
-// ═══════════════════════════════════════════════════════════════
-//
-// Um empregado com employee.operationalAreas não-vazio pode alternar
-// para o Portal do Gestor Operacional, onde vê abas apenas das áreas
-// em que operationalAreas[area] === true.
-//
-// Áreas: escalas, gorjetas, trilhas, reunioes (AppTip)
-//        contagens, checklists, fichasTecnicas (AppMise)
-//
-const OPERATIONAL_AREA_DEFS = [
-  { key: "escalas",        label: "Escalas",         icon: "📅", module: "tip"  },
-  { key: "gorjetas",       label: "Gorjetas",        icon: "💰", module: "tip"  },
-  { key: "trilhas",        label: "Trilhas",         icon: "🎯", module: "tip"  },
-  { key: "reunioes",       label: "Reuniões",        icon: "🗣️", module: "tip"  },
-  { key: "contagens",      label: "Contagens",       icon: "📦", module: "mise" },
-  { key: "checklists",     label: "Checklists",      icon: "✅", module: "mise" },
-  { key: "fichasTecnicas", label: "Fichas Técnicas", icon: "📋", module: "mise" },
-];
-
-function hasAnyOperationalArea(emp) {
-  const a = emp?.operationalAreas;
-  if (!a) return false;
-  return OPERATIONAL_AREA_DEFS.some(def => a[def.key] === true);
-}
-
-function OperationalPortal({ employee, data, onUpdate, onBack, toggleTheme, theme, onSwitchToEmployee }) {
-  const { restaurants } = data;
-  const restaurant = restaurants.find(r => r.id === employee.restaurantId);
-  const areas = employee.operationalAreas ?? {};
-  const activeAreas = OPERATIONAL_AREA_DEFS.filter(a => areas[a.key] === true);
-  const [tab, setTab] = useState(() => activeAreas[0]?.key ?? null);
-
-  // Se a permissão da aba atual foi revogada ao vivo, realinha
-  useEffect(() => {
-    if (tab && !activeAreas.find(a => a.key === tab)) {
-      setTab(activeAreas[0]?.key ?? null);
-    }
-  }, [tab, activeAreas.length]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  if (activeAreas.length === 0) {
-    return (
-      <div style={{minHeight:"100vh",background:"var(--bg)",display:"flex",alignItems:"center",justifyContent:"center",fontFamily:"'DM Sans',sans-serif",padding:24}}>
-        <div style={{maxWidth:420,textAlign:"center"}}>
-          <div style={{fontSize:48,marginBottom:16}}>🔒</div>
-          <h2 style={{color:"var(--text)",fontSize:20,fontWeight:800,margin:"0 0 8px"}}>Sem áreas concedidas</h2>
-          <p style={{color:"var(--text3)",fontSize:14,lineHeight:1.6,margin:"0 0 20px"}}>
-            O gestor administrativo ainda não concedeu nenhuma área para você no Portal do Gestor Operacional.
-          </p>
-          <button onClick={onSwitchToEmployee ?? onBack} style={S.btnPrimary}>Voltar ao Portal</button>
-        </div>
-      </div>
-    );
-  }
-
-  const activeArea = OPERATIONAL_AREA_DEFS.find(a => a.key === tab);
-  const miseColor = "#7c9e5e";
-
-  return (
-    <div style={{minHeight:"100vh",background:"var(--bg)",fontFamily:"'DM Sans',sans-serif"}}>
-      {/* Header */}
-      <div style={{background:"var(--header-bg)",borderBottom:"1px solid var(--border)",padding:"10px 16px",display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:"6px 12px",boxShadow:"0 1px 4px rgba(0,0,0,0.04)"}}>
-        <div style={{display:"flex",alignItems:"center",gap:8,minWidth:0,flex:"1 1 auto"}}>
-          <div style={{minWidth:0}}>
-            <div style={{display:"flex",alignItems:"center",gap:5}}>
-              <span style={{fontSize:14}}>⚙️</span>
-              <span style={{color:"var(--text)",fontWeight:800,fontSize:14,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
-                {restaurant?.name ?? "Gestor Operacional"}
-              </span>
-            </div>
-            <div style={{color:"var(--text3)",fontSize:10,marginTop:1}}>
-              {employee.name} • Gestor Operacional
-            </div>
-          </div>
-        </div>
-        <div style={{display:"flex",gap:5,alignItems:"center",flexShrink:0}}>
-          <button onClick={toggleTheme} style={{background:"none",border:"1px solid var(--border)",borderRadius:20,padding:"5px 8px",cursor:"pointer",fontSize:13,color:"var(--text2)"}}>
-            {theme==="dark"?"☀️":"🌙"}
-          </button>
-          {onSwitchToEmployee && <button onClick={onSwitchToEmployee} style={{...S.btnSecondary,fontSize:11,padding:"5px 10px",color:"var(--ac)",borderColor:"var(--ac)"}}>👤 Empregado</button>}
-          <button onClick={onBack} style={{...S.btnSecondary,fontSize:11,padding:"5px 10px"}}>Sair</button>
-        </div>
-      </div>
-
-      {/* Tabs */}
-      <div style={{background:"var(--card-bg)",borderBottom:"1px solid var(--border)",padding:"0 16px",display:"flex",gap:4,overflowX:"auto"}}>
-        {activeAreas.map(a => {
-          const isActive = tab === a.key;
-          const accent = a.module === "mise" ? miseColor : "var(--ac)";
-          return (
-            <button key={a.key} onClick={()=>setTab(a.key)}
-              style={{
-                background:"none",
-                border:"none",
-                borderBottom: isActive ? `2px solid ${accent}` : "2px solid transparent",
-                padding:"10px 14px",
-                cursor:"pointer",
-                fontSize:13,
-                fontWeight: isActive ? 700 : 500,
-                color: isActive ? "var(--text)" : "var(--text3)",
-                whiteSpace:"nowrap",
-                flexShrink:0,
-              }}>
-              {a.icon} {a.label}
-            </button>
-          );
-        })}
-      </div>
-
-      {/* Body */}
-      <div style={{padding:"24px 20px",maxWidth:960,margin:"0 auto"}}>
-        <div style={{textAlign:"center",padding:"60px 24px",color:"var(--text3)"}}>
-          <div style={{fontSize:48,marginBottom:16}}>{activeArea?.icon}</div>
-          <h3 style={{color:"var(--text)",fontSize:18,fontWeight:700,margin:"0 0 8px"}}>{activeArea?.label}</h3>
-          <p style={{fontSize:14,lineHeight:1.6,maxWidth:420,margin:"0 auto"}}>
-            Em construção. Esta área do {activeArea?.module === "mise" ? "AppMise" : "AppTip"} será habilitada nos próximos passos da implantação.
-          </p>
-        </div>
-      </div>
-    </div>
-  );
-}
-
 //
 // MANAGER PIN CHANGE (first access / reset)
 //
@@ -17523,7 +17332,6 @@ export default function App() {
     const role = localStorage.getItem("apptip_role");
     if (role === "super") return "super";
     if (role === "manager") return "manager";
-    if (role === "operational") return "operational";
     if (role === "employee") return "employee";
     return "login";
   });
@@ -17669,7 +17477,7 @@ export default function App() {
           const u = (loaded_data.managers ?? []).find(m => m.id === savedId);
           if (u) setCurrentUser(u);
           else { localStorage.removeItem("apptip_userid"); localStorage.removeItem("apptip_role"); setView("login"); }
-        } else if (role === "employee" || role === "operational") {
+        } else if (role === "employee") {
           const empIdSaved = localStorage.getItem("apptip_empid") || savedId;
           const u = (loaded_data.employees ?? []).find(e => e.id === empIdSaved);
           if (!u || (u.inactive && u.inactiveFrom && u.inactiveFrom <= today())) {
@@ -17678,17 +17486,10 @@ export default function App() {
             localStorage.removeItem("apptip_role");
             localStorage.removeItem("apptip_empid");
             setView("login");
-          } else if (role === "operational" && !hasAnyOperationalArea(u)) {
-            // Role operational mas áreas revogadas — rebaixar para employee
-            localStorage.setItem("apptip_role", "employee");
-            localStorage.setItem("apptip_userid", empIdSaved);
-            setUserRole("employee");
-            setView("employee");
-            // não setCurrentUser — EmployeePortal lê empId de localStorage
           } else {
+            // Garante que userid está salvo
             localStorage.setItem("apptip_userid", empIdSaved);
-            if (role === "operational") setCurrentUser(u); // operational precisa de currentUser
-            // sessão válida — view já está correta pelo useState inicial
+            // sessão válida — view já está como "employee" pelo useState inicial
           }
         }
       }
@@ -17927,31 +17728,7 @@ export default function App() {
           }
           if (!mgr) return null;
           return () => { setCurrentUser(mgr); setUserRole("manager"); localStorage.setItem("apptip_role","manager"); localStorage.setItem("apptip_userid",mgr.id); setView("manager"); };
-        })()}
-        onSwitchToOperational={(() => {
-          const empIdLs = localStorage.getItem("apptip_empid");
-          const emp = employees.find(e => e.id === empIdLs);
-          if (!emp || !hasAnyOperationalArea(emp)) return null;
-          return () => { setCurrentUser(emp); setUserRole("operational"); localStorage.setItem("apptip_role","operational"); localStorage.setItem("apptip_userid",emp.id); localStorage.setItem("apptip_empid",emp.id); setView("operational"); };
         })()} />}
-      {view === "operational" && currentUser && (
-        <OperationalPortal
-          employee={currentUser}
-          data={data}
-          onUpdate={handleUpdate}
-          onBack={doLogout}
-          toggleTheme={toggleTheme}
-          theme={theme}
-          onSwitchToEmployee={() => {
-            setUserRole("employee");
-            setCurrentUser(null);
-            localStorage.setItem("apptip_role","employee");
-            localStorage.setItem("apptip_empid", currentUser.id);
-            localStorage.setItem("apptip_userid", currentUser.id);
-            setView("employee");
-          }}
-        />
-      )}
       {view === "fatura" && <FaturaPage faturaId={faturaId} restaurants={restaurants} onUpdate={handleUpdate} loaded={loaded} />}
       {view === "guia-gestor" && <GuiaGestor />}
       {view === "home" && <Home onLogin={()=>setView("login")} />}
