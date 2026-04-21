@@ -16365,6 +16365,21 @@ function MiseContagensAdmin({ restaurantId, employees, miseCategories, miseStock
     onUpdate("miseProductSuppliers", (miseProductSuppliers || []).filter(ps => ps.supplierId !== id));
   }
 
+  // Actions — Atribuições (por categoria × pessoa; estoques vêm da categoria)
+  function isAssignedToCategory(categoryId, userId) {
+    return restAssignments.some(a => a.categoryId === categoryId && a.userId === userId);
+  }
+  function toggleCategoryAssignment(categoryId, userId) {
+    const existing = restAssignments.filter(a => a.categoryId === categoryId && a.userId === userId);
+    if (existing.length > 0) {
+      // Remove TODAS as atribuições daquela (cat, user), independente de stockId antigo
+      const idsToRemove = new Set(existing.map(a => a.id));
+      onUpdate("miseAssignments", miseAssignments.filter(a => !idsToRemove.has(a.id)));
+    } else {
+      onUpdate("miseAssignments", [...miseAssignments, { id: mkId(), restaurantId, categoryId, userId }]);
+    }
+  }
+
   // Actions — Vínculos Produto-Fornecedor
   function toggleProductSupplierLink(productId, supplierId) {
     const existing = restProductSuppliers.find(ps => ps.productId === productId && ps.supplierId === supplierId);
@@ -16463,16 +16478,6 @@ function MiseContagensAdmin({ restaurantId, employees, miseCategories, miseStock
     const next = { ...bulkSelected };
     productsInCat.forEach(p => { delete next[p.id]; });
     setBulkSelected(next);
-  }
-
-  // Actions — Atribuições (toggle de célula do grid)
-  function toggleAssignment(categoryId, stockId, userId) {
-    const existing = restAssignments.find(a => a.categoryId === categoryId && a.stockId === stockId && a.userId === userId);
-    if (existing) {
-      onUpdate("miseAssignments", miseAssignments.filter(a => a.id !== existing.id));
-    } else {
-      onUpdate("miseAssignments", [...miseAssignments, { id: mkId(), restaurantId, categoryId, stockId, userId }]);
-    }
   }
 
   // Actions — Ciclos
@@ -16673,101 +16678,63 @@ function MiseContagensAdmin({ restaurantId, employees, miseCategories, miseStock
               </div>
               {!selectedCat ? (
                 <div style={{padding:"32px 16px",textAlign:"center",color:"var(--text3)",fontSize:14,background:"var(--card-bg)",borderRadius:12,border:"1px solid var(--border)"}}>
-                  Selecione uma categoria para atribuir responsáveis por estoque.
-                </div>
-              ) : (selectedCat.type === "pedido") ? (
-                // Categoria de Pedido puro — sem dimensão de estoque
-                <div style={{border:"1px solid var(--border)",borderRadius:12,background:"var(--card-bg)"}}>
-                  <div style={{padding:"10px 14px",background:"var(--bg2)",borderBottom:"1px solid var(--border)",fontSize:12,color:"var(--text3)"}}>
-                    Categoria <b>{selectedCat.name}</b> é do tipo <b>Pedido</b> — não tem estoque. Marque quem pode solicitar produtos dessa categoria.
-                  </div>
-                  {eligibleEmps.length === 0 ? (
-                    <div style={{padding:"32px 16px",textAlign:"center",color:"var(--text3)"}}>Nenhum funcionário com a área Contagens concedida.</div>
-                  ) : [...eligibleEmps].sort((a,b)=>a.name.localeCompare(b.name)).map(emp => {
-                    const checked = !!restAssignments.find(a => a.categoryId === selectedCat.id && a.stockId === null && a.userId === emp.id);
-                    return (
-                      <div key={emp.id} style={{display:"flex",alignItems:"center",gap:10,padding:"8px 14px",borderTop:"1px solid var(--border)"}}>
-                        <input type="checkbox" checked={checked}
-                          onChange={() => toggleAssignment(selectedCat.id, null, emp.id)}
-                          style={{cursor:"pointer",width:18,height:18,accentColor:miseAc}} />
-                        <span style={{color:"var(--text)",fontWeight:500}}>{emp.name}</span>
-                      </div>
-                    );
-                  })}
+                  Selecione uma categoria para atribuir responsáveis.
                 </div>
               ) : (() => {
-                // Mostra só os estoques vinculados à categoria selecionada
                 const linkedStockIds = selectedCat.stockIds || [];
                 const linkedStocks = restStocks.filter(s => linkedStockIds.includes(s.id));
-                if (linkedStocks.length === 0) {
+                const catType = selectedCat.type || "contagem";
+                const needsStocks = catType === "contagem" || catType === "ambos";
+                // Aviso se faltam estoques vinculados para categorias que precisam
+                if (needsStocks && linkedStocks.length === 0) {
                   return (
                     <div style={{padding:"32px 16px",textAlign:"center",color:"var(--text3)",fontSize:14,background:"var(--card-bg)",borderRadius:12,border:"1px solid var(--border)"}}>
                       <div style={{fontSize:32,marginBottom:10}}>📍</div>
                       <div style={{color:"var(--text)",fontWeight:600,fontSize:14,marginBottom:6}}>Categoria sem estoques vinculados</div>
                       <div style={{lineHeight:1.5,maxWidth:420,margin:"0 auto 12px"}}>
-                        A categoria <b>{selectedCat.name}</b> ainda não está vinculada a nenhum estoque. Vincule em <b>Categorias → 📍 estoques</b>.
+                        A categoria <b>{selectedCat.name}</b> é do tipo <b>{catType}</b> e precisa estar vinculada a pelo menos um estoque antes de atribuir pessoas.
                       </div>
                       <button onClick={()=>setCatStocksModalId(selectedCat.id)} style={{...S.btnPrimary,fontSize:12,padding:"6px 14px"}}>📍 Vincular estoques</button>
                     </div>
                   );
                 }
                 return (
-                <div style={{overflowX:"auto",border:"1px solid var(--border)",borderRadius:12,background:"var(--card-bg)"}}>
-                  <table style={{width:"100%",borderCollapse:"collapse",fontSize:13}}>
-                    <thead>
-                      <tr style={{background:"var(--bg2)",borderBottom:"1px solid var(--border)"}}>
-                        <th style={{padding:"10px 12px",textAlign:"left",color:"var(--text)",fontWeight:700,position:"sticky",left:0,background:"var(--bg2)",zIndex:1,minWidth:140}}>Funcionário</th>
-                        {linkedStocks.map(s => (
-                          <th key={s.id} style={{padding:"10px 8px",textAlign:"center",color:"var(--text)",fontWeight:700,minWidth:100}}>
-                            <div>{s.name}</div>
-                            {s.location && <div style={{fontSize:10,color:"var(--text3)",fontWeight:400,marginTop:2}}>{s.location}</div>}
-                          </th>
-                        ))}
-                        {(selectedCat.type === "ambos") && (
-                          <th style={{padding:"10px 8px",textAlign:"center",color:"var(--text)",fontWeight:700,minWidth:100,background:"#fffbeb"}}>
-                            <div>🛒 Pedido direto</div>
-                            <div style={{fontSize:10,color:"var(--text3)",fontWeight:400,marginTop:2}}>além da contagem</div>
-                          </th>
-                        )}
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {eligibleEmps.length === 0 ? (
-                        <tr><td colSpan={linkedStocks.length + 1 + (selectedCat.type==="ambos"?1:0)} style={{padding:"32px 16px",textAlign:"center",color:"var(--text3)"}}>Nenhum funcionário com a área Contagens concedida.</td></tr>
-                      ) : [...eligibleEmps].sort((a,b)=>a.name.localeCompare(b.name)).map(emp => (
-                        <tr key={emp.id} style={{borderTop:"1px solid var(--border)"}}>
-                          <td style={{padding:"8px 12px",color:"var(--text)",fontWeight:500,position:"sticky",left:0,background:"var(--card-bg)",zIndex:1}}>{emp.name}</td>
-                          {linkedStocks.map(st => {
-                            const checked = !!restAssignments.find(a => a.categoryId === selectedCat.id && a.stockId === st.id && a.userId === emp.id);
-                            return (
-                              <td key={st.id} style={{padding:"8px",textAlign:"center"}}>
-                                <input type="checkbox" checked={checked}
-                                  onChange={() => toggleAssignment(selectedCat.id, st.id, emp.id)}
-                                  style={{cursor:"pointer",width:18,height:18,accentColor:miseAc}}
-                                />
-                              </td>
-                            );
-                          })}
-                          {(selectedCat.type === "ambos") && (() => {
-                            const checked = !!restAssignments.find(a => a.categoryId === selectedCat.id && a.stockId === null && a.userId === emp.id);
-                            return (
-                              <td style={{padding:"8px",textAlign:"center",background:"#fffbeb"}}>
-                                <input type="checkbox" checked={checked}
-                                  onChange={() => toggleAssignment(selectedCat.id, null, emp.id)}
-                                  style={{cursor:"pointer",width:18,height:18,accentColor:"#d97706"}} />
-                              </td>
-                            );
-                          })()}
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
+                  <div style={{border:"1px solid var(--border)",borderRadius:12,background:"var(--card-bg)",overflow:"hidden"}}>
+                    <div style={{padding:"10px 14px",background:"var(--bg2)",borderBottom:"1px solid var(--border)",fontSize:12,color:"var(--text3)",lineHeight:1.5}}>
+                      {catType === "pedido" ? (
+                        <>Categoria <b>{selectedCat.name}</b> é do tipo <b>Pedido</b>. Marque quem pode solicitar produtos dela.</>
+                      ) : (
+                        <>
+                          Categoria <b>{selectedCat.name}</b> existe em <b>{linkedStocks.length} estoque(s)</b>: {linkedStocks.map(s=>s.name).join(", ")}.
+                          {catType === "ambos" && <> Também aceita pedido direto.</>}
+                          <br/>Quem for atribuído <b>conta em todos os estoques</b> vinculados à categoria.
+                        </>
+                      )}
+                    </div>
+                    {eligibleEmps.length === 0 ? (
+                      <div style={{padding:"32px 16px",textAlign:"center",color:"var(--text3)"}}>Nenhuma pessoa com a área Contagens concedida. Conceda em <b>Pessoas → Permissões</b>.</div>
+                    ) : [...eligibleEmps].sort((a,b)=>a.name.localeCompare(b.name)).map(emp => {
+                      const checked = isAssignedToCategory(selectedCat.id, emp.id);
+                      return (
+                        <label key={emp.id} style={{display:"flex",alignItems:"center",gap:10,padding:"10px 14px",borderTop:"1px solid var(--border)",cursor:"pointer",background:checked?miseAc+"11":"transparent"}}>
+                          <input type="checkbox" checked={checked}
+                            onChange={() => toggleCategoryAssignment(selectedCat.id, emp.id)}
+                            style={{cursor:"pointer",width:18,height:18,accentColor:miseAc}} />
+                          <span style={{color:"var(--text)",fontWeight:500,flex:1}}>{emp.name}</span>
+                          {checked && (
+                            <span style={{fontSize:11,color:"#15803d",fontWeight:700}}>
+                              ✓ {catType === "pedido" ? "pode solicitar" : `conta em ${linkedStocks.length} estoque(s)`}
+                            </span>
+                          )}
+                        </label>
+                      );
+                    })}
+                  </div>
                 );
               })()}
               {selectedCat && (
                 <div style={{marginTop:12,fontSize:12,color:"var(--text3)",lineHeight:1.5}}>
-                  💡 Tipo atual: <b>{selectedCat.type === "pedido" ? "Pedido (sem estoque)" : selectedCat.type === "ambos" ? "Ambos (contagem + pedido direto)" : "Contagem (por estoque)"}</b>. Trocar o tipo em <b>Categorias</b>.
+                  💡 Tipo <b>{selectedCat.type === "pedido" ? "Pedido" : selectedCat.type === "ambos" ? "Ambos" : "Contagem"}</b> · Estoques vinculados vêm da categoria (edite em <b>Categorias → 📍 estoques</b>).
                 </div>
               )}
             </>
@@ -17375,13 +17342,44 @@ function OperationalContagens({ employee, miseCategories, miseStocks, miseAssign
   const [drafts, setDrafts] = useState({});
   const [justSavedKey, setJustSavedKey] = useState(null);
 
+  // Expande atribuições (cat × user) em grupos (cat × stock) baseado em cat.stockIds + cat.type
+  // Deduplica por categoria (ignora stockId antigo que ficou em registros legados)
+  const myCatIds = [...new Set(myAssignments.map(a => a.categoryId))];
+  const groups = [];
+  myCatIds.forEach(catId => {
+    const cat = miseCategories.find(c => c.id === catId && c.restaurantId === restaurantId);
+    if (!cat) return;
+    const catType = cat.type || "contagem";
+    if (catType === "contagem" || catType === "ambos") {
+      (cat.stockIds || []).forEach(sid => {
+        const stock = miseStocks.find(s => s.id === sid);
+        if (!stock) return;
+        groups.push({ key: `${cat.id}_${stock.id}`, cat, stock, isPedidoOnly: false });
+      });
+    }
+    if (catType === "pedido" || catType === "ambos") {
+      groups.push({ key: `${cat.id}___pedido__`, cat, stock: null, isPedidoOnly: true });
+    }
+  });
+
   if (myAssignments.length === 0) {
     return (
       <div style={{padding:"60px 24px",textAlign:"center",color:"var(--text3)"}}>
         <div style={{fontSize:48,marginBottom:16}}>📦</div>
         <h3 style={{color:"var(--text)",fontSize:18,fontWeight:700,margin:"0 0 8px"}}>Sem atribuições</h3>
         <p style={{fontSize:14,lineHeight:1.6,maxWidth:420,margin:"0 auto"}}>
-          O gestor ainda não atribuiu nenhuma categoria × estoque para você contar.
+          O gestor ainda não atribuiu nenhuma categoria para você contar.
+        </p>
+      </div>
+    );
+  }
+  if (groups.length === 0) {
+    return (
+      <div style={{padding:"60px 24px",textAlign:"center",color:"var(--text3)"}}>
+        <div style={{fontSize:48,marginBottom:16}}>📍</div>
+        <h3 style={{color:"var(--text)",fontSize:18,fontWeight:700,margin:"0 0 8px"}}>Categorias sem estoques</h3>
+        <p style={{fontSize:14,lineHeight:1.6,maxWidth:420,margin:"0 auto"}}>
+          Suas categorias atribuídas não estão vinculadas a nenhum estoque. Peça ao gestor para vincular em <b>Categorias → 📍 estoques</b>.
         </p>
       </div>
     );
@@ -17444,22 +17442,20 @@ function OperationalContagens({ employee, miseCategories, miseStocks, miseAssign
         <div style={{fontSize:12,color:"var(--text3)",marginTop:2}}>Aberto em {fmtDate(openCycle.startDate)}</div>
       </div>
 
-      {myAssignments.map(a => {
-        const cat = miseCategories.find(c => c.id === a.categoryId);
-        const isPedidoOnly = a.stockId === null || a.stockId === undefined;
-        const stock = !isPedidoOnly ? miseStocks.find(s => s.id === a.stockId) : null;
-        if (!cat) return null;
-        if (!isPedidoOnly && !stock) return null;
+      {groups.map(g => {
+        const cat = g.cat;
+        const isPedidoOnly = g.isPedidoOnly;
+        const stock = g.stock;
         const items = miseItems.filter(i => i.restaurantId === restaurantId && i.categoryId === cat.id);
         const stockKeyId = isPedidoOnly ? "__pedido__" : stock.id;
-        const key = `${cat.id}_${stockKeyId}`;
+        const key = g.key;
         const hasDrafts = items.some(i => {
           const d = drafts[`${i.id}_${stockKeyId}`];
           return d !== undefined && d !== "";
         });
         const wasJustSaved = justSavedKey === key;
         return (
-          <div key={a.id} style={{background:"var(--card-bg)",border:`1px solid ${isPedidoOnly ? "#d9770644" : "var(--border)"}`,borderRadius:12,overflow:"hidden"}}>
+          <div key={g.key} style={{background:"var(--card-bg)",border:`1px solid ${isPedidoOnly ? "#d9770644" : "var(--border)"}`,borderRadius:12,overflow:"hidden"}}>
             <div style={{padding:"12px 16px",background: isPedidoOnly ? "#fffbeb" : "var(--bg2)",borderBottom:"1px solid var(--border)",display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:8}}>
               <div>
                 <div style={{fontSize:15,color:"var(--text)",fontWeight:700}}>
