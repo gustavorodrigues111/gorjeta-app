@@ -16159,6 +16159,11 @@ function OperationalPortal({ employee, data, onUpdate, onBack, toggleTheme, them
             miseChecklistRuns={data?.miseChecklistRuns ?? []}
             onUpdate={onUpdate}
           />
+        ) : tab === "gorjetas" ? (
+          <OperationalGorjetas
+            employee={employee}
+            data={data}
+          />
         ) : activeArea?.module === "tip" ? (
           <div style={{textAlign:"center",padding:"50px 24px",color:"var(--text3)"}}>
             <div style={{fontSize:48,marginBottom:16}}>{activeArea?.icon}</div>
@@ -16229,6 +16234,8 @@ function MiseContagensAdmin({ restaurantId, employees, miseCategories, miseStock
   const [bulkFilter, setBulkFilter] = useState({ categoryId: "", search: "" });
   const [bulkSelected, setBulkSelected] = useState({}); // productId → true
   const [bulkDefaults, setBulkDefaults] = useState({ factor: "1", price: "", markPreferred: false });
+  // Modal de vínculo categoria ↔ estoques
+  const [catStocksModalId, setCatStocksModalId] = useState(null);
 
   const mkId = () => Date.now().toString() + "_" + Math.random().toString(36).slice(2, 8);
   const openCycle = restCycles.find(c => c.status === "open");
@@ -16251,6 +16258,21 @@ function MiseContagensAdmin({ restaurantId, employees, miseCategories, miseStock
   }
   function updateCatType(catId, type) {
     onUpdate("miseCategories", miseCategories.map(c => c.id === catId ? { ...c, type } : c));
+  }
+  function toggleCatStock(catId, stockId) {
+    onUpdate("miseCategories", miseCategories.map(c => {
+      if (c.id !== catId) return c;
+      const current = c.stockIds || [];
+      const next = current.includes(stockId)
+        ? current.filter(s => s !== stockId)
+        : [...current, stockId];
+      return { ...c, stockIds: next };
+    }));
+    // Remove assignments referentes a (categoria, estoque-removido)
+    const cat = restCategories.find(c => c.id === catId);
+    if (cat?.stockIds?.includes(stockId)) {
+      onUpdate("miseAssignments", miseAssignments.filter(a => !(a.categoryId === catId && a.stockId === stockId)));
+    }
   }
   function delCategory(id) {
     const cat = restCategories.find(c => c.id === id);
@@ -16518,19 +16540,32 @@ function MiseContagensAdmin({ restaurantId, employees, miseCategories, miseStock
           }
         });
 
-        // 2. Categorias — merge por nome
+        // 2. Categorias — merge por nome + vincula estoques
         const categoriesNext = [...miseCategories];
         const catIdMap = {}; // srcId/srcName → AppTip category id
         let catsAdded = 0;
+        // Helper: mapeia nome de estoque (do JSON) → id do stock correspondente em stocksNext
+        function stockNameToId(name) {
+          const match = stocksNext.find(s => s.restaurantId === restaurantId && ftNrm(s.name) === ftNrm(name));
+          return match?.id;
+        }
         srcCategories.forEach(src => {
           const nm = (src.name || "").trim();
           if (!nm) return;
+          const srcStockNames = Array.isArray(src.stocks) ? src.stocks : [];
+          const srcStockIds = srcStockNames.map(stockNameToId).filter(Boolean);
           const existing = categoriesNext.find(c => c.restaurantId === restaurantId && ftNrm(c.name) === ftNrm(nm));
           if (existing) {
             catIdMap[src.id || nm] = existing.id;
+            // Merge de stockIds
+            if (srcStockIds.length > 0) {
+              const merged = Array.from(new Set([...(existing.stockIds || []), ...srcStockIds]));
+              const idx = categoriesNext.indexOf(existing);
+              categoriesNext[idx] = { ...existing, stockIds: merged };
+            }
           } else {
             const newId = ftUid();
-            const next = { id: newId, restaurantId, name: nm };
+            const next = { id: newId, restaurantId, name: nm, stockIds: srcStockIds };
             if (src.group) next.group = src.group;
             if (src.team) next.team = src.team;
             categoriesNext.push(next);
@@ -16645,13 +16680,29 @@ function MiseContagensAdmin({ restaurantId, employees, miseCategories, miseStock
                     );
                   })}
                 </div>
-              ) : (
+              ) : (() => {
+                // Mostra só os estoques vinculados à categoria selecionada
+                const linkedStockIds = selectedCat.stockIds || [];
+                const linkedStocks = restStocks.filter(s => linkedStockIds.includes(s.id));
+                if (linkedStocks.length === 0) {
+                  return (
+                    <div style={{padding:"32px 16px",textAlign:"center",color:"var(--text3)",fontSize:14,background:"var(--card-bg)",borderRadius:12,border:"1px solid var(--border)"}}>
+                      <div style={{fontSize:32,marginBottom:10}}>📍</div>
+                      <div style={{color:"var(--text)",fontWeight:600,fontSize:14,marginBottom:6}}>Categoria sem estoques vinculados</div>
+                      <div style={{lineHeight:1.5,maxWidth:420,margin:"0 auto 12px"}}>
+                        A categoria <b>{selectedCat.name}</b> ainda não está vinculada a nenhum estoque. Vincule em <b>Categorias → 📍 estoques</b>.
+                      </div>
+                      <button onClick={()=>setCatStocksModalId(selectedCat.id)} style={{...S.btnPrimary,fontSize:12,padding:"6px 14px"}}>📍 Vincular estoques</button>
+                    </div>
+                  );
+                }
+                return (
                 <div style={{overflowX:"auto",border:"1px solid var(--border)",borderRadius:12,background:"var(--card-bg)"}}>
                   <table style={{width:"100%",borderCollapse:"collapse",fontSize:13}}>
                     <thead>
                       <tr style={{background:"var(--bg2)",borderBottom:"1px solid var(--border)"}}>
                         <th style={{padding:"10px 12px",textAlign:"left",color:"var(--text)",fontWeight:700,position:"sticky",left:0,background:"var(--bg2)",zIndex:1,minWidth:140}}>Funcionário</th>
-                        {restStocks.map(s => (
+                        {linkedStocks.map(s => (
                           <th key={s.id} style={{padding:"10px 8px",textAlign:"center",color:"var(--text)",fontWeight:700,minWidth:100}}>
                             <div>{s.name}</div>
                             {s.location && <div style={{fontSize:10,color:"var(--text3)",fontWeight:400,marginTop:2}}>{s.location}</div>}
@@ -16667,11 +16718,11 @@ function MiseContagensAdmin({ restaurantId, employees, miseCategories, miseStock
                     </thead>
                     <tbody>
                       {eligibleEmps.length === 0 ? (
-                        <tr><td colSpan={restStocks.length + 1 + (selectedCat.type==="ambos"?1:0)} style={{padding:"32px 16px",textAlign:"center",color:"var(--text3)"}}>Nenhum funcionário com a área Contagens concedida.</td></tr>
+                        <tr><td colSpan={linkedStocks.length + 1 + (selectedCat.type==="ambos"?1:0)} style={{padding:"32px 16px",textAlign:"center",color:"var(--text3)"}}>Nenhum funcionário com a área Contagens concedida.</td></tr>
                       ) : [...eligibleEmps].sort((a,b)=>a.name.localeCompare(b.name)).map(emp => (
                         <tr key={emp.id} style={{borderTop:"1px solid var(--border)"}}>
                           <td style={{padding:"8px 12px",color:"var(--text)",fontWeight:500,position:"sticky",left:0,background:"var(--card-bg)",zIndex:1}}>{emp.name}</td>
-                          {restStocks.map(st => {
+                          {linkedStocks.map(st => {
                             const checked = !!restAssignments.find(a => a.categoryId === selectedCat.id && a.stockId === st.id && a.userId === emp.id);
                             return (
                               <td key={st.id} style={{padding:"8px",textAlign:"center"}}>
@@ -16697,7 +16748,8 @@ function MiseContagensAdmin({ restaurantId, employees, miseCategories, miseStock
                     </tbody>
                   </table>
                 </div>
-              )}
+                );
+              })()}
               {selectedCat && (
                 <div style={{marginTop:12,fontSize:12,color:"var(--text3)",lineHeight:1.5}}>
                   💡 Tipo atual: <b>{selectedCat.type === "pedido" ? "Pedido (sem estoque)" : selectedCat.type === "ambos" ? "Ambos (contagem + pedido direto)" : "Contagem (por estoque)"}</b>. Trocar o tipo em <b>Categorias</b>.
@@ -16760,6 +16812,12 @@ function MiseContagensAdmin({ restaurantId, employees, miseCategories, miseStock
                           <option value="ambos">📦🛒 Ambos</option>
                         </select>
                         <div style={{fontSize:12,color:"var(--text3)"}}>{nItems} {nItems===1?"item":"itens"}</div>
+                        {cType !== "pedido" && (
+                          <button onClick={()=>setCatStocksModalId(c.id)} title="Em quais estoques essa categoria existe"
+                            style={{...S.btnSecondary,fontSize:12,padding:"6px 12px",color:(c.stockIds||[]).length>0?miseAc:"var(--text3)",borderColor:(c.stockIds||[]).length>0?miseAc+"66":"var(--border)"}}>
+                            📍 {(c.stockIds||[]).length > 0 ? `${(c.stockIds||[]).length} estoque(s)` : "estoques"}
+                          </button>
+                        )}
                         <button onClick={()=>{setEditingCatId(c.id);setEditingCatName(c.name);}} style={{...S.btnSecondary,fontSize:12,padding:"6px 12px"}}>Editar</button>
                         <button onClick={()=>delCategory(c.id)} style={{...S.btnSecondary,fontSize:12,padding:"6px 12px",color:"var(--red)",borderColor:"var(--red)44"}}>Remover</button>
                       </>
@@ -17106,6 +17164,54 @@ function MiseContagensAdmin({ restaurantId, employees, miseCategories, miseStock
                     )}
                   </>
                 )}
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* MODAL: Categoria ↔ Estoques (vínculo estrutural) */}
+      {catStocksModalId && (() => {
+        const cat = restCategories.find(c => c.id === catStocksModalId);
+        if (!cat) { setTimeout(()=>setCatStocksModalId(null),0); return null; }
+        const currentIds = cat.stockIds || [];
+        return (
+          <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.5)",zIndex:1000,display:"flex",alignItems:"center",justifyContent:"center",padding:20}}>
+            <div style={{background:"var(--card-bg)",borderRadius:14,maxWidth:520,width:"100%",maxHeight:"85vh",overflow:"hidden",boxShadow:"0 10px 40px rgba(0,0,0,0.3)",display:"flex",flexDirection:"column"}}>
+              <div style={{padding:"14px 18px",borderBottom:"1px solid var(--border)"}}>
+                <div style={{fontSize:11,color:"var(--text3)",fontWeight:700,textTransform:"uppercase",letterSpacing:0.4}}>Estoques da categoria</div>
+                <div style={{fontSize:15,color:"var(--text)",fontWeight:700,marginTop:2}}>📂 {cat.name}</div>
+              </div>
+              <div style={{padding:"14px 18px",overflowY:"auto",flex:1}}>
+                <p style={{color:"var(--text3)",fontSize:12,lineHeight:1.5,margin:"0 0 14px"}}>
+                  Marque os estoques onde essa categoria existe fisicamente. Ex: Vinhos pode existir em Adega + Estoque, mas não no Bar. A matriz de atribuições só vai mostrar os estoques marcados aqui.
+                </p>
+                {restStocks.length === 0 ? (
+                  <div style={{padding:"24px 16px",textAlign:"center",color:"var(--text3)",fontSize:13}}>
+                    Nenhum estoque cadastrado. Cadastre na aba <b>Estoques</b>.
+                  </div>
+                ) : (
+                  <div style={{display:"flex",flexDirection:"column",gap:6}}>
+                    {[...restStocks].sort((a,b)=>a.name.localeCompare(b.name)).map(s => {
+                      const checked = currentIds.includes(s.id);
+                      return (
+                        <label key={s.id} style={{display:"flex",alignItems:"center",gap:10,padding:"10px 14px",background:checked?miseAc+"11":"var(--bg2)",border:`1px solid ${checked?miseAc+"66":"var(--border)"}`,borderRadius:10,cursor:"pointer"}}>
+                          <input type="checkbox" checked={checked} onChange={()=>toggleCatStock(cat.id, s.id)}
+                            style={{cursor:"pointer",width:18,height:18,accentColor:miseAc}} />
+                          <div style={{flex:1}}>
+                            <div style={{fontSize:14,color:"var(--text)",fontWeight:600}}>{s.name}</div>
+                            {s.location && <div style={{fontSize:11,color:"var(--text3)",marginTop:2}}>📍 {s.location}</div>}
+                          </div>
+                          {checked && <span style={{fontSize:11,color:"#15803d",fontWeight:700}}>✓ vinculado</span>}
+                        </label>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+              <div style={{padding:"10px 18px",borderTop:"1px solid var(--border)",display:"flex",justifyContent:"space-between",alignItems:"center",flexShrink:0}}>
+                <div style={{fontSize:11,color:"var(--text3)"}}>{currentIds.length} de {restStocks.length} estoque(s)</div>
+                <button onClick={()=>setCatStocksModalId(null)} style={{...S.btnPrimary,fontSize:13,padding:"8px 18px"}}>Fechar</button>
               </div>
             </div>
           </div>
@@ -18209,6 +18315,197 @@ function miseWhatsLink(whatsapp, message) {
   const digits = (whatsapp || "").replace(/\D/g, "");
   if (!digits) return null;
   return `https://wa.me/${digits}?text=${encodeURIComponent(message)}`;
+}
+
+// ═══════════════════════════════════════════════════════════════
+// ──  OPERATIONAL GORJETAS — dashboard read-only                 ──
+// ═══════════════════════════════════════════════════════════════
+function OperationalGorjetas({ employee, data }) {
+  const restaurantId = employee.restaurantId;
+  const now = new Date();
+  const [year, setYear] = useState(now.getFullYear());
+  const [month, setMonth] = useState(now.getMonth());
+  const mk = monthKey(year, month);
+  const ac = "var(--ac)";
+
+  const tips = (data?.tips || []).filter(t => t.restaurantId === restaurantId && t.monthKey === mk);
+  const employees = (data?.employees || []).filter(e => e.restaurantId === restaurantId);
+  const roles = (data?.roles || []).filter(r => r.restaurantId === restaurantId);
+  const restaurant = (data?.restaurants || []).find(r => r.id === restaurantId);
+
+  function navMonth(delta) {
+    const d = new Date(year, month + delta, 1);
+    setYear(d.getFullYear());
+    setMonth(d.getMonth());
+  }
+
+  // Totais do mês
+  const totalNet = tips.reduce((a, t) => a + (t.myNet ?? 0), 0);
+  const totalTax = tips.reduce((a, t) => a + (t.myTax ?? 0), 0);
+  const totalGross = totalNet + totalTax;
+
+  // Por dia
+  const byDate = {};
+  tips.forEach(t => {
+    if (!byDate[t.date]) byDate[t.date] = { date: t.date, total: 0, net: 0, tax: 0, empCount: new Set() };
+    byDate[t.date].total += (t.myNet ?? 0) + (t.myTax ?? 0);
+    byDate[t.date].net += (t.myNet ?? 0);
+    byDate[t.date].tax += (t.myTax ?? 0);
+    byDate[t.date].empCount.add(t.employeeId);
+  });
+  const days = Object.values(byDate).sort((a,b) => a.date.localeCompare(b.date));
+
+  // Ranking por colaborador
+  const byEmp = {};
+  tips.forEach(t => {
+    if (!byEmp[t.employeeId]) byEmp[t.employeeId] = { employeeId: t.employeeId, net: 0, tax: 0, daysCount: new Set() };
+    byEmp[t.employeeId].net += (t.myNet ?? 0);
+    byEmp[t.employeeId].tax += (t.myTax ?? 0);
+    byEmp[t.employeeId].daysCount.add(t.date);
+  });
+  const ranking = Object.values(byEmp)
+    .map(r => {
+      const emp = employees.find(e => e.id === r.employeeId);
+      const role = emp ? roles.find(rl => rl.id === emp.roleId) : null;
+      return { ...r, emp, role, days: r.daysCount.size };
+    })
+    .sort((a,b) => b.net - a.net);
+
+  // Semana corrente (últimos 7 dias do mês ou do mês atual)
+  const today_ = today();
+  const isCurrentMonth = year === now.getFullYear() && month === now.getMonth();
+  const currentMonday = isCurrentMonth ? getWeekMonday(today_) : null;
+  const weekTips = currentMonday ? tips.filter(t => getWeekMonday(t.date) === currentMonday) : [];
+  const weekTotal = weekTips.reduce((a, t) => a + (t.myNet ?? 0) + (t.myTax ?? 0), 0);
+
+  return (
+    <div>
+      {/* Header + navegação de mês */}
+      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",flexWrap:"wrap",gap:12,marginBottom:16}}>
+        <div>
+          <div style={{fontSize:11,color:"var(--text3)",fontWeight:700,textTransform:"uppercase",letterSpacing:0.4}}>Gorjetas — visão operacional</div>
+          <div style={{fontSize:17,color:"var(--text)",fontWeight:700,marginTop:2}}>{restaurant?.name ?? "Restaurante"}</div>
+        </div>
+        <div style={{display:"flex",gap:4,alignItems:"center",background:"var(--card-bg)",border:"1px solid var(--border)",borderRadius:10,padding:4}}>
+          <button onClick={()=>navMonth(-1)} style={{background:"none",border:"none",padding:"4px 10px",cursor:"pointer",fontSize:14,color:"var(--text2)"}}>‹</button>
+          <span style={{fontSize:13,color:"var(--text)",fontWeight:700,minWidth:140,textAlign:"center",textTransform:"capitalize"}}>{monthLabel(year, month)}</span>
+          <button onClick={()=>navMonth(1)} style={{background:"none",border:"none",padding:"4px 10px",cursor:"pointer",fontSize:14,color:"var(--text2)"}}>›</button>
+        </div>
+      </div>
+
+      {/* Cards de totais */}
+      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit, minmax(160px, 1fr))",gap:12,marginBottom:16}}>
+        <div style={{padding:"14px 16px",background:"var(--card-bg)",border:"1px solid var(--border)",borderRadius:12}}>
+          <div style={{fontSize:10,color:"var(--text3)",fontWeight:700,textTransform:"uppercase",letterSpacing:0.4}}>Bruto do mês</div>
+          <div style={{fontSize:18,color:"var(--text)",fontWeight:700,fontFamily:"'DM Mono',monospace",marginTop:2}}>{fmt(totalGross)}</div>
+          <div style={{fontSize:11,color:"var(--text3)",marginTop:2}}>{days.length} dia(s) com gorjeta</div>
+        </div>
+        <div style={{padding:"14px 16px",background:"var(--card-bg)",border:"1px solid var(--border)",borderRadius:12}}>
+          <div style={{fontSize:10,color:"var(--text3)",fontWeight:700,textTransform:"uppercase",letterSpacing:0.4}}>Líquido pago</div>
+          <div style={{fontSize:18,color:"#15803d",fontWeight:700,fontFamily:"'DM Mono',monospace",marginTop:2}}>{fmt(totalNet)}</div>
+          <div style={{fontSize:11,color:"var(--text3)",marginTop:2}}>aos colaboradores</div>
+        </div>
+        <div style={{padding:"14px 16px",background:"var(--card-bg)",border:"1px solid var(--border)",borderRadius:12}}>
+          <div style={{fontSize:10,color:"var(--text3)",fontWeight:700,textTransform:"uppercase",letterSpacing:0.4}}>Imposto retido</div>
+          <div style={{fontSize:18,color:"var(--text2)",fontWeight:700,fontFamily:"'DM Mono',monospace",marginTop:2}}>{fmt(totalTax)}</div>
+          <div style={{fontSize:11,color:"var(--text3)",marginTop:2}}>{totalGross > 0 ? `${((totalTax/totalGross)*100).toFixed(1)}%` : "—"}</div>
+        </div>
+        {isCurrentMonth && (
+          <div style={{padding:"14px 16px",background:ac+"22",border:`1px solid ${ac}66`,borderRadius:12}}>
+            <div style={{fontSize:10,color:ac,fontWeight:700,textTransform:"uppercase",letterSpacing:0.4}}>Semana atual</div>
+            <div style={{fontSize:18,color:"var(--text)",fontWeight:700,fontFamily:"'DM Mono',monospace",marginTop:2}}>{fmt(weekTotal)}</div>
+            <div style={{fontSize:11,color:"var(--text3)",marginTop:2}}>desde seg {currentMonday ? fmtDate(currentMonday) : "—"}</div>
+          </div>
+        )}
+      </div>
+
+      {/* Por dia */}
+      <div style={{background:"var(--card-bg)",border:"1px solid var(--border)",borderRadius:12,overflow:"hidden",marginBottom:16}}>
+        <div style={{padding:"10px 16px",borderBottom:"1px solid var(--border)",background:"var(--bg2)"}}>
+          <div style={{fontSize:13,color:"var(--text)",fontWeight:700}}>📅 Dias com gorjeta lançada</div>
+        </div>
+        {days.length === 0 ? (
+          <div style={{padding:"32px 16px",textAlign:"center",color:"var(--text3)",fontSize:13}}>
+            Nenhuma gorjeta lançada neste mês.
+          </div>
+        ) : (
+          <div style={{overflowX:"auto"}}>
+            <table style={{width:"100%",borderCollapse:"collapse",fontSize:13}}>
+              <thead>
+                <tr style={{borderBottom:"1px solid var(--border)"}}>
+                  <th style={{padding:"8px 14px",textAlign:"left",fontSize:10,color:"var(--text3)",fontWeight:700,textTransform:"uppercase",letterSpacing:0.4}}>Dia</th>
+                  <th style={{padding:"8px 12px",textAlign:"right",fontSize:10,color:"var(--text3)",fontWeight:700,textTransform:"uppercase",letterSpacing:0.4}}>Bruto</th>
+                  <th style={{padding:"8px 12px",textAlign:"right",fontSize:10,color:"var(--text3)",fontWeight:700,textTransform:"uppercase",letterSpacing:0.4}}>Líquido</th>
+                  <th style={{padding:"8px 12px",textAlign:"right",fontSize:10,color:"var(--text3)",fontWeight:700,textTransform:"uppercase",letterSpacing:0.4}}>Colab.</th>
+                </tr>
+              </thead>
+              <tbody>
+                {days.map(d => (
+                  <tr key={d.date} style={{borderTop:"1px solid var(--border)"}}>
+                    <td style={{padding:"8px 14px",color:"var(--text)"}}>{fmtDate(d.date)} <span style={{color:"var(--text3)",fontSize:11,marginLeft:4}}>{WEEKDAYS[new Date(d.date + "T12:00:00").getDay()]}</span></td>
+                    <td style={{padding:"8px 12px",textAlign:"right",color:"var(--text2)",fontFamily:"'DM Mono',monospace"}}>{fmt(d.total)}</td>
+                    <td style={{padding:"8px 12px",textAlign:"right",color:"#15803d",fontFamily:"'DM Mono',monospace",fontWeight:600}}>{fmt(d.net)}</td>
+                    <td style={{padding:"8px 12px",textAlign:"right",color:"var(--text3)"}}>{d.empCount.size}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      {/* Ranking */}
+      <div style={{background:"var(--card-bg)",border:"1px solid var(--border)",borderRadius:12,overflow:"hidden"}}>
+        <div style={{padding:"10px 16px",borderBottom:"1px solid var(--border)",background:"var(--bg2)"}}>
+          <div style={{fontSize:13,color:"var(--text)",fontWeight:700}}>🏆 Ranking por colaborador</div>
+        </div>
+        {ranking.length === 0 ? (
+          <div style={{padding:"32px 16px",textAlign:"center",color:"var(--text3)",fontSize:13}}>
+            Nenhum colaborador recebeu gorjeta neste mês.
+          </div>
+        ) : (
+          <div style={{overflowX:"auto"}}>
+            <table style={{width:"100%",borderCollapse:"collapse",fontSize:13}}>
+              <thead>
+                <tr style={{borderBottom:"1px solid var(--border)"}}>
+                  <th style={{padding:"8px 14px",textAlign:"left",fontSize:10,color:"var(--text3)",fontWeight:700,textTransform:"uppercase",letterSpacing:0.4,width:40}}>#</th>
+                  <th style={{padding:"8px 14px",textAlign:"left",fontSize:10,color:"var(--text3)",fontWeight:700,textTransform:"uppercase",letterSpacing:0.4}}>Colaborador</th>
+                  <th style={{padding:"8px 12px",textAlign:"left",fontSize:10,color:"var(--text3)",fontWeight:700,textTransform:"uppercase",letterSpacing:0.4}}>Área</th>
+                  <th style={{padding:"8px 12px",textAlign:"right",fontSize:10,color:"var(--text3)",fontWeight:700,textTransform:"uppercase",letterSpacing:0.4}}>Dias</th>
+                  <th style={{padding:"8px 12px",textAlign:"right",fontSize:10,color:"var(--text3)",fontWeight:700,textTransform:"uppercase",letterSpacing:0.4}}>Líquido</th>
+                </tr>
+              </thead>
+              <tbody>
+                {ranking.map((r, idx) => {
+                  const areaColor = r.role?.area ? AREA_COLORS[r.role.area] : null;
+                  return (
+                    <tr key={r.employeeId} style={{borderTop:"1px solid var(--border)"}}>
+                      <td style={{padding:"8px 14px",color:idx<3?"var(--ac)":"var(--text3)",fontWeight:idx<3?700:400,fontFamily:"'DM Mono',monospace"}}>{idx===0?"🥇":idx===1?"🥈":idx===2?"🥉":idx+1}</td>
+                      <td style={{padding:"8px 14px",color:"var(--text)",fontWeight:600}}>{r.emp?.name ?? "—"}</td>
+                      <td style={{padding:"8px 12px",color:"var(--text2)",fontSize:12}}>
+                        {r.role ? (
+                          <span>
+                            <span style={{display:"inline-block",width:8,height:8,borderRadius:4,background:areaColor ?? "var(--text3)",marginRight:6}}></span>
+                            {r.role.name}
+                          </span>
+                        ) : "—"}
+                      </td>
+                      <td style={{padding:"8px 12px",textAlign:"right",color:"var(--text3)"}}>{r.days}</td>
+                      <td style={{padding:"8px 12px",textAlign:"right",color:"#15803d",fontFamily:"'DM Mono',monospace",fontWeight:700}}>{fmt(r.net)}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      <div style={{marginTop:14,fontSize:11,color:"var(--text3)",lineHeight:1.5}}>
+        💡 Visão read-only dos dados já processados pelo Gestor Administrativo. Para lançar novas gorjetas, fechar semana ou editar a divisão, use o Portal Adm (botão 📊 no topo).
+      </div>
+    </div>
+  );
 }
 
 // ═══════════════════════════════════════════════════════════════
