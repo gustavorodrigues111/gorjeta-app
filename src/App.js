@@ -17663,6 +17663,319 @@ function pessoaHasAnyOperationalArea(pessoa, restaurantId) {
 /* eslint-enable no-unused-vars */
 
 // ═══════════════════════════════════════════════════════════════
+// ──  APPSHELL — sidebar unificada + header + content            ──
+// ═══════════════════════════════════════════════════════════════
+// Define estrutura da sidebar derivada de permissões da pessoa
+function buildShellSections({ pessoa, restaurantId, isOwner }) {
+  const perms = pessoa?.permissions?.[restaurantId] || { operational: {}, admin: {}, special: {} };
+  const isTeam = !!pessoa?.isTeam?.[restaurantId];
+  const op = perms.operational || {};
+  const ad = perms.admin || {};
+  const sp = perms.special || {};
+
+  const sections = [];
+
+  // Minha Área — só pra membros da equipe
+  if (isTeam) {
+    sections.push({
+      group: "Minha Área",
+      color: "#d4a017",
+      items: [
+        { id: "me_home",       label: "Início",         icon: "🏠", kind: "employee", tab: "comunicados" },
+        { id: "me_gorjeta",    label: "Meu extrato",    icon: "💰", kind: "employee", tab: "gorjeta" },
+        { id: "me_escala",     label: "Minha escala",   icon: "📅", kind: "employee", tab: "schedule" },
+        { id: "me_trilha",     label: "Minhas trilhas", icon: "🎯", kind: "employee", tab: "trilha" },
+        { id: "me_comunicados",label: "Comunicados",    icon: "📬", kind: "employee", tab: "comunicados" },
+        { id: "me_dp",         label: "Fale com DP",    icon: "💬", kind: "employee", tab: "dp" },
+      ],
+    });
+  }
+
+  // AppTip Operacional
+  const hasOp = ["escalas","gorjetas","trilhas","reunioes"].some(k => op[k]);
+  if (hasOp) {
+    sections.push({
+      group: "AppTip",
+      color: "#d4a017",
+      items: [
+        op.escalas  && { id: "op_escalas",  label: "Escalas",    icon: "📅", kind: "operational", tab: "escalas" },
+        op.gorjetas && { id: "op_gorjetas", label: "Gorjetas",   icon: "💰", kind: "operational", tab: "gorjetas" },
+        op.trilhas  && { id: "op_trilhas",  label: "Trilhas",    icon: "🎯", kind: "operational", tab: "trilhas" },
+        op.reunioes && { id: "op_reunioes", label: "Reuniões",   icon: "🗣️", kind: "operational", tab: "reunioes" },
+      ].filter(Boolean),
+    });
+  }
+
+  // AppMise (Contagens, Compras, Checklists, Fichas Técnicas)
+  const hasMise = ["contagens","compras","checklists","fichasTecnicas"].some(k => op[k]);
+  if (hasMise) {
+    sections.push({
+      group: "AppMise",
+      color: "#7c9e5e",
+      items: [
+        op.contagens       && { id: "mise_contagens_u", label: "Contagens",       icon: "📦", kind: "operational", tab: "contagens" },
+        op.compras         && { id: "mise_compras_u",   label: "Compras",         icon: "🛒", kind: "operational", tab: "compras" },
+        op.checklists      && { id: "mise_checklists_u",label: "Checklists",      icon: "✅", kind: "operational", tab: "checklists" },
+        op.fichasTecnicas  && { id: "mise_fichas_u",    label: "Fichas Técnicas", icon: "📋", kind: "operational", tab: "fichasTecnicas" },
+      ].filter(Boolean),
+    });
+  }
+
+  // AppTip Admin
+  const hasAdmin = Object.values(ad).some(v => v === true) || isOwner;
+  if (hasAdmin) {
+    sections.push({
+      group: "Administração",
+      color: "#0284c7",
+      items: [
+        (ad.pessoas || isOwner)        && { id: "adm_pessoas",      label: "Pessoas",       icon: "👤", kind: "manager", tab: "pessoas" },
+        (ad.pessoas || isOwner)        && { id: "adm_permissoes",   label: "Permissões",    icon: "🛂", kind: "manager", tab: "permissoes" },
+        (ad.employees || isOwner)      && { id: "adm_equipe",       label: "Equipe",        icon: "👥", kind: "manager", tab: "employees" },
+        (ad.roles || isOwner)          && { id: "adm_cargos",       label: "Cargos",        icon: "🏷️", kind: "manager", tab: "roles" },
+        (ad.tips || isOwner)           && { id: "adm_tips",         label: "Lançar Gorj.",  icon: "💰", kind: "manager", tab: "tips" },
+        (ad.schedule || isOwner)       && { id: "adm_schedule",     label: "Fechar Escala", icon: "📅", kind: "manager", tab: "schedule" },
+        (ad.vt || isOwner)             && { id: "adm_vt",           label: "Vale Transp.",  icon: "🚌", kind: "manager", tab: "vt" },
+        (ad.comunicados || isOwner)    && { id: "adm_comunicados",  label: "Comunicados",   icon: "📢", kind: "manager", tab: "comunicados" },
+        (ad.faq || isOwner)            && { id: "adm_faq",          label: "FAQ",           icon: "❓", kind: "manager", tab: "faq" },
+        (sp.isDP || isOwner)           && { id: "adm_dp",           label: "Fale com DP",   icon: "💬", kind: "manager", tab: "dp" },
+        (ad.config || isOwner)         && { id: "adm_config",       label: "Configurações", icon: "⚙️", kind: "manager", tab: "config" },
+        (ad.employees || isOwner)      && { id: "adm_mise_cat",     label: "Mise · Contagens",  icon: "📦", kind: "manager", tab: "mise_contagens" },
+        (ad.employees || isOwner)      && { id: "adm_mise_chk",     label: "Mise · Checklists", icon: "✅", kind: "manager", tab: "mise_checklists" },
+        (ad.employees || isOwner)      && { id: "adm_mise_ft",      label: "Mise · Fichas",     icon: "📋", kind: "manager", tab: "mise_fichas" },
+      ].filter(Boolean),
+    });
+  }
+
+  // Super (AppTip Owner)
+  if (isOwner) {
+    sections.push({
+      group: "Super (AppTip)",
+      color: "#a855f7",
+      items: [
+        { id: "sup_restaurants", label: "Restaurantes",  icon: "🏢", kind: "super", tab: "restaurantes" },
+        { id: "sup_financeiro",  label: "Financeiro",    icon: "💸", kind: "super", tab: "financeiro_geral" },
+        { id: "sup_owners",      label: "Admins AppTip", icon: "🛂", kind: "super", tab: "owners" },
+        { id: "sup_inbox",       label: "Caixa",         icon: "📥", kind: "super", tab: "inbox" },
+      ],
+    });
+  }
+
+  return sections;
+}
+
+function AppShell({ pessoa, data, activeRestaurantId, setActiveRestaurantId, userRole, currentUser,
+                    onSwitchToEmployee, onSwitchToManager, onSwitchToOperational, onLogout, onUpdate, onExitShell,
+                    toggleTheme, theme }) {
+  const restaurants = data?.restaurants || [];
+  const isOwner = userRole === "super" || currentUser?.isMaster === true;
+  const accessibleRestaurants = isOwner ? restaurants : (pessoa?.restaurantIds || []).map(rid => restaurants.find(r => r.id === rid)).filter(Boolean);
+  const activeRest = restaurants.find(r => r.id === activeRestaurantId);
+  const sections = buildShellSections({ pessoa, restaurantId: activeRestaurantId, isOwner });
+  const allItems = sections.flatMap(s => s.items);
+
+  // Seção ativa do shell (persistida em localStorage)
+  const [activeSectionId, setActiveSectionId] = useState(() => {
+    const saved = localStorage.getItem("apptip_shell_section");
+    if (saved && allItems.some(it => it.id === saved)) return saved;
+    return allItems[0]?.id ?? null;
+  });
+  useEffect(() => {
+    if (activeSectionId) localStorage.setItem("apptip_shell_section", activeSectionId);
+  }, [activeSectionId]);
+
+  // Re-alinha se seção atual sumiu (ex: perdeu permissão)
+  useEffect(() => {
+    if (activeSectionId && !allItems.find(it => it.id === activeSectionId)) {
+      setActiveSectionId(allItems[0]?.id ?? null);
+    }
+  }, [activeSectionId, allItems]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const activeItem = allItems.find(it => it.id === activeSectionId);
+  const ac = "var(--ac)";
+  const [sidebarOpen, setSidebarOpen] = useState(true);
+
+  // Decide o que renderizar no content area
+  function renderContent() {
+    if (!activeItem) {
+      return (
+        <div style={{padding:"60px 24px",textAlign:"center",color:"var(--text3)"}}>
+          <div style={{fontSize:48,marginBottom:16}}>🔒</div>
+          <h3 style={{color:"var(--text)",fontSize:18,fontWeight:700,margin:"0 0 8px"}}>Sem áreas disponíveis</h3>
+          <p style={{fontSize:14,lineHeight:1.6,maxWidth:420,margin:"0 auto"}}>
+            Você ainda não tem permissões para nenhuma área neste restaurante.
+          </p>
+        </div>
+      );
+    }
+
+    // Features já standalone: render inline diretamente
+    if (activeItem.tab === "contagens" && activeItem.kind === "operational") {
+      return (
+        <OperationalContagens
+          employee={buildVirtualEmpForPessoa(pessoa, activeRestaurantId)}
+          miseCategories={data?.miseCategories ?? []}
+          miseStocks={data?.miseStocks ?? []}
+          miseAssignments={data?.miseAssignments ?? []}
+          miseItems={data?.miseItems ?? []}
+          miseCycles={data?.miseCycles ?? []}
+          miseCounts={data?.miseCounts ?? []}
+          onUpdate={onUpdate}
+        />
+      );
+    }
+    if (activeItem.tab === "compras" && activeItem.kind === "operational") {
+      return (
+        <OperationalCompras
+          employee={buildVirtualEmpForPessoa(pessoa, activeRestaurantId)}
+          data={data}
+          onUpdate={onUpdate}
+        />
+      );
+    }
+    if (activeItem.tab === "checklists" && activeItem.kind === "operational") {
+      return (
+        <OperationalChecklists
+          employee={buildVirtualEmpForPessoa(pessoa, activeRestaurantId)}
+          miseChecklistTemplates={data?.miseChecklistTemplates ?? []}
+          miseChecklistRuns={data?.miseChecklistRuns ?? []}
+          onUpdate={onUpdate}
+        />
+      );
+    }
+    if (activeItem.tab === "fichasTecnicas" && activeItem.kind === "operational") {
+      return (
+        <OperationalFichasTecnicas
+          employee={buildVirtualEmpForPessoa(pessoa, activeRestaurantId)}
+          miseFtInsumos={data?.miseFtInsumos ?? []}
+          miseFtDishes={data?.miseFtDishes ?? []}
+        />
+      );
+    }
+    if (activeItem.tab === "gorjetas" && activeItem.kind === "operational") {
+      return (
+        <OperationalGorjetas
+          employee={buildVirtualEmpForPessoa(pessoa, activeRestaurantId)}
+          data={data}
+        />
+      );
+    }
+
+    // Outras áreas: delegação para portais antigos via botão
+    const kindToAction = {
+      employee:    () => onSwitchToEmployee && onSwitchToEmployee(activeItem.tab),
+      manager:     () => onSwitchToManager && onSwitchToManager(activeItem.tab),
+      operational: () => onSwitchToOperational && onSwitchToOperational(activeItem.tab),
+      super:       () => onSwitchToManager && onSwitchToManager(activeItem.tab), // super → OwnerPortal handler
+    };
+    const launch = kindToAction[activeItem.kind];
+    const portalLabel = {
+      employee: "Portal do Empregado",
+      manager: "Portal do Gestor Administrativo",
+      operational: "Portal do Gestor Operacional",
+      super: "Portal Super",
+    }[activeItem.kind] || "Portal";
+    return (
+      <div style={{padding:"60px 24px",textAlign:"center",color:"var(--text3)"}}>
+        <div style={{fontSize:48,marginBottom:16}}>{activeItem.icon}</div>
+        <h3 style={{color:"var(--text)",fontSize:20,fontWeight:700,margin:"0 0 10px"}}>{activeItem.label}</h3>
+        <p style={{fontSize:14,lineHeight:1.6,maxWidth:460,margin:"0 auto 20px"}}>
+          Essa área ainda vive no <b>{portalLabel}</b> (o refactor pro shell está em andamento). Abre lá num clique:
+        </p>
+        <button onClick={launch}
+          style={{background:ac,color:"#fff",border:"none",borderRadius:10,padding:"10px 22px",fontSize:14,fontWeight:700,cursor:"pointer",fontFamily:"'DM Sans',sans-serif"}}>
+          🚀 Abrir em {portalLabel}
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div style={{minHeight:"100vh",background:"var(--bg)",fontFamily:"'DM Sans',sans-serif",display:"flex",flexDirection:"column"}}>
+      {/* HEADER */}
+      <header style={{background:"var(--header-bg)",borderBottom:"1px solid var(--border)",padding:"10px 16px",display:"flex",alignItems:"center",gap:12,flexWrap:"wrap"}}>
+        <button onClick={()=>setSidebarOpen(o=>!o)} style={{background:"none",border:"none",cursor:"pointer",fontSize:18,color:"var(--text2)",padding:"4px 8px"}}>☰</button>
+        <div style={{fontSize:14,fontWeight:800,color:"var(--text)"}}>AppTip</div>
+        {accessibleRestaurants.length > 0 && (
+          <select value={activeRestaurantId ?? ""} onChange={e=>setActiveRestaurantId(e.target.value)}
+            style={{background:"var(--bg1)",border:"1px solid var(--border)",borderRadius:8,padding:"4px 10px",fontSize:13,color:"var(--text)",fontFamily:"'DM Sans',sans-serif",cursor:"pointer"}}>
+            {accessibleRestaurants.length > 1 && <option value="">— Selecione restaurante —</option>}
+            {accessibleRestaurants.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
+          </select>
+        )}
+        <div style={{flex:1}}/>
+        <div style={{fontSize:13,color:"var(--text2)",fontWeight:500}}>
+          👤 {pessoa?.name || currentUser?.name || "—"}
+          {isOwner && <span style={{marginLeft:6,fontSize:10,padding:"1px 6px",borderRadius:6,background:"#a855f722",color:"#a855f7",fontWeight:700}}>SUPER</span>}
+        </div>
+        <button onClick={toggleTheme} style={{background:"none",border:"1px solid var(--border)",borderRadius:20,padding:"5px 10px",cursor:"pointer",fontSize:14,color:"var(--text2)"}}>{theme==="dark"?"☀️":"🌙"}</button>
+        {onExitShell && <button onClick={onExitShell} title="Voltar ao layout antigo"
+          style={{...S.btnSecondary,fontSize:11,padding:"5px 10px",color:"var(--text3)"}}>↩︎ antigo</button>}
+        <button onClick={onLogout} style={{...S.btnSecondary,fontSize:11,padding:"5px 12px"}}>Sair</button>
+      </header>
+
+      {/* BODY: sidebar + content */}
+      <div style={{flex:1,display:"flex",overflow:"hidden"}}>
+        {/* SIDEBAR */}
+        {sidebarOpen && (
+          <aside style={{width:240,flexShrink:0,background:"var(--bg1)",borderRight:"1px solid var(--border)",overflowY:"auto",padding:"12px 0"}}>
+            {!activeRest && accessibleRestaurants.length > 0 ? (
+              <div style={{padding:"16px",fontSize:12,color:"var(--text3)",textAlign:"center"}}>Selecione um restaurante no topo pra ver as áreas disponíveis.</div>
+            ) : sections.length === 0 ? (
+              <div style={{padding:"16px",fontSize:12,color:"var(--text3)",textAlign:"center"}}>Nenhuma área disponível.</div>
+            ) : sections.map(sec => (
+              <div key={sec.group} style={{marginBottom:14}}>
+                <div style={{padding:"4px 16px",fontSize:10,color:sec.color,fontWeight:700,textTransform:"uppercase",letterSpacing:0.5}}>{sec.group}</div>
+                {sec.items.map(it => {
+                  const active = it.id === activeSectionId;
+                  return (
+                    <button key={it.id} onClick={()=>setActiveSectionId(it.id)}
+                      style={{
+                        display:"flex",alignItems:"center",gap:10,width:"100%",background:active?sec.color+"22":"transparent",
+                        border:"none",borderLeft:`3px solid ${active?sec.color:"transparent"}`,
+                        padding:"8px 16px 8px 13px",cursor:"pointer",fontSize:13,
+                        color:active?"var(--text)":"var(--text2)",fontWeight:active?700:500,
+                        fontFamily:"'DM Sans',sans-serif",textAlign:"left",
+                      }}>
+                      <span style={{fontSize:15}}>{it.icon}</span>
+                      <span>{it.label}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            ))}
+          </aside>
+        )}
+
+        {/* CONTENT */}
+        <main style={{flex:1,overflowY:"auto",padding:"20px 24px",minWidth:0}}>
+          {activeRest && (
+            <div style={{marginBottom:16,padding:"8px 14px",background:"var(--bg2)",borderRadius:10,fontSize:12,color:"var(--text3)"}}>
+              <b style={{color:"var(--text)"}}>{activeRest.name}</b> · {activeItem?.label || "—"}
+            </div>
+          )}
+          {renderContent()}
+        </main>
+      </div>
+    </div>
+  );
+}
+
+// Helper: constrói um empregado virtual a partir da pessoa + restaurantId
+// Usado quando features operacionais (Contagens, Compras, etc.) esperam um employee object
+function buildVirtualEmpForPessoa(pessoa, restaurantId) {
+  if (!pessoa) return { id: "virt_empty", restaurantId, name: "—", operationalAreas: {} };
+  const perms = pessoa?.permissions?.[restaurantId] || { operational: {} };
+  return {
+    id: pessoa.linkedEmployeeId || `pes_as_emp_${pessoa.id}`,
+    restaurantId,
+    name: pessoa.name,
+    cpf: pessoa.cpf || "",
+    operationalAreas: perms.operational || {},
+    _pessoaId: pessoa.id,
+  };
+}
+
+// ═══════════════════════════════════════════════════════════════
 // ──  PESSOAS — CRUD                                             ──
 // ═══════════════════════════════════════════════════════════════
 function PessoasAdmin({ restaurantId, pessoas, roles, onUpdate, mobileOnly }) {
@@ -21004,7 +21317,7 @@ function ManagerPinChange({ manager, onDone, onBack }) {
 //
 // LOGIN
 //
-function UnifiedLogin({ owners, managers, employees, restaurants, pessoas, onLoginOwner, onLoginManager, onLoginEmployee, onLoginOperational, onSetupFirst, onGoHome, onUpdatePessoas, toggleTheme, theme, dataLoaded }) {
+function UnifiedLogin({ owners, managers, employees, restaurants, pessoas, onLoginOwner, onLoginManager, onLoginEmployee, onLoginOperational, onLoginShell, onSetupFirst, onGoHome, onUpdatePessoas, toggleTheme, theme, dataLoaded }) {
   const [credential, setCredential] = useState("");
   const [pin, setPin] = useState("");
   const [err, setErr] = useState("");
@@ -21098,6 +21411,15 @@ function UnifiedLogin({ owners, managers, employees, restaurants, pessoas, onLog
         });
       }
     });
+    // Se a pessoa tem mais de um perfil total, oferece o Portal Unificado como primeira opção
+    if (options.length > 1 && onLoginShell) {
+      options.unshift({
+        label: "✨ Portal Unificado (novo)",
+        icon: "🪟",
+        action: () => { setChoices(null); onLoginShell(pessoa); },
+        highlighted: true,
+      });
+    }
     return options;
   }
 
@@ -22523,11 +22845,18 @@ export default function App() {
     if (isGuiaGestor) return "guia-gestor";
     const role = localStorage.getItem("apptip_role");
     if (role === "super") return "super";
+    if (role === "shell") return "shell";
     if (role === "manager") return "manager";
     if (role === "operational") return "operational";
     if (role === "employee") return "employee";
     return "login";
   });
+  // Flag pra controlar se o usuário quer usar o layout novo (shell) ou os portais antigos
+  const [shellActiveRest, setShellActiveRest] = useState(() => localStorage.getItem("apptip_shell_rest") || null);
+  useEffect(() => {
+    if (shellActiveRest) localStorage.setItem("apptip_shell_rest", shellActiveRest);
+    else localStorage.removeItem("apptip_shell_rest");
+  }, [shellActiveRest]);
   const [loaded, setLoaded] = useState(false);
   const [loadProgress, setLoadProgress] = useState(""); // feedback visual durante carregamento
   const [loadError, setLoadError] = useState(false);    // true se não conseguiu conectar
@@ -22927,6 +23256,17 @@ export default function App() {
             setCurrentUser(emp);
             setView("operational");
           }}
+          onLoginShell={pessoa=>{
+            localStorage.setItem("apptip_role", "shell");
+            localStorage.setItem("apptip_userid", pessoa.linkedEmployeeId || pessoa.linkedManagerId || pessoa.id);
+            if (pessoa.linkedEmployeeId) localStorage.setItem("apptip_empid", pessoa.linkedEmployeeId);
+            setUserRole("shell");
+            setShellActiveRest(pessoa.restaurantIds?.[0] || null);
+            // Se tem manager, setCurrentUser pra ter nome etc
+            const mgr = pessoa.linkedManagerId ? managers.find(m => m.id === pessoa.linkedManagerId) : null;
+            if (mgr) setCurrentUser(mgr);
+            setView("shell");
+          }}
           onUpdatePessoas={next=>handleUpdate("pessoas", next)}
           onGoHome={()=>setView("home")}
           toggleTheme={toggleTheme} theme={theme}
@@ -23004,6 +23344,49 @@ export default function App() {
           if (!emp || !hasAnyOperationalArea(emp)) return null;
           return () => { setCurrentUser(emp); setUserRole("operational"); localStorage.setItem("apptip_role","operational"); localStorage.setItem("apptip_userid",emp.id); localStorage.setItem("apptip_empid",emp.id); setView("operational"); };
         })()} />}
+      {view === "shell" && (() => {
+        // Descobre a pessoa logada
+        let pessoa = null;
+        if (userRole === "employee" || userRole === "operational" || userRole === "shell") {
+          const empId = localStorage.getItem("apptip_empid") || localStorage.getItem("apptip_userid");
+          pessoa = (pessoas || []).find(p => p.linkedEmployeeId === empId);
+        } else if (userRole === "manager") {
+          pessoa = (pessoas || []).find(p => p.linkedManagerId === currentUser?.id);
+        }
+        // Fallback: por CPF
+        if (!pessoa && currentUser?.cpf) {
+          const cpfD = currentUser.cpf.replace(/\D/g, "");
+          pessoa = (pessoas || []).find(p => (p.cpf || "").replace(/\D/g, "") === cpfD);
+        }
+        const isOwnerShell = userRole === "super" || currentUser?.isMaster === true;
+        const defaultRid = shellActiveRest || pessoa?.restaurantIds?.[0] || (isOwnerShell ? restaurants[0]?.id : null);
+        return (
+          <AppShell
+            pessoa={pessoa}
+            data={data}
+            activeRestaurantId={defaultRid}
+            setActiveRestaurantId={(rid) => { setShellActiveRest(rid); }}
+            userRole={userRole}
+            currentUser={currentUser}
+            onSwitchToEmployee={(tab) => { localStorage.setItem("apptip_role","employee"); setUserRole("employee"); setView("employee"); }}
+            onSwitchToManager={(tab) => { localStorage.setItem("apptip_role","manager"); setUserRole("manager"); setView("manager"); }}
+            onSwitchToOperational={(tab) => { localStorage.setItem("apptip_role","operational"); setUserRole("operational"); setView("operational"); }}
+            onLogout={doLogout}
+            onUpdate={handleUpdate}
+            onExitShell={() => {
+              // Volta pro portal tradicional baseado no role real (owner → super; senão tenta o que era antes do shell)
+              const prev = localStorage.getItem("apptip_shell_prev_view");
+              const prevRole = prev || (isOwnerShell ? "super" : "employee");
+              localStorage.setItem("apptip_role", prevRole);
+              setUserRole(prevRole);
+              setView(prevRole);
+            }}
+            toggleTheme={toggleTheme}
+            theme={theme}
+          />
+        );
+      })()}
+
       {view === "operational" && currentUser && (
         <OperationalPortal
           employee={currentUser}
