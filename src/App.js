@@ -17792,7 +17792,12 @@ function AppShell({ pessoa, data, activeRestaurantId, setActiveRestaurantId, use
 
   const activeItem = allItems.find(it => it.id === activeSectionId);
   const ac = "var(--ac)";
-  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const isMobile = useMobile();
+  const [sidebarOpen, setSidebarOpen] = useState(() => !isMobile);
+  // Sincroniza estado inicial quando isMobile muda (ex: rotação do device)
+  useEffect(() => {
+    setSidebarOpen(!isMobile);
+  }, [isMobile]);
 
   // Decide o que renderizar no content area
   function renderContent() {
@@ -17889,67 +17894,100 @@ function AppShell({ pessoa, data, activeRestaurantId, setActiveRestaurantId, use
     );
   }
 
+  function handleSectionClick(id) {
+    setActiveSectionId(id);
+    if (isMobile) setSidebarOpen(false); // fecha sidebar no mobile após escolher
+  }
+
   return (
     <div style={{minHeight:"100vh",background:"var(--bg)",fontFamily:"'DM Sans',sans-serif",display:"flex",flexDirection:"column"}}>
       {/* HEADER */}
-      <header style={{background:"var(--header-bg)",borderBottom:"1px solid var(--border)",padding:"10px 16px",display:"flex",alignItems:"center",gap:12,flexWrap:"wrap"}}>
-        <button onClick={()=>setSidebarOpen(o=>!o)} style={{background:"none",border:"none",cursor:"pointer",fontSize:18,color:"var(--text2)",padding:"4px 8px"}}>☰</button>
-        <div style={{fontSize:14,fontWeight:800,color:"var(--text)"}}>AppTip</div>
+      <header style={{background:"var(--header-bg)",borderBottom:"1px solid var(--border)",padding:isMobile?"8px 10px":"10px 16px",display:"flex",alignItems:"center",gap:isMobile?6:12,flexWrap:"nowrap",overflowX:"auto"}}>
+        <button onClick={()=>setSidebarOpen(o=>!o)} title={sidebarOpen?"Fechar menu":"Abrir menu"} style={{background:sidebarOpen?"var(--bg2)":"none",border:"none",cursor:"pointer",fontSize:20,color:"var(--text2)",padding:"4px 10px",borderRadius:8,flexShrink:0}}>☰</button>
+        {!isMobile && <div style={{fontSize:14,fontWeight:800,color:"var(--text)",flexShrink:0}}>AppTip</div>}
         {accessibleRestaurants.length > 0 && (
           <select value={activeRestaurantId ?? ""} onChange={e=>setActiveRestaurantId(e.target.value)}
-            style={{background:"var(--bg1)",border:"1px solid var(--border)",borderRadius:8,padding:"4px 10px",fontSize:13,color:"var(--text)",fontFamily:"'DM Sans',sans-serif",cursor:"pointer"}}>
-            {accessibleRestaurants.length > 1 && <option value="">— Selecione restaurante —</option>}
+            style={{background:"var(--bg1)",border:"1px solid var(--border)",borderRadius:8,padding:isMobile?"5px 8px":"4px 10px",fontSize:isMobile?12:13,color:"var(--text)",fontFamily:"'DM Sans',sans-serif",cursor:"pointer",maxWidth:isMobile?140:"none",flexShrink:0}}>
+            {accessibleRestaurants.length > 1 && <option value="">— Selecione —</option>}
             {accessibleRestaurants.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
           </select>
         )}
-        <div style={{flex:1}}/>
-        <div style={{fontSize:13,color:"var(--text2)",fontWeight:500}}>
-          👤 {pessoa?.name || currentUser?.name || "—"}
-          {isOwner && <span style={{marginLeft:6,fontSize:10,padding:"1px 6px",borderRadius:6,background:"#a855f722",color:"#a855f7",fontWeight:700}}>SUPER</span>}
-        </div>
-        <button onClick={toggleTheme} style={{background:"none",border:"1px solid var(--border)",borderRadius:20,padding:"5px 10px",cursor:"pointer",fontSize:14,color:"var(--text2)"}}>{theme==="dark"?"☀️":"🌙"}</button>
-        {onExitShell && <button onClick={onExitShell} title="Voltar ao layout antigo"
-          style={{...S.btnSecondary,fontSize:11,padding:"5px 10px",color:"var(--text3)"}}>↩︎ antigo</button>}
-        <button onClick={onLogout} style={{...S.btnSecondary,fontSize:11,padding:"5px 12px"}}>Sair</button>
+        <div style={{flex:1,minWidth:0}}/>
+        {!isMobile && (
+          <div style={{fontSize:13,color:"var(--text2)",fontWeight:500,minWidth:0,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
+            👤 {pessoa?.name || currentUser?.name || "—"}
+            {isOwner && <span style={{marginLeft:6,fontSize:10,padding:"1px 6px",borderRadius:6,background:"#a855f722",color:"#a855f7",fontWeight:700}}>SUPER</span>}
+          </div>
+        )}
+        <button onClick={toggleTheme} style={{background:"none",border:"1px solid var(--border)",borderRadius:20,padding:isMobile?"4px 8px":"5px 10px",cursor:"pointer",fontSize:isMobile?13:14,color:"var(--text2)",flexShrink:0}}>{theme==="dark"?"☀️":"🌙"}</button>
+        {!isMobile && onExitShell && <button onClick={onExitShell} title="Voltar ao layout antigo"
+          style={{...S.btnSecondary,fontSize:11,padding:"5px 10px",color:"var(--text3)",flexShrink:0}}>↩︎ antigo</button>}
+        <button onClick={onLogout} style={{...S.btnSecondary,fontSize:isMobile?10:11,padding:isMobile?"4px 8px":"5px 12px",flexShrink:0}}>Sair</button>
       </header>
 
       {/* BODY: sidebar + content */}
-      <div style={{flex:1,display:"flex",overflow:"hidden"}}>
+      <div style={{flex:1,display:"flex",overflow:"hidden",position:"relative"}}>
         {/* SIDEBAR */}
         {sidebarOpen && (
-          <aside style={{width:240,flexShrink:0,background:"var(--bg1)",borderRight:"1px solid var(--border)",overflowY:"auto",padding:"12px 0"}}>
-            {!activeRest && accessibleRestaurants.length > 0 ? (
-              <div style={{padding:"16px",fontSize:12,color:"var(--text3)",textAlign:"center"}}>Selecione um restaurante no topo pra ver as áreas disponíveis.</div>
-            ) : sections.length === 0 ? (
-              <div style={{padding:"16px",fontSize:12,color:"var(--text3)",textAlign:"center"}}>Nenhuma área disponível.</div>
-            ) : sections.map(sec => (
-              <div key={sec.group} style={{marginBottom:14}}>
-                <div style={{padding:"4px 16px",fontSize:10,color:sec.color,fontWeight:700,textTransform:"uppercase",letterSpacing:0.5}}>{sec.group}</div>
-                {sec.items.map(it => {
-                  const active = it.id === activeSectionId;
-                  return (
-                    <button key={it.id} onClick={()=>setActiveSectionId(it.id)}
-                      style={{
-                        display:"flex",alignItems:"center",gap:10,width:"100%",background:active?sec.color+"22":"transparent",
-                        border:"none",borderLeft:`3px solid ${active?sec.color:"transparent"}`,
-                        padding:"8px 16px 8px 13px",cursor:"pointer",fontSize:13,
-                        color:active?"var(--text)":"var(--text2)",fontWeight:active?700:500,
-                        fontFamily:"'DM Sans',sans-serif",textAlign:"left",
-                      }}>
-                      <span style={{fontSize:15}}>{it.icon}</span>
-                      <span>{it.label}</span>
-                    </button>
-                  );
-                })}
-              </div>
-            ))}
-          </aside>
+          <>
+            {isMobile && (
+              <div onClick={()=>setSidebarOpen(false)}
+                style={{position:"fixed",top:0,left:0,right:0,bottom:0,background:"rgba(0,0,0,0.5)",zIndex:100}} />
+            )}
+            <aside style={{
+              width:isMobile?"80%":240,
+              maxWidth:isMobile?320:240,
+              flexShrink:0,
+              background:"var(--bg1)",
+              borderRight:"1px solid var(--border)",
+              overflowY:"auto",
+              padding:"12px 0",
+              ...(isMobile ? {position:"fixed",top:0,left:0,bottom:0,zIndex:101,paddingTop:60,boxShadow:"2px 0 16px rgba(0,0,0,0.2)"} : {}),
+            }}>
+              {isMobile && (
+                <div style={{padding:"6px 16px 10px",borderBottom:"1px solid var(--border)",marginBottom:10,fontSize:12,color:"var(--text2)",fontWeight:600}}>
+                  👤 {pessoa?.name || currentUser?.name || "—"}
+                  {isOwner && <span style={{marginLeft:6,fontSize:10,padding:"1px 6px",borderRadius:6,background:"#a855f722",color:"#a855f7",fontWeight:700}}>SUPER</span>}
+                </div>
+              )}
+              {!activeRest && accessibleRestaurants.length > 0 ? (
+                <div style={{padding:"16px",fontSize:12,color:"var(--text3)",textAlign:"center"}}>Selecione um restaurante no topo pra ver as áreas disponíveis.</div>
+              ) : sections.length === 0 ? (
+                <div style={{padding:"16px",fontSize:12,color:"var(--text3)",textAlign:"center"}}>Nenhuma área disponível.</div>
+              ) : sections.map(sec => (
+                <div key={sec.group} style={{marginBottom:14}}>
+                  <div style={{padding:"4px 16px",fontSize:10,color:sec.color,fontWeight:700,textTransform:"uppercase",letterSpacing:0.5}}>{sec.group}</div>
+                  {sec.items.map(it => {
+                    const active = it.id === activeSectionId;
+                    return (
+                      <button key={it.id} onClick={()=>handleSectionClick(it.id)}
+                        style={{
+                          display:"flex",alignItems:"center",gap:10,width:"100%",background:active?sec.color+"22":"transparent",
+                          border:"none",borderLeft:`3px solid ${active?sec.color:"transparent"}`,
+                          padding:"10px 16px 10px 13px",cursor:"pointer",fontSize:13,
+                          color:active?"var(--text)":"var(--text2)",fontWeight:active?700:500,
+                          fontFamily:"'DM Sans',sans-serif",textAlign:"left",
+                        }}>
+                        <span style={{fontSize:15}}>{it.icon}</span>
+                        <span>{it.label}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              ))}
+              {isMobile && onExitShell && (
+                <div style={{padding:"14px 16px",borderTop:"1px solid var(--border)",marginTop:10}}>
+                  <button onClick={onExitShell} style={{...S.btnSecondary,fontSize:12,padding:"8px 12px",width:"100%",color:"var(--text3)"}}>↩︎ Voltar ao layout antigo</button>
+                </div>
+              )}
+            </aside>
+          </>
         )}
 
         {/* CONTENT */}
-        <main style={{flex:1,overflowY:"auto",padding:"20px 24px",minWidth:0}}>
+        <main style={{flex:1,overflowY:"auto",padding:isMobile?"12px 14px":"20px 24px",minWidth:0}}>
           {activeRest && (
-            <div style={{marginBottom:16,padding:"8px 14px",background:"var(--bg2)",borderRadius:10,fontSize:12,color:"var(--text3)"}}>
+            <div style={{marginBottom:isMobile?10:16,padding:"8px 14px",background:"var(--bg2)",borderRadius:10,fontSize:12,color:"var(--text3)"}}>
               <b style={{color:"var(--text)"}}>{activeRest.name}</b> · {activeItem?.label || "—"}
             </div>
           )}
