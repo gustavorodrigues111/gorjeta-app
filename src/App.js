@@ -3715,8 +3715,12 @@ function DpManagerTab({ restaurantId, dpMessages, onUpdate, isOwner }) {
   );
 }
 
-function EmployeePortal({ employees, roles, tips, schedules, splits, restaurants, communications, commAcks, faq, dpMessages, workSchedules, incidents, feedbacks, devChecklists, onBack, onUpdateEmployee, onUpdate, toggleTheme, theme, onSwitchToManager, onSwitchToOperational, employeeGoals, tipApprovals, delays, meetingPlans, inbox, inboxFolders }) {
-  const [empId, setEmpId] = useState(() => localStorage.getItem("apptip_empid") || null);
+function EmployeePortal({ employees, roles, tips, schedules, splits, restaurants, communications, commAcks, faq, dpMessages, workSchedules, incidents, feedbacks, devChecklists, onBack, onUpdateEmployee, onUpdate, toggleTheme, theme, onSwitchToManager, onSwitchToOperational, employeeGoals, tipApprovals, delays, meetingPlans, inbox, inboxFolders, hideHeader, hideTabNav, forceTab, forceEmpId }) {
+  const [empId, setEmpId] = useState(() => forceEmpId || localStorage.getItem("apptip_empid") || null);
+  // Sincroniza forceEmpId vindo do shell
+  useEffect(() => {
+    if (forceEmpId && forceEmpId !== empId) setEmpId(forceEmpId);
+  }, [forceEmpId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (empId) localStorage.setItem("apptip_empid", empId);
@@ -3726,7 +3730,8 @@ function EmployeePortal({ employees, roles, tips, schedules, splits, restaurants
   const now = new Date();
   const [year, setYear] = useState(now.getFullYear());
   const [month, setMonth] = useState(now.getMonth());
-  const [tab, setTab] = useState("comunicados");
+  const [tab, setTab] = useState(forceTab || "comunicados");
+  useEffect(() => { if (forceTab && forceTab !== tab) setTab(forceTab); }, [forceTab]); // eslint-disable-line react-hooks/exhaustive-deps
   const [firstCpf, setFirstCpf] = useState("");
   const [firstPin, setFirstPin] = useState("");
   const [firstPin2, setFirstPin2] = useState("");
@@ -3860,8 +3865,9 @@ function EmployeePortal({ employees, roles, tips, schedules, splits, restaurants
   ].filter(Boolean);
 
   return (
-    <div style={{ minHeight:"100vh", background:"var(--bg)", fontFamily:"'DM Sans',sans-serif", paddingBottom:76 }}>
+    <div style={{ minHeight:hideHeader?"auto":"100vh", background:"var(--bg)", fontFamily:"'DM Sans',sans-serif", paddingBottom:hideHeader?0:76 }}>
       {/* Header */}
+      {!hideHeader && (
       <div style={{ background:"var(--header-bg)", borderBottom:"1px solid var(--border)", padding:"12px 16px", display:"flex", justifyContent:"space-between", alignItems:"center", boxShadow:"0 1px 4px rgba(0,0,0,0.04)", gap:8 }}>
         <div style={{minWidth:0,flex:1}}>
           <div style={{ color:"var(--text)", fontWeight:700, fontSize:15, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{emp?.name}</div>
@@ -3876,15 +3882,16 @@ function EmployeePortal({ employees, roles, tips, schedules, splits, restaurants
           <button onClick={() => { setEmpId(null); onBack(); }} style={{ ...S.btnSecondary, fontSize:11, padding:"5px 10px" }}>Sair</button>
         </div>
       </div>
+      )}
 
-      {hasPending && (
+      {hasPending && !hideHeader && (
         <div style={{ background:"var(--red-bg)", padding:"8px 16px", fontSize:13, color:"var(--red)", textAlign:"center", fontWeight:500 }}>
           ⚠️ Dê ciência nos comunicados para acessar as outras abas.
         </div>
       )}
 
       {/* Content */}
-      <div style={{ padding: "16px 16px", maxWidth: 600, margin: "0 auto" }}>
+      <div style={{ padding: hideHeader?"0":"16px 16px", maxWidth: hideHeader?"none":600, margin: hideHeader?"0":"0 auto" }}>
 
         {tab === "extrato" && (
           <div>
@@ -4271,7 +4278,8 @@ function EmployeePortal({ employees, roles, tips, schedules, splits, restaurants
 
       </div>
 
-      {/* Bottom navigation bar */}
+      {/* Bottom navigation bar — omitida quando embedado no shell */}
+      {!hideTabNav && (
       <div style={{ position:"fixed", bottom:0, left:0, right:0, background:"var(--header-bg)", borderTop:"1px solid var(--border)", display:"flex", zIndex:100, paddingBottom:"env(safe-area-inset-bottom, 0px)", boxShadow:"0 -2px 12px rgba(0,0,0,0.06)" }}>
         {NAV.map(([id, icon, label]) => {
           const blocked = hasPending && id !== "comunicados";
@@ -4290,6 +4298,7 @@ function EmployeePortal({ employees, roles, tips, schedules, splits, restaurants
           );
         })}
       </div>
+      )}
     </div>
   );
 }
@@ -9293,7 +9302,7 @@ function EmpTrilhaView({ empId, employees, roles, schedules, incidents, feedback
   );
 }
 
-function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, splits, schedules, onUpdate, perms, isOwner, data, currentUser, privacyMask, mobileOnly, onEnterOperational }) {
+function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, splits, schedules, onUpdate, perms, isOwner, data, currentUser, privacyMask, mobileOnly, onEnterOperational, hideTabNav, forceTab }) {
   const now = new Date();
   const [year, setYear] = useState(now.getFullYear());
   const [month, setMonth] = useState(now.getMonth());
@@ -9683,7 +9692,11 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
 
   const defaultGroup = isLider ? "equipe" : "operacao";
   const [tabGroup, setTabGroup] = useState(defaultGroup);
-  const [tab, setTab] = useState(isLider ? "employees" : "dashboard");
+  const [tab, setTab] = useState(forceTab || (isLider ? "employees" : "dashboard"));
+  // Se o shell forçar um tab específico, sincroniza
+  useEffect(() => {
+    if (forceTab && forceTab !== tab) setTab(forceTab);
+  }, [forceTab]); // eslint-disable-line react-hooks/exhaustive-deps
   const [empResetSignal, setEmpResetSignal] = useState(0);
   const activeGroup = TAB_GROUPS_FINAL.find(g => g.id === tabGroup) ?? TAB_GROUPS_FINAL[0];
 
@@ -9767,6 +9780,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
 
   return (
     <div style={{ fontFamily:"'DM Sans',sans-serif" }}>
+      {!hideTabNav && <>
       {/* Tab groups — row 1: group pills + shortcut owner */}
       <div style={{ display:"flex", gap:2, padding:"8px 8px 0", background:"var(--header-bg)", alignItems:"center" }}>
         {TAB_GROUPS_FINAL.map(g => (
@@ -9831,9 +9845,10 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
           </button>
         ))}
       </div>
+      </>}
 
       {/* Botão voltar ao Dashboard no mobile */}
-      {mobileOnly && tab !== "dashboard" && (
+      {mobileOnly && !hideTabNav && tab !== "dashboard" && (
         <button onClick={()=>{
           if (tab === "schedule" && schedDirty) {
             const action = window.confirm("Você tem edições na escala não salvas.\n\nDeseja salvar como nova versão antes de sair?");
@@ -17793,6 +17808,55 @@ function AppShell({ pessoa, data, activeRestaurantId, setActiveRestaurantId, use
   const activeItem = allItems.find(it => it.id === activeSectionId);
   const ac = "var(--ac)";
   const isMobile = useMobile();
+
+  // Badges de notificação por seção
+  const badges = {};
+  const today_ = today();
+  // Compras: pedidos ativos (aprovado/enviado/aguardando-correção)
+  const activeOrders = (data?.miseSupplierOrders || []).filter(o =>
+    o.restaurantId === activeRestaurantId &&
+    !MISE_ORDER_STATUS[o.status]?.terminal
+  );
+  if (activeOrders.length > 0) badges.mise_compras_u = activeOrders.length;
+  // Checklists: templates pendentes hoje pra este usuário
+  const activeTemplates = (data?.miseChecklistTemplates || []).filter(t =>
+    t.restaurantId === activeRestaurantId && t.active !== false
+  );
+  if (activeTemplates.length > 0 && pessoa?.id) {
+    const myRunsToday = (data?.miseChecklistRuns || []).filter(r =>
+      r.restaurantId === activeRestaurantId && r.date === today_ && r.userId === (pessoa.linkedEmployeeId || pessoa.id)
+    );
+    const pending = activeTemplates.filter(t => {
+      const run = myRunsToday.find(r => r.templateId === t.id);
+      return !run || !run.completedAt;
+    });
+    if (pending.length > 0) badges.mise_checklists_u = pending.length;
+  }
+  // Contagens: indicador de ciclo aberto
+  const openCycleForBadge = (data?.miseCycles || []).find(c => c.restaurantId === activeRestaurantId && c.status === "open");
+  if (openCycleForBadge) badges.mise_contagens_u = "•";
+  // Sugestões de compra (calculadas live — só se tem pedidos a aprovar)
+  // Usa miseComputeSuggestedOrders para saber se há sugestões novas
+  if (openCycleForBadge && pessoa) {
+    try {
+      const sugg = miseComputeSuggestedOrders({
+        cycle: openCycleForBadge,
+        restaurantId: activeRestaurantId,
+        items: data?.miseItems || [],
+        counts: data?.miseCounts || [],
+        categories: data?.miseCategories || [],
+        productSuppliers: data?.miseProductSuppliers || [],
+        suppliers: (data?.miseSuppliers || []).filter(s => s.restaurantId === activeRestaurantId),
+        overrides: {},
+      });
+      const suggestedItemsCount = sugg.reduce((s, g) => s + g.items.length, 0);
+      if (suggestedItemsCount > 0 && badges.mise_compras_u) {
+        badges.mise_compras_u = `${badges.mise_compras_u}+${suggestedItemsCount}`;
+      } else if (suggestedItemsCount > 0) {
+        badges.mise_compras_u = `+${suggestedItemsCount}`;
+      }
+    } catch (e) { /* ignore */ }
+  }
   const [sidebarOpen, setSidebarOpen] = useState(() => !isMobile);
   // Sincroniza estado inicial quando isMobile muda (ex: rotação do device)
   useEffect(() => {
@@ -17865,6 +17929,85 @@ function AppShell({ pessoa, data, activeRestaurantId, setActiveRestaurantId, use
       );
     }
 
+    // Embed dos monólitos no shell (Sprint 2)
+    // Para kind="manager": renderiza RestaurantPanel com hideTabNav + forceTab
+    if (activeItem.kind === "manager" && activeRest) {
+      const virtualMgr = pessoa?.linkedManagerId
+        ? (data?.managers || []).find(m => m.id === pessoa.linkedManagerId)
+        : (isOwner ? { id: "owner_virt", name: currentUser?.name || "Owner", cpf: currentUser?.cpf, restaurantIds: [activeRestaurantId], perms: {tips:true,schedule:true}, isMaster: true } : null);
+      return (
+        <RestaurantPanel
+          restaurant={activeRest}
+          restaurants={data?.restaurants || []}
+          employees={data?.employees || []}
+          roles={data?.roles || []}
+          tips={data?.tips || []}
+          splits={data?.splits || {}}
+          schedules={data?.schedules || {}}
+          onUpdate={onUpdate}
+          perms={{tips:true, schedule:true, vt:true, roles:true, employees:true, comunicados:true, faq:true, config:true, isDP:true}}
+          isOwner={isOwner}
+          data={data}
+          currentUser={virtualMgr || currentUser}
+          mobileOnly={false}
+          hideTabNav={true}
+          forceTab={activeItem.tab}
+        />
+      );
+    }
+
+    // Para kind="employee": renderiza EmployeePortal com hideHeader + hideTabNav + forceTab
+    if (activeItem.kind === "employee" && activeRest) {
+      const linkedEmpId = pessoa?.linkedEmployeeId;
+      if (!linkedEmpId) {
+        return (
+          <div style={{padding:"60px 24px",textAlign:"center",color:"var(--text3)"}}>
+            <div style={{fontSize:48,marginBottom:16}}>{activeItem.icon}</div>
+            <h3 style={{color:"var(--text)",fontSize:18,fontWeight:700,margin:"0 0 8px"}}>{activeItem.label}</h3>
+            <p style={{fontSize:14,lineHeight:1.6,maxWidth:460,margin:"0 auto"}}>
+              Esta área precisa de um registro de funcionário vinculado à sua pessoa. Peça ao gestor para te cadastrar como equipe.
+            </p>
+          </div>
+        );
+      }
+      return (
+        <EmployeePortal
+          employees={data?.employees || []}
+          roles={data?.roles || []}
+          tips={data?.tips || []}
+          schedules={data?.schedules || {}}
+          splits={data?.splits || {}}
+          restaurants={data?.restaurants || []}
+          communications={data?.communications || []}
+          commAcks={data?.commAcks || {}}
+          faq={data?.faq || {}}
+          dpMessages={data?.dpMessages || []}
+          workSchedules={data?.workSchedules || {}}
+          incidents={data?.incidents || []}
+          feedbacks={data?.feedbacks || []}
+          devChecklists={data?.devChecklists || {}}
+          employeeGoals={data?.employeeGoals || {}}
+          tipApprovals={data?.tipApprovals || {}}
+          delays={data?.delays || {}}
+          meetingPlans={data?.meetingPlans || []}
+          inbox={data?.inbox || []}
+          inboxFolders={data?.inboxFolders || {}}
+          onBack={()=>{}}
+          onUpdateEmployee={(emp)=>{
+            const next = (data?.employees || []).map(e => e.id === emp.id ? emp : e);
+            onUpdate("employees", next);
+          }}
+          onUpdate={onUpdate}
+          toggleTheme={toggleTheme}
+          theme={theme}
+          hideHeader={true}
+          hideTabNav={true}
+          forceTab={activeItem.tab}
+          forceEmpId={linkedEmpId}
+        />
+      );
+    }
+
     // Outras áreas: delegação para portais antigos via botão
     const kindToAction = {
       employee:    () => onSwitchToEmployee && onSwitchToEmployee(activeItem.tab),
@@ -17920,8 +18063,6 @@ function AppShell({ pessoa, data, activeRestaurantId, setActiveRestaurantId, use
           </div>
         )}
         <button onClick={toggleTheme} style={{background:"none",border:"1px solid var(--border)",borderRadius:20,padding:isMobile?"4px 8px":"5px 10px",cursor:"pointer",fontSize:isMobile?13:14,color:"var(--text2)",flexShrink:0}}>{theme==="dark"?"☀️":"🌙"}</button>
-        {!isMobile && onExitShell && <button onClick={onExitShell} title="Voltar ao layout antigo"
-          style={{...S.btnSecondary,fontSize:11,padding:"5px 10px",color:"var(--text3)",flexShrink:0}}>↩︎ antigo</button>}
         <button onClick={onLogout} style={{...S.btnSecondary,fontSize:isMobile?10:11,padding:isMobile?"4px 8px":"5px 12px",flexShrink:0}}>Sair</button>
       </header>
 
@@ -17959,6 +18100,7 @@ function AppShell({ pessoa, data, activeRestaurantId, setActiveRestaurantId, use
                   <div style={{padding:"4px 16px",fontSize:10,color:sec.color,fontWeight:700,textTransform:"uppercase",letterSpacing:0.5}}>{sec.group}</div>
                   {sec.items.map(it => {
                     const active = it.id === activeSectionId;
+                    const badge = badges[it.id];
                     return (
                       <button key={it.id} onClick={()=>handleSectionClick(it.id)}
                         style={{
@@ -17969,17 +18111,20 @@ function AppShell({ pessoa, data, activeRestaurantId, setActiveRestaurantId, use
                           fontFamily:"'DM Sans',sans-serif",textAlign:"left",
                         }}>
                         <span style={{fontSize:15}}>{it.icon}</span>
-                        <span>{it.label}</span>
+                        <span style={{flex:1}}>{it.label}</span>
+                        {badge != null && (
+                          <span style={{
+                            background: sec.color, color: "#fff",
+                            padding: badge === "•" ? "1px 5px" : "1px 7px",
+                            borderRadius: 10, fontSize: 10, fontWeight: 700,
+                            minWidth: 18, textAlign: "center", fontFamily: "'DM Sans',sans-serif",
+                          }}>{badge}</span>
+                        )}
                       </button>
                     );
                   })}
                 </div>
               ))}
-              {isMobile && onExitShell && (
-                <div style={{padding:"14px 16px",borderTop:"1px solid var(--border)",marginTop:10}}>
-                  <button onClick={onExitShell} style={{...S.btnSecondary,fontSize:12,padding:"8px 12px",width:"100%",color:"var(--text3)"}}>↩︎ Voltar ao layout antigo</button>
-                </div>
-              )}
             </aside>
           </>
         )}
@@ -21509,6 +21654,13 @@ function UnifiedLogin({ owners, managers, employees, restaurants, pessoas, onLog
         const options = buildLoginChoicesFromPessoa(pessoa);
         if (options.length === 0) {
           setErr("Você não tem acesso a nenhum perfil. Peça ao gestor para conceder permissões."); return;
+        }
+        // Regras:
+        // - Se só 1 perfil e há onLoginShell: vai pro shell também (uniforme)
+        // - Se >1 perfil: vai direto pro shell (sem seletor) — shell tem sidebar com tudo
+        // - Fallback: se não tem onLoginShell, usa a 1a opção
+        if (onLoginShell) {
+          setErr(""); setAttempts(0); onLoginShell(pessoa); return;
         }
         if (options.length === 1) { setErr(""); setAttempts(0); options[0].action(); return; }
         setErr(""); setAttempts(0); setChoices({ name: pessoa.name, options }); return;
