@@ -9302,7 +9302,7 @@ function EmpTrilhaView({ empId, employees, roles, schedules, incidents, feedback
   );
 }
 
-function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, splits, schedules, onUpdate, perms, isOwner, data, currentUser, privacyMask, mobileOnly, onEnterOperational, hideTabNav, forceTab }) {
+function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, splits, schedules, onUpdate, perms, isOwner, data, currentUser, privacyMask, mobileOnly, onEnterOperational, hideTabNav, forceTab, realIsOwner, onStartImpersonate }) {
   const now = new Date();
   const [year, setYear] = useState(now.getFullYear());
   const [month, setMonth] = useState(now.getMonth());
@@ -9792,9 +9792,9 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
         {isOwner && onEnterOperational && (
           <>
             <div style={{flex:1}} />
-            <button onClick={()=>onEnterOperational(rid)} title="Entrar no Portal do Gestor Operacional deste restaurante com todas as áreas desbloqueadas (master do AppTip)"
-              style={{padding:"6px 10px",background:"transparent",border:`1px solid #7c9e5e66`,borderRadius:16,color:"#7c9e5e",cursor:"pointer",fontSize:11,fontFamily:"'DM Sans',sans-serif",fontWeight:700,whiteSpace:"nowrap",marginRight:6}}>
-              ⚙️ Ver como Operacional
+            <button onClick={()=>onEnterOperational(rid)} title="Entrar no restaurante como master — mesma UI que qualquer usuário vê, com acesso total"
+              style={{padding:"6px 12px",background:"#7c9e5e",border:`1px solid #7c9e5e`,borderRadius:16,color:"#fff",cursor:"pointer",fontSize:11,fontFamily:"'DM Sans',sans-serif",fontWeight:700,whiteSpace:"nowrap",marginRight:6}}>
+              ▶ Entrar
             </button>
           </>
         )}
@@ -11025,6 +11025,8 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
             owners={data?.owners ?? []}
             onUpdate={onUpdate}
             mobileOnly={mobileOnly}
+            realIsOwner={realIsOwner || isOwner}
+            onStartImpersonate={onStartImpersonate}
           />
         )}
 
@@ -15063,9 +15065,9 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme, 
                           <div><span style={{fontWeight:600}}>Venc.:</span> {venc ? new Date(venc+"T12:00:00").toLocaleDateString("pt-BR") : "—"}</div>
                         </div>
                         <div style={{display:"flex",gap:6,borderTop:"1px solid var(--border)",paddingTop:8}}>
-                          <button onClick={()=>setSelRestaurant(r.id)} style={{...S.btnSecondary,fontSize:11,flex:1,textAlign:"center",color:ac,borderColor:ac,padding:"6px"}}>Abrir →</button>
-                          <button onClick={()=>{setSelRestaurant(r.id);setRestTab("financeiro");}} style={{...S.btnSecondary,fontSize:11,flex:1,textAlign:"center",color:"var(--green)",borderColor:"var(--green)",padding:"6px"}}>💳</button>
-                          <button onClick={()=>{setEditRestId(r.id);setRestForm({name:r.name,shortCode:r.shortCode??"",cnpj:r.cnpj??"",address:r.address??"",whatsappFin:r.whatsappFin??"",whatsappOp:r.whatsappOp??"",serviceStartDate:r.serviceStartDate??""});setShowRestModal(true);}} style={{...S.btnSecondary,fontSize:11,flex:1,textAlign:"center",padding:"6px"}}>✏️ Editar</button>
+                          <button onClick={()=>onEnterOperational && onEnterOperational(r.id)} style={{background:"#7c9e5e",border:"none",borderRadius:8,color:"#fff",cursor:"pointer",fontSize:11,padding:"6px 10px",fontFamily:"'DM Sans',sans-serif",fontWeight:700,flex:1}}>▶ Entrar</button>
+                          <button onClick={()=>{setSelRestaurant(r.id);setRestTab("financeiro");}} style={{...S.btnSecondary,fontSize:11,flex:"0 0 auto",textAlign:"center",color:"var(--green)",borderColor:"var(--green)",padding:"6px 10px"}} title="Financeiro">💳</button>
+                          <button onClick={()=>{setEditRestId(r.id);setRestForm({name:r.name,shortCode:r.shortCode??"",cnpj:r.cnpj??"",address:r.address??"",whatsappFin:r.whatsappFin??"",whatsappOp:r.whatsappOp??"",serviceStartDate:r.serviceStartDate??""});setShowRestModal(true);}} style={{...S.btnSecondary,fontSize:11,flex:"0 0 auto",textAlign:"center",padding:"6px 10px"}} title="Editar cadastro">✏️</button>
                         </div>
                       </div>
                     );
@@ -15135,8 +15137,9 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme, 
                           {statusEl}
                         </div>
                         <div style={{display:"flex",gap:4,alignItems:"center"}} onClick={e=>e.stopPropagation()}>
-                          <button onClick={()=>setSelRestaurant(r.id)} title="Abrir" style={{background:"none",border:`1px solid ${ac}33`,borderRadius:6,color:ac,cursor:"pointer",fontSize:11,padding:"4px 8px",fontFamily:"'DM Sans',sans-serif"}}>Abrir</button>
-                          <button onClick={()=>{setEditRestId(r.id);setRestForm({name:r.name,shortCode:r.shortCode??"",cnpj:r.cnpj??"",address:r.address??"",whatsappFin:r.whatsappFin??"",whatsappOp:r.whatsappOp??"",serviceStartDate:r.serviceStartDate??""});setShowRestModal(true);}} title="Editar" style={{background:"none",border:"1px solid var(--border)",borderRadius:6,color:"var(--text3)",cursor:"pointer",fontSize:11,padding:"4px 8px",fontFamily:"'DM Sans',sans-serif"}}>✏️</button>
+                          <button onClick={()=>onEnterOperational && onEnterOperational(r.id)} title="Entrar no restaurante como master" style={{background:"#7c9e5e",border:"none",borderRadius:6,color:"#fff",cursor:"pointer",fontSize:11,padding:"4px 10px",fontFamily:"'DM Sans',sans-serif",fontWeight:700}}>▶ Entrar</button>
+                          <button onClick={()=>setSelRestaurant(r.id)} title="Ver detalhes / financeiro" style={{background:"none",border:`1px solid ${ac}33`,borderRadius:6,color:ac,cursor:"pointer",fontSize:11,padding:"4px 8px",fontFamily:"'DM Sans',sans-serif"}}>Detalhes</button>
+                          <button onClick={()=>{setEditRestId(r.id);setRestForm({name:r.name,shortCode:r.shortCode??"",cnpj:r.cnpj??"",address:r.address??"",whatsappFin:r.whatsappFin??"",whatsappOp:r.whatsappOp??"",serviceStartDate:r.serviceStartDate??""});setShowRestModal(true);}} title="Editar cadastro" style={{background:"none",border:"1px solid var(--border)",borderRadius:6,color:"var(--text3)",cursor:"pointer",fontSize:11,padding:"4px 8px",fontFamily:"'DM Sans',sans-serif"}}>✏️</button>
                         </div>
                       </div>
                     );
@@ -17785,6 +17788,7 @@ function buildShellSections({ pessoa, restaurantId, isOwner }) {
 
 function AppShell({ pessoa, data, activeRestaurantId, setActiveRestaurantId, userRole, currentUser,
                     onSwitchToEmployee, onSwitchToManager, onSwitchToOperational, onLogout, onUpdate, onExitShell, onReturnToOwnerHome,
+                    impersonatedPessoa, realIsOwner, onStartImpersonate, onStopImpersonate,
                     toggleTheme, theme }) {
   const restaurants = data?.restaurants || [];
   const isOwner = userRole === "super" || currentUser?.isMaster === true;
@@ -17916,6 +17920,8 @@ function AppShell({ pessoa, data, activeRestaurantId, setActiveRestaurantId, use
             mobileOnly={false}
             hideTabNav={true}
             forceTab={adminTab}
+            realIsOwner={realIsOwner}
+            onStartImpersonate={onStartImpersonate}
           />
         );
       }
@@ -17996,6 +18002,8 @@ function AppShell({ pessoa, data, activeRestaurantId, setActiveRestaurantId, use
           mobileOnly={false}
           hideTabNav={true}
           forceTab={activeItem.tab}
+          realIsOwner={realIsOwner}
+          onStartImpersonate={onStartImpersonate}
         />
       );
     }
@@ -18116,6 +18124,14 @@ function AppShell({ pessoa, data, activeRestaurantId, setActiveRestaurantId, use
         <button onClick={onLogout} style={{...S.btnSecondary,fontSize:isMobile?10:11,padding:isMobile?"4px 8px":"5px 12px",flexShrink:0}}>Sair</button>
       </header>
 
+      {/* Banner de impersonate (owner vendo como outra pessoa) */}
+      {impersonatedPessoa && onStopImpersonate && (
+        <div style={{background:"#a855f7",color:"#fff",padding:"6px 14px",fontSize:12,fontWeight:600,display:"flex",alignItems:"center",justifyContent:"space-between",gap:8,flexWrap:"wrap"}}>
+          <div>🎭 Vendo como <b>{impersonatedPessoa.name}</b> — você só vê o que ela veria.</div>
+          <button onClick={onStopImpersonate} style={{background:"#fff",color:"#a855f7",border:"none",borderRadius:6,padding:"3px 12px",cursor:"pointer",fontSize:11,fontWeight:700,fontFamily:"'DM Sans',sans-serif"}}>Sair do modo</button>
+        </div>
+      )}
+
       {/* BODY: sidebar + content */}
       <div style={{flex:1,display:"flex",overflow:"hidden",position:"relative"}}>
         {/* SIDEBAR */}
@@ -18211,7 +18227,7 @@ function buildVirtualEmpForPessoa(pessoa, restaurantId) {
 // ═══════════════════════════════════════════════════════════════
 // ──  PESSOAS — CRUD                                             ──
 // ═══════════════════════════════════════════════════════════════
-function PessoasAdmin({ restaurantId, pessoas, roles, owners, onUpdate, mobileOnly }) {
+function PessoasAdmin({ restaurantId, pessoas, roles, owners, onUpdate, mobileOnly, realIsOwner, onStartImpersonate }) {
   // Filtra owners do AppTip — eles têm acesso implícito, não constam como pessoa do restaurante
   const ownerCpfSet = new Set((owners || []).map(o => (o.cpf || "").replace(/\D/g, "")).filter(Boolean));
   const restPessoas = (pessoas || []).filter(p => {
@@ -18459,6 +18475,9 @@ function PessoasAdmin({ restaurantId, pessoas, roles, owners, onUpdate, mobileOn
                     {isTeam && td.admission && <span>📅 desde {fmtDate(td.admission)}</span>}
                   </div>
                 </div>
+                {realIsOwner && onStartImpersonate && (
+                  <button onClick={()=>onStartImpersonate(p.id)} title="Ver o sistema como esta pessoa" style={{...S.btnSecondary,fontSize:12,padding:"6px 12px",color:"#a855f7",borderColor:"#a855f744"}}>👁️ Ver como</button>
+                )}
                 <button onClick={()=>startEdit(p)} style={{...S.btnSecondary,fontSize:12,padding:"6px 12px"}}>Editar</button>
                 <button onClick={()=>delPessoa(p.id)} style={{...S.btnSecondary,fontSize:12,padding:"6px 12px",color:"var(--red)",borderColor:"var(--red)44"}}>Remover</button>
               </div>
@@ -23111,6 +23130,12 @@ export default function App() {
     if (shellActiveRest) localStorage.setItem("apptip_shell_rest", shellActiveRest);
     else localStorage.removeItem("apptip_shell_rest");
   }, [shellActiveRest]);
+  // Impersonate: owner pode ver como outra pessoa (pra debug/suporte)
+  const [impersonatingPessoaId, setImpersonatingPessoaId] = useState(() => localStorage.getItem("apptip_impersonate_pid") || null);
+  useEffect(() => {
+    if (impersonatingPessoaId) localStorage.setItem("apptip_impersonate_pid", impersonatingPessoaId);
+    else localStorage.removeItem("apptip_impersonate_pid");
+  }, [impersonatingPessoaId]);
   const [loaded, setLoaded] = useState(false);
   const [loadProgress, setLoadProgress] = useState(""); // feedback visual durante carregamento
   const [loadError, setLoadError] = useState(false);    // true se não conseguiu conectar
@@ -23593,29 +23618,36 @@ export default function App() {
       )}
       {view === "shell" && loaded && (() => {
         // Descobre a pessoa logada
-        let pessoa = null;
+        let realPessoa = null;
         if (userRole === "employee" || userRole === "operational" || userRole === "shell") {
           const empId = localStorage.getItem("apptip_empid") || localStorage.getItem("apptip_userid");
-          pessoa = (pessoas || []).find(p => p.linkedEmployeeId === empId);
+          realPessoa = (pessoas || []).find(p => p.linkedEmployeeId === empId);
           // Fallback: tenta por linkedManagerId (pra pessoas que são gestores)
-          if (!pessoa) {
+          if (!realPessoa) {
             const uid = localStorage.getItem("apptip_userid");
-            pessoa = (pessoas || []).find(p => p.linkedManagerId === uid);
+            realPessoa = (pessoas || []).find(p => p.linkedManagerId === uid);
           }
         } else if (userRole === "manager") {
-          pessoa = (pessoas || []).find(p => p.linkedManagerId === currentUser?.id);
+          realPessoa = (pessoas || []).find(p => p.linkedManagerId === currentUser?.id);
         }
         // Fallback: por CPF
-        if (!pessoa && currentUser?.cpf) {
+        if (!realPessoa && currentUser?.cpf) {
           const cpfD = currentUser.cpf.replace(/\D/g, "");
-          pessoa = (pessoas || []).find(p => (p.cpf || "").replace(/\D/g, "") === cpfD);
+          realPessoa = (pessoas || []).find(p => (p.cpf || "").replace(/\D/g, "") === cpfD);
         }
         // Último fallback: se uid salvo é de uma pessoa direta
-        if (!pessoa) {
+        if (!realPessoa) {
           const uid = localStorage.getItem("apptip_userid");
-          pessoa = (pessoas || []).find(p => p.id === uid);
+          realPessoa = (pessoas || []).find(p => p.id === uid);
         }
-        const isOwnerShell = userRole === "super" || currentUser?.isMaster === true;
+        const realIsOwner = userRole === "super" || currentUser?.isMaster === true;
+        // Impersonate: se owner está vendo como outra pessoa
+        const impersonatedPessoa = impersonatingPessoaId && realIsOwner
+          ? (pessoas || []).find(p => p.id === impersonatingPessoaId)
+          : null;
+        // Durante impersonate: usa a pessoa impersonada como fonte de perms; owner NÃO é mais owner (simula pessoa)
+        const pessoa = impersonatedPessoa || realPessoa;
+        const isOwnerShell = realIsOwner && !impersonatedPessoa; // owner só é "full owner" quando não tá impersonando
         const defaultRid = shellActiveRest || pessoa?.restaurantIds?.[0] || (isOwnerShell ? restaurants[0]?.id : null);
         // Se não encontrou pessoa e não é owner, algo quebrou — manda pra tela de login
         if (!pessoa && !isOwnerShell) {
@@ -23649,11 +23681,19 @@ export default function App() {
               setUserRole(prevRole);
               setView(prevRole);
             }}
-            onReturnToOwnerHome={isOwnerShell ? () => {
+            onReturnToOwnerHome={realIsOwner && !impersonatedPessoa ? () => {
               localStorage.removeItem("apptip_owner_virtual_return");
               localStorage.removeItem("apptip_shell_rest");
               setShellActiveRest(null);
               setView("super");
+            } : null}
+            impersonatedPessoa={impersonatedPessoa}
+            realIsOwner={realIsOwner}
+            onStartImpersonate={realIsOwner ? (pid) => {
+              setImpersonatingPessoaId(pid);
+            } : null}
+            onStopImpersonate={impersonatedPessoa ? () => {
+              setImpersonatingPessoaId(null);
             } : null}
             toggleTheme={toggleTheme}
             theme={theme}
