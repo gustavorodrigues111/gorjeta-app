@@ -11022,6 +11022,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
             restaurantId={rid}
             pessoas={data?.pessoas ?? []}
             roles={roles}
+            owners={data?.owners ?? []}
             onUpdate={onUpdate}
             mobileOnly={mobileOnly}
           />
@@ -11034,6 +11035,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
             pessoas={data?.pessoas ?? []}
             employees={employees}
             managers={data?.managers ?? []}
+            owners={data?.owners ?? []}
             onUpdate={onUpdate}
             mobileOnly={mobileOnly}
           />
@@ -17682,8 +17684,19 @@ function pessoaHasAnyOperationalArea(pessoa, restaurantId) {
 // ═══════════════════════════════════════════════════════════════
 // Define estrutura da sidebar derivada de permissões da pessoa
 function buildShellSections({ pessoa, restaurantId, isOwner }) {
-  const perms = pessoa?.permissions?.[restaurantId] || { operational: {}, admin: {}, special: {} };
-  const isTeam = !!pessoa?.isTeam?.[restaurantId];
+  // Owner tem acesso implícito total — simula permissões completas
+  let perms, isTeam;
+  if (isOwner) {
+    perms = {
+      operational: { escalas:true, gorjetas:true, trilhas:true, reunioes:true, contagens:true, compras:true, checklists:true, fichasTecnicas:true },
+      admin: { tips:true, schedule:true, employees:true, roles:true, vt:true, comunicados:true, faq:true, config:true, pessoas:true },
+      special: { isDP:true },
+    };
+    isTeam = false; // Owner não é equipe do restaurante — "Minha Área" não aplica
+  } else {
+    perms = pessoa?.permissions?.[restaurantId] || { operational: {}, admin: {}, special: {} };
+    isTeam = !!pessoa?.isTeam?.[restaurantId];
+  }
   const op = perms.operational || {};
   const ad = perms.admin || {};
   const sp = perms.special || {};
@@ -17763,25 +17776,15 @@ function buildShellSections({ pessoa, restaurantId, isOwner }) {
     });
   }
 
-  // Super (AppTip Owner)
-  if (isOwner) {
-    sections.push({
-      group: "Super (AppTip)",
-      color: "#a855f7",
-      items: [
-        { id: "sup_restaurants", label: "Restaurantes",  icon: "🏢", kind: "super", tab: "restaurantes" },
-        { id: "sup_financeiro",  label: "Financeiro",    icon: "💸", kind: "super", tab: "financeiro_geral" },
-        { id: "sup_owners",      label: "Admins AppTip", icon: "🛂", kind: "super", tab: "owners" },
-        { id: "sup_inbox",       label: "Caixa",         icon: "📥", kind: "super", tab: "inbox" },
-      ],
-    });
-  }
+  // Nota: seções "Super (AppTip)" (Restaurantes, Financeiro, Admins, Caixa)
+  // ficam no OwnerPortal (nível meta), não aqui dentro do restaurante.
+  // Owner usa o botão "← Painel" no header do shell pra voltar ao OwnerPortal.
 
   return sections;
 }
 
 function AppShell({ pessoa, data, activeRestaurantId, setActiveRestaurantId, userRole, currentUser,
-                    onSwitchToEmployee, onSwitchToManager, onSwitchToOperational, onLogout, onUpdate, onExitShell,
+                    onSwitchToEmployee, onSwitchToManager, onSwitchToOperational, onLogout, onUpdate, onExitShell, onReturnToOwnerHome,
                     toggleTheme, theme }) {
   const restaurants = data?.restaurants || [];
   const isOwner = userRole === "super" || currentUser?.isMaster === true;
@@ -17883,6 +17886,39 @@ function AppShell({ pessoa, data, activeRestaurantId, setActiveRestaurantId, use
           </p>
         </div>
       );
+    }
+
+    // Owner sem pessoa: redireciona sections operational Mise pra view admin equivalente
+    // (senão OperationalContagens/Checklists mostram "Sem atribuições" pois owner não tem employee)
+    if (isOwner && !pessoa && activeItem.kind === "operational") {
+      const adminRedirect = {
+        contagens: "mise_contagens",
+        checklists: "mise_checklists",
+        fichasTecnicas: "mise_fichas",
+      };
+      const adminTab = adminRedirect[activeItem.tab];
+      if (adminTab && activeRest) {
+        const virtualMgr = { id: "owner_virt", name: currentUser?.name || "Owner", cpf: currentUser?.cpf, restaurantIds: [activeRestaurantId], perms: {tips:true,schedule:true}, isMaster: true };
+        return (
+          <RestaurantPanel
+            restaurant={activeRest}
+            restaurants={data?.restaurants || []}
+            employees={data?.employees || []}
+            roles={data?.roles || []}
+            tips={data?.tips || []}
+            splits={data?.splits || {}}
+            schedules={data?.schedules || {}}
+            onUpdate={onUpdate}
+            perms={{tips:true, schedule:true, vt:true, roles:true, employees:true, comunicados:true, faq:true, config:true, isDP:true}}
+            isOwner={true}
+            data={data}
+            currentUser={virtualMgr}
+            mobileOnly={false}
+            hideTabNav={true}
+            forceTab={adminTab}
+          />
+        );
+      }
     }
 
     // Features já standalone: render inline diretamente
@@ -18067,8 +18103,14 @@ function AppShell({ pessoa, data, activeRestaurantId, setActiveRestaurantId, use
         {!isMobile && (
           <div style={{fontSize:13,color:"var(--text2)",fontWeight:500,minWidth:0,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
             👤 {pessoa?.name || currentUser?.name || "—"}
-            {isOwner && <span style={{marginLeft:6,fontSize:10,padding:"1px 6px",borderRadius:6,background:"#a855f722",color:"#a855f7",fontWeight:700}}>SUPER</span>}
+            {isOwner && <span style={{marginLeft:6,fontSize:10,padding:"1px 6px",borderRadius:6,background:"#a855f722",color:"#a855f7",fontWeight:700}}>MASTER</span>}
           </div>
+        )}
+        {isOwner && onReturnToOwnerHome && (
+          <button onClick={onReturnToOwnerHome} title="Voltar ao Painel do AppTip"
+            style={{background:"#a855f722",border:"1px solid #a855f744",borderRadius:8,padding:isMobile?"4px 8px":"5px 10px",cursor:"pointer",fontSize:isMobile?10:11,color:"#a855f7",fontWeight:700,fontFamily:"'DM Sans',sans-serif",flexShrink:0}}>
+            ← Painel
+          </button>
         )}
         <button onClick={toggleTheme} style={{background:"none",border:"1px solid var(--border)",borderRadius:20,padding:isMobile?"4px 8px":"5px 10px",cursor:"pointer",fontSize:isMobile?13:14,color:"var(--text2)",flexShrink:0}}>{theme==="dark"?"☀️":"🌙"}</button>
         <button onClick={onLogout} style={{...S.btnSecondary,fontSize:isMobile?10:11,padding:isMobile?"4px 8px":"5px 12px",flexShrink:0}}>Sair</button>
@@ -18169,8 +18211,15 @@ function buildVirtualEmpForPessoa(pessoa, restaurantId) {
 // ═══════════════════════════════════════════════════════════════
 // ──  PESSOAS — CRUD                                             ──
 // ═══════════════════════════════════════════════════════════════
-function PessoasAdmin({ restaurantId, pessoas, roles, onUpdate, mobileOnly }) {
-  const restPessoas = (pessoas || []).filter(p => (p.restaurantIds || []).includes(restaurantId));
+function PessoasAdmin({ restaurantId, pessoas, roles, owners, onUpdate, mobileOnly }) {
+  // Filtra owners do AppTip — eles têm acesso implícito, não constam como pessoa do restaurante
+  const ownerCpfSet = new Set((owners || []).map(o => (o.cpf || "").replace(/\D/g, "")).filter(Boolean));
+  const restPessoas = (pessoas || []).filter(p => {
+    if (!(p.restaurantIds || []).includes(restaurantId)) return false;
+    const cpfD = (p.cpf || "").replace(/\D/g, "");
+    if (cpfD && ownerCpfSet.has(cpfD)) return false; // esconde pessoas que são owners
+    return true;
+  });
   const [filter, setFilter] = useState("");
   const [form, setForm] = useState({ name: "", cpf: "", email: "", whatsapp: "", pin: "" });
   const [editingId, setEditingId] = useState(null);
@@ -18481,8 +18530,15 @@ function permSet(pessoa, restaurantId, key, value) {
   return { ...pessoa, permissions: perms };
 }
 
-function PermissoesMatrix({ restaurantId, pessoas, employees, managers, onUpdate, mobileOnly }) {
-  const restPessoas = (pessoas || []).filter(p => (p.restaurantIds || []).includes(restaurantId));
+function PermissoesMatrix({ restaurantId, pessoas, employees, managers, owners, onUpdate, mobileOnly }) {
+  // Filtra owners do AppTip — acesso implícito, não aparecem na matriz
+  const ownerCpfSet = new Set((owners || []).map(o => (o.cpf || "").replace(/\D/g, "")).filter(Boolean));
+  const restPessoas = (pessoas || []).filter(p => {
+    if (!(p.restaurantIds || []).includes(restaurantId)) return false;
+    const cpfD = (p.cpf || "").replace(/\D/g, "");
+    if (cpfD && ownerCpfSet.has(cpfD)) return false;
+    return true;
+  });
   const [expanded, setExpanded] = useState({ tip_op: true, tip_adm: false, mise: false, esp: false });
   const [filter, setFilter] = useState("");
   const [liderAreasModal, setLiderAreasModal] = useState(null); // pessoaId
@@ -23474,30 +23530,16 @@ export default function App() {
       {view === "setup" && <FirstSetup onDone={sm=>{handleUpdate("owners",[...owners,sm]);setCurrentUser(sm);setUserRole("super");setView("super");}} />}
       {view === "super" && currentUser && <OwnerPortal data={data} onUpdate={handleUpdate} onBack={doLogout} currentUser={currentUser} toggleTheme={toggleTheme} theme={theme}
         onEnterOperational={(rid)=>{
-          // Master do AppTip entra como Gestor Operacional do restaurante selecionado
-          // com TODAS as áreas operacionais desbloqueadas (empregado virtual)
+          // Owner entra no AppShell como master do restaurante — UI unificada (mesma que qualquer pessoa vê).
+          // Não cria pessoa; acesso é implícito via userRole='super' + ownerMode no shell.
           const rest = restaurants.find(r => r.id === rid);
           if (!rest) return;
-          const virtualEmp = {
-            id: `owner_virt_emp_${currentUser.id}_${rid}`,
-            restaurantId: rid,
-            name: currentUser.name + " (master)",
-            cpf: currentUser.cpf || "",
-            pin: currentUser.pin || "0000",
-            empCode: null,
-            roleId: null,
-            admission: today(),
-            operationalAreas: { escalas:true, gorjetas:true, trilhas:true, reunioes:true, contagens:true, compras:true, checklists:true, fichasTecnicas:true },
-            isFreela: false,
-            inactive: false,
-            _isOwnerVirtual: true,
-          };
-          // Guarda o owner atual pra voltar depois
           localStorage.setItem("apptip_userid_owner", currentUser.id);
           localStorage.setItem("apptip_owner_virtual_return", "1");
-          setCurrentUser(virtualEmp);
-          setUserRole("operational");
-          setView("operational");
+          localStorage.setItem("apptip_shell_rest", rid);
+          // Não troca userRole (permanece 'super') — mas vai pro shell
+          setShellActiveRest(rid);
+          setView("shell");
         }}
       />}
       {view === "manager" && currentUser && (currentUser.mustChangePin ? (
@@ -23607,6 +23649,12 @@ export default function App() {
               setUserRole(prevRole);
               setView(prevRole);
             }}
+            onReturnToOwnerHome={isOwnerShell ? () => {
+              localStorage.removeItem("apptip_owner_virtual_return");
+              localStorage.removeItem("apptip_shell_rest");
+              setShellActiveRest(null);
+              setView("super");
+            } : null}
             toggleTheme={toggleTheme}
             theme={theme}
           />
