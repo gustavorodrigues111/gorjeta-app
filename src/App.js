@@ -18043,7 +18043,7 @@ function AppShell({ pessoa, data, activeRestaurantId, setActiveRestaurantId, use
   }
 
   return (
-    <div style={{minHeight:"100vh",background:"var(--bg)",fontFamily:"'DM Sans',sans-serif",display:"flex",flexDirection:"column"}}>
+    <div style={{height:"100vh",maxHeight:"100vh",background:"var(--bg)",fontFamily:"'DM Sans',sans-serif",display:"flex",flexDirection:"column",overflow:"hidden"}}>
       {/* HEADER */}
       <header style={{background:"var(--header-bg)",borderBottom:"1px solid var(--border)",padding:isMobile?"8px 10px":"10px 16px",display:"flex",alignItems:"center",gap:isMobile?6:12,flexWrap:"nowrap",overflowX:"auto"}}>
         <button onClick={()=>setSidebarOpen(o=>!o)} title={sidebarOpen?"Fechar menu":"Abrir menu"} style={{background:sidebarOpen?"var(--bg2)":"none",border:"none",cursor:"pointer",fontSize:20,color:"var(--text2)",padding:"4px 10px",borderRadius:8,flexShrink:0}}>☰</button>
