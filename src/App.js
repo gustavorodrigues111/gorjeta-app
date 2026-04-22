@@ -20383,8 +20383,23 @@ function MiseFtDishesAdmin({ restaurantId, miseFtInsumos, miseFtEquipamentos, mi
           {q ? "Nenhuma ficha encontrada" : (
             <>
               <div style={{fontSize:40,marginBottom:12}}>📋</div>
-              <div style={{color:"var(--text)",fontWeight:600,fontSize:16,marginBottom:6}}>Nenhuma ficha cadastrada</div>
-              <div>Clique em "+ Nova ficha" para começar.</div>
+              <div style={{color:"var(--text)",fontWeight:600,fontSize:16,marginBottom:6}}>Nenhuma ficha cadastrada neste restaurante</div>
+              <div>Clique em "+ Nova ficha" para começar ou use "Importar do AppMise (JSON)" no topo.</div>
+              {(() => {
+                const totalDishes = (miseFtDishes || []).length;
+                const otherRests = (miseFtDishes || []).reduce((s, d) => { s[d.restaurantId] = (s[d.restaurantId] || 0) + 1; return s; }, {});
+                delete otherRests[restaurantId];
+                const otherCount = Object.values(otherRests).reduce((a,b)=>a+b, 0);
+                if (totalDishes > 0) {
+                  return (
+                    <div style={{marginTop:14,padding:"10px 14px",background:"#fffbeb",border:"1px solid #f59e0b44",borderRadius:8,fontSize:12,color:"#92400e",lineHeight:1.6,textAlign:"left",maxWidth:520,margin:"14px auto 0"}}>
+                      ⚠️ Diagnóstico: há <b>{totalDishes} ficha(s)</b> no sistema, mas <b>0 neste restaurante</b> ({otherCount} em outros {Object.keys(otherRests).length > 0 ? `(${Object.keys(otherRests).length} restaurante${Object.keys(otherRests).length>1?"s":""})` : ""}).<br/>
+                      Pode ter havido mismatch de restaurantId no momento da importação. ID atual: <code style={{fontFamily:"'DM Mono',monospace",background:"var(--bg2)",padding:"1px 4px",borderRadius:3}}>{restaurantId}</code>
+                    </div>
+                  );
+                }
+                return null;
+              })()}
             </>
           )}
         </div>
