@@ -19949,6 +19949,7 @@ function MiseFichasTecnicasAdmin({ restaurantId, miseFtInsumos, miseFtEquipament
         // ── Dishes: merge por ID
         const dishesNext = [...miseFtDishes];
         let dishAdded = 0, dishUpdated = 0;
+        const photosDropped = dishes.reduce((s, d) => s + (d.photos || []).length, 0);
         dishes.forEach(src => {
           const id = src.id || ftUid();
           const mapped = {
@@ -19981,7 +19982,7 @@ function MiseFichasTecnicasAdmin({ restaurantId, miseFtInsumos, miseFtEquipament
                 return mi;
               }),
             })),
-            photos: Array.isArray(src.photos) ? src.photos : [],
+            photos: [], // Fotos base64 descartadas — excedem limite Firestore (1MB/doc). Futuro: Firebase Storage
           };
           if (typeof src.target_cmv === "number" && src.target_cmv > 0) mapped.target_cmv = src.target_cmv;
           const idx = dishesNext.findIndex(x => x.id === id && x.restaurantId === restaurantId);
@@ -20003,7 +20004,8 @@ function MiseFichasTecnicasAdmin({ restaurantId, miseFtInsumos, miseFtEquipament
           `Importação concluída:\n\n` +
           `  • Insumos: ${insAdded} novo(s), ${insUpdated} atualizado(s)\n` +
           `  • Fichas: ${dishAdded} nova(s), ${dishUpdated} atualizada(s)\n` +
-          `  • Equipamentos: ${merged.length - currentEquip.length} novo(s) (total ${merged.length})`
+          `  • Equipamentos: ${merged.length - currentEquip.length} novo(s) (total ${merged.length})` +
+          (photosDropped > 0 ? `\n\n⚠ ${photosDropped} foto(s) descartada(s) — imagens base64 excederiam o limite de armazenamento. Upload de fotos será via Firebase Storage numa iteração futura.` : "")
         );
       } catch (err) {
         alert("Erro ao processar arquivo: " + err.message);
