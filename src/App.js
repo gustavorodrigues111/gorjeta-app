@@ -17792,20 +17792,26 @@ function AppShell({ pessoa, data, activeRestaurantId, setActiveRestaurantId, use
 
   // Seção ativa do shell (persistida em localStorage)
   const [activeSectionId, setActiveSectionId] = useState(() => {
-    const saved = localStorage.getItem("apptip_shell_section");
-    if (saved && allItems.some(it => it.id === saved)) return saved;
-    return allItems[0]?.id ?? null;
+    return localStorage.getItem("apptip_shell_section") || null;
   });
   useEffect(() => {
     if (activeSectionId) localStorage.setItem("apptip_shell_section", activeSectionId);
   }, [activeSectionId]);
 
-  // Re-alinha se seção atual sumiu (ex: perdeu permissão)
+  // Re-alinha quando allItems mudar (ex: pessoa/data carregou depois de refresh, ou perdeu permissão)
   useEffect(() => {
-    if (activeSectionId && !allItems.find(it => it.id === activeSectionId)) {
-      setActiveSectionId(allItems[0]?.id ?? null);
+    if (allItems.length === 0) return; // aguarda dados carregarem
+    const hasCurrent = activeSectionId && allItems.find(it => it.id === activeSectionId);
+    if (!hasCurrent) {
+      // Tenta restaurar do localStorage antes de cair no primeiro item
+      const saved = localStorage.getItem("apptip_shell_section");
+      if (saved && allItems.find(it => it.id === saved)) {
+        setActiveSectionId(saved);
+      } else {
+        setActiveSectionId(allItems[0].id);
+      }
     }
-  }, [activeSectionId, allItems]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [activeSectionId, allItems.length]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const activeItem = allItems.find(it => it.id === activeSectionId);
   const ac = "var(--ac)";
@@ -23536,12 +23542,24 @@ export default function App() {
           if (!emp || !hasAnyOperationalArea(emp)) return null;
           return () => { setCurrentUser(emp); setUserRole("operational"); localStorage.setItem("apptip_role","operational"); localStorage.setItem("apptip_userid",emp.id); localStorage.setItem("apptip_empid",emp.id); setView("operational"); };
         })()} />}
-      {view === "shell" && (() => {
+      {view === "shell" && !loaded && (
+        <div style={{minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",flexDirection:"column",gap:12,fontFamily:"'DM Sans',sans-serif"}}>
+          <div style={{fontSize:40}}>🍽️</div>
+          <div style={{fontSize:14,color:"var(--text2)"}}>Carregando AppTip…</div>
+          <div style={{fontSize:11,color:"var(--text3)"}}>{loadProgress}</div>
+        </div>
+      )}
+      {view === "shell" && loaded && (() => {
         // Descobre a pessoa logada
         let pessoa = null;
         if (userRole === "employee" || userRole === "operational" || userRole === "shell") {
           const empId = localStorage.getItem("apptip_empid") || localStorage.getItem("apptip_userid");
           pessoa = (pessoas || []).find(p => p.linkedEmployeeId === empId);
+          // Fallback: tenta por linkedManagerId (pra pessoas que são gestores)
+          if (!pessoa) {
+            const uid = localStorage.getItem("apptip_userid");
+            pessoa = (pessoas || []).find(p => p.linkedManagerId === uid);
+          }
         } else if (userRole === "manager") {
           pessoa = (pessoas || []).find(p => p.linkedManagerId === currentUser?.id);
         }
@@ -23550,8 +23568,24 @@ export default function App() {
           const cpfD = currentUser.cpf.replace(/\D/g, "");
           pessoa = (pessoas || []).find(p => (p.cpf || "").replace(/\D/g, "") === cpfD);
         }
+        // Último fallback: se uid salvo é de uma pessoa direta
+        if (!pessoa) {
+          const uid = localStorage.getItem("apptip_userid");
+          pessoa = (pessoas || []).find(p => p.id === uid);
+        }
         const isOwnerShell = userRole === "super" || currentUser?.isMaster === true;
         const defaultRid = shellActiveRest || pessoa?.restaurantIds?.[0] || (isOwnerShell ? restaurants[0]?.id : null);
+        // Se não encontrou pessoa e não é owner, algo quebrou — manda pra tela de login
+        if (!pessoa && !isOwnerShell) {
+          return (
+            <div style={{minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",flexDirection:"column",gap:14,padding:24,fontFamily:"'DM Sans',sans-serif"}}>
+              <div style={{fontSize:40}}>🔒</div>
+              <div style={{fontSize:15,color:"var(--text)",fontWeight:700}}>Sessão inválida</div>
+              <div style={{fontSize:13,color:"var(--text3)",textAlign:"center",maxWidth:360,lineHeight:1.5}}>Não foi possível recuperar seu perfil. Faça login de novo.</div>
+              <button onClick={doLogout} style={{...S.btnPrimary,padding:"8px 20px"}}>Voltar ao login</button>
+            </div>
+          );
+        }
         return (
           <AppShell
             pessoa={pessoa}
