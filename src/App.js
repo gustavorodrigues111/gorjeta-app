@@ -17707,16 +17707,18 @@ function buildShellSections({ pessoa, restaurantId, isOwner }) {
   }
 
   // AppTip Operacional
+  // Escalas/Trilhas/Reuniões apontam para as tabs do RestaurantPanel (não existe versão "operacional" dedicada).
+  // Gorjetas fica com o dashboard read-only dedicado (OperationalGorjetas).
   const hasOp = ["escalas","gorjetas","trilhas","reunioes"].some(k => op[k]);
   if (hasOp) {
     sections.push({
       group: "AppTip",
       color: "#d4a017",
       items: [
-        op.escalas  && { id: "op_escalas",  label: "Escalas",    icon: "📅", kind: "operational", tab: "escalas" },
+        op.escalas  && { id: "op_escalas",  label: "Escalas",    icon: "📅", kind: "manager",     tab: "schedule" },
         op.gorjetas && { id: "op_gorjetas", label: "Gorjetas",   icon: "💰", kind: "operational", tab: "gorjetas" },
-        op.trilhas  && { id: "op_trilhas",  label: "Trilhas",    icon: "🎯", kind: "operational", tab: "trilhas" },
-        op.reunioes && { id: "op_reunioes", label: "Reuniões",   icon: "🗣️", kind: "operational", tab: "reunioes" },
+        op.trilhas  && { id: "op_trilhas",  label: "Trilhas",    icon: "🎯", kind: "manager",     tab: "employees" },
+        op.reunioes && { id: "op_reunioes", label: "Reuniões",   icon: "🗣️", kind: "manager",     tab: "reunioes" },
       ].filter(Boolean),
     });
   }
