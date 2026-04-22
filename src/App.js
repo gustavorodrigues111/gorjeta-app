@@ -17892,9 +17892,9 @@ function AppShell({ pessoa, data, activeRestaurantId, setActiveRestaurantId, use
       );
     }
 
-    // Owner sem pessoa: redireciona sections operational Mise pra view admin equivalente
-    // (senão OperationalContagens/Checklists mostram "Sem atribuições" pois owner não tem employee)
-    if (isOwner && !pessoa && activeItem.kind === "operational") {
+    // Owner (não impersonando) sempre vê admin view das áreas Mise — mesmo que tenha pessoa por CPF match.
+    // Se estiver impersonando, vê o que a pessoa impersonada veria (operational).
+    if (realIsOwner && !impersonatedPessoa && activeItem.kind === "operational") {
       const adminRedirect = {
         contagens: "mise_contagens",
         checklists: "mise_checklists",
