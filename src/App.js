@@ -23117,6 +23117,8 @@ export default function App() {
     if (isFaturaUrl) return "fatura";
     if (isGuiaGestor) return "guia-gestor";
     const role = localStorage.getItem("apptip_role");
+    // Se owner estava no shell, preserva (refresh mantém no shell em vez de voltar ao OwnerPortal)
+    if (role === "super" && localStorage.getItem("apptip_shell_owner_mode") === "1") return "shell";
     if (role === "super") return "super";
     if (role === "shell") return "shell";
     if (role === "manager") return "manager";
@@ -23555,14 +23557,12 @@ export default function App() {
       {view === "setup" && <FirstSetup onDone={sm=>{handleUpdate("owners",[...owners,sm]);setCurrentUser(sm);setUserRole("super");setView("super");}} />}
       {view === "super" && currentUser && <OwnerPortal data={data} onUpdate={handleUpdate} onBack={doLogout} currentUser={currentUser} toggleTheme={toggleTheme} theme={theme}
         onEnterOperational={(rid)=>{
-          // Owner entra no AppShell como master do restaurante — UI unificada (mesma que qualquer pessoa vê).
-          // Não cria pessoa; acesso é implícito via userRole='super' + ownerMode no shell.
+          // Owner entra no AppShell como master do restaurante — UI unificada.
           const rest = restaurants.find(r => r.id === rid);
           if (!rest) return;
           localStorage.setItem("apptip_userid_owner", currentUser.id);
-          localStorage.setItem("apptip_owner_virtual_return", "1");
           localStorage.setItem("apptip_shell_rest", rid);
-          // Não troca userRole (permanece 'super') — mas vai pro shell
+          localStorage.setItem("apptip_shell_owner_mode", "1"); // flag: owner no shell (pra refresh)
           setShellActiveRest(rid);
           setView("shell");
         }}
@@ -23684,6 +23684,7 @@ export default function App() {
             onReturnToOwnerHome={realIsOwner && !impersonatedPessoa ? () => {
               localStorage.removeItem("apptip_owner_virtual_return");
               localStorage.removeItem("apptip_shell_rest");
+              localStorage.removeItem("apptip_shell_owner_mode");
               setShellActiveRest(null);
               setView("super");
             } : null}
