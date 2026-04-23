@@ -639,6 +639,11 @@ const K = {
   miseFtInsumos:       "v4:miseFtInsumos",        // [{id, restaurantId, name, unit, price}]
   miseFtEquipamentos:  "v4:miseFtEquipamentos",   // {[restaurantId]: [string]}
   miseFtDishes:        "v4:miseFtDishes",         // [{id, restaurantId, name, description, louca, equipamentos:[], markup, sub_fichas:[{id,name,rendimento,rendimento_qty,rendimento_unit,modo_preparo,subproduto?:{name},ingredientes:[{insumo_id?,insumo_name?,subref_id?,qty,unit,qty_raw?,is_qb?,fc?}]}], photos:[]}]
+  // ═══ AppMise — Temperaturas (sensores Tuya/SmartLife) ═══
+  tuyaLinks:           "v4:tuyaLinks",            // {[restaurantId]: {uid, accessToken?, refreshToken?, expiresAt?, linkedAt, linkedBy, accountEmail?}}
+  tempSensors:         "v4:tempSensors",          // [{id, restaurantId, tuyaDeviceId, name, equipmentId?, location?, minTemp, maxTemp, alertMinutes, alertWhatsapp?, alertPessoaId?, createdAt, active}]
+  tempReadings:        "v4:tempReadings",         // [{id, sensorId, restaurantId, timestamp, temp, battery?, online:bool}]   // histórico — pode ser truncado/arquivado
+  tempAlerts:          "v4:tempAlerts",           // [{id, sensorId, restaurantId, openedAt, closedAt?, firstTemp, peakTemp, notifiedAt?, acknowledgedBy?, acknowledgedAt?, note?}]
 };
 
 // ── Inbox helpers ──
@@ -9678,6 +9683,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
       (canTips || isOwner) && ["mise_contagens","Contagens"],
       (canTips || isOwner) && ["mise_checklists","Checklists"],
       (canTips || isOwner) && ["mise_fichas","Fichas Técnicas"],
+      (canTips || isOwner) && ["mise_temperaturas","Temperaturas"],
     ].filter(Boolean) },
   ].filter(g => g.tabs.length > 0);
 
@@ -11093,6 +11099,27 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
               miseFtInsumos={data?.miseFtInsumos ?? []}
               miseFtEquipamentos={data?.miseFtEquipamentos ?? {}}
               miseFtDishes={data?.miseFtDishes ?? []}
+              onUpdate={onUpdate}
+              mobileOnly={mobileOnly}
+            />
+          </div>
+        )}
+
+        {/* MISE — TEMPERATURAS (admin) */}
+        {tab === "mise_temperaturas" && (
+          <div>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:12,marginBottom:8}}>
+              <h3 style={{color:"var(--text)",margin:0,fontSize:mobileOnly?16:20}}>🌡️ Temperaturas <span style={{fontSize:11,color:"#7c9e5e",fontWeight:700,textTransform:"uppercase",letterSpacing:0.4,marginLeft:6}}>Mise</span></h3>
+              <span style={{fontSize:10,padding:"2px 8px",borderRadius:6,background:"#f59e0b22",color:"#f59e0b",fontWeight:700,letterSpacing:0.3}}>PILOTO</span>
+            </div>
+            <MiseTemperaturasAdmin
+              restaurantId={rid}
+              tuyaLink={data?.tuyaLinks?.[rid]}
+              tempSensors={(data?.tempSensors ?? []).filter(s => s.restaurantId === rid)}
+              tempReadings={(data?.tempReadings ?? []).filter(r => r.restaurantId === rid)}
+              miseFtEquipamentos={data?.miseFtEquipamentos ?? {}}
+              pessoas={(data?.pessoas ?? []).filter(p => (p.restaurantIds || []).includes(rid))}
+              currentUser={currentUser}
               onUpdate={onUpdate}
               mobileOnly={mobileOnly}
             />
@@ -16097,6 +16124,7 @@ const OPERATIONAL_AREA_DEFS = [
   { key: "compras",        label: "Compras",         icon: "🛒", module: "mise" },
   { key: "checklists",     label: "Checklists",      icon: "✅", module: "mise" },
   { key: "fichasTecnicas", label: "Fichas Técnicas", icon: "📋", module: "mise" },
+  { key: "temperaturas",   label: "Temperaturas",    icon: "🌡️", module: "mise" },
 ];
 
 function hasAnyOperationalArea(emp) {
@@ -17723,7 +17751,7 @@ function buildShellSections({ pessoa, restaurantId, isOwner }) {
   let perms, isTeam;
   if (isOwner) {
     perms = {
-      operational: { escalas:true, gorjetas:true, trilhas:true, reunioes:true, contagens:true, compras:true, checklists:true, fichasTecnicas:true },
+      operational: { escalas:true, gorjetas:true, trilhas:true, reunioes:true, contagens:true, compras:true, checklists:true, fichasTecnicas:true, temperaturas:true },
       admin: { tips:true, schedule:true, employees:true, roles:true, vt:true, comunicados:true, faq:true, config:true, pessoas:true },
       special: { isDP:true },
     };
@@ -17819,6 +17847,15 @@ function buildShellSections({ pessoa, restaurantId, isOwner }) {
       subtabs: st(
         op.fichasTecnicas && { id: "consultar", label: "Consultar", kind: "operational", tab: "fichasTecnicas" },
         ad.employees      && { id: "editar",    label: "Editar",    kind: "manager",     tab: "mise_fichas" },
+      ),
+    });
+  }
+  if (op.temperaturas || ad.employees) {
+    miseItems.push({
+      id: "mod_mise_temperaturas", label: "Temperaturas", icon: "🌡️",
+      subtabs: st(
+        op.temperaturas && { id: "monitor", label: "Monitorar",  kind: "operational", tab: "temperaturas" },
+        ad.employees    && { id: "config",  label: "Configurar", kind: "manager",     tab: "mise_temperaturas" },
       ),
     });
   }
@@ -17964,6 +18001,11 @@ function AppShell({ pessoa, data, activeRestaurantId, setActiveRestaurantId, use
   // Contagens: indicador de ciclo aberto
   const openCycleForBadge = (data?.miseCycles || []).find(c => c.restaurantId === activeRestaurantId && c.status === "open");
   if (openCycleForBadge) badges.mod_mise_contagens = "•";
+  // Temperaturas: alertas ativos (abertos e não reconhecidos)
+  const openTempAlerts = (data?.tempAlerts || []).filter(a =>
+    a.restaurantId === activeRestaurantId && !a.closedAt && !a.acknowledgedAt
+  );
+  if (openTempAlerts.length > 0) badges.mod_mise_temperaturas = `!${openTempAlerts.length}`;
   // Sugestões de compra (calculadas live — só se tem pedidos a aprovar)
   if (openCycleForBadge && pessoa) {
     try {
@@ -18046,6 +18088,19 @@ function AppShell({ pessoa, data, activeRestaurantId, setActiveRestaurantId, use
           employee={buildVirtualEmpForPessoa(pessoa, activeRestaurantId)}
           miseFtInsumos={data?.miseFtInsumos ?? []}
           miseFtDishes={data?.miseFtDishes ?? []}
+        />
+      );
+    }
+    if (effectiveTab === "temperaturas" && effectiveKind === "operational") {
+      return (
+        <OperationalTemperaturas
+          restaurantId={activeRestaurantId}
+          tempSensors={(data?.tempSensors ?? []).filter(s => s.restaurantId === activeRestaurantId)}
+          tempReadings={(data?.tempReadings ?? []).filter(r => r.restaurantId === activeRestaurantId)}
+          tempAlerts={(data?.tempAlerts ?? []).filter(a => a.restaurantId === activeRestaurantId)}
+          tuyaLink={data?.tuyaLinks?.[activeRestaurantId]}
+          onUpdate={onUpdate}
+          pessoa={pessoa}
         />
       );
     }
@@ -18650,6 +18705,7 @@ const PERM_GROUPS = [
       { key: "operational.compras",        label: "Compras",        icon: "🛒" },
       { key: "operational.checklists",     label: "Checklists",     icon: "✅" },
       { key: "operational.fichasTecnicas", label: "Fichas Técnicas",icon: "📋" },
+      { key: "operational.temperaturas",   label: "Temperaturas",   icon: "🌡️" },
     ],
   },
   {
@@ -20989,6 +21045,492 @@ function MiseFtSubFichaEditor({ sf, sfIdx, total, isFinal, sfCost, insumos, allS
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════
+// ──  TEMPERATURAS — Sensores Tuya/SmartLife (PILOTO)             ──
+// ═══════════════════════════════════════════════════════════════
+// Status helper: compara temp atual com faixa config e retorna cor+label
+function tempStatus(temp, minTemp, maxTemp) {
+  if (temp == null) return { color: "var(--text3)", bg: "var(--bg2)", label: "Sem leitura", dot: "⚪" };
+  if (temp < minTemp || temp > maxTemp) return { color: "var(--red)", bg: "var(--red-bg)", label: "Fora da faixa", dot: "🔴" };
+  const margin = (maxTemp - minTemp) * 0.15;
+  if (temp < minTemp + margin || temp > maxTemp - margin) return { color: "#f59e0b", bg: "#f59e0b18", label: "Atenção", dot: "🟡" };
+  return { color: "var(--green)", bg: "var(--green-bg)", label: "OK", dot: "🟢" };
+}
+
+function fmtTemp(t) {
+  if (t == null || isNaN(t)) return "—";
+  return `${t.toFixed(1)}°C`;
+}
+
+function fmtRelMin(iso) {
+  if (!iso) return "—";
+  const diff = Math.floor((Date.now() - new Date(iso).getTime()) / 60000);
+  if (diff < 1) return "agora";
+  if (diff < 60) return `há ${diff}min`;
+  if (diff < 1440) return `há ${Math.floor(diff/60)}h`;
+  return `há ${Math.floor(diff/1440)}d`;
+}
+
+// Dashboard operacional: ver sensores + histórico + alertas
+function OperationalTemperaturas({ restaurantId, tempSensors, tempReadings, tempAlerts, tuyaLink, onUpdate, pessoa }) {
+  const isMobile = useMobile();
+  const ac = "#7c9e5e";
+  const activeSensors = (tempSensors || []).filter(s => s.active !== false);
+  const openAlerts = (tempAlerts || []).filter(a => !a.closedAt && !a.acknowledgedAt);
+
+  // Última leitura de cada sensor
+  const lastReadingBySensor = {};
+  (tempReadings || []).forEach(r => {
+    const prev = lastReadingBySensor[r.sensorId];
+    if (!prev || new Date(r.timestamp) > new Date(prev.timestamp)) {
+      lastReadingBySensor[r.sensorId] = r;
+    }
+  });
+
+  // Piloto: simular novas leituras (enquanto não tem backend Tuya)
+  function simulateReading() {
+    if (activeSensors.length === 0) { alert("Cadastre sensores primeiro na aba Configurar."); return; }
+    const newReadings = activeSensors.map(s => {
+      const center = (s.minTemp + s.maxTemp) / 2;
+      const drift = (Math.random() - 0.5) * (s.maxTemp - s.minTemp) * 1.1;
+      const temp = +(center + drift).toFixed(1);
+      return {
+        id: `rd_${Date.now().toString(36)}_${s.id.slice(-4)}_${Math.random().toString(36).slice(2,5)}`,
+        sensorId: s.id,
+        restaurantId,
+        timestamp: new Date().toISOString(),
+        temp,
+        battery: Math.floor(70 + Math.random() * 30),
+        online: Math.random() > 0.05,
+      };
+    });
+    onUpdate("tempReadings", [...(tempReadings || []), ...newReadings]);
+    // Gera alerta se fora da faixa
+    const newAlerts = [];
+    newReadings.forEach(r => {
+      const s = activeSensors.find(x => x.id === r.sensorId);
+      if (!s) return;
+      if (r.temp < s.minTemp || r.temp > s.maxTemp) {
+        const hasOpen = (tempAlerts || []).some(a => a.sensorId === s.id && !a.closedAt);
+        if (!hasOpen) {
+          newAlerts.push({
+            id: `al_${Date.now().toString(36)}_${s.id.slice(-4)}`,
+            sensorId: s.id,
+            restaurantId,
+            openedAt: r.timestamp,
+            firstTemp: r.temp,
+            peakTemp: r.temp,
+          });
+        }
+      }
+    });
+    if (newAlerts.length > 0) {
+      onUpdate("tempAlerts", [...(tempAlerts || []), ...newAlerts]);
+      onUpdate("_toast", `⚠️ ${newAlerts.length} alerta(s) gerado(s)`);
+    } else {
+      onUpdate("_toast", "✓ Leituras simuladas");
+    }
+  }
+
+  function acknowledgeAlert(alertId) {
+    const updated = (tempAlerts || []).map(a => a.id === alertId ? {
+      ...a, acknowledgedAt: new Date().toISOString(), acknowledgedBy: pessoa?.name || "—",
+    } : a);
+    onUpdate("tempAlerts", updated);
+  }
+
+  // Empty states
+  if (!tuyaLink) {
+    return (
+      <div style={{padding:isMobile?"30px 16px":"60px 24px",textAlign:"center",color:"var(--text3)"}}>
+        <div style={{fontSize:48,marginBottom:12}}>🌡️</div>
+        <h3 style={{color:"var(--text)",fontSize:isMobile?16:18,fontWeight:700,margin:"0 0 8px"}}>Nenhuma conta SmartLife vinculada</h3>
+        <p style={{fontSize:13,lineHeight:1.6,maxWidth:420,margin:"0 auto"}}>
+          Peça ao gestor pra ir em <b>Temperaturas → Configurar</b> e vincular a conta SmartLife do restaurante.
+        </p>
+      </div>
+    );
+  }
+  if (activeSensors.length === 0) {
+    return (
+      <div style={{padding:isMobile?"30px 16px":"60px 24px",textAlign:"center",color:"var(--text3)"}}>
+        <div style={{fontSize:48,marginBottom:12}}>📡</div>
+        <h3 style={{color:"var(--text)",fontSize:isMobile?16:18,fontWeight:700,margin:"0 0 8px"}}>Nenhum sensor cadastrado</h3>
+        <p style={{fontSize:13,lineHeight:1.6,maxWidth:420,margin:"0 auto"}}>
+          A conta SmartLife está vinculada mas nenhum sensor foi cadastrado ainda. Peça ao gestor pra ir em <b>Temperaturas → Configurar</b>.
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      {/* Header */}
+      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:12,marginBottom:14,flexWrap:"wrap"}}>
+        <div>
+          <div style={{fontSize:11,color:"var(--text3)",fontWeight:700,textTransform:"uppercase",letterSpacing:0.4}}>Monitoramento — tempo real</div>
+          <div style={{fontSize:isMobile?14:16,color:"var(--text)",fontWeight:700,marginTop:2}}>{activeSensors.length} sensor{activeSensors.length!==1?"es":""} · {openAlerts.length} alerta{openAlerts.length!==1?"s":""} ativo{openAlerts.length!==1?"s":""}</div>
+        </div>
+        <button onClick={simulateReading}
+          style={{background:ac+"22",border:`1px solid ${ac}66`,borderRadius:8,padding:"8px 14px",fontSize:12,fontWeight:700,color:ac,cursor:"pointer",fontFamily:"'DM Sans',sans-serif",minHeight:isMobile?44:"auto"}}>
+          🔄 Simular leitura
+        </button>
+      </div>
+
+      {/* Alertas ativos */}
+      {openAlerts.length > 0 && (
+        <div style={{background:"var(--red-bg)",border:"1px solid var(--red)44",borderRadius:12,padding:"12px 14px",marginBottom:14}}>
+          <div style={{fontSize:12,color:"var(--red)",fontWeight:700,textTransform:"uppercase",letterSpacing:0.4,marginBottom:8}}>⚠️ Alertas ativos</div>
+          {openAlerts.map(a => {
+            const s = activeSensors.find(x => x.id === a.sensorId);
+            return (
+              <div key={a.id} style={{display:"flex",alignItems:"center",gap:10,padding:"8px 0",borderTop:"1px solid var(--red)22"}}>
+                <div style={{flex:1,minWidth:0}}>
+                  <div style={{fontSize:13,color:"var(--text)",fontWeight:600}}>{s?.name || "Sensor removido"}</div>
+                  <div style={{fontSize:11,color:"var(--text3)",marginTop:2}}>Pico {fmtTemp(a.peakTemp)} · iniciou {fmtRelMin(a.openedAt)}</div>
+                </div>
+                <button onClick={()=>acknowledgeAlert(a.id)}
+                  style={{background:"var(--red)",color:"#fff",border:"none",borderRadius:6,padding:"5px 12px",fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"'DM Sans',sans-serif"}}>
+                  Reconhecer
+                </button>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {/* Grid de sensores */}
+      <div style={{display:"grid",gridTemplateColumns:isMobile?"1fr":"repeat(auto-fit,minmax(240px,1fr))",gap:12}}>
+        {activeSensors.map(s => {
+          const reading = lastReadingBySensor[s.id];
+          const status = tempStatus(reading?.temp, s.minTemp, s.maxTemp);
+          const offline = reading && reading.online === false;
+          return (
+            <div key={s.id} style={{background:"var(--card-bg)",border:`1px solid ${status.color}33`,borderRadius:12,padding:"14px 16px",position:"relative"}}>
+              <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:8}}>
+                <div style={{flex:1,minWidth:0}}>
+                  <div style={{fontSize:13,color:"var(--text)",fontWeight:700,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{s.name}</div>
+                  {s.location && <div style={{fontSize:10,color:"var(--text3)",marginTop:1}}>{s.location}</div>}
+                </div>
+                <span style={{fontSize:14}} title={status.label}>{status.dot}</span>
+              </div>
+              <div style={{display:"flex",alignItems:"baseline",gap:8,marginBottom:6}}>
+                <div style={{fontSize:32,fontWeight:700,color:status.color,fontFamily:"'DM Mono',monospace",lineHeight:1}}>{fmtTemp(reading?.temp)}</div>
+                <div style={{fontSize:11,color:"var(--text3)"}}>faixa {s.minTemp}°–{s.maxTemp}°</div>
+              </div>
+              <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",fontSize:10,color:"var(--text3)"}}>
+                <span>{reading ? `${fmtRelMin(reading.timestamp)}` : "aguardando leitura"}</span>
+                {reading?.battery != null && <span>🔋 {reading.battery}%</span>}
+                {offline && <span style={{color:"var(--red)",fontWeight:700}}>offline</span>}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      <div style={{marginTop:18,fontSize:11,color:"var(--text3)",lineHeight:1.5,textAlign:"center"}}>
+        💡 Piloto: dados simulados. A integração real com a nuvem Tuya pollar cada sensor a cada 2-5min automaticamente.
+      </div>
+    </div>
+  );
+}
+
+// Admin: vincular conta SmartLife + cadastrar sensores + thresholds
+function MiseTemperaturasAdmin({ restaurantId, tuyaLink, tempSensors, tempReadings, miseFtEquipamentos, pessoas, currentUser, onUpdate, mobileOnly }) {
+  const ac = "#7c9e5e";
+  const [showLinkWizard, setShowLinkWizard] = useState(false);
+  const [editingId, setEditingId] = useState(null);
+  const [newForm, setNewForm] = useState({ name:"", location:"", equipmentId:"", minTemp:-2, maxTemp:5, alertMinutes:10, alertPessoaId:"" });
+  const [editForm, setEditForm] = useState(null);
+
+  const equipamentos = miseFtEquipamentos?.[restaurantId] || [];
+  const restSensors = (tempSensors || []).filter(s => s.restaurantId === restaurantId);
+  const restPessoas = (pessoas || []).filter(p => p.whatsapp);
+
+  // Último reading por sensor
+  const lastRdBySensor = {};
+  (tempReadings || []).forEach(r => {
+    const prev = lastRdBySensor[r.sensorId];
+    if (!prev || new Date(r.timestamp) > new Date(prev.timestamp)) lastRdBySensor[r.sensorId] = r;
+  });
+
+  function doLink(email) {
+    onUpdate("tuyaLinks", prev => ({ ...(prev || {}), [restaurantId]: {
+      uid: `uid_${Date.now().toString(36)}`,
+      accountEmail: email,
+      linkedAt: new Date().toISOString(),
+      linkedBy: currentUser?.name || "—",
+    }}));
+    setShowLinkWizard(false);
+    onUpdate("_toast", "✓ Conta SmartLife vinculada (simulado)");
+  }
+  function doUnlink() {
+    if (!window.confirm("Desvincular a conta SmartLife deste restaurante?\n\nSensores cadastrados serão mantidos mas deixarão de receber leituras até religar.")) return;
+    onUpdate("tuyaLinks", prev => {
+      const next = { ...(prev || {}) };
+      delete next[restaurantId];
+      return next;
+    });
+    onUpdate("_toast", "Conta SmartLife desvinculada");
+  }
+
+  function addSensor() {
+    const nm = newForm.name.trim();
+    if (!nm) { alert("Dê um nome pro sensor (ex: Geladeira Bar)"); return; }
+    if (newForm.minTemp >= newForm.maxTemp) { alert("Temperatura mínima deve ser menor que a máxima"); return; }
+    const s = {
+      id: `snr_${Date.now().toString(36)}${Math.random().toString(36).slice(2,5)}`,
+      restaurantId,
+      tuyaDeviceId: `fake_${Date.now().toString(36)}`, // real: viria da lista Tuya
+      name: nm,
+      location: newForm.location.trim() || null,
+      equipmentId: newForm.equipmentId || null,
+      minTemp: +newForm.minTemp,
+      maxTemp: +newForm.maxTemp,
+      alertMinutes: +newForm.alertMinutes,
+      alertPessoaId: newForm.alertPessoaId || null,
+      createdAt: new Date().toISOString(),
+      active: true,
+    };
+    onUpdate("tempSensors", [...(tempSensors || []), s]);
+    setNewForm({ name:"", location:"", equipmentId:"", minTemp:-2, maxTemp:5, alertMinutes:10, alertPessoaId:"" });
+    onUpdate("_toast", `✓ Sensor "${nm}" cadastrado`);
+  }
+
+  function startEdit(s) {
+    setEditingId(s.id);
+    setEditForm({ name:s.name, location:s.location||"", equipmentId:s.equipmentId||"", minTemp:s.minTemp, maxTemp:s.maxTemp, alertMinutes:s.alertMinutes, alertPessoaId:s.alertPessoaId||"", active:s.active!==false });
+  }
+  function saveEdit() {
+    if (!editingId || !editForm) return;
+    if (editForm.minTemp >= editForm.maxTemp) { alert("Min deve ser menor que max"); return; }
+    const updated = (tempSensors || []).map(s => s.id === editingId ? {
+      ...s,
+      name: editForm.name.trim(),
+      location: editForm.location.trim() || null,
+      equipmentId: editForm.equipmentId || null,
+      minTemp: +editForm.minTemp,
+      maxTemp: +editForm.maxTemp,
+      alertMinutes: +editForm.alertMinutes,
+      alertPessoaId: editForm.alertPessoaId || null,
+      active: !!editForm.active,
+    } : s);
+    onUpdate("tempSensors", updated);
+    setEditingId(null);
+    setEditForm(null);
+  }
+  function delSensor(id) {
+    const s = restSensors.find(x => x.id === id);
+    if (!window.confirm(`Remover sensor "${s?.name}"? Histórico de leituras também será descartado.`)) return;
+    onUpdate("tempSensors", (tempSensors || []).filter(x => x.id !== id));
+    onUpdate("tempReadings", prev => (prev || []).filter(r => r.sensorId !== id));
+    onUpdate("_toast", "Sensor removido");
+  }
+
+  return (
+    <div>
+      {/* ═══ Card: Status da conta SmartLife ═══ */}
+      {!tuyaLink ? (
+        <div style={{background:"var(--card-bg)",border:`1px dashed ${ac}66`,borderRadius:12,padding:mobileOnly?"16px":"20px 24px",marginBottom:18}}>
+          <div style={{fontSize:32,marginBottom:8}}>🔗</div>
+          <h4 style={{color:"var(--text)",margin:"0 0 6px",fontSize:15,fontWeight:700}}>Conectar conta SmartLife</h4>
+          <p style={{color:"var(--text2)",fontSize:12,lineHeight:1.5,marginBottom:14}}>
+            Vincule a conta SmartLife deste restaurante pra começar a monitorar os sensores Tuya. Você só precisa fazer isso uma vez — novos sensores pareados no SmartLife aparecem automaticamente no AppTip.
+          </p>
+          {!showLinkWizard ? (
+            <button onClick={()=>setShowLinkWizard(true)}
+              style={{background:ac,color:"#fff",border:"none",borderRadius:8,padding:"10px 18px",fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:"'DM Sans',sans-serif",minHeight:44}}>
+              🔗 Conectar SmartLife
+            </button>
+          ) : (
+            <LinkSmartLifeWizard onLink={doLink} onCancel={()=>setShowLinkWizard(false)} ac={ac} mobileOnly={mobileOnly}/>
+          )}
+        </div>
+      ) : (
+        <div style={{background:"var(--green-bg)",border:"1px solid var(--green)44",borderRadius:12,padding:"12px 16px",marginBottom:18,display:"flex",alignItems:"center",gap:12,flexWrap:"wrap"}}>
+          <span style={{fontSize:20}}>✅</span>
+          <div style={{flex:1,minWidth:200}}>
+            <div style={{fontSize:13,color:"var(--text)",fontWeight:700}}>SmartLife conectada</div>
+            <div style={{fontSize:11,color:"var(--text3)",marginTop:2}}>
+              {tuyaLink.accountEmail || tuyaLink.uid} · vinculado em {new Date(tuyaLink.linkedAt).toLocaleDateString("pt-BR")} por {tuyaLink.linkedBy}
+            </div>
+          </div>
+          <button onClick={doUnlink}
+            style={{background:"transparent",color:"var(--red)",border:"1px solid var(--red)44",borderRadius:6,padding:"6px 14px",fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"'DM Sans',sans-serif"}}>
+            Desvincular
+          </button>
+        </div>
+      )}
+
+      {/* ═══ Lista de sensores cadastrados ═══ */}
+      {tuyaLink && (
+        <>
+          <div style={{marginBottom:14}}>
+            <h4 style={{color:"var(--text)",margin:"0 0 10px",fontSize:14,fontWeight:700}}>Sensores deste restaurante ({restSensors.length})</h4>
+            {restSensors.length === 0 ? (
+              <div style={{padding:"20px 16px",textAlign:"center",background:"var(--bg2)",borderRadius:10,fontSize:12,color:"var(--text3)"}}>
+                Nenhum sensor cadastrado. Use o formulário abaixo pra cadastrar o primeiro.
+              </div>
+            ) : (
+              <div style={{display:"grid",gap:8}}>
+                {restSensors.map(s => {
+                  const rd = lastRdBySensor[s.id];
+                  const status = tempStatus(rd?.temp, s.minTemp, s.maxTemp);
+                  if (editingId === s.id && editForm) {
+                    return (
+                      <div key={s.id} style={{background:"var(--card-bg)",border:`2px solid ${ac}`,borderRadius:10,padding:"12px 14px"}}>
+                        <div style={{display:"grid",gridTemplateColumns:mobileOnly?"1fr":"2fr 1.5fr",gap:8,marginBottom:8}}>
+                          <input value={editForm.name} onChange={e=>setEditForm(f=>({...f,name:e.target.value}))} placeholder="Nome" style={S.input}/>
+                          <input value={editForm.location} onChange={e=>setEditForm(f=>({...f,location:e.target.value}))} placeholder="Localização" style={S.input}/>
+                        </div>
+                        <div style={{display:"grid",gridTemplateColumns:mobileOnly?"1fr 1fr":"1fr 1fr 1fr 1fr",gap:8,marginBottom:8}}>
+                          <div>
+                            <label style={{fontSize:10,color:"var(--text3)"}}>Min (°C)</label>
+                            <input type="number" step="0.1" value={editForm.minTemp} onChange={e=>setEditForm(f=>({...f,minTemp:e.target.value}))} style={S.input}/>
+                          </div>
+                          <div>
+                            <label style={{fontSize:10,color:"var(--text3)"}}>Max (°C)</label>
+                            <input type="number" step="0.1" value={editForm.maxTemp} onChange={e=>setEditForm(f=>({...f,maxTemp:e.target.value}))} style={S.input}/>
+                          </div>
+                          <div>
+                            <label style={{fontSize:10,color:"var(--text3)"}}>Alerta (min)</label>
+                            <input type="number" value={editForm.alertMinutes} onChange={e=>setEditForm(f=>({...f,alertMinutes:e.target.value}))} style={S.input}/>
+                          </div>
+                          <div>
+                            <label style={{fontSize:10,color:"var(--text3)"}}>Equipamento</label>
+                            <select value={editForm.equipmentId} onChange={e=>setEditForm(f=>({...f,equipmentId:e.target.value}))} style={S.input}>
+                              <option value="">—</option>
+                              {equipamentos.map(eq => <option key={eq} value={eq}>{eq}</option>)}
+                            </select>
+                          </div>
+                        </div>
+                        <div style={{display:"grid",gridTemplateColumns:mobileOnly?"1fr":"1fr 1fr",gap:8,marginBottom:10}}>
+                          <div>
+                            <label style={{fontSize:10,color:"var(--text3)"}}>Responsável (WhatsApp de alerta)</label>
+                            <select value={editForm.alertPessoaId} onChange={e=>setEditForm(f=>({...f,alertPessoaId:e.target.value}))} style={S.input}>
+                              <option value="">—</option>
+                              {restPessoas.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                            </select>
+                          </div>
+                          <label style={{display:"flex",alignItems:"center",gap:6,fontSize:12,color:"var(--text2)",marginTop:mobileOnly?0:18}}>
+                            <input type="checkbox" checked={editForm.active} onChange={e=>setEditForm(f=>({...f,active:e.target.checked}))}/>
+                            Sensor ativo
+                          </label>
+                        </div>
+                        <div style={{display:"flex",gap:8,justifyContent:"flex-end"}}>
+                          <button onClick={()=>delSensor(s.id)} style={{...S.btnSecondary,color:"var(--red)",borderColor:"var(--red)44",fontSize:11,padding:"6px 12px"}}>Remover</button>
+                          <button onClick={()=>{setEditingId(null);setEditForm(null);}} style={{...S.btnSecondary,fontSize:11,padding:"6px 12px"}}>Cancelar</button>
+                          <button onClick={saveEdit} style={{...S.btnPrimary,background:ac,borderColor:ac,fontSize:11,padding:"6px 14px"}}>Salvar</button>
+                        </div>
+                      </div>
+                    );
+                  }
+                  return (
+                    <div key={s.id} style={{background:"var(--card-bg)",border:"1px solid var(--border)",borderRadius:10,padding:"12px 14px",display:"flex",alignItems:"center",gap:12,flexWrap:"wrap"}}>
+                      <span style={{fontSize:18}}>{status.dot}</span>
+                      <div style={{flex:1,minWidth:180}}>
+                        <div style={{fontSize:13,color:"var(--text)",fontWeight:700}}>{s.name} {!s.active && <span style={{fontSize:10,color:"var(--text3)",fontWeight:500}}>(inativo)</span>}</div>
+                        <div style={{fontSize:11,color:"var(--text3)",marginTop:2}}>
+                          {s.location && <>{s.location} · </>}
+                          faixa {s.minTemp}°–{s.maxTemp}° · alerta em {s.alertMinutes}min
+                          {s.equipmentId && <> · 🔧 {s.equipmentId}</>}
+                        </div>
+                      </div>
+                      <div style={{fontSize:13,color:status.color,fontWeight:700,fontFamily:"'DM Mono',monospace",whiteSpace:"nowrap"}}>{fmtTemp(rd?.temp)}</div>
+                      <button onClick={()=>startEdit(s)} style={{...S.btnSecondary,fontSize:11,padding:"6px 12px"}}>Editar</button>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
+          {/* ═══ Cadastrar novo sensor ═══ */}
+          <div style={{background:"var(--card-bg)",border:"1px solid var(--border)",borderRadius:10,padding:"14px 16px",marginBottom:14}}>
+            <h5 style={{color:"var(--text)",margin:"0 0 10px",fontSize:13,fontWeight:700}}>➕ Cadastrar novo sensor</h5>
+            <div style={{fontSize:11,color:"var(--text3)",marginBottom:12,lineHeight:1.5}}>
+              Na integração real, aqui aparecia a lista de sensores da conta SmartLife que ainda não foram cadastrados. No piloto, você cadastra manualmente e os dados são simulados pela tela Monitorar.
+            </div>
+            <div style={{display:"grid",gridTemplateColumns:mobileOnly?"1fr":"2fr 1.5fr",gap:8,marginBottom:8}}>
+              <div>
+                <label style={{fontSize:10,color:"var(--text3)"}}>Nome</label>
+                <input value={newForm.name} onChange={e=>setNewForm(f=>({...f,name:e.target.value}))} placeholder="Ex: Geladeira Bar" style={S.input}/>
+              </div>
+              <div>
+                <label style={{fontSize:10,color:"var(--text3)"}}>Localização (opcional)</label>
+                <input value={newForm.location} onChange={e=>setNewForm(f=>({...f,location:e.target.value}))} placeholder="Ex: Atrás do bar" style={S.input}/>
+              </div>
+            </div>
+            <div style={{display:"grid",gridTemplateColumns:mobileOnly?"1fr 1fr":"1fr 1fr 1fr 1fr",gap:8,marginBottom:8}}>
+              <div>
+                <label style={{fontSize:10,color:"var(--text3)"}}>Min (°C)</label>
+                <input type="number" step="0.1" value={newForm.minTemp} onChange={e=>setNewForm(f=>({...f,minTemp:e.target.value}))} style={S.input}/>
+              </div>
+              <div>
+                <label style={{fontSize:10,color:"var(--text3)"}}>Max (°C)</label>
+                <input type="number" step="0.1" value={newForm.maxTemp} onChange={e=>setNewForm(f=>({...f,maxTemp:e.target.value}))} style={S.input}/>
+              </div>
+              <div>
+                <label style={{fontSize:10,color:"var(--text3)"}}>Alerta após (min)</label>
+                <input type="number" value={newForm.alertMinutes} onChange={e=>setNewForm(f=>({...f,alertMinutes:e.target.value}))} style={S.input}/>
+              </div>
+              <div>
+                <label style={{fontSize:10,color:"var(--text3)"}}>Equipamento</label>
+                <select value={newForm.equipmentId} onChange={e=>setNewForm(f=>({...f,equipmentId:e.target.value}))} style={S.input}>
+                  <option value="">—</option>
+                  {equipamentos.map(eq => <option key={eq} value={eq}>{eq}</option>)}
+                </select>
+              </div>
+            </div>
+            <div style={{display:"grid",gridTemplateColumns:mobileOnly?"1fr":"1fr auto",gap:8,alignItems:"end"}}>
+              <div>
+                <label style={{fontSize:10,color:"var(--text3)"}}>Responsável por alertas (WhatsApp)</label>
+                <select value={newForm.alertPessoaId} onChange={e=>setNewForm(f=>({...f,alertPessoaId:e.target.value}))} style={S.input}>
+                  <option value="">—</option>
+                  {restPessoas.map(p => <option key={p.id} value={p.id}>{p.name} · {p.whatsapp}</option>)}
+                </select>
+              </div>
+              <button onClick={addSensor}
+                style={{background:ac,color:"#fff",border:"none",borderRadius:8,padding:"10px 18px",fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:"'DM Sans',sans-serif",minHeight:44}}>
+                Adicionar
+              </button>
+            </div>
+          </div>
+        </>
+      )}
+
+      <div style={{fontSize:11,color:"var(--text3)",lineHeight:1.5,marginTop:14,padding:"10px 14px",background:"#f59e0b15",borderRadius:8,border:"1px solid #f59e0b33"}}>
+        ⚠️ <b>Modo piloto:</b> os dados exibidos são simulados. Pra conectar de verdade aos sensores Tuya, precisamos criar uma Function serverless (Vercel/Firebase) com as credenciais do Tuya IoT Platform e trocar a simulação pela chamada real.
+      </div>
+    </div>
+  );
+}
+
+// Wizard de vínculo SmartLife (piloto: pede email; real: gera QR code)
+function LinkSmartLifeWizard({ onLink, onCancel, ac, mobileOnly }) {
+  const [email, setEmail] = useState("");
+  return (
+    <div style={{background:"var(--bg2)",border:"1px solid var(--border)",borderRadius:10,padding:"12px 14px"}}>
+      <div style={{fontSize:12,color:"var(--text2)",marginBottom:10,lineHeight:1.5}}>
+        <b>Na versão real:</b> um QR code apareceria aqui. Você abriria o SmartLife no iPhone do gestor, iria em Perfil → Escanear QR, e autorizaria o AppTip a acessar os dispositivos dessa conta. Tokens OAuth ficariam guardados no Firestore.
+      </div>
+      <div style={{fontSize:12,color:"var(--text2)",marginBottom:10}}>
+        <b>Piloto:</b> digite o email da conta SmartLife só pra registrar o "link" simulado:
+      </div>
+      <div style={{display:"grid",gridTemplateColumns:mobileOnly?"1fr":"1fr auto",gap:8}}>
+        <input value={email} onChange={e=>setEmail(e.target.value)} placeholder="email@restaurante.com" type="email" style={S.input}/>
+        <div style={{display:"flex",gap:6}}>
+          <button onClick={onCancel} style={{...S.btnSecondary,fontSize:12,padding:"8px 14px"}}>Cancelar</button>
+          <button onClick={()=>{ if (!email.trim()) { alert("Digite um email"); return; } onLink(email.trim()); }}
+            style={{background:ac,color:"#fff",border:"none",borderRadius:8,padding:"8px 14px",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"'DM Sans',sans-serif"}}>
+            Vincular
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
@@ -23401,6 +23943,11 @@ export default function App() {
   const [miseFtInsumos,      setMiseFtInsumos]      = useState([]);
   const [miseFtEquipamentos, setMiseFtEquipamentos] = useState({});
   const [miseFtDishes,       setMiseFtDishes]       = useState([]);
+  // AppMise — Temperaturas (piloto: dados mockados até integração Tuya)
+  const [tuyaLinks,          setTuyaLinks]          = useState({});
+  const [tempSensors,        setTempSensors]        = useState([]);
+  const [tempReadings,       setTempReadings]       = useState([]);
+  const [tempAlerts,         setTempAlerts]         = useState([]);
 
   useEffect(() => {
     const savedId = currentUserId;
@@ -23428,7 +23975,7 @@ export default function App() {
       setLoadProgress("Preparando o sistema...");
 
       const keys = keyNames;
-      const map = { owners:setOwners, managers:setManagers, restaurants:setRestaurants, employees:setEmployees, roles:setRoles, tips:setTips, splits:setSplits, schedules:setSchedules, communications:setCommunications, commAcks:setCommAcks, faq:setFaq, dpMessages:setDpMessages, workSchedules:setWorkSchedules, notifications:setNotifications, noTipDays:setNoTipDays, trash:setTrash, schedTemplates:setSchedTemplates, schedDrafts:setSchedDrafts, scheduleVersions:setScheduleVersions, tipVersions:setTipVersions, vtConfig:setVtConfig, vtMonthly:setVtMonthly, vtPayments:setVtPayments, incidents:setIncidents, feedbacks:setFeedbacks, devChecklists:setDevChecklists, scheduleAdjustments:setScheduleAdjustments, scheduleStatus:setScheduleStatus, schedulePrevista:setSchedulePrevista, employeeGoals:setEmployeeGoals, delays:setDelays, tipApprovals:setTipApprovals, meetingPlans:setMeetingPlans, meetingIdeas:setMeetingIdeas, meetingAgendas:setMeetingAgendas, meetingActions:setMeetingActions, meetingOccurrences:setMeetingOccurrences, meetingPendencias:setMeetingPendencias, inbox:setInbox, inboxFolders:setInboxFolders, miseCategories:setMiseCategories, miseStocks:setMiseStocks, miseAssignments:setMiseAssignments, miseItems:setMiseItems, miseCycles:setMiseCycles, miseCounts:setMiseCounts, miseSuppliers:setMiseSuppliers, miseProductSuppliers:setMiseProductSuppliers, miseSupplierOrders:setMiseSupplierOrders, miseChecklistTemplates:setMiseChecklistTemplates, miseChecklistRuns:setMiseChecklistRuns, miseFtInsumos:setMiseFtInsumos, miseFtEquipamentos:setMiseFtEquipamentos, miseFtDishes:setMiseFtDishes, pessoas:setPessoas, pessoasMigratedAt:setPessoasMigratedAt };
+      const map = { owners:setOwners, managers:setManagers, restaurants:setRestaurants, employees:setEmployees, roles:setRoles, tips:setTips, splits:setSplits, schedules:setSchedules, communications:setCommunications, commAcks:setCommAcks, faq:setFaq, dpMessages:setDpMessages, workSchedules:setWorkSchedules, notifications:setNotifications, noTipDays:setNoTipDays, trash:setTrash, schedTemplates:setSchedTemplates, schedDrafts:setSchedDrafts, scheduleVersions:setScheduleVersions, tipVersions:setTipVersions, vtConfig:setVtConfig, vtMonthly:setVtMonthly, vtPayments:setVtPayments, incidents:setIncidents, feedbacks:setFeedbacks, devChecklists:setDevChecklists, scheduleAdjustments:setScheduleAdjustments, scheduleStatus:setScheduleStatus, schedulePrevista:setSchedulePrevista, employeeGoals:setEmployeeGoals, delays:setDelays, tipApprovals:setTipApprovals, meetingPlans:setMeetingPlans, meetingIdeas:setMeetingIdeas, meetingAgendas:setMeetingAgendas, meetingActions:setMeetingActions, meetingOccurrences:setMeetingOccurrences, meetingPendencias:setMeetingPendencias, inbox:setInbox, inboxFolders:setInboxFolders, miseCategories:setMiseCategories, miseStocks:setMiseStocks, miseAssignments:setMiseAssignments, miseItems:setMiseItems, miseCycles:setMiseCycles, miseCounts:setMiseCounts, miseSuppliers:setMiseSuppliers, miseProductSuppliers:setMiseProductSuppliers, miseSupplierOrders:setMiseSupplierOrders, miseChecklistTemplates:setMiseChecklistTemplates, miseChecklistRuns:setMiseChecklistRuns, miseFtInsumos:setMiseFtInsumos, miseFtEquipamentos:setMiseFtEquipamentos, miseFtDishes:setMiseFtDishes, pessoas:setPessoas, pessoasMigratedAt:setPessoasMigratedAt, tuyaLinks:setTuyaLinks, tempSensors:setTempSensors, tempReadings:setTempReadings, tempAlerts:setTempAlerts };
       const loaded_data = {};
       let successCount = 0;
       keys.forEach((k, i) => {
@@ -23604,7 +24151,7 @@ export default function App() {
     }
   }, [loaded, employees.length, managers.length]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const data = { owners, managers, restaurants, employees, roles, tips, splits, schedules, communications, commAcks, faq, dpMessages, workSchedules, notifications, noTipDays, trash, schedTemplates, schedDrafts, scheduleVersions, tipVersions, vtConfig, vtMonthly, vtPayments, incidents, feedbacks, devChecklists, scheduleAdjustments, scheduleStatus, schedulePrevista, employeeGoals, delays, tipApprovals, meetingPlans, meetingIdeas, meetingAgendas, meetingActions, meetingOccurrences, meetingPendencias, inbox, inboxFolders, miseCategories, miseStocks, miseAssignments, miseItems, miseCycles, miseCounts, miseSuppliers, miseProductSuppliers, miseSupplierOrders, miseChecklistTemplates, miseChecklistRuns, miseFtInsumos, miseFtEquipamentos, miseFtDishes, pessoas, pessoasMigratedAt };
+  const data = { owners, managers, restaurants, employees, roles, tips, splits, schedules, communications, commAcks, faq, dpMessages, workSchedules, notifications, noTipDays, trash, schedTemplates, schedDrafts, scheduleVersions, tipVersions, vtConfig, vtMonthly, vtPayments, incidents, feedbacks, devChecklists, scheduleAdjustments, scheduleStatus, schedulePrevista, employeeGoals, delays, tipApprovals, meetingPlans, meetingIdeas, meetingAgendas, meetingActions, meetingOccurrences, meetingPendencias, inbox, inboxFolders, miseCategories, miseStocks, miseAssignments, miseItems, miseCycles, miseCounts, miseSuppliers, miseProductSuppliers, miseSupplierOrders, miseChecklistTemplates, miseChecklistRuns, miseFtInsumos, miseFtEquipamentos, miseFtDishes, pessoas, pessoasMigratedAt, tuyaLinks, tempSensors, tempReadings, tempAlerts };
 
   async function handleUpdate(field, value) {
     if (field === "_toast") { setToast(value); return; }
@@ -23613,8 +24160,8 @@ export default function App() {
       setToast("⚠️ Você está offline — conecte à internet para salvar alterações");
       return;
     }
-    const setters = { owners:setOwners, managers:setManagers, restaurants:setRestaurants, employees:setEmployees, roles:setRoles, tips:setTips, splits:setSplits, schedules:setSchedules, communications:setCommunications, commAcks:setCommAcks, faq:setFaq, dpMessages:setDpMessages, workSchedules:setWorkSchedules, notifications:setNotifications, noTipDays:setNoTipDays, trash:setTrash, schedTemplates:setSchedTemplates, schedDrafts:setSchedDrafts, scheduleVersions:setScheduleVersions, tipVersions:setTipVersions, vtConfig:setVtConfig, vtMonthly:setVtMonthly, vtPayments:setVtPayments, incidents:setIncidents, feedbacks:setFeedbacks, devChecklists:setDevChecklists, scheduleAdjustments:setScheduleAdjustments, scheduleStatus:setScheduleStatus, schedulePrevista:setSchedulePrevista, employeeGoals:setEmployeeGoals, delays:setDelays, tipApprovals:setTipApprovals, meetingPlans:setMeetingPlans, meetingIdeas:setMeetingIdeas, meetingAgendas:setMeetingAgendas, meetingActions:setMeetingActions, meetingOccurrences:setMeetingOccurrences, meetingPendencias:setMeetingPendencias, inbox:setInbox, inboxFolders:setInboxFolders, miseCategories:setMiseCategories, miseStocks:setMiseStocks, miseAssignments:setMiseAssignments, miseItems:setMiseItems, miseCycles:setMiseCycles, miseCounts:setMiseCounts, miseSuppliers:setMiseSuppliers, miseProductSuppliers:setMiseProductSuppliers, miseSupplierOrders:setMiseSupplierOrders, miseChecklistTemplates:setMiseChecklistTemplates, miseChecklistRuns:setMiseChecklistRuns, miseFtInsumos:setMiseFtInsumos, miseFtEquipamentos:setMiseFtEquipamentos, miseFtDishes:setMiseFtDishes, pessoas:setPessoas, pessoasMigratedAt:setPessoasMigratedAt };
-    const keys    = { owners:K.owners, managers:K.managers, restaurants:K.restaurants, employees:K.employees, roles:K.roles, tips:K.tips, splits:K.splits, schedules:K.schedules, communications:K.communications, commAcks:K.commAcks, faq:K.faq, dpMessages:K.dpMessages, workSchedules:K.workSchedules, notifications:K.notifications, noTipDays:K.noTipDays, trash:K.trash, schedTemplates:K.schedTemplates, schedDrafts:K.schedDrafts, scheduleVersions:K.scheduleVersions, tipVersions:K.tipVersions, vtConfig:K.vtConfig, vtMonthly:K.vtMonthly, vtPayments:K.vtPayments, incidents:K.incidents, feedbacks:K.feedbacks, devChecklists:K.devChecklists, scheduleAdjustments:K.scheduleAdjustments, scheduleStatus:K.scheduleStatus, schedulePrevista:K.schedulePrevista, employeeGoals:K.employeeGoals, delays:K.delays, tipApprovals:K.tipApprovals, meetingPlans:K.meetingPlans, meetingIdeas:K.meetingIdeas, meetingAgendas:K.meetingAgendas, meetingActions:K.meetingActions, inbox:K.inbox, inboxFolders:K.inboxFolders, miseCategories:K.miseCategories, miseStocks:K.miseStocks, miseAssignments:K.miseAssignments, miseItems:K.miseItems, miseCycles:K.miseCycles, miseCounts:K.miseCounts, miseSuppliers:K.miseSuppliers, miseProductSuppliers:K.miseProductSuppliers, miseSupplierOrders:K.miseSupplierOrders, miseChecklistTemplates:K.miseChecklistTemplates, miseChecklistRuns:K.miseChecklistRuns, miseFtInsumos:K.miseFtInsumos, miseFtEquipamentos:K.miseFtEquipamentos, miseFtDishes:K.miseFtDishes, pessoas:K.pessoas, pessoasMigratedAt:K.pessoasMigratedAt };
+    const setters = { owners:setOwners, managers:setManagers, restaurants:setRestaurants, employees:setEmployees, roles:setRoles, tips:setTips, splits:setSplits, schedules:setSchedules, communications:setCommunications, commAcks:setCommAcks, faq:setFaq, dpMessages:setDpMessages, workSchedules:setWorkSchedules, notifications:setNotifications, noTipDays:setNoTipDays, trash:setTrash, schedTemplates:setSchedTemplates, schedDrafts:setSchedDrafts, scheduleVersions:setScheduleVersions, tipVersions:setTipVersions, vtConfig:setVtConfig, vtMonthly:setVtMonthly, vtPayments:setVtPayments, incidents:setIncidents, feedbacks:setFeedbacks, devChecklists:setDevChecklists, scheduleAdjustments:setScheduleAdjustments, scheduleStatus:setScheduleStatus, schedulePrevista:setSchedulePrevista, employeeGoals:setEmployeeGoals, delays:setDelays, tipApprovals:setTipApprovals, meetingPlans:setMeetingPlans, meetingIdeas:setMeetingIdeas, meetingAgendas:setMeetingAgendas, meetingActions:setMeetingActions, meetingOccurrences:setMeetingOccurrences, meetingPendencias:setMeetingPendencias, inbox:setInbox, inboxFolders:setInboxFolders, miseCategories:setMiseCategories, miseStocks:setMiseStocks, miseAssignments:setMiseAssignments, miseItems:setMiseItems, miseCycles:setMiseCycles, miseCounts:setMiseCounts, miseSuppliers:setMiseSuppliers, miseProductSuppliers:setMiseProductSuppliers, miseSupplierOrders:setMiseSupplierOrders, miseChecklistTemplates:setMiseChecklistTemplates, miseChecklistRuns:setMiseChecklistRuns, miseFtInsumos:setMiseFtInsumos, miseFtEquipamentos:setMiseFtEquipamentos, miseFtDishes:setMiseFtDishes, pessoas:setPessoas, pessoasMigratedAt:setPessoasMigratedAt, tuyaLinks:setTuyaLinks, tempSensors:setTempSensors, tempReadings:setTempReadings, tempAlerts:setTempAlerts };
+    const keys    = { owners:K.owners, managers:K.managers, restaurants:K.restaurants, employees:K.employees, roles:K.roles, tips:K.tips, splits:K.splits, schedules:K.schedules, communications:K.communications, commAcks:K.commAcks, faq:K.faq, dpMessages:K.dpMessages, workSchedules:K.workSchedules, notifications:K.notifications, noTipDays:K.noTipDays, trash:K.trash, schedTemplates:K.schedTemplates, schedDrafts:K.schedDrafts, scheduleVersions:K.scheduleVersions, tipVersions:K.tipVersions, vtConfig:K.vtConfig, vtMonthly:K.vtMonthly, vtPayments:K.vtPayments, incidents:K.incidents, feedbacks:K.feedbacks, devChecklists:K.devChecklists, scheduleAdjustments:K.scheduleAdjustments, scheduleStatus:K.scheduleStatus, schedulePrevista:K.schedulePrevista, employeeGoals:K.employeeGoals, delays:K.delays, tipApprovals:K.tipApprovals, meetingPlans:K.meetingPlans, meetingIdeas:K.meetingIdeas, meetingAgendas:K.meetingAgendas, meetingActions:K.meetingActions, inbox:K.inbox, inboxFolders:K.inboxFolders, miseCategories:K.miseCategories, miseStocks:K.miseStocks, miseAssignments:K.miseAssignments, miseItems:K.miseItems, miseCycles:K.miseCycles, miseCounts:K.miseCounts, miseSuppliers:K.miseSuppliers, miseProductSuppliers:K.miseProductSuppliers, miseSupplierOrders:K.miseSupplierOrders, miseChecklistTemplates:K.miseChecklistTemplates, miseChecklistRuns:K.miseChecklistRuns, miseFtInsumos:K.miseFtInsumos, miseFtEquipamentos:K.miseFtEquipamentos, miseFtDishes:K.miseFtDishes, pessoas:K.pessoas, pessoasMigratedAt:K.pessoasMigratedAt, tuyaLinks:K.tuyaLinks, tempSensors:K.tempSensors, tempReadings:K.tempReadings, tempAlerts:K.tempAlerts };
     // Support functional updates to prevent stale-state race conditions:
     // When value is a function, it receives the latest state (like setState(prev => ...))
     let resolvedValue;
