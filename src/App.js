@@ -18149,7 +18149,7 @@ function AppShell({ pessoa, data, activeRestaurantId, setActiveRestaurantId, use
         {!isMobile && <div style={{fontSize:14,fontWeight:800,color:"var(--text)",flexShrink:0}}>AppTip</div>}
         {accessibleRestaurants.length > 0 && (
           <select value={activeRestaurantId ?? ""} onChange={e=>setActiveRestaurantId(e.target.value)}
-            style={{background:"var(--bg1)",border:"1px solid var(--border)",borderRadius:8,padding:isMobile?"5px 8px":"4px 10px",fontSize:isMobile?12:13,color:"var(--text)",fontFamily:"'DM Sans',sans-serif",cursor:"pointer",maxWidth:isMobile?140:"none",flexShrink:0}}>
+            style={{background:"var(--bg1)",border:"1px solid var(--border)",borderRadius:8,padding:isMobile?"6px 8px":"4px 10px",fontSize:isMobile?12:13,color:"var(--text)",fontFamily:"'DM Sans',sans-serif",cursor:"pointer",maxWidth:isMobile?180:"none",minWidth:isMobile?100:"auto",flexShrink:0,textOverflow:"ellipsis"}}>
             {accessibleRestaurants.length > 1 && <option value="">— Selecione —</option>}
             {accessibleRestaurants.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
           </select>
@@ -18219,7 +18219,9 @@ function AppShell({ pessoa, data, activeRestaurantId, setActiveRestaurantId, use
                         style={{
                           display:"flex",alignItems:"center",gap:10,width:"100%",background:active?sec.color+"22":"transparent",
                           border:"none",borderLeft:`3px solid ${active?sec.color:"transparent"}`,
-                          padding:"10px 16px 10px 13px",cursor:"pointer",fontSize:13,
+                          padding:isMobile?"13px 16px 13px 13px":"10px 16px 10px 13px",
+                          minHeight:isMobile?44:"auto",
+                          cursor:"pointer",fontSize:isMobile?14:13,
                           color:active?"var(--text)":"var(--text2)",fontWeight:active?700:500,
                           fontFamily:"'DM Sans',sans-serif",textAlign:"left",
                         }}>
@@ -18245,9 +18247,10 @@ function AppShell({ pessoa, data, activeRestaurantId, setActiveRestaurantId, use
         {/* CONTENT */}
         <main style={{flex:1,overflowY:"auto",padding:isMobile?"12px 14px":"20px 24px",minWidth:0}}>
           {activeRest && (
-            <div style={{marginBottom:isMobile?10:16,padding:"8px 14px",background:"var(--bg2)",borderRadius:10,fontSize:12,color:"var(--text3)"}}>
+            <div style={{marginBottom:isMobile?8:16,padding:isMobile?"6px 12px":"8px 14px",background:"var(--bg2)",borderRadius:10,fontSize:12,color:"var(--text3)",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
               <b style={{color:"var(--text)"}}>{activeRest.name}</b> · {activeItem?.label || "—"}
-              {hasSubtabs && activeItem.subtabs.length > 1 && activeSubtab && (
+              {/* Subtab no breadcrumb só no desktop — no mobile a SubTabBar já mostra isso logo abaixo */}
+              {!isMobile && hasSubtabs && activeItem.subtabs.length > 1 && activeSubtab && (
                 <span> · <span style={{color:"var(--text2)"}}>{activeSubtab.label}</span></span>
               )}
             </div>
@@ -18256,7 +18259,8 @@ function AppShell({ pessoa, data, activeRestaurantId, setActiveRestaurantId, use
           {hasSubtabs && activeItem.subtabs.length > 1 && (
             <div style={{
               display:"flex", gap:2, borderBottom:"1px solid var(--border)",
-              marginBottom:isMobile?12:18, overflowX:"auto", flexWrap:"nowrap",
+              marginBottom:isMobile?14:18, overflowX:"auto", flexWrap:"nowrap",
+              WebkitOverflowScrolling:"touch",
             }}>
               {activeItem.subtabs.map(sub => {
                 const active = sub.id === activeSubtab.id;
@@ -18265,13 +18269,14 @@ function AppShell({ pessoa, data, activeRestaurantId, setActiveRestaurantId, use
                     style={{
                       background:"none", border:"none",
                       borderBottom:`2px solid ${active ? "var(--ac)" : "transparent"}`,
-                      padding:isMobile?"7px 12px":"9px 16px",
-                      fontSize:isMobile?12:13, cursor:"pointer",
+                      padding:isMobile?"11px 16px":"9px 16px",
+                      fontSize:isMobile?13:13, cursor:"pointer",
                       color: active ? "var(--text)" : "var(--text3)",
                       fontWeight: active ? 700 : 500,
                       fontFamily:"'DM Sans',sans-serif",
                       whiteSpace:"nowrap",
                       marginBottom:-1,
+                      minHeight:isMobile?44:"auto",
                     }}>
                     {sub.label}
                   </button>
