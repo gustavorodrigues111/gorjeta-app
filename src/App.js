@@ -17992,7 +17992,8 @@ function AppShell({ pessoa, data, activeRestaurantId, setActiveRestaurantId, use
     !MISE_ORDER_STATUS[o.status]?.terminal
   );
   if (activeOrders.length > 0) badges.mod_mise_compras = activeOrders.length;
-  // Checklists: templates pendentes hoje pra este usuário
+  // Checklists: templates pendentes hoje — prefixo ⏳ deixa explícito que é "a fazer",
+  // não "preenchimentos novos chegaram".
   const activeTemplates = (data?.miseChecklistTemplates || []).filter(t =>
     t.restaurantId === activeRestaurantId && t.active !== false
   );
@@ -18004,7 +18005,7 @@ function AppShell({ pessoa, data, activeRestaurantId, setActiveRestaurantId, use
       const run = myRunsToday.find(r => r.templateId === t.id);
       return !run || !run.completedAt;
     });
-    if (pending.length > 0) badges.mod_mise_checklists = pending.length;
+    if (pending.length > 0) badges.mod_mise_checklists = `⏳${pending.length}`;
   }
   // Contagens: indicador de ciclo aberto
   const openCycleForBadge = (data?.miseCycles || []).find(c => c.restaurantId === activeRestaurantId && c.status === "open");
@@ -19607,6 +19608,10 @@ function OperationalChecklists({ employee, miseChecklistTemplates, miseChecklist
   const myRunsToday = (miseChecklistRuns || []).filter(r =>
     r.restaurantId === restaurantId && r.userId === employee.id && r.date === today_
   );
+  // Runs DE HOJE de todo mundo no restaurante — pra mostrar "último envio" por template
+  const restRunsToday = (miseChecklistRuns || []).filter(r =>
+    r.restaurantId === restaurantId && r.date === today_ && r.completedAt
+  );
   const [expandedTpl, setExpandedTpl] = useState(null);
   const miseAc = "#7c9e5e";
 
@@ -19715,6 +19720,10 @@ function OperationalChecklists({ employee, miseChecklistTemplates, miseChecklist
         }, 0);
         const pct = items.length > 0 ? Math.round(doneCount/items.length*100) : 0;
         const isExpanded = expandedTpl === tpl.id || (!run && items.length > 0);
+        // Último envio do template hoje (qualquer pessoa)
+        const lastSubmission = restRunsToday
+          .filter(r => r.templateId === tpl.id)
+          .sort((a, b) => new Date(b.completedAt) - new Date(a.completedAt))[0];
         return (
           <div key={tpl.id} style={{background:"var(--card-bg)",border:`1px solid ${isCompleted?"#10b98144":"var(--border)"}`,borderRadius:12,overflow:"hidden"}}>
             <div style={{padding:"12px 16px",background:isCompleted?"#f0fdf4":"var(--bg2)",borderBottom:"1px solid var(--border)",display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:8,cursor:"pointer"}}
@@ -19726,6 +19735,13 @@ function OperationalChecklists({ employee, miseChecklistTemplates, miseChecklist
                   {!isCompleted && draftForTpl && <span style={{fontSize:10,padding:"1px 8px",borderRadius:10,background:"#f59e0b22",color:"#b45309",fontWeight:700}}>RASCUNHO</span>}
                 </div>
                 {tpl.description && <div style={{fontSize:12,color:"var(--text3)",marginTop:3}}>{tpl.description}</div>}
+                {/* Último envio de hoje — ajuda quem entrou no meio do turno a saber se já foi feito */}
+                {lastSubmission && (
+                  <div style={{fontSize:11,color:"#15803d",marginTop:3,display:"flex",alignItems:"center",gap:4}}>
+                    <span>✓</span>
+                    <span>Último envio: <b>{lastSubmission.userName || "—"}</b> às {new Date(lastSubmission.completedAt).toLocaleTimeString("pt-BR",{hour:"2-digit",minute:"2-digit"})}</span>
+                  </div>
+                )}
                 <div style={{display:"flex",alignItems:"center",gap:8,marginTop:6}}>
                   <div style={{width:120,height:5,background:"var(--bg2)",borderRadius:3,overflow:"hidden"}}>
                     <div style={{width:`${pct}%`,height:"100%",background:pct===100?"#15803d":miseAc,transition:"width 0.2s"}}/>
