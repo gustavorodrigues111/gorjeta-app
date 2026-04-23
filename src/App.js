@@ -21187,6 +21187,8 @@ function OperationalTemperaturas({ restaurantId, tempSensors, tempReadings, temp
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeSensors.length]);
 
+  const [showExport, setShowExport] = useState(false);
+
   function acknowledgeAlert(alertId) {
     const updated = (tempAlerts || []).map(a => a.id === alertId ? {
       ...a, acknowledgedAt: new Date().toISOString(), acknowledgedBy: pessoa?.name || "—",
@@ -21226,10 +21228,16 @@ function OperationalTemperaturas({ restaurantId, tempSensors, tempReadings, temp
           <div style={{fontSize:11,color:"var(--text3)",fontWeight:700,textTransform:"uppercase",letterSpacing:0.4}}>Monitoramento — tempo real</div>
           <div style={{fontSize:isMobile?14:16,color:"var(--text)",fontWeight:700,marginTop:2}}>{activeSensors.length} sensor{activeSensors.length!==1?"es":""} · {openAlerts.length} alerta{openAlerts.length!==1?"s":""} ativo{openAlerts.length!==1?"s":""}</div>
         </div>
-        <button onClick={fetchReadings} disabled={polling}
-          style={{background:polling?"var(--bg3)":ac+"22",border:`1px solid ${polling?"var(--border)":ac+"66"}`,borderRadius:8,padding:"8px 14px",fontSize:12,fontWeight:700,color:polling?"var(--text3)":ac,cursor:polling?"wait":"pointer",fontFamily:"'DM Sans',sans-serif",minHeight:isMobile?44:"auto"}}>
-          {polling ? "🔄 Atualizando…" : "🔄 Atualizar agora"}
-        </button>
+        <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+          <button onClick={fetchReadings} disabled={polling}
+            style={{background:polling?"var(--bg3)":ac+"22",border:`1px solid ${polling?"var(--border)":ac+"66"}`,borderRadius:8,padding:"8px 14px",fontSize:12,fontWeight:700,color:polling?"var(--text3)":ac,cursor:polling?"wait":"pointer",fontFamily:"'DM Sans',sans-serif",minHeight:isMobile?44:"auto"}}>
+            {polling ? "🔄 Atualizando…" : "🔄 Atualizar"}
+          </button>
+          <button onClick={()=>setShowExport(true)}
+            style={{background:"transparent",border:"1px solid var(--border)",borderRadius:8,padding:"8px 14px",fontSize:12,fontWeight:700,color:"var(--text2)",cursor:"pointer",fontFamily:"'DM Sans',sans-serif",minHeight:isMobile?44:"auto"}}>
+            📤 Exportar
+          </button>
+        </div>
       </div>
 
       {/* Alertas ativos */}
@@ -21286,6 +21294,251 @@ function OperationalTemperaturas({ restaurantId, tempSensors, tempReadings, temp
       <div style={{marginTop:18,fontSize:11,color:"var(--text3)",lineHeight:1.5,textAlign:"center"}}>
         🟢 Leituras reais do Tuya Cloud. Atualização automática a cada 5 min enquanto esta tela está aberta.
         {lastPollAt && <> Última: {fmtRelMin(lastPollAt)}.</>}
+      </div>
+
+      {showExport && (
+        <TemperaturasExportModal
+          sensors={activeSensors}
+          readings={tempReadings || []}
+          alerts={tempAlerts || []}
+          restaurantId={restaurantId}
+          onClose={()=>setShowExport(false)}
+          ac={ac}
+          isMobile={isMobile}
+        />
+      )}
+    </div>
+  );
+}
+
+// Modal de exportação — agrega leituras por hora e gera XLSX
+function TemperaturasExportModal({ sensors, readings, alerts, restaurantId, onClose, ac, isMobile }) {
+  // Default: últimos 7 dias
+  const today = new Date();
+  const weekAgo = new Date(today.getTime() - 7*24*60*60*1000);
+  const toDate = (d) => d.toISOString().slice(0, 10);
+
+  const [from, setFrom] = useState(toDate(weekAgo));
+  const [to, setTo] = useState(toDate(today));
+  const [selected, setSelected] = useState(() => {
+    const s = {};
+    sensors.forEach(sn => s[sn.id] = true);
+    return s;
+  });
+  const [agg, setAgg] = useState("hour"); // hour | raw
+  const [generating, setGenerating] = useState(false);
+
+  const selectedSensors = sensors.filter(s => selected[s.id]);
+
+  function toggleSensor(id) {
+    setSelected(s => ({ ...s, [id]: !s[id] }));
+  }
+
+  function toggleAll() {
+    const allOn = sensors.every(s => selected[s.id]);
+    const next = {};
+    sensors.forEach(s => next[s.id] = !allOn);
+    setSelected(next);
+  }
+
+  function doExport() {
+    if (selectedSensors.length === 0) { alert("Selecione pelo menos 1 sensor"); return; }
+    if (!window.XLSX) { alert("Biblioteca XLSX ainda carregando, tenta de novo em 2s"); return; }
+    setGenerating(true);
+    try {
+      const fromMs = new Date(from + "T00:00:00").getTime();
+      const toMs   = new Date(to   + "T23:59:59").getTime();
+
+      // Filtra leituras no período + dos sensores selecionados
+      const relevant = readings.filter(r => {
+        if (!selected[r.sensorId]) return false;
+        const t = new Date(r.timestamp).getTime();
+        return t >= fromMs && t <= toMs;
+      });
+
+      const rows = [];
+      if (agg === "hour") {
+        // Agrupa por (sensorId, YYYY-MM-DD HH:00)
+        const buckets = {};
+        relevant.forEach(r => {
+          const dt = new Date(r.timestamp);
+          const hourKey = `${dt.getFullYear()}-${String(dt.getMonth()+1).padStart(2,"0")}-${String(dt.getDate()).padStart(2,"0")} ${String(dt.getHours()).padStart(2,"0")}:00`;
+          const k = `${r.sensorId}|${hourKey}`;
+          if (!buckets[k]) buckets[k] = { sensorId:r.sensorId, hourKey, temps:[], hums:[], bats:[], onlineCount:0, total:0 };
+          if (r.temp != null) buckets[k].temps.push(r.temp);
+          if (r.humidity != null) buckets[k].hums.push(r.humidity);
+          if (r.battery != null) buckets[k].bats.push(r.battery);
+          if (r.online) buckets[k].onlineCount++;
+          buckets[k].total++;
+        });
+        const sorted = Object.values(buckets).sort((a,b) => {
+          if (a.hourKey !== b.hourKey) return a.hourKey.localeCompare(b.hourKey);
+          return a.sensorId.localeCompare(b.sensorId);
+        });
+        sorted.forEach(b => {
+          const sensor = sensors.find(s => s.id === b.sensorId);
+          if (!sensor) return;
+          const avg = b.temps.length > 0 ? b.temps.reduce((a,v) => a+v, 0) / b.temps.length : null;
+          const min = b.temps.length > 0 ? Math.min(...b.temps) : null;
+          const max = b.temps.length > 0 ? Math.max(...b.temps) : null;
+          const outOfRange = b.temps.some(t => t < sensor.minTemp || t > sensor.maxTemp);
+          const [dateStr, timeStr] = b.hourKey.split(" ");
+          rows.push({
+            "Data": dateStr.split("-").reverse().join("/"),
+            "Hora": timeStr,
+            "Sensor": sensor.name,
+            "Localização": sensor.location || "",
+            "Faixa config (°C)": `${sensor.minTemp} / ${sensor.maxTemp}`,
+            "Temp média (°C)": avg != null ? +avg.toFixed(1) : "",
+            "Temp min (°C)": min != null ? +min.toFixed(1) : "",
+            "Temp max (°C)": max != null ? +max.toFixed(1) : "",
+            "Umidade média (%)": b.hums.length > 0 ? +(b.hums.reduce((a,v)=>a+v,0)/b.hums.length).toFixed(0) : "",
+            "Bateria (%)": b.bats.length > 0 ? b.bats[b.bats.length-1] : "",
+            "Status": outOfRange ? "⚠️ FORA DA FAIXA" : "✓ OK",
+            "Nº leituras na hora": b.total,
+          });
+        });
+      } else {
+        // raw: todas as leituras
+        const sorted = [...relevant].sort((a,b) => new Date(a.timestamp) - new Date(b.timestamp));
+        sorted.forEach(r => {
+          const sensor = sensors.find(s => s.id === r.sensorId);
+          if (!sensor) return;
+          const dt = new Date(r.timestamp);
+          const outOfRange = r.temp != null && (r.temp < sensor.minTemp || r.temp > sensor.maxTemp);
+          rows.push({
+            "Data": dt.toLocaleDateString("pt-BR"),
+            "Hora": dt.toTimeString().slice(0,8),
+            "Sensor": sensor.name,
+            "Localização": sensor.location || "",
+            "Faixa config (°C)": `${sensor.minTemp} / ${sensor.maxTemp}`,
+            "Temp (°C)": r.temp != null ? +r.temp.toFixed(1) : "",
+            "Umidade (%)": r.humidity ?? "",
+            "Bateria (%)": r.battery ?? "",
+            "Online": r.online ? "Sim" : "Não",
+            "Status": outOfRange ? "⚠️ FORA DA FAIXA" : "✓ OK",
+          });
+        });
+      }
+
+      if (rows.length === 0) {
+        alert("Nenhuma leitura encontrada no período selecionado.");
+        setGenerating(false);
+        return;
+      }
+
+      // Gera XLSX
+      const XLSX = window.XLSX;
+      const wb = XLSX.utils.book_new();
+      const ws = XLSX.utils.json_to_sheet(rows);
+
+      // Auto-largura grosseira
+      const colWidths = Object.keys(rows[0]).map(k => ({ wch: Math.max(k.length, 12) }));
+      ws['!cols'] = colWidths;
+
+      XLSX.utils.book_append_sheet(wb, ws, "Leituras");
+
+      // Aba de resumo: config dos sensores + contagem de alertas
+      const summary = selectedSensors.map(s => {
+        const sReads = relevant.filter(r => r.sensorId === s.id);
+        const sAlerts = alerts.filter(a =>
+          a.sensorId === s.id &&
+          new Date(a.openedAt).getTime() >= fromMs &&
+          new Date(a.openedAt).getTime() <= toMs
+        );
+        return {
+          "Sensor": s.name,
+          "Localização": s.location || "",
+          "Faixa (°C)": `${s.minTemp} a ${s.maxTemp}`,
+          "Leituras no período": sReads.length,
+          "Alertas abertos": sAlerts.length,
+          "Tempo alerta (h)": sAlerts.reduce((acc, a) => {
+            const end = a.closedAt ? new Date(a.closedAt).getTime() : Date.now();
+            return acc + (end - new Date(a.openedAt).getTime()) / (1000*60*60);
+          }, 0).toFixed(1),
+        };
+      });
+      const wsSum = XLSX.utils.json_to_sheet(summary);
+      wsSum['!cols'] = Object.keys(summary[0] || {}).map(k => ({ wch: Math.max(k.length, 14) }));
+      XLSX.utils.book_append_sheet(wb, wsSum, "Resumo por sensor");
+
+      // Download
+      const fname = `temperaturas_${from}_a_${to}_${agg}.xlsx`;
+      XLSX.writeFile(wb, fname);
+      setGenerating(false);
+      onClose();
+    } catch (e) {
+      console.error(e);
+      alert("Erro ao gerar Excel: " + e.message);
+      setGenerating(false);
+    }
+  }
+
+  return (
+    <div onClick={onClose}
+      style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.5)",zIndex:200,display:"flex",alignItems:"center",justifyContent:"center",padding:isMobile?12:20}}>
+      <div onClick={e=>e.stopPropagation()}
+        style={{background:"var(--bg1)",borderRadius:12,padding:isMobile?"16px":"22px 26px",maxWidth:560,width:"100%",maxHeight:"90vh",overflowY:"auto",boxShadow:"0 10px 40px rgba(0,0,0,0.3)"}}>
+        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:14}}>
+          <h3 style={{color:"var(--text)",margin:0,fontSize:isMobile?16:18,fontWeight:700}}>📤 Exportar temperaturas</h3>
+          <button onClick={onClose} style={{background:"none",border:"none",fontSize:18,color:"var(--text3)",cursor:"pointer",padding:"4px 8px"}}>×</button>
+        </div>
+
+        {/* Data range */}
+        <div style={{display:"grid",gridTemplateColumns:isMobile?"1fr":"1fr 1fr",gap:8,marginBottom:14}}>
+          <div>
+            <label style={{fontSize:11,color:"var(--text3)",fontWeight:600}}>De</label>
+            <input type="date" value={from} onChange={e=>setFrom(e.target.value)} style={S.input}/>
+          </div>
+          <div>
+            <label style={{fontSize:11,color:"var(--text3)",fontWeight:600}}>Até</label>
+            <input type="date" value={to} onChange={e=>setTo(e.target.value)} style={S.input}/>
+          </div>
+        </div>
+
+        {/* Agregação */}
+        <div style={{marginBottom:14}}>
+          <label style={{fontSize:11,color:"var(--text3)",fontWeight:600,display:"block",marginBottom:6}}>Agregação</label>
+          <div style={{display:"flex",gap:6}}>
+            {[["hour","1 por hora (média)"],["raw","Todas as leituras"]].map(([v,l]) => (
+              <button key={v} onClick={()=>setAgg(v)}
+                style={{flex:1,padding:"10px",borderRadius:8,border:`1px solid ${agg===v?ac:"var(--border)"}`,background:agg===v?ac+"15":"transparent",color:agg===v?ac:"var(--text2)",fontSize:12,fontWeight:agg===v?700:500,cursor:"pointer",fontFamily:"'DM Sans',sans-serif",minHeight:isMobile?44:"auto"}}>
+                {l}
+              </button>
+            ))}
+          </div>
+          <div style={{fontSize:10,color:"var(--text3)",marginTop:6,lineHeight:1.4}}>
+            "1 por hora" gera 1 linha por sensor por hora, com média/min/max daquela hora.
+            Ideal pra auditoria ANVISA. "Todas" inclui todas as leituras capturadas (a cada ~5min).
+          </div>
+        </div>
+
+        {/* Sensores */}
+        <div style={{marginBottom:14}}>
+          <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:6}}>
+            <label style={{fontSize:11,color:"var(--text3)",fontWeight:600}}>Sensores</label>
+            <button onClick={toggleAll} style={{background:"none",border:"none",fontSize:11,color:ac,cursor:"pointer",fontWeight:600}}>
+              {sensors.every(s=>selected[s.id]) ? "Desmarcar todos" : "Marcar todos"}
+            </button>
+          </div>
+          <div style={{border:"1px solid var(--border)",borderRadius:8,maxHeight:200,overflowY:"auto"}}>
+            {sensors.map(s => (
+              <label key={s.id} style={{display:"flex",alignItems:"center",gap:8,padding:"8px 12px",borderBottom:"1px solid var(--border)",cursor:"pointer",fontSize:13,color:"var(--text)"}}>
+                <input type="checkbox" checked={!!selected[s.id]} onChange={()=>toggleSensor(s.id)}/>
+                <span style={{flex:1}}>{s.name}</span>
+                <span style={{fontSize:10,color:"var(--text3)"}}>{s.minTemp}°–{s.maxTemp}°</span>
+              </label>
+            ))}
+          </div>
+        </div>
+
+        <div style={{display:"flex",gap:8,justifyContent:"flex-end"}}>
+          <button onClick={onClose} style={{...S.btnSecondary,fontSize:12,padding:"10px 16px"}}>Cancelar</button>
+          <button onClick={doExport} disabled={generating || selectedSensors.length === 0}
+            style={{background:generating?"var(--bg3)":ac,color:generating?"var(--text3)":"#fff",border:"none",borderRadius:8,padding:"10px 18px",fontSize:13,fontWeight:700,cursor:generating?"wait":"pointer",fontFamily:"'DM Sans',sans-serif",minHeight:44}}>
+            {generating ? "Gerando…" : "📥 Baixar Excel"}
+          </button>
+        </div>
       </div>
     </div>
   );
