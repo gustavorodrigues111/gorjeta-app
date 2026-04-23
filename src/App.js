@@ -17466,17 +17466,9 @@ function OperationalContagens({ employee, miseCategories, miseStocks, miseAssign
     );
   }
 
-  if (!openCycle) {
-    return (
-      <div style={{padding:"60px 24px",textAlign:"center",color:"var(--text3)"}}>
-        <div style={{fontSize:48,marginBottom:16}}>🔒</div>
-        <h3 style={{color:"var(--text)",fontSize:18,fontWeight:700,margin:"0 0 8px"}}>Nenhum ciclo aberto</h3>
-        <p style={{fontSize:14,lineHeight:1.6,maxWidth:420,margin:"0 auto"}}>
-          Ainda não há um ciclo de contagem aberto. O gestor precisa abrir um ciclo antes que você possa lançar contagens.
-        </p>
-      </div>
-    );
-  }
+  // Contagem não precisa mais de ciclo aberto.
+  // Se não tem ciclo → contagem fica SOLTA (cycleId: null), disponível pra Compras puxar depois.
+  // Cada save = uma nova linha (não sobrescreve) — preserva histórico/auditoria.
 
   const saveGroup = (categoryId, stockId) => {
     // stockId pode ser null (pedido-direto) ou uma string válida (contagem por estoque)
@@ -17492,13 +17484,22 @@ function OperationalContagens({ employee, miseCategories, miseStocks, miseAssign
       if (draft === undefined || draft === "") return;
       const qty = parseFloat(String(draft).replace(",","."));
       if (isNaN(qty)) return;
-      const existingIdx = newCounts.findIndex(c => c.cycleId === openCycle.id && c.itemId === it.id && c.stockId === stockId && c.userId === employee.id);
-      if (existingIdx >= 0) {
-        newCounts[existingIdx] = { ...newCounts[existingIdx], qty, countedAt: now };
+      if (openCycle) {
+        // Dentro de ciclo aberto: comportamento legado (substitui contagem do mesmo user/item/stock)
+        const existingIdx = newCounts.findIndex(c => c.cycleId === openCycle.id && c.itemId === it.id && c.stockId === stockId && c.userId === employee.id);
+        if (existingIdx >= 0) {
+          newCounts[existingIdx] = { ...newCounts[existingIdx], qty, countedAt: now };
+        } else {
+          newCounts.push({
+            id: Date.now().toString() + "_" + Math.random().toString(36).slice(2,8) + "_" + idx,
+            restaurantId, cycleId: openCycle.id, itemId: it.id, stockId: stockId ?? null, userId: employee.id, qty, countedAt: now
+          });
+        }
       } else {
+        // Solta (cycleId=null): sempre adiciona nova linha — cada contagem preservada
         newCounts.push({
           id: Date.now().toString() + "_" + Math.random().toString(36).slice(2,8) + "_" + idx,
-          restaurantId, cycleId: openCycle.id, itemId: it.id, stockId: stockId ?? null, userId: employee.id, qty, countedAt: now
+          restaurantId, cycleId: null, itemId: it.id, stockId: stockId ?? null, userId: employee.id, qty, countedAt: now
         });
       }
       changed++;
@@ -17985,31 +17986,16 @@ function AppShell({ pessoa, data, activeRestaurantId, setActiveRestaurantId, use
 
   // Badges de notificação por seção (agora usa IDs novos mod_mise_*)
   const badges = {};
-  const today_ = today();
   // Compras: pedidos ativos (aprovado/enviado/aguardando-correção)
   const activeOrders = (data?.miseSupplierOrders || []).filter(o =>
     o.restaurantId === activeRestaurantId &&
     !MISE_ORDER_STATUS[o.status]?.terminal
   );
   if (activeOrders.length > 0) badges.mod_mise_compras = activeOrders.length;
-  // Checklists: templates pendentes hoje — prefixo ⏳ deixa explícito que é "a fazer",
-  // não "preenchimentos novos chegaram".
-  const activeTemplates = (data?.miseChecklistTemplates || []).filter(t =>
-    t.restaurantId === activeRestaurantId && t.active !== false
-  );
-  if (activeTemplates.length > 0 && pessoa?.id) {
-    const myRunsToday = (data?.miseChecklistRuns || []).filter(r =>
-      r.restaurantId === activeRestaurantId && r.date === today_ && r.userId === (pessoa.linkedEmployeeId || pessoa.id)
-    );
-    const pending = activeTemplates.filter(t => {
-      const run = myRunsToday.find(r => r.templateId === t.id);
-      return !run || !run.completedAt;
-    });
-    if (pending.length > 0) badges.mod_mise_checklists = `⏳${pending.length}`;
-  }
-  // Contagens: indicador de ciclo aberto
+  // Badge de Checklists removido (era "pendentes" mas confundia com "novos preenchimentos").
+  // Badge de Contagens removido (era ciclo aberto "•", desnecessário agora que Compras é dona do ciclo).
+  // Mantemos cálculo de openCycle pra outras badges que dependem dele.
   const openCycleForBadge = (data?.miseCycles || []).find(c => c.restaurantId === activeRestaurantId && c.status === "open");
-  if (openCycleForBadge) badges.mod_mise_contagens = "•";
   // Temperaturas: alertas ativos (abertos e não reconhecidos)
   const openTempAlerts = (data?.tempAlerts || []).filter(a =>
     a.restaurantId === activeRestaurantId && !a.closedAt && !a.acknowledgedAt
@@ -22920,6 +22906,96 @@ function OperationalFichasTecnicas({ employee, miseFtInsumos, miseFtDishes }) {
 // ═══════════════════════════════════════════════════════════════
 // ──  MISE COMPRAS — USER (Gestor Operacional)                   ──
 // ═══════════════════════════════════════════════════════════════
+// Card exibido quando há contagens soltas e nenhum ciclo aberto — mostra o que foi contado
+// e oferece criar um ciclo de compras puxando tudo
+function LooseCountsCard({ looseCounts, items, miseStocks, employees, onCreateCycle, miseAc }) {
+  // Agrupa por item pra facilitar leitura
+  const byItem = {};
+  looseCounts.forEach(c => {
+    if (!byItem[c.itemId]) byItem[c.itemId] = [];
+    byItem[c.itemId].push(c);
+  });
+  const today_ = today();
+  const oldestOver30 = looseCounts.filter(c => {
+    const days = (new Date(today_) - new Date(c.countedAt.split("T")[0])) / (1000*60*60*24);
+    return days > 30;
+  }).length;
+
+  return (
+    <div>
+      <div style={{padding:"16px 20px",background:"var(--card-bg)",border:`1px solid ${miseAc}66`,borderRadius:12,marginBottom:16}}>
+        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:10,flexWrap:"wrap",gap:10}}>
+          <div>
+            <div style={{fontSize:11,color:miseAc,fontWeight:700,textTransform:"uppercase",letterSpacing:0.4}}>Contagens disponíveis</div>
+            <div style={{fontSize:14,color:"var(--text)",fontWeight:700,marginTop:2}}>
+              {looseCounts.length} lançamento(s) · {Object.keys(byItem).length} produto(s)
+            </div>
+            {oldestOver30 > 0 && (
+              <div style={{fontSize:11,color:"#b45309",marginTop:4}}>
+                ⚠️ {oldestOver30} contagem(ns) com mais de 30 dias — considere refazer antes de criar o ciclo
+              </div>
+            )}
+          </div>
+          <button onClick={onCreateCycle}
+            style={{background:miseAc,color:"#fff",border:"none",borderRadius:8,padding:"10px 18px",fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:"'DM Sans',sans-serif",minHeight:44}}>
+            🛒 Criar ciclo de compras
+          </button>
+        </div>
+        <div style={{fontSize:11,color:"var(--text3)",lineHeight:1.5}}>
+          Ao criar o ciclo, todas estas contagens entram e o fluxo de sugestão/aprovação/envio de pedidos é ativado.
+        </div>
+      </div>
+
+      {/* Lista das contagens agrupadas por item */}
+      <div style={{background:"var(--card-bg)",border:"1px solid var(--border)",borderRadius:12,overflow:"hidden"}}>
+        <div style={{overflowX:"auto"}}>
+          <table style={{width:"100%",borderCollapse:"collapse",fontSize:13}}>
+            <thead>
+              <tr style={{borderBottom:"1px solid var(--border)",background:"var(--bg2)"}}>
+                <th style={{padding:"10px 14px",textAlign:"left",fontSize:10,color:"var(--text3)",fontWeight:700,textTransform:"uppercase",letterSpacing:0.4}}>Produto</th>
+                <th style={{padding:"10px 12px",textAlign:"right",fontSize:10,color:"var(--text3)",fontWeight:700,textTransform:"uppercase",letterSpacing:0.4}}>Qtd</th>
+                <th style={{padding:"10px 12px",textAlign:"left",fontSize:10,color:"var(--text3)",fontWeight:700,textTransform:"uppercase",letterSpacing:0.4}}>Estoque</th>
+                <th style={{padding:"10px 12px",textAlign:"left",fontSize:10,color:"var(--text3)",fontWeight:700,textTransform:"uppercase",letterSpacing:0.4}}>Contado por</th>
+                <th style={{padding:"10px 12px",textAlign:"right",fontSize:10,color:"var(--text3)",fontWeight:700,textTransform:"uppercase",letterSpacing:0.4}}>Quando</th>
+              </tr>
+            </thead>
+            <tbody>
+              {Object.entries(byItem).map(([itemId, countsArr]) => {
+                const item = items.find(i => i.id === itemId);
+                return countsArr
+                  .sort((a,b) => new Date(b.countedAt) - new Date(a.countedAt))
+                  .map((c, idx) => {
+                    const stock = (miseStocks || []).find(s => s.id === c.stockId);
+                    const who = (employees || []).find(e => e.id === c.userId);
+                    const ageDays = Math.floor((Date.now() - new Date(c.countedAt).getTime()) / (1000*60*60*24));
+                    const ageLabel = ageDays === 0 ? "hoje" : ageDays === 1 ? "ontem" : `há ${ageDays} dias`;
+                    const old = ageDays > 30;
+                    return (
+                      <tr key={c.id} style={{borderTop:"1px solid var(--border)",background: old ? "#fff7ed" : "transparent"}}>
+                        <td style={{padding:"8px 14px",color:"var(--text)",fontWeight: idx===0 ? 600 : 400}}>
+                          {idx===0 ? (item?.name || "(removido)") : ""}
+                        </td>
+                        <td style={{padding:"8px 12px",textAlign:"right",color:"var(--text)",fontFamily:"'DM Mono',monospace",fontWeight:600}}>
+                          {c.qty} {item?.unit || ""}
+                        </td>
+                        <td style={{padding:"8px 12px",color:"var(--text2)",fontSize:12}}>{stock?.name || "—"}</td>
+                        <td style={{padding:"8px 12px",color:"var(--text2)",fontSize:12}}>{who?.name || "—"}</td>
+                        <td style={{padding:"8px 12px",textAlign:"right",color: old ? "#b45309" : "var(--text3)",fontSize:11}}>
+                          {ageLabel}
+                          {old && " ⚠️"}
+                        </td>
+                      </tr>
+                    );
+                  });
+              })}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function OperationalCompras({ employee, data, onUpdate }) {
   const restaurantId = employee.restaurantId;
   const [view, setView] = useState("sugestoes");
@@ -22942,14 +23018,55 @@ function OperationalCompras({ employee, data, onUpdate }) {
   const orders = (data.miseSupplierOrders || []).filter(o => o.restaurantId === restaurantId);
   const restaurantName = (data.restaurants || []).find(r => r.id === restaurantId)?.name || "Restaurante";
 
+  // Contagens soltas (sem ciclo) — disponíveis pra serem puxadas pra um ciclo novo
+  const looseCounts = counts.filter(c => c.restaurantId === restaurantId && !c.cycleId && !c.archivedAt);
+  const hasLooseCounts = looseCounts.length > 0;
+
+  // Cria um ciclo novo e puxa todas as contagens soltas pra dentro dele
+  function createCycleFromLoose() {
+    const mesNome = new Date().toLocaleString("pt-BR", { day:"2-digit", month:"long" });
+    const defaultName = `Ciclo ${mesNome}`;
+    const name = window.prompt("Nome do novo ciclo de compras:", defaultName);
+    if (!name || !name.trim()) return;
+    const newCycle = {
+      id: `cyc_${Date.now().toString(36)}${Math.random().toString(36).slice(2,5)}`,
+      restaurantId,
+      name: name.trim(),
+      startDate: today(),
+      status: "open",
+    };
+    onUpdate("miseCycles", [...(data.miseCycles || []), newCycle]);
+    // Puxa todas as contagens soltas pra esse ciclo
+    const looseIds = new Set(looseCounts.map(c => c.id));
+    const updatedCounts = (data.miseCounts || []).map(c =>
+      looseIds.has(c.id) ? { ...c, cycleId: newCycle.id } : c
+    );
+    onUpdate("miseCounts", updatedCounts);
+    onUpdate("_toast", `✓ Ciclo "${name.trim()}" criado com ${looseCounts.length} contagem(ns)`);
+  }
+
+  // Ciclo não aberto: só mostra o card de contagens soltas (se houver) + um call-to-action
   if (!openCycle) {
     return (
-      <div style={{padding:"60px 24px",textAlign:"center",color:"var(--text3)"}}>
-        <div style={{fontSize:48,marginBottom:16}}>🔒</div>
-        <h3 style={{color:"var(--text)",fontSize:18,fontWeight:700,margin:"0 0 8px"}}>Nenhum ciclo aberto</h3>
-        <p style={{fontSize:14,lineHeight:1.6,maxWidth:420,margin:"0 auto"}}>
-          Ainda não há um ciclo de abastecimento aberto. Peça a um contador ou ao gestor para abrir o ciclo do dia na área <b>Contagens</b>.
-        </p>
+      <div>
+        {hasLooseCounts ? (
+          <LooseCountsCard
+            looseCounts={looseCounts}
+            items={items}
+            miseStocks={data.miseStocks || []}
+            employees={data.employees || []}
+            onCreateCycle={createCycleFromLoose}
+            miseAc={miseAc}
+          />
+        ) : (
+          <div style={{padding:"60px 24px",textAlign:"center",color:"var(--text3)"}}>
+            <div style={{fontSize:48,marginBottom:16}}>🛒</div>
+            <h3 style={{color:"var(--text)",fontSize:18,fontWeight:700,margin:"0 0 8px"}}>Nenhuma contagem pra comprar</h3>
+            <p style={{fontSize:14,lineHeight:1.6,maxWidth:460,margin:"0 auto"}}>
+              Quando alguém fizer contagens na área <b>Contagens</b>, elas aparecem aqui pra você puxar pra um ciclo de compras.
+            </p>
+          </div>
+        )}
       </div>
     );
   }
@@ -23114,6 +23231,18 @@ function OperationalCompras({ employee, data, onUpdate }) {
     { id: "historico",    label: `Histórico${terminalOrders.length?` (${terminalOrders.length})`:""}` },
   ];
 
+  // Com ciclo aberto + contagens soltas: oferece puxar contagens pro ciclo atual
+  function pullLooseToOpenCycle() {
+    if (!openCycle || !hasLooseCounts) return;
+    if (!window.confirm(`Puxar ${looseCounts.length} contagem(ns) solta(s) pra dentro do ciclo "${openCycle.name}"?`)) return;
+    const looseIds = new Set(looseCounts.map(c => c.id));
+    const updatedCounts = (data.miseCounts || []).map(c =>
+      looseIds.has(c.id) ? { ...c, cycleId: openCycle.id } : c
+    );
+    onUpdate("miseCounts", updatedCounts);
+    onUpdate("_toast", `✓ ${looseCounts.length} contagem(ns) adicionada(s) ao ciclo`);
+  }
+
   return (
     <div>
       {/* Banner do ciclo */}
@@ -23126,6 +23255,19 @@ function OperationalCompras({ employee, data, onUpdate }) {
           Aberto em {fmtDate(openCycle.startDate)} · {activeOrders.length} ativo(s) · {terminalOrders.length} fechado(s)
         </div>
       </div>
+
+      {/* Se tem contagens soltas, oferece puxá-las pro ciclo atual */}
+      {hasLooseCounts && (
+        <div style={{padding:"10px 14px",background:"#fef3c7",border:"1px solid #f59e0b66",borderRadius:10,marginBottom:14,display:"flex",alignItems:"center",justifyContent:"space-between",flexWrap:"wrap",gap:8}}>
+          <div style={{fontSize:12,color:"#92400e"}}>
+            <b>{looseCounts.length}</b> contagem(ns) solta(s) não vinculada(s) a este ciclo.
+          </div>
+          <button onClick={pullLooseToOpenCycle}
+            style={{background:"#f59e0b",color:"#fff",border:"none",borderRadius:6,padding:"6px 14px",fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"'DM Sans',sans-serif"}}>
+            Puxar pro ciclo
+          </button>
+        </div>
+      )}
 
       {/* Sub-views */}
       <div style={{display:"flex",gap:4,marginBottom:16,borderBottom:"1px solid var(--border)",overflowX:"auto"}}>
