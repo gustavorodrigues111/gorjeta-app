@@ -17695,7 +17695,7 @@ function buildShellSections({ pessoa, restaurantId, isOwner }) {
       admin: { tips:true, schedule:true, employees:true, roles:true, vt:true, comunicados:true, faq:true, config:true, pessoas:true },
       special: { isDP:true },
     };
-    isTeam = false; // Owner não é equipe do restaurante — "Minha Área" não aplica
+    isTeam = false; // Owner não é equipe do restaurante — "Meu Dia" não aplica
   } else {
     perms = pessoa?.permissions?.[restaurantId] || { operational: {}, admin: {}, special: {} };
     isTeam = !!pessoa?.isTeam?.[restaurantId];
@@ -17704,78 +17704,137 @@ function buildShellSections({ pessoa, restaurantId, isOwner }) {
   const ad = perms.admin || {};
   const sp = perms.special || {};
 
+  // helper: emite subtab se condição for truthy
+  const st = (...arr) => arr.filter(Boolean);
+
   const sections = [];
 
-  // Minha Área — só pra membros da equipe
+  // 1) MEU DIA — área pessoal do membro da equipe
   if (isTeam) {
     sections.push({
-      group: "Minha Área",
+      group: "Meu Dia",
       color: "#d4a017",
       items: [
-        { id: "me_home",       label: "Início",         icon: "🏠", kind: "employee", tab: "comunicados" },
-        { id: "me_gorjeta",    label: "Meu extrato",    icon: "💰", kind: "employee", tab: "gorjeta" },
-        { id: "me_escala",     label: "Minha escala",   icon: "📅", kind: "employee", tab: "schedule" },
-        { id: "me_trilha",     label: "Minhas trilhas", icon: "🎯", kind: "employee", tab: "trilha" },
-        { id: "me_comunicados",label: "Comunicados",    icon: "📬", kind: "employee", tab: "comunicados" },
-        { id: "me_dp",         label: "Fale com DP",    icon: "💬", kind: "employee", tab: "dp" },
+        { id: "me_home",        label: "Início",         icon: "🏠", kind: "employee", tab: "comunicados" },
+        { id: "me_gorjeta",     label: "Meu extrato",    icon: "💰", kind: "employee", tab: "gorjeta" },
+        { id: "me_escala",      label: "Minha escala",   icon: "📅", kind: "employee", tab: "schedule" },
+        { id: "me_trilha",      label: "Minhas trilhas", icon: "🎯", kind: "employee", tab: "trilha" },
+        { id: "me_comunicados", label: "Comunicados",    icon: "📬", kind: "employee", tab: "comunicados" },
+        { id: "me_dp",          label: "Fale com DP",    icon: "💬", kind: "employee", tab: "dp" },
       ],
     });
   }
 
-  // AppTip Operacional
-  // Escalas/Trilhas/Reuniões apontam para as tabs do RestaurantPanel (não existe versão "operacional" dedicada).
-  // Gorjetas fica com o dashboard read-only dedicado (OperationalGorjetas).
-  const hasOp = ["escalas","gorjetas","trilhas","reunioes"].some(k => op[k]);
-  if (hasOp) {
-    sections.push({
-      group: "AppTip",
-      color: "#d4a017",
-      items: [
-        op.escalas  && { id: "op_escalas",  label: "Escalas",    icon: "📅", kind: "manager",     tab: "schedule" },
-        op.gorjetas && { id: "op_gorjetas", label: "Gorjetas",   icon: "💰", kind: "operational", tab: "gorjetas" },
-        op.trilhas  && { id: "op_trilhas",  label: "Trilhas",    icon: "🎯", kind: "manager",     tab: "employees" },
-        op.reunioes && { id: "op_reunioes", label: "Reuniões",   icon: "🗣️", kind: "manager",     tab: "reunioes" },
-      ].filter(Boolean),
+  // 2) OPERAÇÃO — Gorjetas/Escalas/Trilhas/Reuniões com subtabs op+admin fundidos
+  const opItems = [];
+  if (op.gorjetas || ad.tips) {
+    opItems.push({
+      id: "mod_gorjetas", label: "Gorjetas", icon: "💰",
+      subtabs: st(
+        op.gorjetas && { id: "dashboard", label: "Dashboard",   kind: "operational", tab: "gorjetas" },
+        ad.tips     && { id: "lancar",    label: "Lançamentos", kind: "manager",     tab: "tips" },
+      ),
     });
   }
-
-  // AppMise (Contagens, Compras, Checklists, Fichas Técnicas)
-  const hasMise = ["contagens","compras","checklists","fichasTecnicas"].some(k => op[k]);
-  if (hasMise) {
-    sections.push({
-      group: "AppMise",
-      color: "#7c9e5e",
-      items: [
-        op.contagens       && { id: "mise_contagens_u", label: "Contagens",       icon: "📦", kind: "operational", tab: "contagens" },
-        op.compras         && { id: "mise_compras_u",   label: "Compras",         icon: "🛒", kind: "operational", tab: "compras" },
-        op.checklists      && { id: "mise_checklists_u",label: "Checklists",      icon: "✅", kind: "operational", tab: "checklists" },
-        op.fichasTecnicas  && { id: "mise_fichas_u",    label: "Fichas Técnicas", icon: "📋", kind: "operational", tab: "fichasTecnicas" },
-      ].filter(Boolean),
+  if (op.escalas || ad.schedule) {
+    // Mesma tela (RestaurantPanel→schedule), mas separa por papel pra o rótulo ficar claro.
+    // Quando a pessoa tem as duas perms, ela vê as duas (útil em gestor op que também fecha).
+    opItems.push({
+      id: "mod_escalas", label: "Escalas", icon: "📅",
+      subtabs: st(
+        op.escalas  && { id: "ver",    label: "Ver",    kind: "manager", tab: "schedule" },
+        ad.schedule && { id: "fechar", label: "Fechar", kind: "manager", tab: "schedule" },
+      ),
     });
   }
+  if (op.trilhas) {
+    opItems.push({ id: "mod_trilhas", label: "Trilhas", icon: "🎯", kind: "manager", tab: "employees" });
+  }
+  if (op.reunioes) {
+    opItems.push({ id: "mod_reunioes", label: "Reuniões", icon: "🗣️", kind: "manager", tab: "reunioes" });
+  }
+  if (opItems.length > 0) {
+    sections.push({ group: "Operação", color: "#d4a017", items: opItems });
+  }
 
-  // AppTip Admin
-  const hasAdmin = Object.values(ad).some(v => v === true) || isOwner;
-  if (hasAdmin) {
+  // 3) APPMISE — Contagens/Compras/Checklists/Fichas com subtab Operar + Config
+  const miseItems = [];
+  if (op.contagens || ad.employees) {
+    miseItems.push({
+      id: "mod_mise_contagens", label: "Contagens", icon: "📦",
+      subtabs: st(
+        op.contagens  && { id: "contar", label: "Contar",    kind: "operational", tab: "contagens" },
+        ad.employees  && { id: "config", label: "Configurar", kind: "manager",    tab: "mise_contagens" },
+      ),
+    });
+  }
+  if (op.compras) {
+    // Compras é única — fornecedores são subtabs internas de OperationalCompras, não há tab admin separada.
+    miseItems.push({ id: "mod_mise_compras", label: "Compras", icon: "🛒", kind: "operational", tab: "compras" });
+  }
+  if (op.checklists || ad.employees) {
+    miseItems.push({
+      id: "mod_mise_checklists", label: "Checklists", icon: "✅",
+      subtabs: st(
+        op.checklists && { id: "executar",  label: "Executar",  kind: "operational", tab: "checklists" },
+        ad.employees  && { id: "templates", label: "Templates", kind: "manager",     tab: "mise_checklists" },
+      ),
+    });
+  }
+  if (op.fichasTecnicas || ad.employees) {
+    miseItems.push({
+      id: "mod_mise_fichas", label: "Fichas Técnicas", icon: "📋",
+      subtabs: st(
+        op.fichasTecnicas && { id: "consultar", label: "Consultar", kind: "operational", tab: "fichasTecnicas" },
+        ad.employees      && { id: "editar",    label: "Editar",    kind: "manager",     tab: "mise_fichas" },
+      ),
+    });
+  }
+  if (miseItems.length > 0) {
+    sections.push({ group: "AppMise", color: "#7c9e5e", items: miseItems });
+  }
+
+  // 4) PESSOAS — cadastro+permissões agrupados; Equipe junta membros/cargos/VT
+  const peopleItems = [];
+  if (ad.pessoas || isOwner) {
+    peopleItems.push({
+      id: "mod_pessoas", label: "Pessoas", icon: "👤",
+      subtabs: [
+        { id: "cadastro",   label: "Cadastro",   kind: "manager", tab: "pessoas" },
+        { id: "permissoes", label: "Permissões", kind: "manager", tab: "permissoes" },
+      ],
+    });
+  }
+  const equipeSubs = st(
+    (ad.employees || isOwner) && { id: "membros", label: "Membros",       kind: "manager", tab: "employees" },
+    (ad.roles     || isOwner) && { id: "cargos",  label: "Cargos",        kind: "manager", tab: "roles" },
+    (ad.vt        || isOwner) && { id: "vt",      label: "Vale Transp.",  kind: "manager", tab: "vt" },
+  );
+  if (equipeSubs.length > 0) {
+    peopleItems.push({ id: "mod_equipe", label: "Equipe", icon: "👥", subtabs: equipeSubs });
+  }
+  if (peopleItems.length > 0) {
+    sections.push({ group: "Pessoas", color: "#0284c7", items: peopleItems });
+  }
+
+  // 5) COMUNICAÇÃO — Comunicados/FAQ/DP
+  const commItems = st(
+    (ad.comunicados || isOwner) && { id: "mod_comunicados", label: "Comunicados",  icon: "📢", kind: "manager", tab: "comunicados" },
+    (ad.faq         || isOwner) && { id: "mod_faq",         label: "FAQ",          icon: "❓", kind: "manager", tab: "faq" },
+    (sp.isDP        || isOwner) && { id: "mod_dp",          label: "Fale com DP",  icon: "💬", kind: "manager", tab: "dp" },
+  );
+  if (commItems.length > 0) {
+    sections.push({ group: "Comunicação", color: "#8b5cf6", items: commItems });
+  }
+
+  // 6) AJUSTES — config geral do restaurante (nome, logo, regras globais)
+  if (ad.config || isOwner) {
     sections.push({
-      group: "Administração",
-      color: "#0284c7",
+      group: "Ajustes",
+      color: "#64748b",
       items: [
-        (ad.pessoas || isOwner)        && { id: "adm_pessoas",      label: "Pessoas",       icon: "👤", kind: "manager", tab: "pessoas" },
-        (ad.pessoas || isOwner)        && { id: "adm_permissoes",   label: "Permissões",    icon: "🛂", kind: "manager", tab: "permissoes" },
-        (ad.employees || isOwner)      && { id: "adm_equipe",       label: "Equipe",        icon: "👥", kind: "manager", tab: "employees" },
-        (ad.roles || isOwner)          && { id: "adm_cargos",       label: "Cargos",        icon: "🏷️", kind: "manager", tab: "roles" },
-        (ad.tips || isOwner)           && { id: "adm_tips",         label: "Lançar Gorj.",  icon: "💰", kind: "manager", tab: "tips" },
-        (ad.schedule || isOwner)       && { id: "adm_schedule",     label: "Fechar Escala", icon: "📅", kind: "manager", tab: "schedule" },
-        (ad.vt || isOwner)             && { id: "adm_vt",           label: "Vale Transp.",  icon: "🚌", kind: "manager", tab: "vt" },
-        (ad.comunicados || isOwner)    && { id: "adm_comunicados",  label: "Comunicados",   icon: "📢", kind: "manager", tab: "comunicados" },
-        (ad.faq || isOwner)            && { id: "adm_faq",          label: "FAQ",           icon: "❓", kind: "manager", tab: "faq" },
-        (sp.isDP || isOwner)           && { id: "adm_dp",           label: "Fale com DP",   icon: "💬", kind: "manager", tab: "dp" },
-        (ad.config || isOwner)         && { id: "adm_config",       label: "Configurações", icon: "⚙️", kind: "manager", tab: "config" },
-        (ad.employees || isOwner)      && { id: "adm_mise_cat",     label: "Mise · Contagens",  icon: "📦", kind: "manager", tab: "mise_contagens" },
-        (ad.employees || isOwner)      && { id: "adm_mise_chk",     label: "Mise · Checklists", icon: "✅", kind: "manager", tab: "mise_checklists" },
-        (ad.employees || isOwner)      && { id: "adm_mise_ft",      label: "Mise · Fichas",     icon: "📋", kind: "manager", tab: "mise_fichas" },
-      ].filter(Boolean),
+        { id: "mod_config", label: "Configurações", icon: "⚙️", kind: "manager", tab: "config" },
+      ],
     });
   }
 
@@ -17821,10 +17880,33 @@ function AppShell({ pessoa, data, activeRestaurantId, setActiveRestaurantId, use
   }, [activeSectionId, allItems.length]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const activeItem = allItems.find(it => it.id === activeSectionId);
+
+  // Subtab ativa por item (persistida como objeto {itemId: subtabId})
+  const [activeSubtabByItem, setActiveSubtabByItem] = useState(() => {
+    try { return JSON.parse(localStorage.getItem("apptip_shell_subtabs") || "{}"); }
+    catch { return {}; }
+  });
+  useEffect(() => {
+    localStorage.setItem("apptip_shell_subtabs", JSON.stringify(activeSubtabByItem));
+  }, [activeSubtabByItem]);
+
+  // Derivação: pra o item ativo, qual subtab tá selecionada?
+  const hasSubtabs = !!(activeItem?.subtabs && activeItem.subtabs.length > 0);
+  const activeSubtab = hasSubtabs
+    ? (activeItem.subtabs.find(s => s.id === activeSubtabByItem[activeItem.id]) || activeItem.subtabs[0])
+    : null;
+  const effectiveKind = activeSubtab?.kind || activeItem?.kind;
+  const effectiveTab  = activeSubtab?.tab  || activeItem?.tab;
+
+  function handleSubtabClick(subtabId) {
+    if (!activeItem) return;
+    setActiveSubtabByItem(prev => ({ ...prev, [activeItem.id]: subtabId }));
+  }
+
   const ac = "var(--ac)";
   const isMobile = useMobile();
 
-  // Badges de notificação por seção
+  // Badges de notificação por seção (agora usa IDs novos mod_mise_*)
   const badges = {};
   const today_ = today();
   // Compras: pedidos ativos (aprovado/enviado/aguardando-correção)
@@ -17832,7 +17914,7 @@ function AppShell({ pessoa, data, activeRestaurantId, setActiveRestaurantId, use
     o.restaurantId === activeRestaurantId &&
     !MISE_ORDER_STATUS[o.status]?.terminal
   );
-  if (activeOrders.length > 0) badges.mise_compras_u = activeOrders.length;
+  if (activeOrders.length > 0) badges.mod_mise_compras = activeOrders.length;
   // Checklists: templates pendentes hoje pra este usuário
   const activeTemplates = (data?.miseChecklistTemplates || []).filter(t =>
     t.restaurantId === activeRestaurantId && t.active !== false
@@ -17845,13 +17927,12 @@ function AppShell({ pessoa, data, activeRestaurantId, setActiveRestaurantId, use
       const run = myRunsToday.find(r => r.templateId === t.id);
       return !run || !run.completedAt;
     });
-    if (pending.length > 0) badges.mise_checklists_u = pending.length;
+    if (pending.length > 0) badges.mod_mise_checklists = pending.length;
   }
   // Contagens: indicador de ciclo aberto
   const openCycleForBadge = (data?.miseCycles || []).find(c => c.restaurantId === activeRestaurantId && c.status === "open");
-  if (openCycleForBadge) badges.mise_contagens_u = "•";
+  if (openCycleForBadge) badges.mod_mise_contagens = "•";
   // Sugestões de compra (calculadas live — só se tem pedidos a aprovar)
-  // Usa miseComputeSuggestedOrders para saber se há sugestões novas
   if (openCycleForBadge && pessoa) {
     try {
       const sugg = miseComputeSuggestedOrders({
@@ -17865,10 +17946,10 @@ function AppShell({ pessoa, data, activeRestaurantId, setActiveRestaurantId, use
         overrides: {},
       });
       const suggestedItemsCount = sugg.reduce((s, g) => s + g.items.length, 0);
-      if (suggestedItemsCount > 0 && badges.mise_compras_u) {
-        badges.mise_compras_u = `${badges.mise_compras_u}+${suggestedItemsCount}`;
+      if (suggestedItemsCount > 0 && badges.mod_mise_compras) {
+        badges.mod_mise_compras = `${badges.mod_mise_compras}+${suggestedItemsCount}`;
       } else if (suggestedItemsCount > 0) {
-        badges.mise_compras_u = `+${suggestedItemsCount}`;
+        badges.mod_mise_compras = `+${suggestedItemsCount}`;
       }
     } catch (e) { /* ignore */ }
   }
@@ -17892,43 +17973,9 @@ function AppShell({ pessoa, data, activeRestaurantId, setActiveRestaurantId, use
       );
     }
 
-    // Owner (não impersonando) sempre vê admin view das áreas Mise — mesmo que tenha pessoa por CPF match.
-    // Se estiver impersonando, vê o que a pessoa impersonada veria (operational).
-    if (realIsOwner && !impersonatedPessoa && activeItem.kind === "operational") {
-      const adminRedirect = {
-        contagens: "mise_contagens",
-        checklists: "mise_checklists",
-        fichasTecnicas: "mise_fichas",
-      };
-      const adminTab = adminRedirect[activeItem.tab];
-      if (adminTab && activeRest) {
-        const virtualMgr = { id: "owner_virt", name: currentUser?.name || "Owner", cpf: currentUser?.cpf, restaurantIds: [activeRestaurantId], perms: {tips:true,schedule:true}, isMaster: true };
-        return (
-          <RestaurantPanel
-            restaurant={activeRest}
-            restaurants={data?.restaurants || []}
-            employees={data?.employees || []}
-            roles={data?.roles || []}
-            tips={data?.tips || []}
-            splits={data?.splits || {}}
-            schedules={data?.schedules || {}}
-            onUpdate={onUpdate}
-            perms={{tips:true, schedule:true, vt:true, roles:true, employees:true, comunicados:true, faq:true, config:true, isDP:true}}
-            isOwner={true}
-            data={data}
-            currentUser={virtualMgr}
-            mobileOnly={false}
-            hideTabNav={true}
-            forceTab={adminTab}
-            realIsOwner={realIsOwner}
-            onStartImpersonate={onStartImpersonate}
-          />
-        );
-      }
-    }
-
+    // Com subtabs, owner escolhe explicitamente op vs admin — não há mais redirect implícito.
     // Features já standalone: render inline diretamente
-    if (activeItem.tab === "contagens" && activeItem.kind === "operational") {
+    if (effectiveTab === "contagens" && effectiveKind === "operational") {
       return (
         <OperationalContagens
           employee={buildVirtualEmpForPessoa(pessoa, activeRestaurantId)}
@@ -17942,7 +17989,7 @@ function AppShell({ pessoa, data, activeRestaurantId, setActiveRestaurantId, use
         />
       );
     }
-    if (activeItem.tab === "compras" && activeItem.kind === "operational") {
+    if (effectiveTab === "compras" && effectiveKind === "operational") {
       return (
         <OperationalCompras
           employee={buildVirtualEmpForPessoa(pessoa, activeRestaurantId)}
@@ -17951,7 +17998,7 @@ function AppShell({ pessoa, data, activeRestaurantId, setActiveRestaurantId, use
         />
       );
     }
-    if (activeItem.tab === "checklists" && activeItem.kind === "operational") {
+    if (effectiveTab === "checklists" && effectiveKind === "operational") {
       return (
         <OperationalChecklists
           employee={buildVirtualEmpForPessoa(pessoa, activeRestaurantId)}
@@ -17961,7 +18008,7 @@ function AppShell({ pessoa, data, activeRestaurantId, setActiveRestaurantId, use
         />
       );
     }
-    if (activeItem.tab === "fichasTecnicas" && activeItem.kind === "operational") {
+    if (effectiveTab === "fichasTecnicas" && effectiveKind === "operational") {
       return (
         <OperationalFichasTecnicas
           employee={buildVirtualEmpForPessoa(pessoa, activeRestaurantId)}
@@ -17970,7 +18017,7 @@ function AppShell({ pessoa, data, activeRestaurantId, setActiveRestaurantId, use
         />
       );
     }
-    if (activeItem.tab === "gorjetas" && activeItem.kind === "operational") {
+    if (effectiveTab === "gorjetas" && effectiveKind === "operational") {
       return (
         <OperationalGorjetas
           employee={buildVirtualEmpForPessoa(pessoa, activeRestaurantId)}
@@ -17981,7 +18028,7 @@ function AppShell({ pessoa, data, activeRestaurantId, setActiveRestaurantId, use
 
     // Embed dos monólitos no shell (Sprint 2)
     // Para kind="manager": renderiza RestaurantPanel com hideTabNav + forceTab
-    if (activeItem.kind === "manager" && activeRest) {
+    if (effectiveKind === "manager" && activeRest) {
       const virtualMgr = pessoa?.linkedManagerId
         ? (data?.managers || []).find(m => m.id === pessoa.linkedManagerId)
         : (isOwner ? { id: "owner_virt", name: currentUser?.name || "Owner", cpf: currentUser?.cpf, restaurantIds: [activeRestaurantId], perms: {tips:true,schedule:true}, isMaster: true } : null);
@@ -18001,7 +18048,7 @@ function AppShell({ pessoa, data, activeRestaurantId, setActiveRestaurantId, use
           currentUser={virtualMgr || currentUser}
           mobileOnly={false}
           hideTabNav={true}
-          forceTab={activeItem.tab}
+          forceTab={effectiveTab}
           realIsOwner={realIsOwner}
           onStartImpersonate={onStartImpersonate}
         />
@@ -18009,7 +18056,7 @@ function AppShell({ pessoa, data, activeRestaurantId, setActiveRestaurantId, use
     }
 
     // Para kind="employee": renderiza EmployeePortal com hideHeader + hideTabNav + forceTab
-    if (activeItem.kind === "employee" && activeRest) {
+    if (effectiveKind === "employee" && activeRest) {
       const linkedEmpId = pessoa?.linkedEmployeeId;
       if (!linkedEmpId) {
         return (
@@ -18054,7 +18101,7 @@ function AppShell({ pessoa, data, activeRestaurantId, setActiveRestaurantId, use
           theme={theme}
           hideHeader={true}
           hideTabNav={true}
-          forceTab={activeItem.tab}
+          forceTab={effectiveTab}
           forceEmpId={linkedEmpId}
         />
       );
@@ -18062,18 +18109,18 @@ function AppShell({ pessoa, data, activeRestaurantId, setActiveRestaurantId, use
 
     // Outras áreas: delegação para portais antigos via botão
     const kindToAction = {
-      employee:    () => onSwitchToEmployee && onSwitchToEmployee(activeItem.tab),
-      manager:     () => onSwitchToManager && onSwitchToManager(activeItem.tab),
-      operational: () => onSwitchToOperational && onSwitchToOperational(activeItem.tab),
-      super:       () => onSwitchToManager && onSwitchToManager(activeItem.tab), // super → OwnerPortal handler
+      employee:    () => onSwitchToEmployee && onSwitchToEmployee(effectiveTab),
+      manager:     () => onSwitchToManager && onSwitchToManager(effectiveTab),
+      operational: () => onSwitchToOperational && onSwitchToOperational(effectiveTab),
+      super:       () => onSwitchToManager && onSwitchToManager(effectiveTab), // super → OwnerPortal handler
     };
-    const launch = kindToAction[activeItem.kind];
+    const launch = kindToAction[effectiveKind];
     const portalLabel = {
       employee: "Portal do Empregado",
       manager: "Portal do Gestor Administrativo",
       operational: "Portal do Gestor Operacional",
       super: "Portal Super",
-    }[activeItem.kind] || "Portal";
+    }[effectiveKind] || "Portal";
     return (
       <div style={{padding:"60px 24px",textAlign:"center",color:"var(--text3)"}}>
         <div style={{fontSize:48,marginBottom:16}}>{activeItem.icon}</div>
@@ -18200,6 +18247,36 @@ function AppShell({ pessoa, data, activeRestaurantId, setActiveRestaurantId, use
           {activeRest && (
             <div style={{marginBottom:isMobile?10:16,padding:"8px 14px",background:"var(--bg2)",borderRadius:10,fontSize:12,color:"var(--text3)"}}>
               <b style={{color:"var(--text)"}}>{activeRest.name}</b> · {activeItem?.label || "—"}
+              {hasSubtabs && activeItem.subtabs.length > 1 && activeSubtab && (
+                <span> · <span style={{color:"var(--text2)"}}>{activeSubtab.label}</span></span>
+              )}
+            </div>
+          )}
+          {/* SubTabBar — só aparece quando o item tem >1 subtab */}
+          {hasSubtabs && activeItem.subtabs.length > 1 && (
+            <div style={{
+              display:"flex", gap:2, borderBottom:"1px solid var(--border)",
+              marginBottom:isMobile?12:18, overflowX:"auto", flexWrap:"nowrap",
+            }}>
+              {activeItem.subtabs.map(sub => {
+                const active = sub.id === activeSubtab.id;
+                return (
+                  <button key={sub.id} onClick={()=>handleSubtabClick(sub.id)}
+                    style={{
+                      background:"none", border:"none",
+                      borderBottom:`2px solid ${active ? "var(--ac)" : "transparent"}`,
+                      padding:isMobile?"7px 12px":"9px 16px",
+                      fontSize:isMobile?12:13, cursor:"pointer",
+                      color: active ? "var(--text)" : "var(--text3)",
+                      fontWeight: active ? 700 : 500,
+                      fontFamily:"'DM Sans',sans-serif",
+                      whiteSpace:"nowrap",
+                      marginBottom:-1,
+                    }}>
+                    {sub.label}
+                  </button>
+                );
+              })}
             </div>
           )}
           {renderContent()}
