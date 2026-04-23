@@ -21692,7 +21692,7 @@ function LinkSmartLifeWizard({ onLink, onCancel, ac, mobileOnly }) {
     if (!picking) return;
     onLink({
       uid: picking.uid,
-      accountEmail: picking.email || picking.mobile || picking.nick_name || picking.uid,
+      accountEmail: picking.email || picking.nick_name || `Conta ${picking.uid.slice(0, 8)}`,
     });
   }
 
@@ -21719,13 +21719,17 @@ function LinkSmartLifeWizard({ onLink, onCancel, ac, mobileOnly }) {
       {accounts && accounts.length > 0 && (
         <div style={{marginBottom:12}}>
           {accounts.map(a => {
-            const label = a.email || a.mobile || a.nick_name || a.uid;
+            const label = a.email || a.nick_name || `Conta ${a.uid.slice(0, 8)}…`;
             const selected = picking && picking.uid === a.uid;
             return (
               <div key={a.uid} onClick={()=>setPicking(a)}
                 style={{padding:"10px 12px",marginBottom:6,borderRadius:8,border:`1px solid ${selected?ac:"var(--border)"}`,background:selected?ac+"15":"var(--card-bg)",cursor:"pointer",fontSize:13}}>
                 <div style={{color:"var(--text)",fontWeight:selected?700:500}}>{label}</div>
-                <div style={{fontSize:10,color:"var(--text3)",marginTop:2}}>UID: {a.uid} · {a.schema}</div>
+                <div style={{fontSize:10,color:"var(--text3)",marginTop:2}}>
+                  {a.device_count} device{a.device_count!==1?"s":""}
+                  {a.sample_device_name && <> · ex: {a.sample_device_name}</>}
+                  <br/>UID: {a.uid}
+                </div>
               </div>
             );
           })}

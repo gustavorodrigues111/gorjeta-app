@@ -1,6 +1,6 @@
 // GET /api/tuya/devices?uid=<smartlife_uid>
-// Lista todos os devices vinculados a uma conta SmartLife específica.
-// Usado pelo admin do AppTip pra escolher qual sensor cadastrar.
+// Lista devices de uma conta SmartLife específica.
+// Usa /v1.0/iot-01/associated-users/devices (IoT Core) e filtra por uid client-side.
 
 const { tuyaRequest } = require('../_lib/tuya');
 
@@ -11,11 +11,19 @@ module.exports = async function handler(req, res) {
   }
 
   try {
-    const devices = await tuyaRequest('GET', `/v1.0/users/${uid}/devices`);
+    const allDevices = [];
+    let lastRowKey = '';
+    for (let i = 0; i < 20; i++) {
+      const qs = `page_size=100${lastRowKey ? `&last_row_key=${encodeURIComponent(lastRowKey)}` : ''}`;
+      const result = await tuyaRequest('GET', `/v1.0/iot-01/associated-users/devices?${qs}`);
+      const devs = result.devices || result.list || [];
+      allDevices.push(...devs);
+      if (!result.has_more || !result.last_row_key) break;
+      lastRowKey = result.last_row_key;
+    }
 
-    // Filtra + padroniza. Deixa passar qualquer device pro admin ver o que tem,
-    // mas marca flag is_temp_sensor pra facilitar filtragem no frontend.
-    const simplified = (devices || []).map(d => ({
+    const ofUser = allDevices.filter(d => d.uid === uid);
+    const simplified = ofUser.map(d => ({
       id: d.id,
       name: d.name,
       product_name: d.product_name,
@@ -23,10 +31,7 @@ module.exports = async function handler(req, res) {
       online: !!d.online,
       sub: !!d.sub,
       time_zone: d.time_zone,
-      ip: d.ip,
       active_time: d.active_time,
-      // Sensores T1U e similares têm category "wsdcg" (Temperature & Humidity).
-      // Outros de temperatura: "wsdcgq" (com alarm), "wk" (smart plug com temp), etc.
       is_temp_sensor: ['wsdcg', 'wsdcgq', 'wts'].includes(d.category),
     }));
 
