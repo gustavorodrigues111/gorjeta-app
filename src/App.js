@@ -18095,6 +18095,7 @@ function AppShell({ pessoa, data, activeRestaurantId, setActiveRestaurantId, use
       return (
         <OperationalTemperaturas
           restaurantId={activeRestaurantId}
+          restaurantName={activeRest?.name || ""}
           tempSensors={(data?.tempSensors ?? []).filter(s => s.restaurantId === activeRestaurantId)}
           tempReadings={(data?.tempReadings ?? []).filter(r => r.restaurantId === activeRestaurantId)}
           tempAlerts={(data?.tempAlerts ?? []).filter(a => a.restaurantId === activeRestaurantId)}
@@ -21076,7 +21077,7 @@ function fmtRelMin(iso) {
 }
 
 // Dashboard operacional: ver sensores + histórico + alertas (dados reais Tuya)
-function OperationalTemperaturas({ restaurantId, tempSensors, tempReadings, tempAlerts, tuyaLink, onUpdate, pessoa }) {
+function OperationalTemperaturas({ restaurantId, restaurantName, tempSensors, tempReadings, tempAlerts, tuyaLink, onUpdate, pessoa }) {
   const isMobile = useMobile();
   const ac = "#7c9e5e";
   const activeSensors = (tempSensors || []).filter(s => s.active !== false);
@@ -21128,42 +21129,121 @@ function OperationalTemperaturas({ restaurantId, tempSensors, tempReadings, temp
       const keptOld = (tempReadings || []).filter(r => new Date(r.timestamp).getTime() >= cutoff);
       onUpdate("tempReadings", [...keptOld, ...newReadings]);
 
-      // Gera alertas se fora da faixa
+      // Detecta 4 tipos de alerta. Email só pra over_max, low_battery e offline.
+      const BATTERY_THRESHOLD = 20; // %
+      const OFFLINE_HOURS = 12;
+      const offlineCutoff = Date.now() - OFFLINE_HOURS * 60 * 60 * 1000;
+
+      const updatedAlerts = [...(tempAlerts || [])];
       const newAlerts = [];
-      newReadings.forEach(r => {
-        const s = activeSensors.find(x => x.id === r.sensorId);
-        if (!s || r.temp == null) return;
-        if (r.temp < s.minTemp || r.temp > s.maxTemp) {
-          const existingOpen = (tempAlerts || []).find(a => a.sensorId === s.id && !a.closedAt);
-          if (!existingOpen) {
-            newAlerts.push({
-              id: `al_${Date.now().toString(36)}_${s.id.slice(-4)}`,
-              sensorId: s.id,
-              restaurantId,
-              openedAt: r.timestamp,
-              firstTemp: r.temp,
-              peakTemp: r.temp,
-            });
-          } else {
-            // Atualiza peakTemp se esta leitura for pior
-            if (Math.abs(r.temp - (s.minTemp + s.maxTemp)/2) > Math.abs(existingOpen.peakTemp - (s.minTemp + s.maxTemp)/2)) {
-              existingOpen.peakTemp = r.temp; // mutação local, vai ser salva abaixo
-            }
-          }
-        } else {
-          // Voltou pra faixa — fecha alerta aberto
-          const existingOpen = (tempAlerts || []).find(a => a.sensorId === s.id && !a.closedAt);
+      const alertsToEmail = [];
+
+      activeSensors.forEach(s => {
+        // Última leitura deste sensor (merge entre histórico kept + novas)
+        const allRs = [...keptOld, ...newReadings].filter(r => r.sensorId === s.id);
+        const lastR = allRs.sort((a,b) => new Date(b.timestamp) - new Date(a.timestamp))[0];
+        if (!lastR) return;
+
+        // Função helper: abre um alerta se ainda não tem um aberto daquele tipo
+        const openAlert = (type, peakValue, extraNote) => {
+          const existingOpen = updatedAlerts.find(a => a.sensorId === s.id && a.type === type && !a.closedAt);
           if (existingOpen) {
-            existingOpen.closedAt = r.timestamp;
+            // Atualiza peakTemp se é over_max e pior que antes
+            if (type === "over_max" && peakValue != null && peakValue > existingOpen.peakTemp) {
+              existingOpen.peakTemp = peakValue;
+            }
+            return;
           }
+          const al = {
+            id: `al_${Date.now().toString(36)}_${s.id.slice(-4)}_${type.slice(0,3)}`,
+            sensorId: s.id,
+            restaurantId,
+            type,
+            openedAt: lastR.timestamp,
+            firstTemp: lastR.temp ?? null,
+            peakTemp: peakValue ?? lastR.temp ?? null,
+            note: extraNote || "",
+          };
+          newAlerts.push(al);
+          updatedAlerts.push(al);
+          if (alertTypeSendsEmail(type)) alertsToEmail.push({ alert: al, sensor: s, reading: lastR });
+        };
+
+        // Função helper: fecha alertas abertos de um tipo
+        const closeAlerts = (type) => {
+          updatedAlerts.forEach(a => {
+            if (a.sensorId === s.id && a.type === type && !a.closedAt) {
+              a.closedAt = lastR.timestamp;
+            }
+          });
+        };
+
+        // 1) Offline > 12h
+        if (lastR.online === false || new Date(lastR.timestamp).getTime() < offlineCutoff) {
+          openAlert("offline");
+        } else {
+          closeAlerts("offline");
+        }
+
+        // 2) Bateria baixa
+        if (lastR.battery != null && lastR.battery <= BATTERY_THRESHOLD) {
+          openAlert("low_battery");
+        } else if (lastR.battery != null && lastR.battery > BATTERY_THRESHOLD + 5) {
+          // só fecha quando bateria subir além do threshold + histerese (troca de pilha)
+          closeAlerts("low_battery");
+        }
+
+        // 3) Temperatura acima do máximo (crítico)
+        if (lastR.temp != null && lastR.temp > s.maxTemp) {
+          openAlert("over_max", lastR.temp);
+        } else {
+          closeAlerts("over_max");
+        }
+
+        // 4) Temperatura abaixo do mínimo (info — só registra, não manda email)
+        if (lastR.temp != null && lastR.temp < s.minTemp) {
+          openAlert("under_min", lastR.temp);
+        } else {
+          closeAlerts("under_min");
         }
       });
-      if (newAlerts.length > 0) {
-        onUpdate("tempAlerts", [...(tempAlerts || []), ...newAlerts]);
-        onUpdate("_toast", `⚠️ ${newAlerts.length} alerta(s) novo(s)`);
-      } else if (errors.length === 0) {
-        // Só avisa "atualizado" se não teve erro — evita spam de toast no auto-polling
+
+      if (newAlerts.length > 0 || updatedAlerts.some(a => a.closedAt && a.closedAt === newReadings[0]?.timestamp)) {
+        onUpdate("tempAlerts", updatedAlerts);
       }
+
+      // Dispara emails (se configurado) — fire-and-forget
+      if (alertsToEmail.length > 0 && tuyaLink?.alertEmail) {
+        alertsToEmail.forEach(({ alert, sensor, reading }) => {
+          fetch("/api/alerts/send-email", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              to: tuyaLink.alertEmail,
+              subject: `${ALERT_TYPES[alert.type]?.icon || "⚠️"} ${ALERT_TYPES[alert.type]?.label || "Alerta"} — ${sensor.name}`,
+              html: buildAlertEmailHtml({
+                restaurantName: restaurantName || "Restaurante",
+                sensorName: sensor.name,
+                location: sensor.location || "",
+                currentTemp: reading.temp,
+                minTemp: sensor.minTemp,
+                maxTemp: sensor.maxTemp,
+                when: new Date(reading.timestamp),
+                alertType: alert.type,
+                extraInfo: {
+                  battery: reading.battery,
+                  lastSeen: new Date(reading.timestamp).toLocaleString("pt-BR"),
+                },
+              }),
+            }),
+          }).catch(e => console.warn("Falha envio email alerta:", e));
+        });
+      }
+
+      const criticalCount = newAlerts.filter(a => a.type === "over_max").length;
+      const warningCount = newAlerts.filter(a => a.type === "low_battery" || a.type === "offline").length;
+      if (criticalCount > 0) onUpdate("_toast", `🔴 ${criticalCount} alerta(s) crítico(s) novo(s)`);
+      else if (warningCount > 0) onUpdate("_toast", `🟡 ${warningCount} alerta(s) de atenção novo(s)`);
     }
 
     if (errors.length > 0) {
@@ -21361,12 +21441,17 @@ function TemperaturasExportModal({ sensors, readings, alerts, restaurantId, onCl
         return;
       }
 
-      // Agrupa leituras em buckets (sensorId, hourKey=YYYY-MM-DD HH:00) → [temps]
+      // Agrupa leituras em buckets de 3h (sensorId, slotKey=YYYY-MM-DD HH) → [temps]
+      // Slots: 00, 03, 06, 09, 12, 15, 18, 21. Cada leitura cai no slot do seu horário.
+      const SLOT_HOURS = 3;
+      const SLOTS_PER_DAY = 24 / SLOT_HOURS; // 8
       const buckets = {};
       relevant.forEach(r => {
         const dt = new Date(r.timestamp);
-        const hourKey = `${dt.getFullYear()}-${String(dt.getMonth()+1).padStart(2,"0")}-${String(dt.getDate()).padStart(2,"0")} ${String(dt.getHours()).padStart(2,"0")}`;
-        const k = `${r.sensorId}|${hourKey}`;
+        const slotIdx = Math.floor(dt.getHours() / SLOT_HOURS); // 0..7
+        const slotHH = String(slotIdx * SLOT_HOURS).padStart(2, "0");
+        const slotKey = `${dt.getFullYear()}-${String(dt.getMonth()+1).padStart(2,"0")}-${String(dt.getDate()).padStart(2,"0")} ${slotHH}`;
+        const k = `${r.sensorId}|${slotKey}`;
         if (!buckets[k]) buckets[k] = [];
         if (r.temp != null) buckets[k].push(r.temp);
       });
@@ -21374,8 +21459,8 @@ function TemperaturasExportModal({ sensors, readings, alerts, restaurantId, onCl
       // Coleta dias únicos do período (com leituras)
       const daysSet = new Set();
       Object.keys(buckets).forEach(k => {
-        const hourKey = k.split("|")[1];
-        const dateStr = hourKey.split(" ")[0];
+        const slotKey = k.split("|")[1];
+        const dateStr = slotKey.split(" ")[0];
         daysSet.add(dateStr);
       });
       const days = [...daysSet].sort();
@@ -21568,82 +21653,77 @@ function TemperaturasExportModal({ sensors, readings, alerts, restaurantId, onCl
 
       footer(2);
 
-      // ═══ PÁGINAS 3+: PIVOT POR DIA (1 dia por página) ═══
-      // Se muitos sensores (>12), divide em grupos de 12 por página
-
-      const sensorsPerPage = 12;
-      const sensorGroups = [];
-      for (let i = 0; i < selectedSensors.length; i += sensorsPerPage) {
-        sensorGroups.push(selectedSensors.slice(i, i + sensorsPerPage));
-      }
+      // ═══ PÁGINAS 3+: PIVOT POR DIA — 1 dia por página ═══
+      // Layout: linhas = sensores, colunas = slots de 3h (como a tela de escalas).
+      // 15 sensores × 8 slots cabem confortavelmente em 1 página paisagem.
 
       let pageCount = 2;
       days.forEach(day => {
-        sensorGroups.forEach((group, groupIdx) => {
-          doc.addPage();
-          pageCount++;
+        doc.addPage();
+        pageCount++;
+        header(`${fmtDate(day)}`, `Leituras a cada ${SLOT_HOURS}h · ${selectedSensors.length} sensor${selectedSensors.length>1?'es':''}`);
 
-          const groupLabel = sensorGroups.length > 1 ? ` (grupo ${groupIdx + 1}/${sensorGroups.length})` : '';
-          header(`${fmtDate(day)}`, `Leituras hora-a-hora · ${group.length} sensor${group.length>1?'es':''}${groupLabel}`);
+        // Cabeçalho das colunas: Sensor + Faixa + 8 slots
+        const slotLabels = [];
+        for (let slot = 0; slot < SLOTS_PER_DAY; slot++) {
+          const startHH = String(slot * SLOT_HOURS).padStart(2, "0");
+          const endHH = String(((slot + 1) * SLOT_HOURS) % 24).padStart(2, "0");
+          slotLabels.push(`${startHH}—${endHH}h`);
+        }
+        const head = [["Sensor", "Faixa (°C)", ...slotLabels]];
 
-          // Monta body: 24 linhas (uma por hora)
-          const body = [];
-          for (let h = 0; h < 24; h++) {
-            const hh = String(h).padStart(2, "0");
-            const row = [`${hh}:00`];
-            group.forEach(s => {
-              const temps = buckets[`${s.id}|${day} ${hh}`];
-              if (!temps || temps.length === 0) {
-                row.push("—");
-              } else {
-                const avg = temps.reduce((a, v) => a + v, 0) / temps.length;
-                row.push(`${avg.toFixed(1)}`);
-              }
-            });
-            body.push(row);
+        // Body: 1 linha por sensor
+        const body = selectedSensors.map(s => {
+          const row = [s.name, `${s.minTemp} a ${s.maxTemp}`];
+          for (let slot = 0; slot < SLOTS_PER_DAY; slot++) {
+            const startHH = String(slot * SLOT_HOURS).padStart(2, "0");
+            const temps = buckets[`${s.id}|${day} ${startHH}`];
+            if (!temps || temps.length === 0) {
+              row.push("—");
+            } else {
+              const avg = temps.reduce((a, v) => a + v, 0) / temps.length;
+              row.push(`${avg.toFixed(1)}`);
+            }
           }
+          return row;
+        });
 
-          // Cabeçalho: 2 linhas (nome do sensor + faixa de referência)
-          const head = [
-            ["Hora", ...group.map(s => s.name)],
-            ["", ...group.map(s => `${s.minTemp}° a ${s.maxTemp}°`)],
-          ];
-
-          doc.autoTable({
-            startY: 38,
-            head,
-            body,
-            theme: 'grid',
-            styles: { fontSize: 8, cellPadding: 1.5, textColor: TEXT_RGB, lineColor: BORDER_RGB, lineWidth: 0.15, halign: 'center' },
-            headStyles: { fillColor: ACCENT_RGB, textColor: [255,255,255], fontStyle: 'bold', fontSize: 8, halign: 'center' },
-            alternateRowStyles: { fillColor: [250, 248, 244] },
-            columnStyles: { 0: { fontStyle: 'bold', cellWidth: 18, fillColor: [242, 239, 232] } },
-            didParseCell: function(data) {
-              // Linha 2 do head = faixa — renderiza em cinza mais leve
-              if (data.section === 'head' && data.row.index === 1) {
-                data.cell.styles.fillColor = [242, 239, 232];
-                data.cell.styles.textColor = TEXT3_RGB;
-                data.cell.styles.fontStyle = 'normal';
-                data.cell.styles.fontSize = 7;
-              }
-              // Colore células fora da faixa
-              if (data.section === 'body' && data.column.index > 0) {
-                const sensor = group[data.column.index - 1];
-                const value = data.cell.raw;
-                if (value !== "—") {
-                  const t = parseFloat(value);
-                  if (!isNaN(t) && (t < sensor.minTemp || t > sensor.maxTemp)) {
-                    data.cell.styles.fillColor = [252, 232, 230]; // vermelho claro
+        doc.autoTable({
+          startY: 38,
+          head,
+          body,
+          theme: 'grid',
+          styles: { fontSize: 9, cellPadding: 2.5, textColor: TEXT_RGB, lineColor: BORDER_RGB, lineWidth: 0.15, halign: 'center' },
+          headStyles: { fillColor: ACCENT_RGB, textColor: [255,255,255], fontStyle: 'bold', fontSize: 9, halign: 'center' },
+          alternateRowStyles: { fillColor: [250, 248, 244] },
+          columnStyles: {
+            0: { fontStyle: 'bold', cellWidth: 50, halign: 'left', fillColor: [242, 239, 232] },
+            1: { cellWidth: 24, fillColor: [242, 239, 232], textColor: TEXT3_RGB },
+          },
+          didParseCell: function(data) {
+            // Colore células de temperatura fora da faixa (só cols >= 2)
+            if (data.section === 'body' && data.column.index >= 2) {
+              const sensor = selectedSensors[data.row.index];
+              const value = data.cell.raw;
+              if (value !== "—") {
+                const t = parseFloat(value);
+                if (!isNaN(t)) {
+                  if (t > sensor.maxTemp) {
+                    data.cell.styles.fillColor = [252, 232, 230];
                     data.cell.styles.textColor = RED_RGB;
+                    data.cell.styles.fontStyle = 'bold';
+                  } else if (t < sensor.minTemp) {
+                    data.cell.styles.fillColor = [230, 238, 252];
+                    data.cell.styles.textColor = [30, 64, 175]; // azul
                     data.cell.styles.fontStyle = 'bold';
                   }
                 }
               }
-            },
-          });
-
-          footer(pageCount);
+            }
+          },
         });
+
+        footer(pageCount);
       });
 
       // ═══ ÚLTIMAS PÁGINAS: ALERTAS DETALHADOS ═══
@@ -21880,6 +21960,17 @@ function MiseTemperaturasAdmin({ restaurantId, tuyaLink, tempSensors, tempReadin
             Desvincular
           </button>
         </div>
+      )}
+
+      {/* ═══ Email de alertas ═══ */}
+      {tuyaLink && (
+        <AlertEmailConfig
+          restaurantId={restaurantId}
+          currentEmail={tuyaLink.alertEmail || ""}
+          onUpdate={onUpdate}
+          ac={ac}
+          mobileOnly={mobileOnly}
+        />
       )}
 
       {/* ═══ Lista de sensores cadastrados ═══ */}
@@ -22147,6 +22238,189 @@ function AddSensorPanel({ restaurantId, tuyaUid, alreadyRegistered, equipamentos
       )}
     </div>
   );
+}
+
+// Configurador do email de alertas do restaurante — salva em tuyaLinks[rid].alertEmail
+function AlertEmailConfig({ restaurantId, currentEmail, onUpdate, ac, mobileOnly }) {
+  const [email, setEmail] = useState(currentEmail);
+  const [testing, setTesting] = useState(false);
+  const isDirty = email !== currentEmail;
+
+  function save() {
+    const e = email.trim();
+    if (e && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e)) {
+      alert("Email inválido. Ex: gerente@restaurante.com");
+      return;
+    }
+    onUpdate("tuyaLinks", prev => {
+      const next = { ...(prev || {}) };
+      const link = next[restaurantId] || {};
+      next[restaurantId] = { ...link, alertEmail: e || null };
+      return next;
+    });
+    onUpdate("_toast", e ? `✓ Email de alertas: ${e}` : "Email de alertas removido");
+  }
+
+  async function sendTest() {
+    if (!currentEmail) { alert("Salve o email primeiro."); return; }
+    setTesting(true);
+    try {
+      const res = await fetch("/api/alerts/send-email", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          to: currentEmail,
+          subject: "🔔 Teste de alerta — AppTip",
+          html: buildAlertEmailHtml({
+            restaurantName: "Teste",
+            sensorName: "Sensor de teste",
+            location: "—",
+            currentTemp: 8.5,
+            minTemp: -2,
+            maxTemp: 5,
+            when: new Date(),
+            isTest: true,
+            alertType: "over_max",
+          }),
+        }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        onUpdate("_toast", `✓ Email de teste enviado pra ${currentEmail}`);
+      } else {
+        alert("Falha no envio: " + (data.error || "erro desconhecido"));
+      }
+    } catch (e) {
+      alert("Erro: " + e.message);
+    }
+    setTesting(false);
+  }
+
+  return (
+    <div style={{background:"var(--card-bg)",border:"1px solid var(--border)",borderRadius:10,padding:"14px 16px",marginBottom:18}}>
+      <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:8}}>
+        <span style={{fontSize:18}}>📧</span>
+        <div style={{flex:1}}>
+          <div style={{fontSize:13,color:"var(--text)",fontWeight:700}}>Email para alertas</div>
+          <div style={{fontSize:11,color:"var(--text3)",marginTop:2}}>
+            Quando um sensor sair da faixa, este endereço recebe um email imediatamente.
+            Pode ser um email compartilhado (ex: <i>gerencia@restaurante.com</i>) pra múltiplas pessoas.
+          </div>
+        </div>
+      </div>
+      <div style={{display:"grid",gridTemplateColumns:mobileOnly?"1fr":"1fr auto auto",gap:8,alignItems:"end"}}>
+        <input
+          type="email"
+          value={email}
+          onChange={e=>setEmail(e.target.value)}
+          placeholder="gerencia@restaurante.com"
+          style={S.input}
+        />
+        <button
+          onClick={save}
+          disabled={!isDirty}
+          style={{background:isDirty?ac:"var(--bg3)",color:isDirty?"#fff":"var(--text3)",border:"none",borderRadius:8,padding:"10px 16px",fontSize:12,fontWeight:700,cursor:isDirty?"pointer":"not-allowed",fontFamily:"'DM Sans',sans-serif",minHeight:44}}>
+          {isDirty ? "Salvar" : "Salvo"}
+        </button>
+        <button
+          onClick={sendTest}
+          disabled={!currentEmail || testing || isDirty}
+          title={!currentEmail ? "Salve o email antes" : isDirty ? "Salve primeiro" : "Envia um email de teste"}
+          style={{...S.btnSecondary,fontSize:12,padding:"10px 14px",minHeight:44}}>
+          {testing ? "Enviando…" : "Testar"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// Tipos de alerta com severidade + rótulos + cores pro email
+// - over_max: temperatura acima do max → vermelho (crítico)
+// - low_battery: bateria baixa → amarelo (atenção)
+// - offline: sem leitura há >12h → amarelo (atenção)
+// - under_min: abaixo do min → só registro na UI, NÃO envia email
+const ALERT_TYPES = {
+  over_max:    { color: "#c0392b", label: "TEMPERATURA ACIMA DO MÁXIMO", icon: "🔴", severity: "critical" },
+  low_battery: { color: "#f59e0b", label: "BATERIA BAIXA",               icon: "🟡", severity: "warning"  },
+  offline:     { color: "#f59e0b", label: "SENSOR OFFLINE",              icon: "🟡", severity: "warning"  },
+  under_min:   { color: "#3b82f6", label: "TEMPERATURA ABAIXO DO MÍNIMO",icon: "🔵", severity: "info"     },
+};
+
+// Decide se um tipo de alerta dispara email automático
+function alertTypeSendsEmail(type) {
+  return ["over_max", "low_battery", "offline"].includes(type);
+}
+
+// Gera HTML bonito do email de alerta (3 temas: teste azul, crítico vermelho, atenção amarelo)
+function buildAlertEmailHtml({ restaurantName, sensorName, location, currentTemp, minTemp, maxTemp, when, isTest, alertType, extraInfo }) {
+  const tempStr = currentTemp != null ? `${currentTemp.toFixed(1)}°C` : "—";
+  const dateStr = when instanceof Date ? when.toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo" }) : when;
+
+  let bannerText, bannerColor, reasonTitle, reasonBody, showTempRow = true;
+  if (isTest) {
+    bannerText = "TESTE — este email confirma que o canal está funcionando";
+    bannerColor = "#2563eb";
+    reasonTitle = "É só um teste";
+    reasonBody = "Se você está recebendo este email, o canal de alertas está configurado corretamente. Alertas reais serão disparados automaticamente.";
+  } else {
+    const t = ALERT_TYPES[alertType] || ALERT_TYPES.over_max;
+    bannerText = t.label;
+    bannerColor = t.color;
+    if (alertType === "over_max") {
+      reasonTitle = "⚠️ Ação imediata recomendada";
+      reasonBody = "A temperatura está acima do máximo configurado. Verifique o equipamento: porta aberta, falha de compressor, sobrecarga, queda de energia.";
+    } else if (alertType === "low_battery") {
+      reasonTitle = "🔋 Bateria do sensor baixa";
+      reasonBody = `O sensor está com ${extraInfo?.battery ?? "?"}% de bateria. Troque as pilhas em breve pra evitar perder o monitoramento.`;
+      showTempRow = false;
+    } else if (alertType === "offline") {
+      reasonTitle = "📡 Sensor sem comunicação";
+      reasonBody = `Não recebemos leituras deste sensor há mais de 12 horas${extraInfo?.lastSeen ? ` (última leitura: ${extraInfo.lastSeen})` : ""}. Verifique se ele tá ligado, se o WiFi do restaurante tá funcionando, e se ele ainda aparece no app SmartLife.`;
+      showTempRow = false;
+    }
+  }
+
+  return `<!DOCTYPE html>
+<html lang="pt-BR">
+<head><meta charset="utf-8"/><title>Alerta AppTip</title></head>
+<body style="margin:0;padding:0;background:#faf8f4;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;color:#1c1710;">
+  <div style="max-width:560px;margin:24px auto;background:#fff;border-radius:12px;overflow:hidden;border:1px solid #e8e2d8;">
+    <div style="background:${bannerColor};color:#fff;padding:16px 22px;">
+      <div style="font-size:11px;font-weight:700;letter-spacing:1px;opacity:0.85;">${bannerText}</div>
+      <div style="font-size:22px;font-weight:700;margin-top:4px;">${sensorName}</div>
+    </div>
+    <div style="padding:22px;">
+      <table style="width:100%;border-collapse:collapse;font-size:14px;">
+        <tr><td style="padding:8px 0;color:#9a8d7a;width:130px;">Restaurante</td><td style="padding:8px 0;font-weight:600;">${restaurantName}</td></tr>
+        ${location ? `<tr><td style="padding:8px 0;color:#9a8d7a;">Localização</td><td style="padding:8px 0;">${location}</td></tr>` : ""}
+        ${showTempRow ? `
+        <tr>
+          <td style="padding:8px 0;color:#9a8d7a;">Temperatura atual</td>
+          <td style="padding:8px 0;font-family:'DM Mono',Courier,monospace;font-size:26px;font-weight:700;color:${bannerColor};">${tempStr}</td>
+        </tr>
+        <tr><td style="padding:8px 0;color:#9a8d7a;">Faixa configurada</td><td style="padding:8px 0;">${minTemp}°C a ${maxTemp}°C</td></tr>
+        ` : ""}
+        ${extraInfo?.battery != null && alertType !== "low_battery" ? `<tr><td style="padding:8px 0;color:#9a8d7a;">Bateria</td><td style="padding:8px 0;">${extraInfo.battery}%</td></tr>` : ""}
+        <tr><td style="padding:8px 0;color:#9a8d7a;">Detectado em</td><td style="padding:8px 0;">${dateStr}</td></tr>
+      </table>
+
+      <div style="background:${bannerColor}12;border:1px solid ${bannerColor}44;border-radius:8px;padding:14px 16px;margin-top:18px;">
+        <div style="font-weight:700;color:${bannerColor};margin-bottom:6px;">${reasonTitle}</div>
+        <div style="font-size:13px;color:#1c1710;line-height:1.5;">${reasonBody}</div>
+      </div>
+
+      ${!isTest ? `
+      <div style="margin-top:18px;text-align:center;">
+        <a href="https://apptip.app" style="display:inline-block;background:#7c9e5e;color:#fff;text-decoration:none;padding:10px 22px;border-radius:8px;font-weight:700;font-size:14px;">Abrir AppTip pra reconhecer</a>
+      </div>
+      ` : ""}
+    </div>
+    <div style="padding:14px 22px;background:#f2efe8;font-size:11px;color:#9a8d7a;text-align:center;border-top:1px solid #e8e2d8;">
+      AppTip — Monitoramento de temperaturas · integração Tuya/SmartLife
+    </div>
+  </div>
+</body>
+</html>`;
 }
 
 // Wizard de vínculo SmartLife — busca as contas já vinculadas no projeto Tuya
