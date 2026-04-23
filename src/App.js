@@ -21075,12 +21075,14 @@ function fmtRelMin(iso) {
   return `há ${Math.floor(diff/1440)}d`;
 }
 
-// Dashboard operacional: ver sensores + histórico + alertas
+// Dashboard operacional: ver sensores + histórico + alertas (dados reais Tuya)
 function OperationalTemperaturas({ restaurantId, tempSensors, tempReadings, tempAlerts, tuyaLink, onUpdate, pessoa }) {
   const isMobile = useMobile();
   const ac = "#7c9e5e";
   const activeSensors = (tempSensors || []).filter(s => s.active !== false);
   const openAlerts = (tempAlerts || []).filter(a => !a.closedAt && !a.acknowledgedAt);
+  const [polling, setPolling] = useState(false);
+  const [lastPollAt, setLastPollAt] = useState(null);
 
   // Última leitura de cada sensor
   const lastReadingBySensor = {};
@@ -21091,50 +21093,99 @@ function OperationalTemperaturas({ restaurantId, tempSensors, tempReadings, temp
     }
   });
 
-  // Piloto: simular novas leituras (enquanto não tem backend Tuya)
-  function simulateReading() {
-    if (activeSensors.length === 0) { alert("Cadastre sensores primeiro na aba Configurar."); return; }
-    const newReadings = activeSensors.map(s => {
-      const center = (s.minTemp + s.maxTemp) / 2;
-      const drift = (Math.random() - 0.5) * (s.maxTemp - s.minTemp) * 1.1;
-      const temp = +(center + drift).toFixed(1);
-      return {
-        id: `rd_${Date.now().toString(36)}_${s.id.slice(-4)}_${Math.random().toString(36).slice(2,5)}`,
-        sensorId: s.id,
-        restaurantId,
-        timestamp: new Date().toISOString(),
-        temp,
-        battery: Math.floor(70 + Math.random() * 30),
-        online: Math.random() > 0.05,
-      };
-    });
-    onUpdate("tempReadings", [...(tempReadings || []), ...newReadings]);
-    // Gera alerta se fora da faixa
-    const newAlerts = [];
-    newReadings.forEach(r => {
-      const s = activeSensors.find(x => x.id === r.sensorId);
-      if (!s) return;
-      if (r.temp < s.minTemp || r.temp > s.maxTemp) {
-        const hasOpen = (tempAlerts || []).some(a => a.sensorId === s.id && !a.closedAt);
-        if (!hasOpen) {
-          newAlerts.push({
-            id: `al_${Date.now().toString(36)}_${s.id.slice(-4)}`,
-            sensorId: s.id,
-            restaurantId,
-            openedAt: r.timestamp,
-            firstTemp: r.temp,
-            peakTemp: r.temp,
-          });
+  // Busca leitura real de cada sensor ativo via Vercel Function
+  async function fetchReadings() {
+    if (activeSensors.length === 0 || polling) return;
+    setPolling(true);
+    const newReadings = [];
+    const errors = [];
+    await Promise.all(activeSensors.map(async (s) => {
+      try {
+        const res = await fetch(`/api/tuya/device-status?device=${encodeURIComponent(s.tuyaDeviceId)}`);
+        const data = await res.json();
+        if (!data.success) {
+          errors.push(`${s.name}: ${data.error || 'erro'}`);
+          return;
         }
+        newReadings.push({
+          id: `rd_${Date.now().toString(36)}_${s.id.slice(-4)}_${Math.random().toString(36).slice(2,5)}`,
+          sensorId: s.id,
+          restaurantId,
+          timestamp: data.timestamp,
+          temp: data.temp,
+          humidity: data.humidity,
+          battery: data.battery,
+          online: data.online,
+        });
+      } catch (e) {
+        errors.push(`${s.name}: ${e.message}`);
       }
-    });
-    if (newAlerts.length > 0) {
-      onUpdate("tempAlerts", [...(tempAlerts || []), ...newAlerts]);
-      onUpdate("_toast", `⚠️ ${newAlerts.length} alerta(s) gerado(s)`);
-    } else {
-      onUpdate("_toast", "✓ Leituras simuladas");
+    }));
+
+    if (newReadings.length > 0) {
+      // Trunca histórico: mantém últimos 7 dias pra não estourar doc de 1MB
+      const cutoff = Date.now() - 7 * 24 * 60 * 60 * 1000;
+      const keptOld = (tempReadings || []).filter(r => new Date(r.timestamp).getTime() >= cutoff);
+      onUpdate("tempReadings", [...keptOld, ...newReadings]);
+
+      // Gera alertas se fora da faixa
+      const newAlerts = [];
+      newReadings.forEach(r => {
+        const s = activeSensors.find(x => x.id === r.sensorId);
+        if (!s || r.temp == null) return;
+        if (r.temp < s.minTemp || r.temp > s.maxTemp) {
+          const existingOpen = (tempAlerts || []).find(a => a.sensorId === s.id && !a.closedAt);
+          if (!existingOpen) {
+            newAlerts.push({
+              id: `al_${Date.now().toString(36)}_${s.id.slice(-4)}`,
+              sensorId: s.id,
+              restaurantId,
+              openedAt: r.timestamp,
+              firstTemp: r.temp,
+              peakTemp: r.temp,
+            });
+          } else {
+            // Atualiza peakTemp se esta leitura for pior
+            if (Math.abs(r.temp - (s.minTemp + s.maxTemp)/2) > Math.abs(existingOpen.peakTemp - (s.minTemp + s.maxTemp)/2)) {
+              existingOpen.peakTemp = r.temp; // mutação local, vai ser salva abaixo
+            }
+          }
+        } else {
+          // Voltou pra faixa — fecha alerta aberto
+          const existingOpen = (tempAlerts || []).find(a => a.sensorId === s.id && !a.closedAt);
+          if (existingOpen) {
+            existingOpen.closedAt = r.timestamp;
+          }
+        }
+      });
+      if (newAlerts.length > 0) {
+        onUpdate("tempAlerts", [...(tempAlerts || []), ...newAlerts]);
+        onUpdate("_toast", `⚠️ ${newAlerts.length} alerta(s) novo(s)`);
+      } else if (errors.length === 0) {
+        // Só avisa "atualizado" se não teve erro — evita spam de toast no auto-polling
+      }
     }
+
+    if (errors.length > 0) {
+      onUpdate("_toast", `⚠️ ${errors.length} sensor(es) com erro — ver console`);
+      console.warn("Erros no fetchReadings:", errors);
+    }
+    setLastPollAt(new Date().toISOString());
+    setPolling(false);
   }
+
+  // Auto-polling a cada 5 minutos enquanto a tela está montada
+  useEffect(() => {
+    if (activeSensors.length === 0) return;
+    // Primeira leitura: se não tem nenhuma dos últimos 5min, busca agora
+    const freshCutoff = Date.now() - 5 * 60 * 1000;
+    const hasFresh = Object.values(lastReadingBySensor).some(r => new Date(r.timestamp).getTime() > freshCutoff);
+    if (!hasFresh) fetchReadings();
+
+    const interval = setInterval(fetchReadings, 5 * 60 * 1000);
+    return () => clearInterval(interval);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeSensors.length]);
 
   function acknowledgeAlert(alertId) {
     const updated = (tempAlerts || []).map(a => a.id === alertId ? {
@@ -21175,9 +21226,9 @@ function OperationalTemperaturas({ restaurantId, tempSensors, tempReadings, temp
           <div style={{fontSize:11,color:"var(--text3)",fontWeight:700,textTransform:"uppercase",letterSpacing:0.4}}>Monitoramento — tempo real</div>
           <div style={{fontSize:isMobile?14:16,color:"var(--text)",fontWeight:700,marginTop:2}}>{activeSensors.length} sensor{activeSensors.length!==1?"es":""} · {openAlerts.length} alerta{openAlerts.length!==1?"s":""} ativo{openAlerts.length!==1?"s":""}</div>
         </div>
-        <button onClick={simulateReading}
-          style={{background:ac+"22",border:`1px solid ${ac}66`,borderRadius:8,padding:"8px 14px",fontSize:12,fontWeight:700,color:ac,cursor:"pointer",fontFamily:"'DM Sans',sans-serif",minHeight:isMobile?44:"auto"}}>
-          🔄 Simular leitura
+        <button onClick={fetchReadings} disabled={polling}
+          style={{background:polling?"var(--bg3)":ac+"22",border:`1px solid ${polling?"var(--border)":ac+"66"}`,borderRadius:8,padding:"8px 14px",fontSize:12,fontWeight:700,color:polling?"var(--text3)":ac,cursor:polling?"wait":"pointer",fontFamily:"'DM Sans',sans-serif",minHeight:isMobile?44:"auto"}}>
+          {polling ? "🔄 Atualizando…" : "🔄 Atualizar agora"}
         </button>
       </div>
 
@@ -21233,7 +21284,8 @@ function OperationalTemperaturas({ restaurantId, tempSensors, tempReadings, temp
       </div>
 
       <div style={{marginTop:18,fontSize:11,color:"var(--text3)",lineHeight:1.5,textAlign:"center"}}>
-        💡 Piloto: dados simulados. A integração real com a nuvem Tuya pollar cada sensor a cada 2-5min automaticamente.
+        🟢 Leituras reais do Tuya Cloud. Atualização automática a cada 5 min enquanto esta tela está aberta.
+        {lastPollAt && <> Última: {fmtRelMin(lastPollAt)}.</>}
       </div>
     </div>
   );
@@ -21244,7 +21296,6 @@ function MiseTemperaturasAdmin({ restaurantId, tuyaLink, tempSensors, tempReadin
   const ac = "#7c9e5e";
   const [showLinkWizard, setShowLinkWizard] = useState(false);
   const [editingId, setEditingId] = useState(null);
-  const [newForm, setNewForm] = useState({ name:"", location:"", equipmentId:"", minTemp:-2, maxTemp:5, alertMinutes:10, alertPessoaId:"" });
   const [editForm, setEditForm] = useState(null);
 
   const equipamentos = miseFtEquipamentos?.[restaurantId] || [];
@@ -21258,15 +21309,15 @@ function MiseTemperaturasAdmin({ restaurantId, tuyaLink, tempSensors, tempReadin
     if (!prev || new Date(r.timestamp) > new Date(prev.timestamp)) lastRdBySensor[r.sensorId] = r;
   });
 
-  function doLink(email) {
+  function doLink({ uid, accountEmail }) {
     onUpdate("tuyaLinks", prev => ({ ...(prev || {}), [restaurantId]: {
-      uid: `uid_${Date.now().toString(36)}`,
-      accountEmail: email,
+      uid,
+      accountEmail,
       linkedAt: new Date().toISOString(),
       linkedBy: currentUser?.name || "—",
     }}));
     setShowLinkWizard(false);
-    onUpdate("_toast", "✓ Conta SmartLife vinculada (simulado)");
+    onUpdate("_toast", `✓ Conta SmartLife "${accountEmail}" vinculada`);
   }
   function doUnlink() {
     if (!window.confirm("Desvincular a conta SmartLife deste restaurante?\n\nSensores cadastrados serão mantidos mas deixarão de receber leituras até religar.")) return;
@@ -21276,29 +21327,6 @@ function MiseTemperaturasAdmin({ restaurantId, tuyaLink, tempSensors, tempReadin
       return next;
     });
     onUpdate("_toast", "Conta SmartLife desvinculada");
-  }
-
-  function addSensor() {
-    const nm = newForm.name.trim();
-    if (!nm) { alert("Dê um nome pro sensor (ex: Geladeira Bar)"); return; }
-    if (newForm.minTemp >= newForm.maxTemp) { alert("Temperatura mínima deve ser menor que a máxima"); return; }
-    const s = {
-      id: `snr_${Date.now().toString(36)}${Math.random().toString(36).slice(2,5)}`,
-      restaurantId,
-      tuyaDeviceId: `fake_${Date.now().toString(36)}`, // real: viria da lista Tuya
-      name: nm,
-      location: newForm.location.trim() || null,
-      equipmentId: newForm.equipmentId || null,
-      minTemp: +newForm.minTemp,
-      maxTemp: +newForm.maxTemp,
-      alertMinutes: +newForm.alertMinutes,
-      alertPessoaId: newForm.alertPessoaId || null,
-      createdAt: new Date().toISOString(),
-      active: true,
-    };
-    onUpdate("tempSensors", [...(tempSensors || []), s]);
-    setNewForm({ name:"", location:"", equipmentId:"", minTemp:-2, maxTemp:5, alertMinutes:10, alertPessoaId:"" });
-    onUpdate("_toast", `✓ Sensor "${nm}" cadastrado`);
   }
 
   function startEdit(s) {
@@ -21449,87 +21477,267 @@ function MiseTemperaturasAdmin({ restaurantId, tuyaLink, tempSensors, tempReadin
             )}
           </div>
 
-          {/* ═══ Cadastrar novo sensor ═══ */}
-          <div style={{background:"var(--card-bg)",border:"1px solid var(--border)",borderRadius:10,padding:"14px 16px",marginBottom:14}}>
-            <h5 style={{color:"var(--text)",margin:"0 0 10px",fontSize:13,fontWeight:700}}>➕ Cadastrar novo sensor</h5>
-            <div style={{fontSize:11,color:"var(--text3)",marginBottom:12,lineHeight:1.5}}>
-              Na integração real, aqui aparecia a lista de sensores da conta SmartLife que ainda não foram cadastrados. No piloto, você cadastra manualmente e os dados são simulados pela tela Monitorar.
-            </div>
-            <div style={{display:"grid",gridTemplateColumns:mobileOnly?"1fr":"2fr 1.5fr",gap:8,marginBottom:8}}>
-              <div>
-                <label style={{fontSize:10,color:"var(--text3)"}}>Nome</label>
-                <input value={newForm.name} onChange={e=>setNewForm(f=>({...f,name:e.target.value}))} placeholder="Ex: Geladeira Bar" style={S.input}/>
-              </div>
-              <div>
-                <label style={{fontSize:10,color:"var(--text3)"}}>Localização (opcional)</label>
-                <input value={newForm.location} onChange={e=>setNewForm(f=>({...f,location:e.target.value}))} placeholder="Ex: Atrás do bar" style={S.input}/>
-              </div>
-            </div>
-            <div style={{display:"grid",gridTemplateColumns:mobileOnly?"1fr 1fr":"1fr 1fr 1fr 1fr",gap:8,marginBottom:8}}>
-              <div>
-                <label style={{fontSize:10,color:"var(--text3)"}}>Min (°C)</label>
-                <input type="number" step="0.1" value={newForm.minTemp} onChange={e=>setNewForm(f=>({...f,minTemp:e.target.value}))} style={S.input}/>
-              </div>
-              <div>
-                <label style={{fontSize:10,color:"var(--text3)"}}>Max (°C)</label>
-                <input type="number" step="0.1" value={newForm.maxTemp} onChange={e=>setNewForm(f=>({...f,maxTemp:e.target.value}))} style={S.input}/>
-              </div>
-              <div>
-                <label style={{fontSize:10,color:"var(--text3)"}}>Alerta após (min)</label>
-                <input type="number" value={newForm.alertMinutes} onChange={e=>setNewForm(f=>({...f,alertMinutes:e.target.value}))} style={S.input}/>
-              </div>
-              <div>
-                <label style={{fontSize:10,color:"var(--text3)"}}>Equipamento</label>
-                <select value={newForm.equipmentId} onChange={e=>setNewForm(f=>({...f,equipmentId:e.target.value}))} style={S.input}>
-                  <option value="">—</option>
-                  {equipamentos.map(eq => <option key={eq} value={eq}>{eq}</option>)}
-                </select>
-              </div>
-            </div>
-            <div style={{display:"grid",gridTemplateColumns:mobileOnly?"1fr":"1fr auto",gap:8,alignItems:"end"}}>
-              <div>
-                <label style={{fontSize:10,color:"var(--text3)"}}>Responsável por alertas (WhatsApp)</label>
-                <select value={newForm.alertPessoaId} onChange={e=>setNewForm(f=>({...f,alertPessoaId:e.target.value}))} style={S.input}>
-                  <option value="">—</option>
-                  {restPessoas.map(p => <option key={p.id} value={p.id}>{p.name} · {p.whatsapp}</option>)}
-                </select>
-              </div>
-              <button onClick={addSensor}
-                style={{background:ac,color:"#fff",border:"none",borderRadius:8,padding:"10px 18px",fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:"'DM Sans',sans-serif",minHeight:44}}>
-                Adicionar
-              </button>
-            </div>
-          </div>
+          {/* ═══ Cadastrar novo sensor — picker real de devices Tuya ═══ */}
+          <AddSensorPanel
+            restaurantId={restaurantId}
+            tuyaUid={tuyaLink.uid}
+            alreadyRegistered={restSensors.map(s => s.tuyaDeviceId)}
+            equipamentos={equipamentos}
+            restPessoas={restPessoas}
+            onSave={(sensorData) => {
+              onUpdate("tempSensors", [...(tempSensors || []), {
+                ...sensorData,
+                id: `snr_${Date.now().toString(36)}${Math.random().toString(36).slice(2,5)}`,
+                restaurantId,
+                createdAt: new Date().toISOString(),
+                active: true,
+              }]);
+              onUpdate("_toast", `✓ Sensor "${sensorData.name}" cadastrado`);
+            }}
+            mobileOnly={mobileOnly}
+            ac={ac}
+          />
         </>
       )}
 
-      <div style={{fontSize:11,color:"var(--text3)",lineHeight:1.5,marginTop:14,padding:"10px 14px",background:"#f59e0b15",borderRadius:8,border:"1px solid #f59e0b33"}}>
-        ⚠️ <b>Modo piloto:</b> os dados exibidos são simulados. Pra conectar de verdade aos sensores Tuya, precisamos criar uma Function serverless (Vercel/Firebase) com as credenciais do Tuya IoT Platform e trocar a simulação pela chamada real.
+      <div style={{fontSize:11,lineHeight:1.5,marginTop:14,padding:"10px 14px",background:"#ecfccb",borderRadius:8,border:"1px solid #84cc1644",color:"#3f6212"}}>
+        🟢 <b>Integração ativa:</b> leituras vêm do Tuya Cloud (atualização a cada 5 min quando o AppTip está aberto). Para monitoramento 24/7 (alertas de madrugada), vamos precisar de uma camada adicional de backend — conversamos depois.
       </div>
     </div>
   );
 }
 
-// Wizard de vínculo SmartLife (piloto: pede email; real: gera QR code)
+// Painel de adicionar sensor — busca devices reais da conta SmartLife vinculada
+function AddSensorPanel({ restaurantId, tuyaUid, alreadyRegistered, equipamentos, restPessoas, onSave, mobileOnly, ac }) {
+  const [devices, setDevices] = useState(null);
+  const [error, setError] = useState(null);
+  const [picked, setPicked] = useState(null);
+  const [form, setForm] = useState({ name:"", location:"", equipmentId:"", minTemp:-2, maxTemp:5, alertMinutes:10, alertPessoaId:"" });
+
+  useEffect(() => {
+    let cancelled = false;
+    setError(null);
+    (async () => {
+      try {
+        const res = await fetch(`/api/tuya/devices?uid=${encodeURIComponent(tuyaUid)}`);
+        const data = await res.json();
+        if (cancelled) return;
+        if (!data.success) { setError(data.error || "Falha ao buscar devices"); return; }
+        setDevices(data.devices || []);
+      } catch (e) {
+        if (!cancelled) setError(e.message);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [tuyaUid]);
+
+  const available = (devices || []).filter(d => !alreadyRegistered.includes(d.id));
+  const tempSensorsOnly = available.filter(d => d.is_temp_sensor);
+
+  function pickDevice(d) {
+    setPicked(d);
+    setForm(f => ({ ...f, name: f.name || d.name || d.product_name || "Sensor" }));
+  }
+
+  function save() {
+    if (!picked) { alert("Selecione um sensor"); return; }
+    const nm = form.name.trim();
+    if (!nm) { alert("Dê um nome pro sensor"); return; }
+    if (+form.minTemp >= +form.maxTemp) { alert("Min deve ser menor que max"); return; }
+    onSave({
+      tuyaDeviceId: picked.id,
+      name: nm,
+      location: form.location.trim() || null,
+      equipmentId: form.equipmentId || null,
+      minTemp: +form.minTemp,
+      maxTemp: +form.maxTemp,
+      alertMinutes: +form.alertMinutes,
+      alertPessoaId: form.alertPessoaId || null,
+    });
+    setPicked(null);
+    setForm({ name:"", location:"", equipmentId:"", minTemp:-2, maxTemp:5, alertMinutes:10, alertPessoaId:"" });
+  }
+
+  return (
+    <div style={{background:"var(--card-bg)",border:"1px solid var(--border)",borderRadius:10,padding:"14px 16px",marginBottom:14}}>
+      <h5 style={{color:"var(--text)",margin:"0 0 10px",fontSize:13,fontWeight:700}}>➕ Cadastrar novo sensor</h5>
+
+      {devices === null && !error && (
+        <div style={{padding:"10px 0",fontSize:12,color:"var(--text3)"}}>Buscando devices da conta SmartLife…</div>
+      )}
+      {error && (
+        <div style={{padding:"10px 14px",background:"var(--red-bg)",border:"1px solid var(--red)44",borderRadius:8,fontSize:12,color:"var(--red)",marginBottom:10}}>
+          ⚠️ {error}
+        </div>
+      )}
+      {devices && available.length === 0 && (
+        <div style={{padding:"10px 14px",background:"#f59e0b15",border:"1px solid #f59e0b44",borderRadius:8,fontSize:12,color:"var(--text2)",marginBottom:10}}>
+          Todos os devices dessa conta já estão cadastrados neste restaurante. Pareie um sensor novo no SmartLife e volte aqui.
+        </div>
+      )}
+      {devices && available.length > 0 && !picked && (
+        <>
+          <div style={{fontSize:11,color:"var(--text3)",marginBottom:8}}>
+            {tempSensorsOnly.length > 0
+              ? `Sensores de temperatura disponíveis na conta (${tempSensorsOnly.length})`
+              : `Devices da conta (${available.length}) — nenhum é sensor de temperatura, mas você pode cadastrar outros tipos se quiser`}
+          </div>
+          <div style={{display:"grid",gap:6,marginBottom:10}}>
+            {(tempSensorsOnly.length > 0 ? tempSensorsOnly : available).map(d => (
+              <div key={d.id} onClick={()=>pickDevice(d)}
+                style={{padding:"10px 12px",borderRadius:8,border:"1px solid var(--border)",background:"var(--bg2)",cursor:"pointer",display:"flex",alignItems:"center",gap:10}}>
+                <span style={{fontSize:16}}>{d.is_temp_sensor?"🌡️":"📡"}</span>
+                <div style={{flex:1,minWidth:0}}>
+                  <div style={{color:"var(--text)",fontSize:13,fontWeight:600}}>{d.name}</div>
+                  <div style={{fontSize:10,color:"var(--text3)",marginTop:1}}>
+                    {d.product_name} · {d.online?"🟢 online":"🔴 offline"} · {d.id}
+                  </div>
+                </div>
+                <button style={{...S.btnSecondary,fontSize:11,padding:"5px 10px"}}>Selecionar</button>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
+
+      {picked && (
+        <>
+          <div style={{padding:"10px 12px",borderRadius:8,background:ac+"15",border:`1px solid ${ac}`,marginBottom:12,display:"flex",alignItems:"center",gap:8}}>
+            <span style={{fontSize:18}}>🌡️</span>
+            <div style={{flex:1}}>
+              <div style={{fontSize:12,color:"var(--text)",fontWeight:700}}>{picked.name}</div>
+              <div style={{fontSize:10,color:"var(--text3)"}}>{picked.product_name} · {picked.id}</div>
+            </div>
+            <button onClick={()=>setPicked(null)} style={{...S.btnSecondary,fontSize:11,padding:"5px 10px"}}>Trocar</button>
+          </div>
+
+          <div style={{display:"grid",gridTemplateColumns:mobileOnly?"1fr":"2fr 1.5fr",gap:8,marginBottom:8}}>
+            <div>
+              <label style={{fontSize:10,color:"var(--text3)"}}>Nome (apelido)</label>
+              <input value={form.name} onChange={e=>setForm(f=>({...f,name:e.target.value}))} placeholder="Ex: Geladeira Bar" style={S.input}/>
+            </div>
+            <div>
+              <label style={{fontSize:10,color:"var(--text3)"}}>Localização (opcional)</label>
+              <input value={form.location} onChange={e=>setForm(f=>({...f,location:e.target.value}))} placeholder="Ex: Atrás do bar" style={S.input}/>
+            </div>
+          </div>
+          <div style={{display:"grid",gridTemplateColumns:mobileOnly?"1fr 1fr":"1fr 1fr 1fr 1fr",gap:8,marginBottom:8}}>
+            <div>
+              <label style={{fontSize:10,color:"var(--text3)"}}>Min (°C)</label>
+              <input type="number" step="0.1" value={form.minTemp} onChange={e=>setForm(f=>({...f,minTemp:e.target.value}))} style={S.input}/>
+            </div>
+            <div>
+              <label style={{fontSize:10,color:"var(--text3)"}}>Max (°C)</label>
+              <input type="number" step="0.1" value={form.maxTemp} onChange={e=>setForm(f=>({...f,maxTemp:e.target.value}))} style={S.input}/>
+            </div>
+            <div>
+              <label style={{fontSize:10,color:"var(--text3)"}}>Alerta após (min)</label>
+              <input type="number" value={form.alertMinutes} onChange={e=>setForm(f=>({...f,alertMinutes:e.target.value}))} style={S.input}/>
+            </div>
+            <div>
+              <label style={{fontSize:10,color:"var(--text3)"}}>Equipamento</label>
+              <select value={form.equipmentId} onChange={e=>setForm(f=>({...f,equipmentId:e.target.value}))} style={S.input}>
+                <option value="">—</option>
+                {equipamentos.map(eq => <option key={eq} value={eq}>{eq}</option>)}
+              </select>
+            </div>
+          </div>
+          <div style={{display:"grid",gridTemplateColumns:mobileOnly?"1fr":"1fr auto",gap:8,alignItems:"end"}}>
+            <div>
+              <label style={{fontSize:10,color:"var(--text3)"}}>Responsável por alertas (WhatsApp)</label>
+              <select value={form.alertPessoaId} onChange={e=>setForm(f=>({...f,alertPessoaId:e.target.value}))} style={S.input}>
+                <option value="">—</option>
+                {restPessoas.map(p => <option key={p.id} value={p.id}>{p.name} · {p.whatsapp}</option>)}
+              </select>
+            </div>
+            <button onClick={save}
+              style={{background:ac,color:"#fff",border:"none",borderRadius:8,padding:"10px 18px",fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:"'DM Sans',sans-serif",minHeight:44}}>
+              Cadastrar
+            </button>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+// Wizard de vínculo SmartLife — busca as contas já vinculadas no projeto Tuya
+// (via QR code escaneado antes no painel iot.tuya.com) e deixa o admin escolher
+// qual conta pertence a este restaurante.
 function LinkSmartLifeWizard({ onLink, onCancel, ac, mobileOnly }) {
-  const [email, setEmail] = useState("");
+  const [accounts, setAccounts] = useState(null); // null = loading, [] = nenhuma
+  const [error, setError] = useState(null);
+  const [picking, setPicking] = useState(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch("/api/tuya/app-accounts");
+        const data = await res.json();
+        if (cancelled) return;
+        if (!data.success) {
+          setError(data.error || "Falha ao buscar contas");
+          return;
+        }
+        setAccounts(data.users || []);
+      } catch (e) {
+        if (!cancelled) setError(e.message);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  function confirmPick() {
+    if (!picking) return;
+    onLink({
+      uid: picking.uid,
+      accountEmail: picking.email || picking.mobile || picking.nick_name || picking.uid,
+    });
+  }
+
   return (
     <div style={{background:"var(--bg2)",border:"1px solid var(--border)",borderRadius:10,padding:"12px 14px"}}>
       <div style={{fontSize:12,color:"var(--text2)",marginBottom:10,lineHeight:1.5}}>
-        <b>Na versão real:</b> um QR code apareceria aqui. Você abriria o SmartLife no iPhone do gestor, iria em Perfil → Escanear QR, e autorizaria o AppTip a acessar os dispositivos dessa conta. Tokens OAuth ficariam guardados no Firestore.
+        Contas SmartLife vinculadas ao projeto Tuya IoT. Escolha qual pertence a este restaurante.
+        Se a conta não aparecer, vá em iot.tuya.com → projeto → Devices → <b>Link App Account</b>, escaneie o QR code com o SmartLife do restaurante, e volte aqui.
       </div>
-      <div style={{fontSize:12,color:"var(--text2)",marginBottom:10}}>
-        <b>Piloto:</b> digite o email da conta SmartLife só pra registrar o "link" simulado:
-      </div>
-      <div style={{display:"grid",gridTemplateColumns:mobileOnly?"1fr":"1fr auto",gap:8}}>
-        <input value={email} onChange={e=>setEmail(e.target.value)} placeholder="email@restaurante.com" type="email" style={S.input}/>
-        <div style={{display:"flex",gap:6}}>
-          <button onClick={onCancel} style={{...S.btnSecondary,fontSize:12,padding:"8px 14px"}}>Cancelar</button>
-          <button onClick={()=>{ if (!email.trim()) { alert("Digite um email"); return; } onLink(email.trim()); }}
-            style={{background:ac,color:"#fff",border:"none",borderRadius:8,padding:"8px 14px",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"'DM Sans',sans-serif"}}>
-            Vincular
-          </button>
+
+      {accounts === null && !error && (
+        <div style={{padding:"10px 0",fontSize:12,color:"var(--text3)"}}>Carregando contas…</div>
+      )}
+      {error && (
+        <div style={{padding:"10px 14px",background:"var(--red-bg)",border:"1px solid var(--red)44",borderRadius:8,fontSize:12,color:"var(--red)",marginBottom:10}}>
+          ⚠️ Erro: {error}
         </div>
+      )}
+      {accounts && accounts.length === 0 && (
+        <div style={{padding:"10px 14px",background:"#f59e0b15",border:"1px solid #f59e0b44",borderRadius:8,fontSize:12,color:"var(--text2)",marginBottom:10}}>
+          Nenhuma conta SmartLife encontrada no projeto. Vincule uma primeiro no painel Tuya IoT.
+        </div>
+      )}
+      {accounts && accounts.length > 0 && (
+        <div style={{marginBottom:12}}>
+          {accounts.map(a => {
+            const label = a.email || a.mobile || a.nick_name || a.uid;
+            const selected = picking && picking.uid === a.uid;
+            return (
+              <div key={a.uid} onClick={()=>setPicking(a)}
+                style={{padding:"10px 12px",marginBottom:6,borderRadius:8,border:`1px solid ${selected?ac:"var(--border)"}`,background:selected?ac+"15":"var(--card-bg)",cursor:"pointer",fontSize:13}}>
+                <div style={{color:"var(--text)",fontWeight:selected?700:500}}>{label}</div>
+                <div style={{fontSize:10,color:"var(--text3)",marginTop:2}}>UID: {a.uid} · {a.schema}</div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      <div style={{display:"flex",gap:8,justifyContent:"flex-end"}}>
+        <button onClick={onCancel} style={{...S.btnSecondary,fontSize:12,padding:"8px 14px"}}>Cancelar</button>
+        <button onClick={confirmPick} disabled={!picking}
+          style={{background:picking?ac:"var(--bg3)",color:picking?"#fff":"var(--text3)",border:"none",borderRadius:8,padding:"8px 14px",fontSize:12,fontWeight:700,cursor:picking?"pointer":"not-allowed",fontFamily:"'DM Sans',sans-serif"}}>
+          Vincular conta selecionada
+        </button>
       </div>
     </div>
   );
