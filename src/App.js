@@ -21406,6 +21406,13 @@ function TemperaturasExportModal({ sensors, readings, alerts, restaurantId, onCl
     return s;
   });
   const [generating, setGenerating] = useState(false);
+  const [previewUrl, setPreviewUrl] = useState(null); // blob URL quando em preview
+  const [previewFname, setPreviewFname] = useState("");
+
+  // Limpa blob URL ao fechar pra não vazar memória
+  useEffect(() => {
+    return () => { if (previewUrl) URL.revokeObjectURL(previewUrl); };
+  }, [previewUrl]);
 
   const selectedSensors = sensors.filter(s => selected[s.id]);
 
@@ -21784,11 +21791,13 @@ function TemperaturasExportModal({ sensors, readings, alerts, restaurantId, onCl
         footer(i, totalPages);
       }
 
-      // Download
+      // Gera blob e troca pro modo preview em vez de baixar direto
       const fname = `temperaturas_${from}_a_${to}.pdf`;
-      doc.save(fname);
+      const blob = doc.output("blob");
+      const url = URL.createObjectURL(blob);
+      setPreviewUrl(url);
+      setPreviewFname(fname);
       setGenerating(false);
-      onClose();
     } catch (e) {
       console.error(e);
       alert("Erro ao gerar PDF: " + e.message);
@@ -21796,6 +21805,69 @@ function TemperaturasExportModal({ sensors, readings, alerts, restaurantId, onCl
     }
   }
 
+  function downloadPreview() {
+    if (!previewUrl || !previewFname) return;
+    const a = document.createElement("a");
+    a.href = previewUrl;
+    a.download = previewFname;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+  }
+
+  function backToConfig() {
+    if (previewUrl) {
+      URL.revokeObjectURL(previewUrl);
+      setPreviewUrl(null);
+      setPreviewFname("");
+    }
+  }
+
+  // ═══ MODO PREVIEW (quando PDF já foi gerado) ═══
+  if (previewUrl) {
+    return (
+      <div onClick={onClose}
+        style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.7)",zIndex:200,display:"flex",flexDirection:"column",padding:isMobile?8:16}}>
+        <div onClick={e=>e.stopPropagation()}
+          style={{background:"var(--bg1)",borderRadius:12,width:"100%",flex:1,display:"flex",flexDirection:"column",overflow:"hidden",boxShadow:"0 10px 40px rgba(0,0,0,0.4)"}}>
+          {/* Header do preview */}
+          <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:isMobile?"10px 14px":"14px 20px",borderBottom:"1px solid var(--border)",background:"var(--bg2)",flexWrap:"wrap",gap:8}}>
+            <div style={{flex:1,minWidth:200}}>
+              <h3 style={{color:"var(--text)",margin:0,fontSize:isMobile?14:16,fontWeight:700}}>📄 Pré-visualização</h3>
+              <div style={{fontSize:11,color:"var(--text3)",marginTop:2,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{previewFname}</div>
+            </div>
+            <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+              <button onClick={backToConfig}
+                style={{...S.btnSecondary,fontSize:12,padding:"8px 14px",minHeight:isMobile?40:"auto"}}>
+                ← Voltar
+              </button>
+              <button onClick={downloadPreview}
+                style={{background:ac,color:"#fff",border:"none",borderRadius:8,padding:"8px 16px",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"'DM Sans',sans-serif",minHeight:isMobile?40:"auto"}}>
+                📥 Baixar PDF
+              </button>
+              <button onClick={onClose} style={{background:"none",border:"none",fontSize:20,color:"var(--text3)",cursor:"pointer",padding:"4px 10px"}}>×</button>
+            </div>
+          </div>
+          {/* Iframe do PDF */}
+          <div style={{flex:1,background:"#525659",overflow:"hidden",position:"relative"}}>
+            <iframe
+              src={previewUrl + "#zoom=page-fit&view=Fit"}
+              title="Pré-visualização do relatório"
+              style={{width:"100%",height:"100%",border:"none",background:"#fff"}}
+            />
+          </div>
+          {/* Footer mobile hint */}
+          {isMobile && (
+            <div style={{padding:"8px 14px",fontSize:10,color:"var(--text3)",textAlign:"center",borderTop:"1px solid var(--border)",background:"var(--bg2)"}}>
+              Se não visualizar, toque em <b>📥 Baixar PDF</b> pra abrir no Files.
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  // ═══ MODO CONFIG (formulário pra gerar) ═══
   return (
     <div onClick={onClose}
       style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.5)",zIndex:200,display:"flex",alignItems:"center",justifyContent:"center",padding:isMobile?12:20}}>
@@ -21820,11 +21892,10 @@ function TemperaturasExportModal({ sensors, readings, alerts, restaurantId, onCl
 
         {/* Info sobre formato */}
         <div style={{marginBottom:14,padding:"10px 12px",background:ac+"10",borderRadius:8,border:`1px solid ${ac}33`}}>
-          <div style={{fontSize:12,color:"var(--text)",fontWeight:600,marginBottom:4}}>📊 Formato: pivot horário × sensor</div>
+          <div style={{fontSize:12,color:"var(--text)",fontWeight:600,marginBottom:4}}>📊 Formato: planilha sensores × slots de 3h</div>
           <div style={{fontSize:11,color:"var(--text2)",lineHeight:1.5}}>
-            Cada linha = 1 hora. Cada coluna = 1 sensor. Célula = média das leituras daquela hora.
-            Orientação paisagem, otimizado pra muitos sensores em visão única (ANVISA).
-            Abas: "Temperaturas por hora", "Resumo por sensor" e "Alertas" (se houver).
+            1 página por dia. Linhas = sensores. Colunas = 8 slots (00-03h, 03-06h…). Célula = média daquela janela.
+            Células vermelhas = acima do max. Azuis = abaixo do min. Orientação paisagem, pronto pra auditoria ANVISA.
           </div>
         </div>
 
@@ -21851,7 +21922,7 @@ function TemperaturasExportModal({ sensors, readings, alerts, restaurantId, onCl
           <button onClick={onClose} style={{...S.btnSecondary,fontSize:12,padding:"10px 16px"}}>Cancelar</button>
           <button onClick={doExport} disabled={generating || selectedSensors.length === 0}
             style={{background:generating?"var(--bg3)":ac,color:generating?"var(--text3)":"#fff",border:"none",borderRadius:8,padding:"10px 18px",fontSize:13,fontWeight:700,cursor:generating?"wait":"pointer",fontFamily:"'DM Sans',sans-serif",minHeight:44}}>
-            {generating ? "Gerando…" : "📥 Baixar Excel"}
+            {generating ? "Gerando…" : "👁️ Pré-visualizar"}
           </button>
         </div>
       </div>
