@@ -12763,7 +12763,8 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
               <p style={{color:"var(--text3)",fontSize:14}}>Notificações ocultas pelo modo privacidade.</p>
             </div>
           ) : (
-            <NotificacoesTab restaurantId={rid} dpMessages={data?.dpMessages??[]} notifications={data?.notifications??[]} onUpdate={onUpdate} isOwner={isOwner} inbox={data?.inbox??[]} managerId={currentUser?.id} managerRole={userRoleForInbox} inboxFolders={data?.inboxFolders??{}} />
+            // DP tem canal próprio (aba Fale com DP) — passa array vazio pra caixa não misturar
+            <NotificacoesTab restaurantId={rid} dpMessages={[]} notifications={data?.notifications??[]} onUpdate={onUpdate} isOwner={isOwner} inbox={data?.inbox??[]} managerId={currentUser?.id} managerRole={userRoleForInbox} inboxFolders={data?.inboxFolders??{}} />
           )}
           </div>
         )}
@@ -18020,7 +18021,7 @@ function AppShell({ pessoa, data, activeRestaurantId, setActiveRestaurantId, use
   ).length;
   if (unreadDp > 0) badges.mod_dp = unreadDp;
 
-  // Caixa de entrada: notificações + inbox do sistema + mensagens DP todas somadas
+  // Caixa de entrada: só notificações do sistema + inbox (DP tem canal próprio, fica fora)
   if (pessoa?.id) {
     const userRoleForInbox = pessoa?.linkedManagerId ? "manager" : "employee";
     const notifsUnread = (data?.notifications || []).filter(n =>
@@ -18036,7 +18037,7 @@ function AppShell({ pessoa, data, activeRestaurantId, setActiveRestaurantId, use
         includeRead: false,
       }).length;
     } catch (e) { /* ignore */ }
-    const totalInbox = notifsUnread + unreadDp + inboxMsgsUnread;
+    const totalInbox = notifsUnread + inboxMsgsUnread;
     if (totalInbox > 0) badges.mod_inbox = totalInbox;
   }
   // Sugestões de compra (calculadas live — só se tem pedidos a aprovar)
