@@ -18249,7 +18249,18 @@ function AppShell({ pessoa, data, activeRestaurantId, setActiveRestaurantId, use
 
   function handleSectionClick(id) {
     setActiveSectionId(id);
-    if (isMobile) setSidebarOpen(false); // fecha sidebar no mobile após escolher
+    // Reset subtab pra default (primeira) ao clicar na sidebar
+    // UX: cada clique na sidebar = "fresh start", abre sempre na visão principal (Executar/Contar/Dashboard/etc)
+    // Navegação entre subtabs dentro do item continua persistindo em sessão
+    const newItem = allItems.find(it => it.id === id);
+    if (newItem?.subtabs?.length > 0) {
+      setActiveSubtabByItem(prev => {
+        const next = { ...prev };
+        delete next[id];
+        return next;
+      });
+    }
+    if (isMobile) setSidebarOpen(false);
   }
 
   return (
@@ -19051,10 +19062,15 @@ const MISE_ORDER_STATUS = {
 // Calcula pedidos sugeridos para um ciclo baseado nas contagens já lançadas.
 // Retorna: [{ supplierId, supplier, items:[{productId,product,totalCounted,minStock,necessidade,linkId,link,conversionFactor,qtySuggested,estimatedCost}], totalCost }]
 // `overrides` é um mapa { [productId]: linkId } que força um vínculo específico
-function miseComputeSuggestedOrders({ cycle, restaurantId, items, counts, categories, productSuppliers, suppliers, overrides = {} }) {
-  if (!cycle) return [];
+// Calcula pedidos sugeridos a partir de um conjunto de contagens específico (sem conceito de ciclo).
+// Signature antiga aceitava `cycle` e filtrava counts; nova aceita `countsToUse` direto (array já filtrado).
+// Retrocompat: se vier `cycle` e não vier `countsToUse`, faz o filtro legado.
+function miseComputeSuggestedOrders({ cycle, countsToUse, restaurantId, items, counts, categories, productSuppliers, suppliers, overrides = {} }) {
   const restItems = items.filter(i => i.restaurantId === restaurantId);
-  const restCounts = counts.filter(c => c.restaurantId === restaurantId && c.cycleId === cycle.id);
+  const restCounts = countsToUse
+    ? countsToUse.filter(c => c.restaurantId === restaurantId)
+    : (cycle ? counts.filter(c => c.restaurantId === restaurantId && c.cycleId === cycle.id) : []);
+  if (restCounts.length === 0) return [];
   const restLinks = productSuppliers.filter(ps => ps.restaurantId === restaurantId);
   const restCats = categories.filter(c => c.restaurantId === restaurantId);
 
@@ -19646,12 +19662,14 @@ function OperationalChecklists({ employee, miseChecklistTemplates, miseChecklist
     }
     const newItems = (tpl.items || []).map(it => {
       const d = draft[it.id] || {};
-      return {
+      // Firestore não aceita undefined — usa null ou omite o campo
+      const row = {
         itemId: it.id,
         done: !!d.done,
-        doneAt: d.done ? now : undefined,
-        note: d.note ? d.note.trim() : undefined,
       };
+      if (d.done) row.doneAt = now;
+      if (d.note && d.note.trim()) row.note = d.note.trim();
+      return row;
     });
     const existingRun = myRunsToday.find(r => r.templateId === tpl.id);
     const newRun = {
