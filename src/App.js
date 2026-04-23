@@ -17745,6 +17745,14 @@ function pessoaHasAnyOperationalArea(pessoa, restaurantId) {
 // ═══════════════════════════════════════════════════════════════
 // ──  APPSHELL — sidebar unificada + header + content            ──
 // ═══════════════════════════════════════════════════════════════
+// Helper: pessoa tem ao menos 1 perm admin, especial ou é owner?
+function hasAnyAdminRole(ad, sp, isOwner) {
+  if (isOwner) return true;
+  if (Object.values(ad || {}).some(v => v === true)) return true;
+  if (Object.values(sp || {}).some(v => v === true)) return true;
+  return false;
+}
+
 // Define estrutura da sidebar derivada de permissões da pessoa
 function buildShellSections({ pessoa, restaurantId, isOwner }) {
   // Owner tem acesso implícito total — simula permissões completas
@@ -17785,85 +17793,7 @@ function buildShellSections({ pessoa, restaurantId, isOwner }) {
     });
   }
 
-  // 2) OPERAÇÃO — Gorjetas/Escalas/Trilhas/Reuniões com subtabs op+admin fundidos
-  const opItems = [];
-  if (op.gorjetas || ad.tips) {
-    opItems.push({
-      id: "mod_gorjetas", label: "Gorjetas", icon: "💰",
-      subtabs: st(
-        op.gorjetas && { id: "dashboard", label: "Dashboard",   kind: "operational", tab: "gorjetas" },
-        ad.tips     && { id: "lancar",    label: "Lançamentos", kind: "manager",     tab: "tips" },
-      ),
-    });
-  }
-  if (op.escalas || ad.schedule) {
-    // Mesma tela (RestaurantPanel→schedule), mas separa por papel pra o rótulo ficar claro.
-    // Quando a pessoa tem as duas perms, ela vê as duas (útil em gestor op que também fecha).
-    opItems.push({
-      id: "mod_escalas", label: "Escalas", icon: "📅",
-      subtabs: st(
-        op.escalas  && { id: "ver",    label: "Ver",    kind: "manager", tab: "schedule" },
-        ad.schedule && { id: "fechar", label: "Fechar", kind: "manager", tab: "schedule" },
-      ),
-    });
-  }
-  if (op.trilhas) {
-    opItems.push({ id: "mod_trilhas", label: "Trilhas", icon: "🎯", kind: "manager", tab: "employees" });
-  }
-  if (op.reunioes) {
-    opItems.push({ id: "mod_reunioes", label: "Reuniões", icon: "🗣️", kind: "manager", tab: "reunioes" });
-  }
-  if (opItems.length > 0) {
-    sections.push({ group: "Operação", color: "#d4a017", items: opItems });
-  }
-
-  // 3) APPMISE — Contagens/Compras/Checklists/Fichas com subtab Operar + Config
-  const miseItems = [];
-  if (op.contagens || ad.employees) {
-    miseItems.push({
-      id: "mod_mise_contagens", label: "Contagens", icon: "📦",
-      subtabs: st(
-        op.contagens  && { id: "contar", label: "Contar",    kind: "operational", tab: "contagens" },
-        ad.employees  && { id: "config", label: "Configurar", kind: "manager",    tab: "mise_contagens" },
-      ),
-    });
-  }
-  if (op.compras) {
-    // Compras é única — fornecedores são subtabs internas de OperationalCompras, não há tab admin separada.
-    miseItems.push({ id: "mod_mise_compras", label: "Compras", icon: "🛒", kind: "operational", tab: "compras" });
-  }
-  if (op.checklists || ad.employees) {
-    miseItems.push({
-      id: "mod_mise_checklists", label: "Checklists", icon: "✅",
-      subtabs: st(
-        op.checklists && { id: "executar",  label: "Executar",  kind: "operational", tab: "checklists" },
-        ad.employees  && { id: "templates", label: "Templates", kind: "manager",     tab: "mise_checklists" },
-      ),
-    });
-  }
-  if (op.fichasTecnicas || ad.employees) {
-    miseItems.push({
-      id: "mod_mise_fichas", label: "Fichas Técnicas", icon: "📋",
-      subtabs: st(
-        op.fichasTecnicas && { id: "consultar", label: "Consultar", kind: "operational", tab: "fichasTecnicas" },
-        ad.employees      && { id: "editar",    label: "Editar",    kind: "manager",     tab: "mise_fichas" },
-      ),
-    });
-  }
-  if (op.temperaturas || ad.employees) {
-    miseItems.push({
-      id: "mod_mise_temperaturas", label: "Temperaturas", icon: "🌡️",
-      subtabs: st(
-        op.temperaturas && { id: "monitor", label: "Monitorar",  kind: "operational", tab: "temperaturas" },
-        ad.employees    && { id: "config",  label: "Configurar", kind: "manager",     tab: "mise_temperaturas" },
-      ),
-    });
-  }
-  if (miseItems.length > 0) {
-    sections.push({ group: "AppMise", color: "#7c9e5e", items: miseItems });
-  }
-
-  // 4) PESSOAS — cadastro+permissões agrupados; Equipe junta membros/cargos/VT
+  // 2) PESSOAS — tudo que envolve quadro humano: cadastro, equipe, escalas, reuniões, trilhas
   const peopleItems = [];
   if (ad.pessoas || isOwner) {
     peopleItems.push({
@@ -17882,15 +17812,92 @@ function buildShellSections({ pessoa, restaurantId, isOwner }) {
   if (equipeSubs.length > 0) {
     peopleItems.push({ id: "mod_equipe", label: "Equipe", icon: "👥", subtabs: equipeSubs });
   }
+  if (op.escalas || ad.schedule) {
+    peopleItems.push({
+      id: "mod_escalas", label: "Escalas", icon: "📅",
+      subtabs: st(
+        op.escalas  && { id: "ver",    label: "Ver",    kind: "manager", tab: "schedule" },
+        ad.schedule && { id: "fechar", label: "Fechar", kind: "manager", tab: "schedule" },
+      ),
+    });
+  }
+  if (op.reunioes) {
+    peopleItems.push({ id: "mod_reunioes", label: "Reuniões", icon: "🗣️", kind: "manager", tab: "reunioes" });
+  }
+  if (op.trilhas) {
+    peopleItems.push({ id: "mod_trilhas", label: "Trilhas", icon: "🎯", kind: "manager", tab: "employees" });
+  }
   if (peopleItems.length > 0) {
     sections.push({ group: "Pessoas", color: "#0284c7", items: peopleItems });
   }
 
-  // 5) COMUNICAÇÃO — Comunicados/FAQ/DP
+  // 3) OPERAÇÃO — dia-a-dia de rotina: gorjetas, checklists, contagens, temperaturas, compras
+  const opItems = [];
+  if (op.gorjetas || ad.tips) {
+    opItems.push({
+      id: "mod_gorjetas", label: "Gorjetas", icon: "💰",
+      subtabs: st(
+        op.gorjetas && { id: "dashboard", label: "Dashboard",   kind: "operational", tab: "gorjetas" },
+        ad.tips     && { id: "lancar",    label: "Lançamentos", kind: "manager",     tab: "tips" },
+      ),
+    });
+  }
+  if (op.checklists || ad.employees) {
+    opItems.push({
+      id: "mod_mise_checklists", label: "Checklists", icon: "✅",
+      subtabs: st(
+        op.checklists && { id: "executar",  label: "Executar",  kind: "operational", tab: "checklists" },
+        ad.employees  && { id: "templates", label: "Templates", kind: "manager",     tab: "mise_checklists" },
+      ),
+    });
+  }
+  if (op.contagens || ad.employees) {
+    opItems.push({
+      id: "mod_mise_contagens", label: "Contagens", icon: "📦",
+      subtabs: st(
+        op.contagens  && { id: "contar", label: "Contar",    kind: "operational", tab: "contagens" },
+        ad.employees  && { id: "config", label: "Configurar", kind: "manager",    tab: "mise_contagens" },
+      ),
+    });
+  }
+  if (op.temperaturas || ad.employees) {
+    opItems.push({
+      id: "mod_mise_temperaturas", label: "Temperaturas", icon: "🌡️",
+      subtabs: st(
+        op.temperaturas && { id: "monitor", label: "Monitorar",  kind: "operational", tab: "temperaturas" },
+        ad.employees    && { id: "config",  label: "Configurar", kind: "manager",     tab: "mise_temperaturas" },
+      ),
+    });
+  }
+  if (op.compras) {
+    opItems.push({ id: "mod_mise_compras", label: "Compras", icon: "🛒", kind: "operational", tab: "compras" });
+  }
+  if (opItems.length > 0) {
+    sections.push({ group: "Operação", color: "#d4a017", items: opItems });
+  }
+
+  // 4) PRODUÇÃO — receitas, custos, planejamento (por enquanto só Fichas Técnicas)
+  const prodItems = [];
+  if (op.fichasTecnicas || ad.employees) {
+    prodItems.push({
+      id: "mod_mise_fichas", label: "Fichas Técnicas", icon: "📋",
+      subtabs: st(
+        op.fichasTecnicas && { id: "consultar", label: "Consultar", kind: "operational", tab: "fichasTecnicas" },
+        ad.employees      && { id: "editar",    label: "Editar",    kind: "manager",     tab: "mise_fichas" },
+      ),
+    });
+  }
+  if (prodItems.length > 0) {
+    sections.push({ group: "Produção", color: "#7c9e5e", items: prodItems });
+  }
+
+  // 5) COMUNICAÇÃO — Comunicados, FAQ, Fale com DP, Caixa de Entrada
   const commItems = st(
     (ad.comunicados || isOwner) && { id: "mod_comunicados", label: "Comunicados",  icon: "📢", kind: "manager", tab: "comunicados" },
     (ad.faq         || isOwner) && { id: "mod_faq",         label: "FAQ",          icon: "❓", kind: "manager", tab: "faq" },
     (sp.isDP        || isOwner) && { id: "mod_dp",          label: "Fale com DP",  icon: "💬", kind: "manager", tab: "dp" },
+    // Caixa de entrada aparece se tem algum papel admin (recebe mensagens/notificações do sistema)
+    (hasAnyAdminRole(ad, sp, isOwner)) && { id: "mod_inbox", label: "Caixa de entrada", icon: "📬", kind: "manager", tab: "notificacoes" },
   );
   if (commItems.length > 0) {
     sections.push({ group: "Comunicação", color: "#8b5cf6", items: commItems });
@@ -18006,6 +18013,32 @@ function AppShell({ pessoa, data, activeRestaurantId, setActiveRestaurantId, use
     a.restaurantId === activeRestaurantId && !a.closedAt && !a.acknowledgedAt
   );
   if (openTempAlerts.length > 0) badges.mod_mise_temperaturas = `!${openTempAlerts.length}`;
+
+  // Fale com DP: mensagens não lidas do restaurante
+  const unreadDp = (data?.dpMessages || []).filter(m =>
+    m.restaurantId === activeRestaurantId && !m.read && !m.deleted
+  ).length;
+  if (unreadDp > 0) badges.mod_dp = unreadDp;
+
+  // Caixa de entrada: notificações + inbox do sistema + mensagens DP todas somadas
+  if (pessoa?.id) {
+    const userRoleForInbox = pessoa?.linkedManagerId ? "manager" : "employee";
+    const notifsUnread = (data?.notifications || []).filter(n =>
+      n.restaurantId === activeRestaurantId && !n.read && !n.deleted && n.targetRole !== "admin" && n.type !== "upgrade_request"
+    ).length;
+    let inboxMsgsUnread = 0;
+    try {
+      inboxMsgsUnread = getInboxForUser({
+        inbox: data?.inbox,
+        userId: pessoa.linkedManagerId || pessoa.id,
+        userRole: userRoleForInbox,
+        restaurantId: activeRestaurantId,
+        includeRead: false,
+      }).length;
+    } catch (e) { /* ignore */ }
+    const totalInbox = notifsUnread + unreadDp + inboxMsgsUnread;
+    if (totalInbox > 0) badges.mod_inbox = totalInbox;
+  }
   // Sugestões de compra (calculadas live — só se tem pedidos a aprovar)
   if (openCycleForBadge && pessoa) {
     try {
@@ -19576,35 +19609,77 @@ function OperationalChecklists({ employee, miseChecklistTemplates, miseChecklist
   const [expandedTpl, setExpandedTpl] = useState(null);
   const miseAc = "#7c9e5e";
 
-  function toggleItem(tpl, itemId) {
-    const now = new Date().toISOString();
-    const existing = (miseChecklistRuns || []).find(r => r.restaurantId === restaurantId && r.templateId === tpl.id && r.userId === employee.id && r.date === today_);
-    if (!existing) {
-      // cria run novo com esse item marcado
-      const run = {
-        id: `clrun_${Date.now().toString(36)}${Math.random().toString(36).slice(2,6)}`,
-        restaurantId, templateId: tpl.id, userId: employee.id, userName: employee.name,
-        date: today_,
-        items: (tpl.items || []).map(it => ({ itemId: it.id, done: it.id === itemId, doneAt: it.id === itemId ? now : undefined })),
+  // Estado local dos checklists abertos. Tudo fica local até clicar "Enviar".
+  // Estrutura: { [tplId]: { [itemId]: { done, note, showNote } } }
+  const [drafts, setDrafts] = useState({});
+
+  // Garante que um draft exista pra esse template, inicializado a partir do run salvo (se houver)
+  function ensureDraft(tpl) {
+    if (drafts[tpl.id]) return drafts[tpl.id];
+    const existingRun = myRunsToday.find(r => r.templateId === tpl.id);
+    const initial = {};
+    (tpl.items || []).forEach(it => {
+      const ri = (existingRun?.items || []).find(x => x.itemId === it.id);
+      initial[it.id] = {
+        done: !!ri?.done,
+        note: ri?.note || "",
+        showNote: !!ri?.note, // se já tinha nota, expande
       };
-      onUpdate("miseChecklistRuns", [...(miseChecklistRuns || []), run]);
-      return;
-    }
-    const newItems = (existing.items || []).map(i =>
-      i.itemId === itemId ? { ...i, done: !i.done, doneAt: !i.done ? now : undefined } : i
-    );
-    // Garante que todos os itens do template estão no run
-    (tpl.items || []).forEach(tit => {
-      if (!newItems.find(i => i.itemId === tit.id)) newItems.push({ itemId: tit.id, done: false });
     });
-    onUpdate("miseChecklistRuns", (miseChecklistRuns || []).map(r => r.id === existing.id ? { ...r, items: newItems } : r));
+    setDrafts(d => ({ ...d, [tpl.id]: initial }));
+    return initial;
   }
 
-  function finalizeRun(tpl) {
-    const run = myRunsToday.find(r => r.templateId === tpl.id);
-    if (!run) { alert("Marque pelo menos um item antes de finalizar."); return; }
-    if (!window.confirm("Finalizar este checklist? Depois de finalizado, não pode ser alterado hoje.")) return;
-    onUpdate("miseChecklistRuns", (miseChecklistRuns || []).map(r => r.id === run.id ? { ...r, completedAt: new Date().toISOString() } : r));
+  function getItemState(tpl, itemId) {
+    const draft = drafts[tpl.id];
+    if (draft && draft[itemId]) return draft[itemId];
+    const existingRun = myRunsToday.find(r => r.templateId === tpl.id);
+    const ri = existingRun?.items?.find(x => x.itemId === itemId);
+    return { done: !!ri?.done, note: ri?.note || "", showNote: !!ri?.note };
+  }
+
+  function updateItem(tpl, itemId, patch) {
+    setDrafts(d => {
+      const base = d[tpl.id] || ensureDraft(tpl);
+      return { ...d, [tpl.id]: { ...base, [itemId]: { ...getItemState(tpl, itemId), ...base?.[itemId], ...patch } } };
+    });
+  }
+
+  function submitChecklist(tpl) {
+    const draft = drafts[tpl.id] || ensureDraft(tpl);
+    const now = new Date().toISOString();
+    const doneCount = Object.values(draft).filter(i => i?.done).length;
+    if (doneCount === 0) {
+      if (!window.confirm("Nenhum item foi marcado. Enviar checklist vazio?")) return;
+    }
+    const newItems = (tpl.items || []).map(it => {
+      const d = draft[it.id] || {};
+      return {
+        itemId: it.id,
+        done: !!d.done,
+        doneAt: d.done ? now : undefined,
+        note: d.note ? d.note.trim() : undefined,
+      };
+    });
+    const existingRun = myRunsToday.find(r => r.templateId === tpl.id);
+    const newRun = {
+      id: existingRun?.id || `clrun_${Date.now().toString(36)}${Math.random().toString(36).slice(2,6)}`,
+      restaurantId,
+      templateId: tpl.id,
+      userId: employee.id,
+      userName: employee.name,
+      date: today_,
+      items: newItems,
+      completedAt: now,
+    };
+    if (existingRun) {
+      onUpdate("miseChecklistRuns", (miseChecklistRuns || []).map(r => r.id === existingRun.id ? newRun : r));
+    } else {
+      onUpdate("miseChecklistRuns", [...(miseChecklistRuns || []), newRun]);
+    }
+    // Limpa draft
+    setDrafts(d => { const n = { ...d }; delete n[tpl.id]; return n; });
+    onUpdate("_toast", `✓ Checklist "${tpl.name}" enviado`);
   }
 
   if (templates.length === 0) {
@@ -19630,8 +19705,13 @@ function OperationalChecklists({ employee, miseChecklistTemplates, miseChecklist
         const run = myRunsToday.find(r => r.templateId === tpl.id);
         const isCompleted = !!run?.completedAt;
         const items = tpl.items || [];
-        const runItems = run?.items || [];
-        const doneCount = runItems.filter(i => i.done).length;
+        const draftForTpl = drafts[tpl.id];
+        // Contagem "ao vivo" baseada no draft (se aberto) ou no run salvo
+        const doneCount = items.reduce((acc, it) => {
+          if (draftForTpl && draftForTpl[it.id]) return acc + (draftForTpl[it.id].done ? 1 : 0);
+          const ri = run?.items?.find(x => x.itemId === it.id);
+          return acc + (ri?.done ? 1 : 0);
+        }, 0);
         const pct = items.length > 0 ? Math.round(doneCount/items.length*100) : 0;
         const isExpanded = expandedTpl === tpl.id || (!run && items.length > 0);
         return (
@@ -19641,7 +19721,8 @@ function OperationalChecklists({ employee, miseChecklistTemplates, miseChecklist
               <div style={{flex:1,minWidth:180}}>
                 <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
                   <span style={{fontSize:15,color:"var(--text)",fontWeight:700}}>{tpl.name}</span>
-                  {isCompleted && <span style={{fontSize:10,padding:"1px 8px",borderRadius:10,background:"#10b98122",color:"#15803d",fontWeight:700}}>✓ FINALIZADO</span>}
+                  {isCompleted && <span style={{fontSize:10,padding:"1px 8px",borderRadius:10,background:"#10b98122",color:"#15803d",fontWeight:700}}>✓ ENVIADO</span>}
+                  {!isCompleted && draftForTpl && <span style={{fontSize:10,padding:"1px 8px",borderRadius:10,background:"#f59e0b22",color:"#b45309",fontWeight:700}}>RASCUNHO</span>}
                 </div>
                 {tpl.description && <div style={{fontSize:12,color:"var(--text3)",marginTop:3}}>{tpl.description}</div>}
                 <div style={{display:"flex",alignItems:"center",gap:8,marginTop:6}}>
@@ -19663,27 +19744,53 @@ function OperationalChecklists({ employee, miseChecklistTemplates, miseChecklist
                   <>
                     <div style={{display:"flex",flexDirection:"column",gap:6}}>
                       {items.map((it, idx) => {
-                        const runItem = runItems.find(ri => ri.itemId === it.id);
-                        const done = !!runItem?.done;
+                        const state = getItemState(tpl, it.id);
+                        const done = state.done;
                         return (
-                          <label key={it.id} onClick={e => isCompleted && e.preventDefault()}
-                            style={{display:"flex",alignItems:"center",gap:10,padding:"10px 14px",background:done?"#f0fdf4":"var(--bg2)",border:`1px solid ${done?"#10b98144":"var(--border)"}`,borderRadius:8,cursor:isCompleted?"default":"pointer",opacity:isCompleted?0.7:1}}>
-                            <input type="checkbox" checked={done} disabled={isCompleted}
-                              onChange={()=>!isCompleted && toggleItem(tpl, it.id)}
-                              style={{cursor:isCompleted?"default":"pointer",width:18,height:18,accentColor:"#15803d"}} />
-                            <span style={{fontSize:11,color:"var(--text3)",fontFamily:"'DM Mono',monospace",minWidth:24}}>{idx+1}.</span>
-                            <span style={{fontSize:14,color:done?"var(--text3)":"var(--text)",fontWeight:500,flex:1,textDecoration:done?"line-through":"none"}}>{it.text}</span>
-                            {done && runItem?.doneAt && <span style={{fontSize:10,color:"var(--text3)",fontFamily:"'DM Mono',monospace"}}>{new Date(runItem.doneAt).toLocaleTimeString("pt-BR",{hour:"2-digit",minute:"2-digit"})}</span>}
-                          </label>
+                          <div key={it.id} style={{background:done?"#f0fdf4":"var(--bg2)",border:`1px solid ${done?"#10b98144":"var(--border)"}`,borderRadius:8,opacity:isCompleted?0.7:1}}>
+                            <div onClick={()=>!isCompleted && updateItem(tpl, it.id, { done: !done })}
+                              style={{display:"flex",alignItems:"center",gap:10,padding:"12px 14px",cursor:isCompleted?"default":"pointer"}}>
+                              <input type="checkbox" checked={done} disabled={isCompleted}
+                                onChange={()=>{}} // controlado via onClick do div pra expandir área clicável
+                                style={{cursor:isCompleted?"default":"pointer",width:20,height:20,accentColor:"#15803d",flexShrink:0}} />
+                              <span style={{fontSize:11,color:"var(--text3)",fontFamily:"'DM Mono',monospace",minWidth:22}}>{idx+1}.</span>
+                              <span style={{fontSize:14,color:done?"var(--text3)":"var(--text)",fontWeight:500,flex:1,textDecoration:done?"line-through":"none"}}>{it.text}</span>
+                              {state.note && !state.showNote && <span title={state.note} style={{fontSize:11,padding:"2px 6px",borderRadius:4,background:"#f59e0b22",color:"#b45309",fontWeight:700}}>📝</span>}
+                              {!isCompleted && (
+                                <button onClick={e=>{ e.stopPropagation(); updateItem(tpl, it.id, { showNote: !state.showNote }); }}
+                                  style={{background:state.showNote?"#f59e0b22":"transparent",border:`1px solid ${state.showNote?"#f59e0b66":"var(--border)"}`,borderRadius:6,padding:"4px 10px",fontSize:10,fontWeight:700,color:state.showNote?"#b45309":"var(--text3)",cursor:"pointer",fontFamily:"'DM Sans',sans-serif",flexShrink:0}}>
+                                  OBS
+                                </button>
+                              )}
+                            </div>
+                            {state.showNote && !isCompleted && (
+                              <div style={{padding:"0 14px 12px",marginTop:-4}}>
+                                <textarea
+                                  value={state.note}
+                                  onChange={e=>updateItem(tpl, it.id, { note: e.target.value })}
+                                  placeholder="Observação sobre este item (opcional)"
+                                  rows={2}
+                                  style={{width:"100%",padding:"8px 10px",borderRadius:6,border:"1px solid var(--border)",background:"var(--card-bg)",fontSize:13,fontFamily:"'DM Sans',sans-serif",resize:"vertical",color:"var(--text)",boxSizing:"border-box"}}
+                                />
+                              </div>
+                            )}
+                            {isCompleted && state.note && (
+                              <div style={{padding:"0 14px 10px",fontSize:12,color:"#b45309",fontStyle:"italic"}}>
+                                📝 {state.note}
+                              </div>
+                            )}
+                          </div>
                         );
                       })}
                     </div>
                     {!isCompleted && (
-                      <div style={{marginTop:14,display:"flex",justifyContent:"flex-end"}}>
-                        <button onClick={()=>finalizeRun(tpl)}
-                          disabled={doneCount===0}
-                          style={{background:doneCount>0?"#15803d":"var(--border)",color:doneCount>0?"#fff":"var(--text3)",border:"none",borderRadius:8,padding:"8px 18px",fontSize:13,fontWeight:700,cursor:doneCount>0?"pointer":"not-allowed",fontFamily:"'DM Sans',sans-serif"}}>
-                          ✓ Finalizar checklist
+                      <div style={{marginTop:14,display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:8}}>
+                        <div style={{fontSize:11,color:"var(--text3)"}}>
+                          {doneCount === 0 ? "Marque os itens conferidos e envie ao final." : `${doneCount} de ${items.length} marcado${doneCount>1?"s":""}`}
+                        </div>
+                        <button onClick={()=>submitChecklist(tpl)}
+                          style={{background:"#15803d",color:"#fff",border:"none",borderRadius:8,padding:"10px 20px",fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:"'DM Sans',sans-serif",minHeight:44}}>
+                          📨 Enviar checklist
                         </button>
                       </div>
                     )}
