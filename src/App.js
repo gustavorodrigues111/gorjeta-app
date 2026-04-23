@@ -18034,6 +18034,7 @@ function AppShell({ pessoa, data, activeRestaurantId, setActiveRestaurantId, use
         : (isOwner ? { id: "owner_virt", name: currentUser?.name || "Owner", cpf: currentUser?.cpf, restaurantIds: [activeRestaurantId], perms: {tips:true,schedule:true}, isMaster: true } : null);
       return (
         <RestaurantPanel
+          key={`rp-${activeRestaurantId}-${effectiveTab}`}
           restaurant={activeRest}
           restaurants={data?.restaurants || []}
           employees={data?.employees || []}
@@ -18046,7 +18047,7 @@ function AppShell({ pessoa, data, activeRestaurantId, setActiveRestaurantId, use
           isOwner={isOwner}
           data={data}
           currentUser={virtualMgr || currentUser}
-          mobileOnly={false}
+          mobileOnly={isMobile}
           hideTabNav={true}
           forceTab={effectiveTab}
           realIsOwner={realIsOwner}
@@ -18071,6 +18072,7 @@ function AppShell({ pessoa, data, activeRestaurantId, setActiveRestaurantId, use
       }
       return (
         <EmployeePortal
+          key={`ep-${activeRestaurantId}-${effectiveTab}`}
           employees={data?.employees || []}
           roles={data?.roles || []}
           tips={data?.tips || []}
@@ -18245,46 +18247,57 @@ function AppShell({ pessoa, data, activeRestaurantId, setActiveRestaurantId, use
         )}
 
         {/* CONTENT */}
-        <main style={{flex:1,overflowY:"auto",padding:isMobile?"12px 14px":"20px 24px",minWidth:0}}>
-          {activeRest && (
-            <div style={{marginBottom:isMobile?8:16,padding:isMobile?"6px 12px":"8px 14px",background:"var(--bg2)",borderRadius:10,fontSize:12,color:"var(--text3)",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
-              <b style={{color:"var(--text)"}}>{activeRest.name}</b> · {activeItem?.label || "—"}
-              {/* Subtab no breadcrumb só no desktop — no mobile a SubTabBar já mostra isso logo abaixo */}
-              {!isMobile && hasSubtabs && activeItem.subtabs.length > 1 && activeSubtab && (
-                <span> · <span style={{color:"var(--text2)"}}>{activeSubtab.label}</span></span>
+        <main style={{flex:1,overflowY:"auto",padding:isMobile?"0":"20px 24px",minWidth:0,position:"relative"}}>
+          {/* Sticky header: breadcrumb + SubTabBar ficam grudados no topo ao rolar */}
+          {(activeRest || (hasSubtabs && activeItem.subtabs.length > 1)) && (
+            <div style={{
+              position:"sticky", top:0, zIndex:10,
+              background:"var(--bg)", paddingTop:isMobile?10:0,
+              paddingLeft:isMobile?14:0, paddingRight:isMobile?14:0,
+              marginBottom:isMobile?0:0,
+              borderBottom: isMobile && !(hasSubtabs && activeItem.subtabs.length > 1) ? "1px solid var(--border)" : "none",
+            }}>
+              {activeRest && (
+                <div style={{marginBottom:isMobile?8:16,padding:isMobile?"6px 12px":"8px 14px",background:"var(--bg2)",borderRadius:10,fontSize:12,color:"var(--text3)",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
+                  <b style={{color:"var(--text)"}}>{activeRest.name}</b> · {activeItem?.label || "—"}
+                  {!isMobile && hasSubtabs && activeItem.subtabs.length > 1 && activeSubtab && (
+                    <span> · <span style={{color:"var(--text2)"}}>{activeSubtab.label}</span></span>
+                  )}
+                </div>
+              )}
+              {hasSubtabs && activeItem.subtabs.length > 1 && (
+                <div style={{
+                  display:"flex", gap:2, borderBottom:"1px solid var(--border)",
+                  overflowX:"auto", flexWrap:"nowrap",
+                  WebkitOverflowScrolling:"touch",
+                }}>
+                  {activeItem.subtabs.map(sub => {
+                    const active = sub.id === activeSubtab.id;
+                    return (
+                      <button key={sub.id} onClick={()=>handleSubtabClick(sub.id)}
+                        style={{
+                          background:"none", border:"none",
+                          borderBottom:`2px solid ${active ? "var(--ac)" : "transparent"}`,
+                          padding:isMobile?"11px 16px":"9px 16px",
+                          fontSize:13, cursor:"pointer",
+                          color: active ? "var(--text)" : "var(--text3)",
+                          fontWeight: active ? 700 : 500,
+                          fontFamily:"'DM Sans',sans-serif",
+                          whiteSpace:"nowrap",
+                          marginBottom:-1,
+                          minHeight:isMobile?44:"auto",
+                        }}>
+                        {sub.label}
+                      </button>
+                    );
+                  })}
+                </div>
               )}
             </div>
           )}
-          {/* SubTabBar — só aparece quando o item tem >1 subtab */}
-          {hasSubtabs && activeItem.subtabs.length > 1 && (
-            <div style={{
-              display:"flex", gap:2, borderBottom:"1px solid var(--border)",
-              marginBottom:isMobile?14:18, overflowX:"auto", flexWrap:"nowrap",
-              WebkitOverflowScrolling:"touch",
-            }}>
-              {activeItem.subtabs.map(sub => {
-                const active = sub.id === activeSubtab.id;
-                return (
-                  <button key={sub.id} onClick={()=>handleSubtabClick(sub.id)}
-                    style={{
-                      background:"none", border:"none",
-                      borderBottom:`2px solid ${active ? "var(--ac)" : "transparent"}`,
-                      padding:isMobile?"11px 16px":"9px 16px",
-                      fontSize:isMobile?13:13, cursor:"pointer",
-                      color: active ? "var(--text)" : "var(--text3)",
-                      fontWeight: active ? 700 : 500,
-                      fontFamily:"'DM Sans',sans-serif",
-                      whiteSpace:"nowrap",
-                      marginBottom:-1,
-                      minHeight:isMobile?44:"auto",
-                    }}>
-                    {sub.label}
-                  </button>
-                );
-              })}
-            </div>
-          )}
-          {renderContent()}
+          <div style={{padding:isMobile?"12px 14px":"0", paddingTop:isMobile?14:18}}>
+            {renderContent()}
+          </div>
         </main>
       </div>
     </div>
