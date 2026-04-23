@@ -21342,13 +21342,13 @@ function TemperaturasExportModal({ sensors, readings, alerts, restaurantId, onCl
 
   function doExport() {
     if (selectedSensors.length === 0) { alert("Selecione pelo menos 1 sensor"); return; }
-    if (!window.XLSX) { alert("Biblioteca XLSX ainda carregando, tenta de novo em 2s"); return; }
+    if (!window.jspdf || !window.jspdf.jsPDF) { alert("Biblioteca PDF ainda carregando, tenta de novo em 2s"); return; }
     setGenerating(true);
     try {
       const fromMs = new Date(from + "T00:00:00").getTime();
       const toMs   = new Date(to   + "T23:59:59").getTime();
 
-      // Filtra leituras no período + dos sensores selecionados
+      // Filtra leituras no período + sensores selecionados
       const relevant = readings.filter(r => {
         if (!selected[r.sensorId]) return false;
         const t = new Date(r.timestamp).getTime();
@@ -21361,67 +21361,26 @@ function TemperaturasExportModal({ sensors, readings, alerts, restaurantId, onCl
         return;
       }
 
-      // Agrupa por (sensorId, hourKey) — hourKey = "YYYY-MM-DD HH:00"
-      // bucket.temps = [array de temps lidas naquela hora pra aquele sensor]
+      // Agrupa leituras em buckets (sensorId, hourKey=YYYY-MM-DD HH:00) → [temps]
       const buckets = {};
       relevant.forEach(r => {
         const dt = new Date(r.timestamp);
-        const hourKey = `${dt.getFullYear()}-${String(dt.getMonth()+1).padStart(2,"0")}-${String(dt.getDate()).padStart(2,"0")} ${String(dt.getHours()).padStart(2,"0")}:00`;
+        const hourKey = `${dt.getFullYear()}-${String(dt.getMonth()+1).padStart(2,"0")}-${String(dt.getDate()).padStart(2,"0")} ${String(dt.getHours()).padStart(2,"0")}`;
         const k = `${r.sensorId}|${hourKey}`;
         if (!buckets[k]) buckets[k] = [];
         if (r.temp != null) buckets[k].push(r.temp);
       });
 
-      // Coleta todos os hourKeys únicos e ordena cronologicamente
-      const hourKeys = [...new Set(Object.keys(buckets).map(k => k.split("|")[1]))].sort();
-
-      // Monta as linhas do pivot: 1ª coluna Data, 2ª Hora, depois 1 coluna por sensor
-      const headers = ["Data", "Hora", ...selectedSensors.map(s => s.name)];
-      const rowsAOA = [headers]; // array-of-arrays (facilita styling per-cell depois)
-
-      // Linha abaixo do cabeçalho: faixa config de cada sensor (referência visual)
-      const rangeRow = ["", "Faixa (°C)", ...selectedSensors.map(s => `${s.minTemp} a ${s.maxTemp}`)];
-      rowsAOA.push(rangeRow);
-
-      hourKeys.forEach(hk => {
-        const [dateStr, timeStr] = hk.split(" ");
-        const row = [dateStr.split("-").reverse().join("/"), timeStr];
-        selectedSensors.forEach(s => {
-          const temps = buckets[`${s.id}|${hk}`];
-          if (!temps || temps.length === 0) {
-            row.push(""); // sem leitura naquela hora
-          } else {
-            const avg = temps.reduce((a, v) => a + v, 0) / temps.length;
-            row.push(+avg.toFixed(1));
-          }
-        });
-        rowsAOA.push(row);
+      // Coleta dias únicos do período (com leituras)
+      const daysSet = new Set();
+      Object.keys(buckets).forEach(k => {
+        const hourKey = k.split("|")[1];
+        const dateStr = hourKey.split(" ")[0];
+        daysSet.add(dateStr);
       });
+      const days = [...daysSet].sort();
 
-      // Gera XLSX
-      const XLSX = window.XLSX;
-      const wb = XLSX.utils.book_new();
-      const ws = XLSX.utils.aoa_to_sheet(rowsAOA);
-
-      // Largura das colunas: Data 12, Hora 8, cada sensor min(nome.length, 14)
-      const cols = [{ wch: 12 }, { wch: 10 }];
-      selectedSensors.forEach(s => cols.push({ wch: Math.max(s.name.length + 2, 14) }));
-      ws['!cols'] = cols;
-
-      // Congela cabeçalho + linha de faixa + 2 primeiras colunas (Data/Hora)
-      ws['!freeze'] = { xSplit: 2, ySplit: 2 };
-      ws['!views'] = [{ state: 'frozen', xSplit: 2, ySplit: 2 }];
-
-      // Page setup: paisagem, ajustar ao papel
-      ws['!pageSetup'] = {
-        orientation: 'landscape',
-        fitToWidth: 1,
-        fitToHeight: 0, // deixa quebrar em várias páginas verticalmente se precisar
-      };
-
-      XLSX.utils.book_append_sheet(wb, ws, "Temperaturas por hora");
-
-      // Sheet 2: Resumo por sensor
+      // Resumo por sensor
       const summary = selectedSensors.map(s => {
         const sReads = relevant.filter(r => r.sensorId === s.id);
         const sAlerts = alerts.filter(a =>
@@ -21431,64 +21390,328 @@ function TemperaturasExportModal({ sensors, readings, alerts, restaurantId, onCl
         );
         const temps = sReads.map(r => r.temp).filter(t => t != null);
         return {
-          "Sensor": s.name,
-          "Localização": s.location || "",
-          "Faixa (°C)": `${s.minTemp} a ${s.maxTemp}`,
-          "Leituras no período": sReads.length,
-          "Temp média": temps.length ? +(temps.reduce((a,v)=>a+v,0)/temps.length).toFixed(1) : "",
-          "Temp mínima": temps.length ? +Math.min(...temps).toFixed(1) : "",
-          "Temp máxima": temps.length ? +Math.max(...temps).toFixed(1) : "",
-          "Alertas abertos": sAlerts.length,
-          "Tempo em alerta (h)": sAlerts.reduce((acc, a) => {
+          sensor: s,
+          readings: sReads.length,
+          tempAvg: temps.length ? temps.reduce((a,v)=>a+v,0)/temps.length : null,
+          tempMin: temps.length ? Math.min(...temps) : null,
+          tempMax: temps.length ? Math.max(...temps) : null,
+          alerts: sAlerts.length,
+          alertHours: sAlerts.reduce((acc, a) => {
             const end = a.closedAt ? new Date(a.closedAt).getTime() : Date.now();
             return acc + (end - new Date(a.openedAt).getTime()) / (1000*60*60);
-          }, 0).toFixed(1),
+          }, 0),
+          hasOutOfRange: temps.some(t => t < s.minTemp || t > s.maxTemp),
         };
       });
-      const wsSum = XLSX.utils.json_to_sheet(summary);
-      wsSum['!cols'] = Object.keys(summary[0] || {}).map(k => ({ wch: Math.max(k.length, 14) }));
-      wsSum['!pageSetup'] = { orientation: 'landscape', fitToWidth: 1 };
-      XLSX.utils.book_append_sheet(wb, wsSum, "Resumo por sensor");
 
-      // Sheet 3: Alertas detalhados (se tiver)
+      const { jsPDF } = window.jspdf;
+      const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
+
+      // Paleta
+      const ACCENT_RGB = [124, 158, 94]; // #7c9e5e (AppMise verde)
+      const TEXT_RGB = [28, 23, 16];
+      const TEXT2_RGB = [74, 63, 48];
+      const TEXT3_RGB = [154, 141, 122];
+      const BORDER_RGB = [232, 226, 216];
+      const RED_RGB = [192, 57, 43];
+      const GREEN_RGB = [45, 143, 94];
+
+      const pageW = doc.internal.pageSize.getWidth();
+      const pageH = doc.internal.pageSize.getHeight();
+
+      function fmtDate(iso) { // YYYY-MM-DD → DD/MM/YYYY
+        const [y, m, d] = iso.split("-");
+        return `${d}/${m}/${y}`;
+      }
+
+      function header(title, subtitle) {
+        // Barra verde esquerda
+        doc.setFillColor(...ACCENT_RGB);
+        doc.rect(14, 12, 3, 16, 'F');
+        // Título
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(14);
+        doc.setTextColor(...TEXT_RGB);
+        doc.text(title, 22, 20);
+        if (subtitle) {
+          doc.setFont("helvetica", "normal");
+          doc.setFontSize(9);
+          doc.setTextColor(...TEXT3_RGB);
+          doc.text(subtitle, 22, 26);
+        }
+        // Linha separadora
+        doc.setDrawColor(...BORDER_RGB);
+        doc.setLineWidth(0.3);
+        doc.line(14, 32, pageW - 14, 32);
+      }
+
+      function footer(pageNum, totalPages) {
+        doc.setFont("helvetica", "normal");
+        doc.setFontSize(8);
+        doc.setTextColor(...TEXT3_RGB);
+        const footerText = `AppTip · Relatório gerado em ${new Date().toLocaleString("pt-BR")} · Página ${pageNum}${totalPages?` de ${totalPages}`:""}`;
+        doc.text(footerText, pageW / 2, pageH - 8, { align: "center" });
+      }
+
+      // ═══ PÁGINA 1: CAPA / RESUMO ═══
+      doc.setFillColor(250, 248, 244); // bg claro
+      doc.rect(0, 0, pageW, pageH, 'F');
+
+      // Título grande
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(28);
+      doc.setTextColor(...TEXT_RGB);
+      doc.text("Relatório de Temperaturas", pageW / 2, 45, { align: "center" });
+
+      // Subtítulo
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(12);
+      doc.setTextColor(...TEXT2_RGB);
+      doc.text(`Período: ${fmtDate(from)} a ${fmtDate(to)}`, pageW / 2, 55, { align: "center" });
+
+      // Caixa de metadata
+      const boxY = 70;
+      doc.setDrawColor(...BORDER_RGB);
+      doc.setLineWidth(0.5);
+      doc.setFillColor(255, 255, 255);
+      doc.roundedRect(30, boxY, pageW - 60, 60, 3, 3, 'FD');
+
+      doc.setFontSize(10);
+      doc.setTextColor(...TEXT3_RGB);
+      doc.setFont("helvetica", "bold");
+      const mdX1 = 40; const mdX2 = pageW / 2 + 10;
+      doc.text("SENSORES MONITORADOS", mdX1, boxY + 10);
+      doc.text("TOTAL DE LEITURAS", mdX2, boxY + 10);
+
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(22);
+      doc.setTextColor(...TEXT_RGB);
+      doc.text(String(selectedSensors.length), mdX1, boxY + 22);
+      doc.text(String(relevant.length), mdX2, boxY + 22);
+
+      const totalAlerts = summary.reduce((acc, s) => acc + s.alerts, 0);
+      const totalAlertHours = summary.reduce((acc, s) => acc + s.alertHours, 0);
+
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(10);
+      doc.setTextColor(...TEXT3_RGB);
+      doc.text("ALERTAS NO PERÍODO", mdX1, boxY + 38);
+      doc.text("TEMPO EM ALERTA", mdX2, boxY + 38);
+
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(22);
+      doc.setTextColor(...(totalAlerts > 0 ? RED_RGB : GREEN_RGB));
+      doc.text(String(totalAlerts), mdX1, boxY + 50);
+      doc.setTextColor(...(totalAlertHours > 0 ? RED_RGB : GREEN_RGB));
+      doc.text(`${totalAlertHours.toFixed(1)}h`, mdX2, boxY + 50);
+
+      // Info
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(9);
+      doc.setTextColor(...TEXT3_RGB);
+      doc.text(
+        "Leituras capturadas pelo AppTip a partir dos sensores Tuya/SmartLife. Cada célula de temperatura representa a média das leituras daquela hora. Faixas de referência configuradas por sensor são destacadas em cada seção.",
+        pageW / 2,
+        150,
+        { align: "center", maxWidth: pageW - 60 }
+      );
+
+      footer(1);
+
+      // ═══ PÁGINA 2: RESUMO POR SENSOR ═══
+      doc.addPage();
+      header("Resumo por sensor", `${fmtDate(from)} a ${fmtDate(to)}`);
+
+      doc.autoTable({
+        startY: 38,
+        head: [["Sensor", "Localização", "Faixa (°C)", "Leituras", "Mín.", "Média", "Máx.", "Alertas", "Tempo alerta"]],
+        body: summary.map(s => [
+          s.sensor.name,
+          s.sensor.location || "—",
+          `${s.sensor.minTemp}° a ${s.sensor.maxTemp}°`,
+          s.readings,
+          s.tempMin != null ? `${s.tempMin.toFixed(1)}°` : "—",
+          s.tempAvg != null ? `${s.tempAvg.toFixed(1)}°` : "—",
+          s.tempMax != null ? `${s.tempMax.toFixed(1)}°` : "—",
+          s.alerts,
+          `${s.alertHours.toFixed(1)}h`,
+        ]),
+        theme: 'grid',
+        styles: { fontSize: 9, cellPadding: 2.5, textColor: TEXT_RGB, lineColor: BORDER_RGB, lineWidth: 0.2 },
+        headStyles: { fillColor: ACCENT_RGB, textColor: [255,255,255], fontStyle: 'bold', fontSize: 9 },
+        alternateRowStyles: { fillColor: [250, 248, 244] },
+        columnStyles: {
+          0: { cellWidth: 45, fontStyle: 'bold' },
+          1: { cellWidth: 40 },
+          2: { cellWidth: 28, halign: 'center' },
+          3: { cellWidth: 20, halign: 'right' },
+          4: { cellWidth: 20, halign: 'right' },
+          5: { cellWidth: 20, halign: 'right' },
+          6: { cellWidth: 20, halign: 'right' },
+          7: { cellWidth: 22, halign: 'right' },
+          8: { cellWidth: 25, halign: 'right' },
+        },
+        didParseCell: function(data) {
+          // Colore linha toda em amarelo se o sensor teve fora-da-faixa
+          if (data.section === 'body') {
+            const s = summary[data.row.index];
+            if (s && s.hasOutOfRange) {
+              data.cell.styles.fillColor = [255, 243, 224]; // amarelo claro
+            }
+            if (data.column.index === 7 && s && s.alerts > 0) {
+              data.cell.styles.textColor = RED_RGB;
+              data.cell.styles.fontStyle = 'bold';
+            }
+          }
+        },
+      });
+
+      footer(2);
+
+      // ═══ PÁGINAS 3+: PIVOT POR DIA (1 dia por página) ═══
+      // Se muitos sensores (>12), divide em grupos de 12 por página
+
+      const sensorsPerPage = 12;
+      const sensorGroups = [];
+      for (let i = 0; i < selectedSensors.length; i += sensorsPerPage) {
+        sensorGroups.push(selectedSensors.slice(i, i + sensorsPerPage));
+      }
+
+      let pageCount = 2;
+      days.forEach(day => {
+        sensorGroups.forEach((group, groupIdx) => {
+          doc.addPage();
+          pageCount++;
+
+          const groupLabel = sensorGroups.length > 1 ? ` (grupo ${groupIdx + 1}/${sensorGroups.length})` : '';
+          header(`${fmtDate(day)}`, `Leituras hora-a-hora · ${group.length} sensor${group.length>1?'es':''}${groupLabel}`);
+
+          // Monta body: 24 linhas (uma por hora)
+          const body = [];
+          for (let h = 0; h < 24; h++) {
+            const hh = String(h).padStart(2, "0");
+            const row = [`${hh}:00`];
+            group.forEach(s => {
+              const temps = buckets[`${s.id}|${day} ${hh}`];
+              if (!temps || temps.length === 0) {
+                row.push("—");
+              } else {
+                const avg = temps.reduce((a, v) => a + v, 0) / temps.length;
+                row.push(`${avg.toFixed(1)}`);
+              }
+            });
+            body.push(row);
+          }
+
+          // Cabeçalho: 2 linhas (nome do sensor + faixa de referência)
+          const head = [
+            ["Hora", ...group.map(s => s.name)],
+            ["", ...group.map(s => `${s.minTemp}° a ${s.maxTemp}°`)],
+          ];
+
+          doc.autoTable({
+            startY: 38,
+            head,
+            body,
+            theme: 'grid',
+            styles: { fontSize: 8, cellPadding: 1.5, textColor: TEXT_RGB, lineColor: BORDER_RGB, lineWidth: 0.15, halign: 'center' },
+            headStyles: { fillColor: ACCENT_RGB, textColor: [255,255,255], fontStyle: 'bold', fontSize: 8, halign: 'center' },
+            alternateRowStyles: { fillColor: [250, 248, 244] },
+            columnStyles: { 0: { fontStyle: 'bold', cellWidth: 18, fillColor: [242, 239, 232] } },
+            didParseCell: function(data) {
+              // Linha 2 do head = faixa — renderiza em cinza mais leve
+              if (data.section === 'head' && data.row.index === 1) {
+                data.cell.styles.fillColor = [242, 239, 232];
+                data.cell.styles.textColor = TEXT3_RGB;
+                data.cell.styles.fontStyle = 'normal';
+                data.cell.styles.fontSize = 7;
+              }
+              // Colore células fora da faixa
+              if (data.section === 'body' && data.column.index > 0) {
+                const sensor = group[data.column.index - 1];
+                const value = data.cell.raw;
+                if (value !== "—") {
+                  const t = parseFloat(value);
+                  if (!isNaN(t) && (t < sensor.minTemp || t > sensor.maxTemp)) {
+                    data.cell.styles.fillColor = [252, 232, 230]; // vermelho claro
+                    data.cell.styles.textColor = RED_RGB;
+                    data.cell.styles.fontStyle = 'bold';
+                  }
+                }
+              }
+            },
+          });
+
+          footer(pageCount);
+        });
+      });
+
+      // ═══ ÚLTIMAS PÁGINAS: ALERTAS DETALHADOS ═══
       const alertsInPeriod = alerts.filter(a =>
         selectedSensors.some(s => s.id === a.sensorId) &&
         new Date(a.openedAt).getTime() >= fromMs &&
         new Date(a.openedAt).getTime() <= toMs
       ).sort((a,b) => new Date(a.openedAt) - new Date(b.openedAt));
+
       if (alertsInPeriod.length > 0) {
-        const alRows = alertsInPeriod.map(a => {
-          const sensor = selectedSensors.find(s => s.id === a.sensorId);
-          const openDt = new Date(a.openedAt);
-          const closeDt = a.closedAt ? new Date(a.closedAt) : null;
-          const durMin = ((closeDt ? closeDt.getTime() : Date.now()) - openDt.getTime()) / 60000;
-          return {
-            "Sensor": sensor?.name || "(removido)",
-            "Abertura (data)": openDt.toLocaleDateString("pt-BR"),
-            "Abertura (hora)": openDt.toTimeString().slice(0,5),
-            "Temp inicial (°C)": a.firstTemp,
-            "Temp pico (°C)": a.peakTemp,
-            "Fechamento": closeDt ? closeDt.toLocaleString("pt-BR") : "(ainda aberto)",
-            "Duração (min)": Math.round(durMin),
-            "Reconhecido por": a.acknowledgedBy || "",
-            "Reconhecido em": a.acknowledgedAt ? new Date(a.acknowledgedAt).toLocaleString("pt-BR") : "",
-            "Nota": a.note || "",
-          };
+        doc.addPage();
+        pageCount++;
+        header("Alertas detalhados", `${alertsInPeriod.length} alerta${alertsInPeriod.length>1?'s':''} no período`);
+
+        doc.autoTable({
+          startY: 38,
+          head: [["Sensor", "Abertura", "Temp. pico", "Fechamento", "Duração", "Reconhecido por", "Observação"]],
+          body: alertsInPeriod.map(a => {
+            const sensor = selectedSensors.find(s => s.id === a.sensorId);
+            const openDt = new Date(a.openedAt);
+            const closeDt = a.closedAt ? new Date(a.closedAt) : null;
+            const durMin = ((closeDt ? closeDt.getTime() : Date.now()) - openDt.getTime()) / 60000;
+            return [
+              sensor?.name || "(removido)",
+              openDt.toLocaleString("pt-BR"),
+              `${a.peakTemp?.toFixed(1) || '?'}°`,
+              closeDt ? closeDt.toLocaleString("pt-BR") : "(aberto)",
+              durMin >= 60 ? `${Math.floor(durMin/60)}h ${Math.round(durMin%60)}min` : `${Math.round(durMin)}min`,
+              a.acknowledgedBy || "—",
+              a.note || "",
+            ];
+          }),
+          theme: 'grid',
+          styles: { fontSize: 9, cellPadding: 2.5, textColor: TEXT_RGB, lineColor: BORDER_RGB, lineWidth: 0.2 },
+          headStyles: { fillColor: RED_RGB, textColor: [255,255,255], fontStyle: 'bold' },
+          alternateRowStyles: { fillColor: [252, 232, 230] },
+          columnStyles: {
+            0: { cellWidth: 45, fontStyle: 'bold' },
+            1: { cellWidth: 38 },
+            2: { cellWidth: 22, halign: 'right' },
+            3: { cellWidth: 38 },
+            4: { cellWidth: 22, halign: 'right' },
+            5: { cellWidth: 35 },
+            6: { cellWidth: 'auto' },
+          },
         });
-        const wsAl = XLSX.utils.json_to_sheet(alRows);
-        wsAl['!cols'] = Object.keys(alRows[0]).map(k => ({ wch: Math.max(k.length, 14) }));
-        wsAl['!pageSetup'] = { orientation: 'landscape', fitToWidth: 1 };
-        XLSX.utils.book_append_sheet(wb, wsAl, "Alertas");
+
+        footer(pageCount);
+      }
+
+      // Re-render footers com total correto
+      const totalPages = doc.internal.getNumberOfPages();
+      for (let i = 1; i <= totalPages; i++) {
+        doc.setPage(i);
+        // Sobrescreve footer anterior com retângulo branco
+        doc.setFillColor(250, 248, 244);
+        doc.rect(0, pageH - 12, pageW, 12, 'F');
+        footer(i, totalPages);
       }
 
       // Download
-      const fname = `temperaturas_${from}_a_${to}.xlsx`;
-      XLSX.writeFile(wb, fname);
+      const fname = `temperaturas_${from}_a_${to}.pdf`;
+      doc.save(fname);
       setGenerating(false);
       onClose();
     } catch (e) {
       console.error(e);
-      alert("Erro ao gerar Excel: " + e.message);
+      alert("Erro ao gerar PDF: " + e.message);
       setGenerating(false);
     }
   }
