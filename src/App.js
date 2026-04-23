@@ -25488,7 +25488,19 @@ export default function App() {
     if (keys[field]) {
       const ok = await save(keys[field], resolvedValue);
       if (!ok) {
-        setToast("Erro ao salvar — tente novamente");
+        // Alerta em vez de toast pra garantir visibilidade — o save falhou e a mudança NÃO persiste
+        // mesmo que a tela esteja mostrando como se tivesse dado certo.
+        const msg = `❌ Falha ao salvar no servidor (${field}).\n\n`
+          + `O que você fez aparece na tela localmente, mas NÃO foi gravado. Após um refresh, vai sumir.\n\n`
+          + `Possíveis causas:\n`
+          + `• Internet instável — tente de novo\n`
+          + `• Documento excedeu 1 MB (muitos registros acumulados)\n`
+          + `• Bloqueio de segurança (App Check / Firestore rules)\n\n`
+          + `Abra o Console do navegador (⌘⌥I) e procure por "save error" pra ver a causa real.`;
+        setToast(`❌ Falha ao salvar ${field} — ver alerta`);
+        if (typeof window !== "undefined") {
+          try { window.alert(msg); } catch (_) {}
+        }
         return;
       }
     }
