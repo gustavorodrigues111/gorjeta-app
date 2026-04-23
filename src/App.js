@@ -21311,7 +21311,7 @@ function OperationalTemperaturas({ restaurantId, tempSensors, tempReadings, temp
   );
 }
 
-// Modal de exportação — agrega leituras por hora e gera XLSX
+// Modal de exportação — gera XLSX em formato pivot (horário × sensor) em paisagem
 function TemperaturasExportModal({ sensors, readings, alerts, restaurantId, onClose, ac, isMobile }) {
   // Default: últimos 7 dias
   const today = new Date();
@@ -21325,7 +21325,6 @@ function TemperaturasExportModal({ sensors, readings, alerts, restaurantId, onCl
     sensors.forEach(sn => s[sn.id] = true);
     return s;
   });
-  const [agg, setAgg] = useState("hour"); // hour | raw
   const [generating, setGenerating] = useState(false);
 
   const selectedSensors = sensors.filter(s => selected[s.id]);
@@ -21356,89 +21355,73 @@ function TemperaturasExportModal({ sensors, readings, alerts, restaurantId, onCl
         return t >= fromMs && t <= toMs;
       });
 
-      const rows = [];
-      if (agg === "hour") {
-        // Agrupa por (sensorId, YYYY-MM-DD HH:00)
-        const buckets = {};
-        relevant.forEach(r => {
-          const dt = new Date(r.timestamp);
-          const hourKey = `${dt.getFullYear()}-${String(dt.getMonth()+1).padStart(2,"0")}-${String(dt.getDate()).padStart(2,"0")} ${String(dt.getHours()).padStart(2,"0")}:00`;
-          const k = `${r.sensorId}|${hourKey}`;
-          if (!buckets[k]) buckets[k] = { sensorId:r.sensorId, hourKey, temps:[], hums:[], bats:[], onlineCount:0, total:0 };
-          if (r.temp != null) buckets[k].temps.push(r.temp);
-          if (r.humidity != null) buckets[k].hums.push(r.humidity);
-          if (r.battery != null) buckets[k].bats.push(r.battery);
-          if (r.online) buckets[k].onlineCount++;
-          buckets[k].total++;
-        });
-        const sorted = Object.values(buckets).sort((a,b) => {
-          if (a.hourKey !== b.hourKey) return a.hourKey.localeCompare(b.hourKey);
-          return a.sensorId.localeCompare(b.sensorId);
-        });
-        sorted.forEach(b => {
-          const sensor = sensors.find(s => s.id === b.sensorId);
-          if (!sensor) return;
-          const avg = b.temps.length > 0 ? b.temps.reduce((a,v) => a+v, 0) / b.temps.length : null;
-          const min = b.temps.length > 0 ? Math.min(...b.temps) : null;
-          const max = b.temps.length > 0 ? Math.max(...b.temps) : null;
-          const outOfRange = b.temps.some(t => t < sensor.minTemp || t > sensor.maxTemp);
-          const [dateStr, timeStr] = b.hourKey.split(" ");
-          rows.push({
-            "Data": dateStr.split("-").reverse().join("/"),
-            "Hora": timeStr,
-            "Sensor": sensor.name,
-            "Localização": sensor.location || "",
-            "Faixa config (°C)": `${sensor.minTemp} / ${sensor.maxTemp}`,
-            "Temp média (°C)": avg != null ? +avg.toFixed(1) : "",
-            "Temp min (°C)": min != null ? +min.toFixed(1) : "",
-            "Temp max (°C)": max != null ? +max.toFixed(1) : "",
-            "Umidade média (%)": b.hums.length > 0 ? +(b.hums.reduce((a,v)=>a+v,0)/b.hums.length).toFixed(0) : "",
-            "Bateria (%)": b.bats.length > 0 ? b.bats[b.bats.length-1] : "",
-            "Status": outOfRange ? "⚠️ FORA DA FAIXA" : "✓ OK",
-            "Nº leituras na hora": b.total,
-          });
-        });
-      } else {
-        // raw: todas as leituras
-        const sorted = [...relevant].sort((a,b) => new Date(a.timestamp) - new Date(b.timestamp));
-        sorted.forEach(r => {
-          const sensor = sensors.find(s => s.id === r.sensorId);
-          if (!sensor) return;
-          const dt = new Date(r.timestamp);
-          const outOfRange = r.temp != null && (r.temp < sensor.minTemp || r.temp > sensor.maxTemp);
-          rows.push({
-            "Data": dt.toLocaleDateString("pt-BR"),
-            "Hora": dt.toTimeString().slice(0,8),
-            "Sensor": sensor.name,
-            "Localização": sensor.location || "",
-            "Faixa config (°C)": `${sensor.minTemp} / ${sensor.maxTemp}`,
-            "Temp (°C)": r.temp != null ? +r.temp.toFixed(1) : "",
-            "Umidade (%)": r.humidity ?? "",
-            "Bateria (%)": r.battery ?? "",
-            "Online": r.online ? "Sim" : "Não",
-            "Status": outOfRange ? "⚠️ FORA DA FAIXA" : "✓ OK",
-          });
-        });
-      }
-
-      if (rows.length === 0) {
+      if (relevant.length === 0) {
         alert("Nenhuma leitura encontrada no período selecionado.");
         setGenerating(false);
         return;
       }
 
+      // Agrupa por (sensorId, hourKey) — hourKey = "YYYY-MM-DD HH:00"
+      // bucket.temps = [array de temps lidas naquela hora pra aquele sensor]
+      const buckets = {};
+      relevant.forEach(r => {
+        const dt = new Date(r.timestamp);
+        const hourKey = `${dt.getFullYear()}-${String(dt.getMonth()+1).padStart(2,"0")}-${String(dt.getDate()).padStart(2,"0")} ${String(dt.getHours()).padStart(2,"0")}:00`;
+        const k = `${r.sensorId}|${hourKey}`;
+        if (!buckets[k]) buckets[k] = [];
+        if (r.temp != null) buckets[k].push(r.temp);
+      });
+
+      // Coleta todos os hourKeys únicos e ordena cronologicamente
+      const hourKeys = [...new Set(Object.keys(buckets).map(k => k.split("|")[1]))].sort();
+
+      // Monta as linhas do pivot: 1ª coluna Data, 2ª Hora, depois 1 coluna por sensor
+      const headers = ["Data", "Hora", ...selectedSensors.map(s => s.name)];
+      const rowsAOA = [headers]; // array-of-arrays (facilita styling per-cell depois)
+
+      // Linha abaixo do cabeçalho: faixa config de cada sensor (referência visual)
+      const rangeRow = ["", "Faixa (°C)", ...selectedSensors.map(s => `${s.minTemp} a ${s.maxTemp}`)];
+      rowsAOA.push(rangeRow);
+
+      hourKeys.forEach(hk => {
+        const [dateStr, timeStr] = hk.split(" ");
+        const row = [dateStr.split("-").reverse().join("/"), timeStr];
+        selectedSensors.forEach(s => {
+          const temps = buckets[`${s.id}|${hk}`];
+          if (!temps || temps.length === 0) {
+            row.push(""); // sem leitura naquela hora
+          } else {
+            const avg = temps.reduce((a, v) => a + v, 0) / temps.length;
+            row.push(+avg.toFixed(1));
+          }
+        });
+        rowsAOA.push(row);
+      });
+
       // Gera XLSX
       const XLSX = window.XLSX;
       const wb = XLSX.utils.book_new();
-      const ws = XLSX.utils.json_to_sheet(rows);
+      const ws = XLSX.utils.aoa_to_sheet(rowsAOA);
 
-      // Auto-largura grosseira
-      const colWidths = Object.keys(rows[0]).map(k => ({ wch: Math.max(k.length, 12) }));
-      ws['!cols'] = colWidths;
+      // Largura das colunas: Data 12, Hora 8, cada sensor min(nome.length, 14)
+      const cols = [{ wch: 12 }, { wch: 10 }];
+      selectedSensors.forEach(s => cols.push({ wch: Math.max(s.name.length + 2, 14) }));
+      ws['!cols'] = cols;
 
-      XLSX.utils.book_append_sheet(wb, ws, "Leituras");
+      // Congela cabeçalho + linha de faixa + 2 primeiras colunas (Data/Hora)
+      ws['!freeze'] = { xSplit: 2, ySplit: 2 };
+      ws['!views'] = [{ state: 'frozen', xSplit: 2, ySplit: 2 }];
 
-      // Aba de resumo: config dos sensores + contagem de alertas
+      // Page setup: paisagem, ajustar ao papel
+      ws['!pageSetup'] = {
+        orientation: 'landscape',
+        fitToWidth: 1,
+        fitToHeight: 0, // deixa quebrar em várias páginas verticalmente se precisar
+      };
+
+      XLSX.utils.book_append_sheet(wb, ws, "Temperaturas por hora");
+
+      // Sheet 2: Resumo por sensor
       const summary = selectedSensors.map(s => {
         const sReads = relevant.filter(r => r.sensorId === s.id);
         const sAlerts = alerts.filter(a =>
@@ -21446,13 +21429,17 @@ function TemperaturasExportModal({ sensors, readings, alerts, restaurantId, onCl
           new Date(a.openedAt).getTime() >= fromMs &&
           new Date(a.openedAt).getTime() <= toMs
         );
+        const temps = sReads.map(r => r.temp).filter(t => t != null);
         return {
           "Sensor": s.name,
           "Localização": s.location || "",
           "Faixa (°C)": `${s.minTemp} a ${s.maxTemp}`,
           "Leituras no período": sReads.length,
+          "Temp média": temps.length ? +(temps.reduce((a,v)=>a+v,0)/temps.length).toFixed(1) : "",
+          "Temp mínima": temps.length ? +Math.min(...temps).toFixed(1) : "",
+          "Temp máxima": temps.length ? +Math.max(...temps).toFixed(1) : "",
           "Alertas abertos": sAlerts.length,
-          "Tempo alerta (h)": sAlerts.reduce((acc, a) => {
+          "Tempo em alerta (h)": sAlerts.reduce((acc, a) => {
             const end = a.closedAt ? new Date(a.closedAt).getTime() : Date.now();
             return acc + (end - new Date(a.openedAt).getTime()) / (1000*60*60);
           }, 0).toFixed(1),
@@ -21460,10 +21447,42 @@ function TemperaturasExportModal({ sensors, readings, alerts, restaurantId, onCl
       });
       const wsSum = XLSX.utils.json_to_sheet(summary);
       wsSum['!cols'] = Object.keys(summary[0] || {}).map(k => ({ wch: Math.max(k.length, 14) }));
+      wsSum['!pageSetup'] = { orientation: 'landscape', fitToWidth: 1 };
       XLSX.utils.book_append_sheet(wb, wsSum, "Resumo por sensor");
 
+      // Sheet 3: Alertas detalhados (se tiver)
+      const alertsInPeriod = alerts.filter(a =>
+        selectedSensors.some(s => s.id === a.sensorId) &&
+        new Date(a.openedAt).getTime() >= fromMs &&
+        new Date(a.openedAt).getTime() <= toMs
+      ).sort((a,b) => new Date(a.openedAt) - new Date(b.openedAt));
+      if (alertsInPeriod.length > 0) {
+        const alRows = alertsInPeriod.map(a => {
+          const sensor = selectedSensors.find(s => s.id === a.sensorId);
+          const openDt = new Date(a.openedAt);
+          const closeDt = a.closedAt ? new Date(a.closedAt) : null;
+          const durMin = ((closeDt ? closeDt.getTime() : Date.now()) - openDt.getTime()) / 60000;
+          return {
+            "Sensor": sensor?.name || "(removido)",
+            "Abertura (data)": openDt.toLocaleDateString("pt-BR"),
+            "Abertura (hora)": openDt.toTimeString().slice(0,5),
+            "Temp inicial (°C)": a.firstTemp,
+            "Temp pico (°C)": a.peakTemp,
+            "Fechamento": closeDt ? closeDt.toLocaleString("pt-BR") : "(ainda aberto)",
+            "Duração (min)": Math.round(durMin),
+            "Reconhecido por": a.acknowledgedBy || "",
+            "Reconhecido em": a.acknowledgedAt ? new Date(a.acknowledgedAt).toLocaleString("pt-BR") : "",
+            "Nota": a.note || "",
+          };
+        });
+        const wsAl = XLSX.utils.json_to_sheet(alRows);
+        wsAl['!cols'] = Object.keys(alRows[0]).map(k => ({ wch: Math.max(k.length, 14) }));
+        wsAl['!pageSetup'] = { orientation: 'landscape', fitToWidth: 1 };
+        XLSX.utils.book_append_sheet(wb, wsAl, "Alertas");
+      }
+
       // Download
-      const fname = `temperaturas_${from}_a_${to}_${agg}.xlsx`;
+      const fname = `temperaturas_${from}_a_${to}.xlsx`;
       XLSX.writeFile(wb, fname);
       setGenerating(false);
       onClose();
@@ -21496,20 +21515,13 @@ function TemperaturasExportModal({ sensors, readings, alerts, restaurantId, onCl
           </div>
         </div>
 
-        {/* Agregação */}
-        <div style={{marginBottom:14}}>
-          <label style={{fontSize:11,color:"var(--text3)",fontWeight:600,display:"block",marginBottom:6}}>Agregação</label>
-          <div style={{display:"flex",gap:6}}>
-            {[["hour","1 por hora (média)"],["raw","Todas as leituras"]].map(([v,l]) => (
-              <button key={v} onClick={()=>setAgg(v)}
-                style={{flex:1,padding:"10px",borderRadius:8,border:`1px solid ${agg===v?ac:"var(--border)"}`,background:agg===v?ac+"15":"transparent",color:agg===v?ac:"var(--text2)",fontSize:12,fontWeight:agg===v?700:500,cursor:"pointer",fontFamily:"'DM Sans',sans-serif",minHeight:isMobile?44:"auto"}}>
-                {l}
-              </button>
-            ))}
-          </div>
-          <div style={{fontSize:10,color:"var(--text3)",marginTop:6,lineHeight:1.4}}>
-            "1 por hora" gera 1 linha por sensor por hora, com média/min/max daquela hora.
-            Ideal pra auditoria ANVISA. "Todas" inclui todas as leituras capturadas (a cada ~5min).
+        {/* Info sobre formato */}
+        <div style={{marginBottom:14,padding:"10px 12px",background:ac+"10",borderRadius:8,border:`1px solid ${ac}33`}}>
+          <div style={{fontSize:12,color:"var(--text)",fontWeight:600,marginBottom:4}}>📊 Formato: pivot horário × sensor</div>
+          <div style={{fontSize:11,color:"var(--text2)",lineHeight:1.5}}>
+            Cada linha = 1 hora. Cada coluna = 1 sensor. Célula = média das leituras daquela hora.
+            Orientação paisagem, otimizado pra muitos sensores em visão única (ANVISA).
+            Abas: "Temperaturas por hora", "Resumo por sensor" e "Alertas" (se houver).
           </div>
         </div>
 
