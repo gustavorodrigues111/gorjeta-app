@@ -11191,7 +11191,19 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
               <PillBar options={["Todos", ...AREAS]} value={schedArea} onChange={setSchedArea}/>
             </div>
             <div style={{display:"flex",gap:mobileOnly?4:8,flexWrap:"wrap",alignItems:"center",justifyContent:"space-between",marginBottom:12}}>
-              <div style={{display:"flex",gap:mobileOnly?4:8,flexWrap:"wrap"}}>
+              <details open={!mobileOnly} style={{flex:mobileOnly?"1 1 100%":"0 1 auto",minWidth:0}}>
+                <summary style={{
+                  display: mobileOnly ? "flex" : "none",
+                  alignItems:"center", gap:8, padding:"10px 14px",
+                  background:"var(--bg2)", borderRadius:10,
+                  fontSize:13, color:"var(--text)", fontWeight:600,
+                  minHeight:44, border:"1px solid var(--border)",
+                  cursor:"pointer", listStyle:"none", marginBottom:8,
+                }}>
+                  <span>⚙️ Ações da escala</span>
+                  <span style={{marginLeft:"auto",fontSize:10,color:"var(--text3)"}}>tocar pra expandir</span>
+                </summary>
+                <div style={{display:"flex",gap:mobileOnly?4:8,flexWrap:"wrap"}}>
 
                 {/* Pre-fill contract days off */}
                 <button onClick={()=>{
@@ -11364,6 +11376,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                   </button>
                 )}
               </div>
+              </details>
 
               {/* Month close confirmation modal — Phase 4 */}
               {showCloseConfirm && (
@@ -11601,17 +11614,36 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
               </button>}
             </div>
 
-            {/* Legend */}
-            <div style={{display:"flex",gap:mobileOnly?0:8,flexWrap:mobileOnly?"nowrap":"wrap",justifyContent:mobileOnly?"space-between":"flex-start",marginBottom:12}}>
-              {[["var(--green)","T","Trabalho"],["var(--red)","F","Folga"],["#06b6d4","FL","Freela"],["#3b82f6","FC","Folga Comp."],["#0ea5e9","TC","Trab. Comp."],["#8b5cf6","Fér","Férias"],["#f59e0b","FJ","F.Just."],["var(--red)","FI","F.Inj."]].map(([c,s,l])=>(
-                <div key={s} style={{display:"flex",alignItems:"center",gap:mobileOnly?1:3,flexShrink:0}}>
-                  <div style={{width:mobileOnly?14:20,height:mobileOnly?14:16,borderRadius:3,background:c+"33",border:`1px solid ${c}`,display:"flex",alignItems:"center",justifyContent:"center"}}>
-                    <span style={{color:c,fontSize:mobileOnly?7:9,fontWeight:700}}>{s}</span>
-                  </div>
-                  {!mobileOnly && <span style={{color:"var(--text3)",fontSize:10,fontFamily:"'DM Mono',monospace"}}>{l}</span>}
+            {/* Legend — no mobile vira expandable com labels; no desktop exibe inline */}
+            {mobileOnly ? (
+              <details style={{marginBottom:12}}>
+                <summary style={{cursor:"pointer",listStyle:"none",display:"flex",alignItems:"center",gap:8,padding:"6px 10px",background:"var(--bg2)",borderRadius:8,fontSize:11,color:"var(--text2)",fontWeight:600}}>
+                  <span>ℹ️ Legenda dos status</span>
+                  <span style={{marginLeft:"auto",fontSize:10,color:"var(--text3)"}}>tocar pra ver</span>
+                </summary>
+                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:6,marginTop:8,padding:"0 4px"}}>
+                  {[["var(--green)","T","Trabalho"],["var(--red)","F","Folga"],["#06b6d4","FL","Freela"],["#3b82f6","FC","Folga Comp."],["#0ea5e9","TC","Trab. Comp."],["#8b5cf6","Fér","Férias"],["#f59e0b","FJ","F.Just."],["var(--red)","FI","F.Inj."]].map(([c,s,l])=>(
+                    <div key={s} style={{display:"flex",alignItems:"center",gap:6}}>
+                      <div style={{width:18,height:16,borderRadius:3,background:c+"33",border:`1px solid ${c}`,display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>
+                        <span style={{color:c,fontSize:8,fontWeight:700}}>{s}</span>
+                      </div>
+                      <span style={{color:"var(--text2)",fontSize:11,fontFamily:"'DM Mono',monospace"}}>{l}</span>
+                    </div>
+                  ))}
                 </div>
-              ))}
-            </div>
+              </details>
+            ) : (
+              <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:12}}>
+                {[["var(--green)","T","Trabalho"],["var(--red)","F","Folga"],["#06b6d4","FL","Freela"],["#3b82f6","FC","Folga Comp."],["#0ea5e9","TC","Trab. Comp."],["#8b5cf6","Fér","Férias"],["#f59e0b","FJ","F.Just."],["var(--red)","FI","F.Inj."]].map(([c,s,l])=>(
+                  <div key={s} style={{display:"flex",alignItems:"center",gap:3,flexShrink:0}}>
+                    <div style={{width:20,height:16,borderRadius:3,background:c+"33",border:`1px solid ${c}`,display:"flex",alignItems:"center",justifyContent:"center"}}>
+                      <span style={{color:c,fontSize:9,fontWeight:700}}>{s}</span>
+                    </div>
+                    <span style={{color:"var(--text3)",fontSize:10,fontFamily:"'DM Mono',monospace"}}>{l}</span>
+                  </div>
+                ))}
+              </div>
+            )}
 
             {/* ═══ Importar folha de ponto ═══ */}
             {showPontoImport && (
@@ -19037,6 +19069,7 @@ function OperationalGorjetas({ employee, data }) {
   const [month, setMonth] = useState(now.getMonth());
   const mk = monthKey(year, month);
   const ac = "var(--ac)";
+  const isMobile = useMobile();
 
   const tips = (data?.tips || []).filter(t => t.restaurantId === restaurantId && t.monthKey === mk);
   const employees = (data?.employees || []).filter(e => e.restaurantId === restaurantId);
@@ -19140,22 +19173,22 @@ function OperationalGorjetas({ employee, data }) {
           </div>
         ) : (
           <div style={{overflowX:"auto"}}>
-            <table style={{width:"100%",borderCollapse:"collapse",fontSize:13}}>
+            <table style={{width:"100%",borderCollapse:"collapse",fontSize:isMobile?12:13}}>
               <thead>
                 <tr style={{borderBottom:"1px solid var(--border)"}}>
-                  <th style={{padding:"8px 14px",textAlign:"left",fontSize:10,color:"var(--text3)",fontWeight:700,textTransform:"uppercase",letterSpacing:0.4}}>Dia</th>
-                  <th style={{padding:"8px 12px",textAlign:"right",fontSize:10,color:"var(--text3)",fontWeight:700,textTransform:"uppercase",letterSpacing:0.4}}>Bruto</th>
-                  <th style={{padding:"8px 12px",textAlign:"right",fontSize:10,color:"var(--text3)",fontWeight:700,textTransform:"uppercase",letterSpacing:0.4}}>Líquido</th>
-                  <th style={{padding:"8px 12px",textAlign:"right",fontSize:10,color:"var(--text3)",fontWeight:700,textTransform:"uppercase",letterSpacing:0.4}}>Colab.</th>
+                  <th style={{padding:isMobile?"8px 10px":"8px 14px",textAlign:"left",fontSize:10,color:"var(--text3)",fontWeight:700,textTransform:"uppercase",letterSpacing:0.4}}>Dia</th>
+                  <th style={{padding:isMobile?"8px 6px":"8px 12px",textAlign:"right",fontSize:10,color:"var(--text3)",fontWeight:700,textTransform:"uppercase",letterSpacing:0.4}}>{isMobile?"Líq.":"Bruto"}</th>
+                  {!isMobile && <th style={{padding:"8px 12px",textAlign:"right",fontSize:10,color:"var(--text3)",fontWeight:700,textTransform:"uppercase",letterSpacing:0.4}}>Líquido</th>}
+                  <th style={{padding:isMobile?"8px 10px":"8px 12px",textAlign:"right",fontSize:10,color:"var(--text3)",fontWeight:700,textTransform:"uppercase",letterSpacing:0.4}}>Col.</th>
                 </tr>
               </thead>
               <tbody>
                 {days.map(d => (
                   <tr key={d.date} style={{borderTop:"1px solid var(--border)"}}>
-                    <td style={{padding:"8px 14px",color:"var(--text)"}}>{fmtDate(d.date)} <span style={{color:"var(--text3)",fontSize:11,marginLeft:4}}>{WEEKDAYS[new Date(d.date + "T12:00:00").getDay()]}</span></td>
-                    <td style={{padding:"8px 12px",textAlign:"right",color:"var(--text2)",fontFamily:"'DM Mono',monospace"}}>{fmt(d.total)}</td>
-                    <td style={{padding:"8px 12px",textAlign:"right",color:"#15803d",fontFamily:"'DM Mono',monospace",fontWeight:600}}>{fmt(d.net)}</td>
-                    <td style={{padding:"8px 12px",textAlign:"right",color:"var(--text3)"}}>{d.empCount.size}</td>
+                    <td style={{padding:isMobile?"8px 10px":"8px 14px",color:"var(--text)"}}>{fmtDate(d.date)} <span style={{color:"var(--text3)",fontSize:11,marginLeft:4}}>{WEEKDAYS[new Date(d.date + "T12:00:00").getDay()]}</span></td>
+                    {!isMobile && <td style={{padding:"8px 12px",textAlign:"right",color:"var(--text2)",fontFamily:"'DM Mono',monospace"}}>{fmt(d.total)}</td>}
+                    <td style={{padding:isMobile?"8px 6px":"8px 12px",textAlign:"right",color:"#15803d",fontFamily:"'DM Mono',monospace",fontWeight:600}}>{fmt(d.net)}</td>
+                    <td style={{padding:isMobile?"8px 10px":"8px 12px",textAlign:"right",color:"var(--text3)"}}>{d.empCount.size}</td>
                   </tr>
                 ))}
               </tbody>
@@ -19172,6 +19205,34 @@ function OperationalGorjetas({ employee, data }) {
         {ranking.length === 0 ? (
           <div style={{padding:"32px 16px",textAlign:"center",color:"var(--text3)",fontSize:13}}>
             Nenhum colaborador recebeu gorjeta neste mês.
+          </div>
+        ) : isMobile ? (
+          /* Mobile: cards empilhados (tabela não cabe em 375px) */
+          <div>
+            {ranking.map((r, idx) => {
+              const areaColor = r.role?.area ? AREA_COLORS[r.role.area] : null;
+              const medal = idx===0?"🥇":idx===1?"🥈":idx===2?"🥉":null;
+              return (
+                <div key={r.employeeId} style={{padding:"12px 14px",borderTop:"1px solid var(--border)",display:"flex",alignItems:"center",gap:12}}>
+                  <div style={{minWidth:32,textAlign:"center",fontSize:medal?20:15,fontFamily:"'DM Mono',monospace",color:idx<3?"var(--ac)":"var(--text3)",fontWeight:idx<3?700:400}}>
+                    {medal || (idx+1)}
+                  </div>
+                  <div style={{flex:1,minWidth:0}}>
+                    <div style={{color:"var(--text)",fontWeight:600,fontSize:14,lineHeight:1.2}}>{r.emp?.name ?? "—"}</div>
+                    <div style={{display:"flex",alignItems:"center",gap:6,marginTop:3,flexWrap:"wrap"}}>
+                      {r.role && <span style={{fontSize:11,color:"var(--text2)"}}>
+                        <span style={{display:"inline-block",width:6,height:6,borderRadius:3,background:areaColor ?? "var(--text3)",marginRight:5,verticalAlign:"middle"}}></span>
+                        {r.role.name}
+                      </span>}
+                      <span style={{fontSize:11,color:"var(--text3)"}}>· {r.days} dia{r.days!==1?"s":""}</span>
+                    </div>
+                  </div>
+                  <div style={{textAlign:"right",color:"#15803d",fontFamily:"'DM Mono',monospace",fontWeight:700,fontSize:14,whiteSpace:"nowrap"}}>
+                    {fmt(r.net)}
+                  </div>
+                </div>
+              );
+            })}
           </div>
         ) : (
           <div style={{overflowX:"auto"}}>
