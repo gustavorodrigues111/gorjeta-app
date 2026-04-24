@@ -12473,7 +12473,8 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                     </colgroup>
                     <thead>
                       <tr>
-                        <th style={{position:"sticky",left:0,background:"var(--card-bg)",zIndex:2,padding:"6px 6px",textAlign:"left",color:"var(--text3)",fontSize:10,borderBottom:"1px solid var(--border)",whiteSpace:"nowrap"}}>
+                        {/* "Empregado" — sticky top+left. z-index 12 fica acima do breadcrumb (z:10) do AppShell */}
+                        <th style={{position:"sticky",left:0,top:0,background:"var(--card-bg)",zIndex:12,padding:"6px 6px",textAlign:"left",color:"var(--text3)",fontSize:10,borderBottom:"1px solid var(--border)",whiteSpace:"nowrap",boxShadow:"0 1px 0 var(--border)"}}>
                           Empregado
                         </th>
                         {Array.from({length:daysInMonth},(_,i)=>{
@@ -12482,14 +12483,15 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                           const wd = new Date(date+"T12:00:00").getDay();
                           const isWe = wd===0||wd===6;
                           return (
-                            <th key={d} style={{padding:"2px 0",textAlign:"center",color:isWe?"#f59e0b":"#555",fontSize:8,borderBottom:"1px solid var(--border)"}}>
+                            <th key={d} style={{position:"sticky",top:0,background:"var(--card-bg)",zIndex:11,padding:"2px 0",textAlign:"center",color:isWe?"#f59e0b":"#555",fontSize:8,borderBottom:"1px solid var(--border)",boxShadow:"0 1px 0 var(--border)"}}>
                               <div>{d}</div>
                               <div style={{fontSize:7}}>{["D","S","T","Q","Q","S","S"][wd]}</div>
                             </th>
                           );
                         })}
-                        <th style={{position:"sticky",right:30,background:"var(--card-bg)",zIndex:2,padding:"4px 2px",textAlign:"center",color:"var(--green)",fontSize:9,borderBottom:"1px solid var(--border)",borderLeft:"1px solid var(--border)"}}>T</th>
-                        <th style={{position:"sticky",right:0,background:"var(--card-bg)",zIndex:2,padding:"4px 2px",textAlign:"center",color:"var(--red)",fontSize:9,borderBottom:"1px solid var(--border)",borderLeft:"1px solid var(--border)"}}>F</th>
+                        {/* "T" e "F" — sticky top+right */}
+                        <th style={{position:"sticky",top:0,right:30,background:"var(--card-bg)",zIndex:12,padding:"4px 2px",textAlign:"center",color:"var(--green)",fontSize:9,borderBottom:"1px solid var(--border)",borderLeft:"1px solid var(--border)",boxShadow:"0 1px 0 var(--border)"}}>T</th>
+                        <th style={{position:"sticky",top:0,right:0,background:"var(--card-bg)",zIndex:12,padding:"4px 2px",textAlign:"center",color:"var(--red)",fontSize:9,borderBottom:"1px solid var(--border)",borderLeft:"1px solid var(--border)",boxShadow:"0 1px 0 var(--border)"}}>F</th>
                       </tr>
                     </thead>
                     <tbody>
