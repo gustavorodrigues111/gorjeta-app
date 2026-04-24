@@ -12462,8 +12462,10 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
               }
 
               /* ——— DESKTOP: Tabela completa ——— */
+              // O div é o scroll-container (x + y). Sticky no <th> pina relativo a este div.
+              // max-height garante que o div scrolla em vez da página — assim sticky funciona.
               return (
-                <div style={{overflowX:"auto",WebkitOverflowScrolling:"touch"}}>
+                <div style={{overflowX:"auto",overflowY:"auto",maxHeight:"calc(100vh - 260px)",WebkitOverflowScrolling:"touch",border:"1px solid var(--border)",borderRadius:8}}>
                   <table style={{borderCollapse:"collapse",fontFamily:"'DM Mono',monospace",fontSize:11,width:"100%",tableLayout:"fixed"}}>
                     <colgroup>
                       <col style={{width:110,minWidth:110}}/>
