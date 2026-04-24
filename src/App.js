@@ -18370,19 +18370,18 @@ function AppShell({ pessoa, data, activeRestaurantId, setActiveRestaurantId, use
           </>
         )}
 
-        {/* CONTENT */}
-        <main style={{flex:1,overflowY:"auto",padding:isMobile?"0":"20px 24px",minWidth:0,position:"relative"}}>
-          {/* Sticky header: breadcrumb + SubTabBar ficam grudados no topo ao rolar */}
+        {/* CONTENT WRAPPER — flex column: header fixo no topo + main scrollável */}
+        <div style={{flex:1,display:"flex",flexDirection:"column",minWidth:0,minHeight:0}}>
+          {/* Header fixo (fora do scroll do main) — sempre visível por estrutura, não depende de sticky */}
           {(activeRest || (hasSubtabs && activeItem.subtabs.length > 1)) && (
             <div style={{
-              position:"sticky", top:0, zIndex:10,
-              background:"var(--bg)", paddingTop:isMobile?10:0,
-              paddingLeft:isMobile?14:0, paddingRight:isMobile?14:0,
-              marginBottom:isMobile?0:0,
+              flex:"0 0 auto",
+              background:"var(--bg)",
+              padding: isMobile ? "10px 14px 0" : "20px 24px 0",
               borderBottom: isMobile && !(hasSubtabs && activeItem.subtabs.length > 1) ? "1px solid var(--border)" : "none",
             }}>
               {activeRest && (
-                <div style={{marginBottom:isMobile?8:16,padding:isMobile?"6px 12px":"8px 14px",background:"var(--bg2)",borderRadius:10,fontSize:12,color:"var(--text3)",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
+                <div style={{marginBottom:isMobile?8:12,padding:isMobile?"6px 12px":"8px 14px",background:"var(--bg2)",borderRadius:10,fontSize:12,color:"var(--text3)",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
                   <b style={{color:"var(--text)"}}>{activeRest.name}</b> · {activeItem?.label || "—"}
                   {!isMobile && hasSubtabs && activeItem.subtabs.length > 1 && activeSubtab && (
                     <span> · <span style={{color:"var(--text2)"}}>{activeSubtab.label}</span></span>
@@ -18419,10 +18418,11 @@ function AppShell({ pessoa, data, activeRestaurantId, setActiveRestaurantId, use
               )}
             </div>
           )}
-          <div style={{padding:isMobile?"12px 14px":"0", paddingTop:isMobile?14:18}}>
+          {/* Main scrollável — dentro dele os componentes podem ter scrolls internos próprios */}
+          <main style={{flex:1,overflowY:"auto",padding:isMobile?"12px 14px":"20px 24px",paddingTop:isMobile?14:18,minWidth:0,minHeight:0,position:"relative"}}>
             {renderContent()}
-          </div>
-        </main>
+          </main>
+        </div>
       </div>
     </div>
   );
