@@ -1,5 +1,5 @@
 // AppTip — sistema de gestão de gorjetas e equipe para restaurantes
-import React, { useState, useEffect, useMemo, Component } from "react";
+import React, { useState, useEffect, useMemo, useRef, Component } from "react";
 import { db } from "./firebase";
 import { doc, getDoc, setDoc } from "firebase/firestore";
 
@@ -9818,68 +9818,73 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
     if (forceTab && forceTab !== tab) setTab(forceTab);
   }, [forceTab]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Fase B: Auto-recálculo quando uma nova regra de divisão é ativada.
-  // RegraWizard.activate() dispara CustomEvent "apptip:recalc-tips" com
-  // { restaurantId, fromDate }. Aqui a gente escuta, varre todos os dias
-  // com gorjeta lançada >= fromDate e recalcula em batch.
-  useEffect(() => {
-    function handleRecalc(ev) {
-      const detail = ev.detail || {};
-      if (detail.restaurantId !== rid) return;
-      const fromDate = detail.fromDate;
-      if (!fromDate) return;
-      const affectedDates = [...new Set(
-        (tips || [])
-          .filter(t => t.restaurantId === rid && t.date >= fromDate)
-          .map(t => t.date)
-      )].sort();
-      if (affectedDates.length === 0) return;
-      let cur = tips;
-      let anyChange = false;
-      affectedDates.forEach(d => {
-        const r = recalcTipDay(d, cur);
-        if (r && r.updatedTips) {
-          cur = r.updatedTips;
-          anyChange = true;
-        }
-      });
-      if (anyChange) {
-        onUpdate("tips", cur);
-        onUpdate("_toast", `🔄 ${affectedDates.length} dia(s) recalculados após mudança de regra`);
-      }
-    }
-    window.addEventListener("apptip:recalc-tips", handleRecalc);
-    return () => window.removeEventListener("apptip:recalc-tips", handleRecalc);
-  }, [tips, rid, employees, restRoles, splits, schedules, restaurant]); // eslint-disable-line react-hooks/exhaustive-deps
+  // Listener legado do CustomEvent "apptip:recalc-tips" mantido como no-op.
+  // O useEffect unificado abaixo (Fase B v2) já catch tudo via dataSignature.
+  // Mantemos o listener pra evitar warnings caso outro código dispare o evento.
 
   const [empResetSignal, setEmpResetSignal] = useState(0);
   const activeGroup = TAB_GROUPS_FINAL.find(g => g.id === tabGroup) ?? TAB_GROUPS_FINAL[0];
 
-  // Fase B helper: recalcula gorjetas dos dias editados (chamado depois de TODO save de escala).
-  // Recebe o mapa de schedLocalEdits que está sendo persistido.
-  function recalcAfterScheduleSave(editedEdits) {
-    if (!editedEdits) return;
-    try {
-      const editedDates = new Set();
-      Object.values(editedEdits).forEach(dayEdits => {
-        Object.keys(dayEdits || {}).forEach(dt => editedDates.add(dt));
-      });
-      const datesWithTips = [...editedDates].filter(dt =>
-        (tips || []).some(t => t.restaurantId === rid && t.date === dt)
-      ).sort();
+  // Fase B v2: auto-recálculo unificado. Vigia mudanças em employees, roles,
+  // schedules e splits do restaurante. Quando algo relevante muda, recalcula
+  // TODOS os dias com tip lançado neste rid (todos os meses) — debounce 1.2s
+  // pra agrupar várias edições rápidas num único recalc.
+  const dataSignature = useMemo(() => {
+    const empSig = (employees||[])
+      .filter(e => e.restaurantId === rid)
+      .map(e => `${e.id}|${e.roleId||""}|${e.isFreela?1:0}|${e.isProducao?1:0}|${e.admission||""}|${e.demitidoEm||""}|${e.inactive?1:0}|${e.inactiveFrom||""}`)
+      .sort().join(";");
+    const roleSig = (roles||[])
+      .filter(r => r.restaurantId === rid)
+      .map(r => `${r.id}|${r.area||""}|${r.points||0}|${r.noTip?1:0}`)
+      .sort().join(";");
+    const schedSig = JSON.stringify(schedules?.[rid] || {});
+    const splitSig = JSON.stringify(splits?.[rid] || {});
+    return `${empSig}#${roleSig}#${schedSig}#${splitSig}`;
+  }, [employees, roles, schedules, splits, rid]);
+
+  const lastSigRef = useRef(null);
+  useEffect(() => {
+    // Pula a primeira renderização — evita recalc desnecessário ao abrir a tela
+    if (lastSigRef.current === null) {
+      lastSigRef.current = dataSignature;
+      return;
+    }
+    if (lastSigRef.current === dataSignature) return;
+    lastSigRef.current = dataSignature;
+
+    // Debounce: agrupa várias mudanças rápidas num só recalc
+    const t = setTimeout(() => {
+      const datesWithTips = [...new Set(
+        (tips || []).filter(t => t.restaurantId === rid).map(t => t.date)
+      )].sort();
       if (datesWithTips.length === 0) return;
+
       let cur = tips;
-      let any = false;
-      datesWithTips.forEach(dt => {
-        const r = recalcTipDay(dt, cur);
-        if (r && r.updatedTips) { cur = r.updatedTips; any = true; }
+      let anyChange = false;
+      datesWithTips.forEach(d => {
+        const r = recalcTipDay(d, cur);
+        if (r && r.updatedTips) {
+          // Detecta se houve mudança real (compara antes/depois pelos ids/valores)
+          const oldDay = cur.filter(t => t.restaurantId === rid && t.date === d);
+          const newDay = r.updatedTips.filter(t => t.restaurantId === rid && t.date === d);
+          const oldKey = oldDay.map(t => `${t.employeeId}:${(t.myShare||0).toFixed(4)}`).sort().join("|");
+          const newKey = newDay.map(t => `${t.employeeId}:${(t.myShare||0).toFixed(4)}`).sort().join("|");
+          if (oldKey !== newKey) {
+            cur = r.updatedTips;
+            anyChange = true;
+          }
+        }
       });
-      if (any) {
+      if (anyChange) {
         onUpdate("tips", cur);
-        setTimeout(() => onUpdate("_toast", `🔄 ${datesWithTips.length} dia(s) de gorjeta recalculados após mudança de escala`), 800);
+        onUpdate("_toast", `🔄 Gorjetas atualizadas automaticamente (${datesWithTips.length} dia(s) recalculados)`);
       }
-    } catch (_) { /* silent */ }
-  }
+    }, 1200);
+    return () => clearTimeout(t);
+  }, [dataSignature]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // (helper antigo recalcAfterScheduleSave removido — substituído pelo useEffect unificado acima)
 
   function switchGroup(gid) {
     const g = TAB_GROUPS_FINAL.find(x => x.id === gid);
@@ -10015,7 +10020,6 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                   newMonth[eid] = empMap;
                 });
                 onUpdate("schedules", { ...schedules, [rid]: { ...(schedules?.[rid]??{}), [mk]: newMonth } });
-                recalcAfterScheduleSave(schedLocalEdits);
               }
               setSchedLocalEdits(null);
             }
@@ -10052,7 +10056,6 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                 newMonth[eid] = empMap;
               });
               onUpdate("schedules", { ...schedules, [rid]: { ...(schedules?.[rid]??{}), [mk]: newMonth } });
-              recalcAfterScheduleSave(schedLocalEdits);
             }
             setSchedLocalEdits(null);
           }
@@ -10085,7 +10088,6 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                   newMonth2[eid] = empMap;
                 });
                 onUpdate("schedules", { ...schedules, [rid]: { ...(schedules?.[rid]??{}), [mk]: newMonth2 } });
-                recalcAfterScheduleSave(schedLocalEdits);
               }
               setSchedLocalEdits(null);
             }
@@ -11503,8 +11505,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                       ...schedules,
                       [rid]: { ...(schedules?.[rid]??{}), [mk]: newMonth }
                     });
-                    recalcAfterScheduleSave(schedLocalEdits);
-                    setSchedLocalEdits(null);
+                        setSchedLocalEdits(null);
                     onUpdate("_toast", "✅ Escala salva como nova versão");
                   }} style={{...S.btnPrimary,fontSize:mobileOnly?11:12,padding:mobileOnly?"8px 14px":"8px 18px",fontWeight:700}}>
                     💾 {mobileOnly?"Salvar":"Salvar nova versão"}
@@ -19881,14 +19882,8 @@ function RegraWizard({ editingVersion, restaurant, restaurantId, pessoas, employ
     }
     const v = buildVersion("active");
     onSave(v);
-    // Auto-recalc dos dias afetados (Fase B)
-    if (affectedDays > 0) {
-      // Delay garante que o setState de splits propagou antes do listener
-      // no RestaurantPanel ler o novo splits[rid] via closure.
-      setTimeout(() => {
-        window.dispatchEvent(new CustomEvent("apptip:recalc-tips", { detail: { restaurantId, fromDate: effectiveFrom } }));
-      }, 400);
-    }
+    // Auto-recalc é feito pelo useEffect unificado em RestaurantPanel
+    // (Fase B v2): a mudança no splits dispara recalc automático.
   }
 
   function downloadAtaPreview() {
