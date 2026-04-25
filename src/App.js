@@ -19563,7 +19563,10 @@ function RegraDivisaoAdmin({ restaurantId, restaurant, splits, pessoas, roles, e
 
       {activeNow ? (
         <RegraCard version={activeNow} restaurant={restaurant} employees={employees} roles={roles}
-                   pessoas={pessoas} title="Vigente agora" titleColor="var(--green)" mobileOnly={mobileOnly} />
+                   pessoas={pessoas} title="Vigente agora" titleColor="var(--green)"
+                   onEdit={activeNow._legacy ? null : ()=>editPastRule(activeNow)}
+                   editLabel="✏️ Corrigir"
+                   mobileOnly={mobileOnly} />
       ) : (
         <div style={{padding:"24px 20px",background:"var(--card-bg)",border:"1px dashed var(--border)",borderRadius:12,marginBottom:16,textAlign:"center",color:"var(--text3)"}}>
           Nenhuma regra ativa. Configure abaixo a primeira regra deste restaurante.
