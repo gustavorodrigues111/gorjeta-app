@@ -17932,8 +17932,11 @@ function AppShell({ pessoa, data, activeRestaurantId, setActiveRestaurantId, use
                     impersonatedPessoa, realIsOwner, onStartImpersonate, onStopImpersonate,
                     toggleTheme, theme }) {
   const restaurants = data?.restaurants || [];
-  const isOwner = userRole === "super" || currentUser?.isMaster === true;
-  const accessibleRestaurants = isOwner ? restaurants : (pessoa?.restaurantIds || []).map(rid => restaurants.find(r => r.id === rid)).filter(Boolean);
+  // isOwner real (do user logado). Quando impersonando, NÃO conta como owner pra fins de permissão —
+  // queremos ver exatamente o que o impersonado vê, sem bypass.
+  const isRealOwnerLocal = userRole === "super" || currentUser?.isMaster === true;
+  const isOwner = isRealOwnerLocal && !impersonatedPessoa;
+  const accessibleRestaurants = isRealOwnerLocal ? restaurants : (pessoa?.restaurantIds || []).map(rid => restaurants.find(r => r.id === rid)).filter(Boolean);
   const activeRest = restaurants.find(r => r.id === activeRestaurantId);
   const sections = buildShellSections({ pessoa, restaurantId: activeRestaurantId, isOwner });
   const allItems = sections.flatMap(s => s.items);
