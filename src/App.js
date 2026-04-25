@@ -20031,30 +20031,34 @@ function generateAtaPDF({ version, restaurant, pessoas, roles, finalPct, employe
       "Cada cargo tem uma pontuação que define o peso do empregado na divisão dentro da sua área (modo Por Área + Pontos) ou no pool global (modo Pontos Globais). Quanto maior a pontuação, maior a fração da gorjeta que o empregado recebe em comparação aos colegas.",
       { fontSize: 10, lineHeight: 5, gap: 3 }
     );
+    // Só inclui cargos que recebem gorjeta (filtra noTip)
     const cargoRows = [...restRoles]
+      .filter(r => !r.noTip)
       .sort((a, b) => (a.area || "z").localeCompare(b.area || "z") || (a.name || "").localeCompare(b.name || ""))
       .map(r => [
         r.name || "—",
         r.area || "—",
         r.points != null ? String(r.points) : "—",
-        r.noTip ? "❌ Não recebe gorjeta" : "✓ Recebe gorjeta",
       ]);
-    doc.autoTable({
-      startY: y,
-      head: [["Cargo", "Área", "Pontos", "Participação na gorjeta"]],
-      body: cargoRows,
-      theme: "grid",
-      styles: { fontSize: 9, cellPadding: 2.5, textColor: TEXT, lineColor: BORDER, lineWidth: 0.2 },
-      headStyles: { fillColor: ACCENT, textColor: [255,255,255], fontStyle: "bold", fontSize: 9 },
-      columnStyles: {
-        0: { cellWidth: 60, fontStyle: "bold" },
-        1: { cellWidth: 35 },
-        2: { cellWidth: 25, halign: "right" },
-        3: { cellWidth: "auto" },
-      },
-      margin: { left: MARGIN, right: MARGIN },
-    });
-    y = doc.lastAutoTable.finalY + 6;
+    if (cargoRows.length === 0) {
+      writeText("(Nenhum cargo com participação na gorjeta foi cadastrado.)", { fontSize: 10, color: TEXT3, gap: 4 });
+    } else {
+      doc.autoTable({
+        startY: y,
+        head: [["Cargo", "Área", "Pontos"]],
+        body: cargoRows,
+        theme: "grid",
+        styles: { fontSize: 9, cellPadding: 2.5, textColor: TEXT, lineColor: BORDER, lineWidth: 0.2 },
+        headStyles: { fillColor: ACCENT, textColor: [255,255,255], fontStyle: "bold", fontSize: 9 },
+        columnStyles: {
+          0: { cellWidth: 80, fontStyle: "bold" },
+          1: { cellWidth: 50 },
+          2: { cellWidth: "auto", halign: "right" },
+        },
+        margin: { left: MARGIN, right: MARGIN },
+      });
+      y = doc.lastAutoTable.finalY + 6;
+    }
   }
 
   // ─── 6) QUEM PARTICIPA / NÃO PARTICIPA ───
@@ -20162,7 +20166,7 @@ function generateAtaPDF({ version, restaurant, pessoas, roles, finalPct, employe
       body: voters.map(v => [v.name, v.cpf || "—", v.roleName || "—", "", "", "", ""]),
       theme: "grid",
       styles: { fontSize: 8.5, cellPadding: 2.5, textColor: TEXT, lineColor: BORDER, lineWidth: 0.2, minCellHeight: 13, valign: "middle" },
-      headStyles: { fillColor: ACCENT, textColor: [255,255,255], fontStyle: "bold", fontSize: 8, halign: "center" },
+      headStyles: { fillColor: ACCENT, textColor: [255,255,255], fontStyle: "bold", fontSize: 6.5, halign: "center", cellPadding: 2 },
       columnStyles: {
         0: { cellWidth: 50 },                             // Nome
         1: { cellWidth: 28 },                             // CPF
