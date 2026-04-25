@@ -144,6 +144,18 @@ function getSplitForDate(splitsForRid, date) {
   return null;
 }
 
+// Verifica se um tip está publicado (visível pro empregado).
+// Modelo novo (Fase D): cada tip tem `publishedAt` (ISO string ou null=despublicado).
+// Modelo legado: aprovação semanal via `tipApprovals[rid][weekMonday]`.
+// Helper aceita ambos transparentemente.
+function isTipPublished(tip, ridApprovals) {
+  if (tip?.publishedAt === null) return false; // explicitamente despublicado pelo gestor
+  if (tip?.publishedAt) return true;            // novo: publicado por dia
+  if (!tip?.date) return false;
+  const monday = getWeekMonday(tip.date);
+  return !!ridApprovals?.[monday];               // legado: cai no approval semanal
+}
+
 // Conta empregados ATIVOS numa área em uma data específica (per-day, conforme decisão).
 // Filtros: não freela, admitido ≤ date, demitido > date (ou nunca demitido), não inativo.
 function countActiveEmployeesInArea(employees, restRoles, areaName, date, restaurantId) {
@@ -213,11 +225,14 @@ function computeAreaPercentages(percentages, employeesPerArea) {
 //
 function nextEmpSeq(employees, restaurantCode) {
   // Find all seqs ever used for this restaurant (including deleted)
-  const used = employees
-    .filter(e => e.restaurantId && e.empCode && e.empCode.startsWith(restaurantCode))
-    .map(e => parseInt(e.empCode.slice(restaurantCode.length)) || 0);
+  // Set lookup é O(1) — antes era includes() em array (O(n)) num while loop = O(n²)
+  const used = new Set(
+    employees
+      .filter(e => e.restaurantId && e.empCode && e.empCode.startsWith(restaurantCode))
+      .map(e => parseInt(e.empCode.slice(restaurantCode.length)) || 0)
+  );
   let seq = 1;
-  while (used.includes(seq)) seq++;
+  while (used.has(seq)) seq++;
   return seq;
 }
 function makeEmpCode(restaurantCode, seq) {
@@ -289,9 +304,6 @@ function getDow(dateStr) { // "2026-03-01" → 0-6 (dom-sáb)
   const d = new Date(dateStr + "T12:00:00");
   return d.getDay();
 }
-// DOW_NAMES available for future parser extensions
-// const DOW_NAMES = ["domingo","segunda","terca","quarta","quinta","sexta","sabado"];
-
 // ── Parser Sólides ──
 function parseSolidesPDF(fullText, expectedYear, expectedMonth) {
   // Validate month from PDF header
@@ -761,14 +773,16 @@ function createInboxMessage({ tipo, de, para, restaurantId, assunto, corpo, meta
   };
 }
 
+// 90 dias em ms — usado em purge automático de inbox excluído
+const NINETY_DAYS_MS = 90 * 24 * 60 * 60 * 1000;
+
 // Filtrar mensagens do inbox para um destinatário específico
 // folder: undefined = todas (exceto excluídas), null = Entrada, "__trash" = excluídas, string = id da pasta
 function getInboxForUser({ inbox, userId, userRole, restaurantId, includeRead = true, folder }) {
-  const NINETY_DAYS = 90 * 24 * 60 * 60 * 1000;
   const now = Date.now();
   return (inbox ?? []).filter(m => {
     // Purge: mensagens excluídas há mais de 90 dias são invisíveis
-    if (m.deletedAt && (now - new Date(m.deletedAt).getTime()) > NINETY_DAYS) return false;
+    if (m.deletedAt && (now - new Date(m.deletedAt).getTime()) > NINETY_DAYS_MS) return false;
     // Filtro de pasta
     if (folder === "__trash") { if (!m.deletedAt) return false; }
     else if (folder === null || folder === undefined) { if (m.deletedAt) return false; }
@@ -787,10 +801,9 @@ function getInboxForUser({ inbox, userId, userRole, restaurantId, includeRead = 
 
 // Auto-purge: remove mensagens excluídas há mais de 90 dias do array (chamado no load)
 function purgeExpiredInbox(inbox) {
-  const NINETY_DAYS = 90 * 24 * 60 * 60 * 1000;
   const now = Date.now();
   const before = (inbox ?? []).length;
-  const cleaned = (inbox ?? []).filter(m => !m.deletedAt || (now - new Date(m.deletedAt).getTime()) <= NINETY_DAYS);
+  const cleaned = (inbox ?? []).filter(m => !m.deletedAt || (now - new Date(m.deletedAt).getTime()) <= NINETY_DAYS_MS);
   return cleaned.length < before ? cleaned : null; // null = nada mudou
 }
 
@@ -1419,7 +1432,7 @@ function FaqTab({ restaurantId, faq, emp, roles, restaurants, splits }) {
   const empRole = roles?.find(r => r.id === emp?.roleId);
   const restRolesComGorjeta = (roles ?? []).filter(r => r.restaurantId === restaurantId && !r.inactive && !r.noTip);
   const restRolesSemGorjeta = (roles ?? []).filter(r => r.restaurantId === restaurantId && !r.inactive && r.noTip);
-  const taxRate = rest?.taxRate ?? 0.33;
+  const taxRate = rest?.taxRate ?? TAX;
   const taxLabel = taxRate === 0.20 ? "20% (Simples Nacional)" : "33% (Lucro Real/Presumido)";
   const splitType = (rest?.divisionMode ?? MODE_AREA_POINTS) === MODE_AREA_POINTS ? "area" : "points";
   const ac = "var(--ac)";
@@ -3865,13 +3878,9 @@ function EmployeePortal({ employees, roles, tips, schedules, splits, restaurants
   const mk = monthKey(year, month);
   const ridApprovals = tipApprovals?.[emp?.restaurantId] ?? {};
   // Fase D: filtra por publishedAt (novo) com fallback para tipApprovals semanal (legado)
-  const myTips = tips.filter(t => t.employeeId === empId && t.monthKey === mk).filter(t => {
-    if (t.publishedAt === null) return false; // explicitamente despublicado pelo gestor
-    if (t.publishedAt) return true; // novo: publicado por dia
-    // Legado: cai no approval semanal
-    const monday = getWeekMonday(t.date);
-    return !!ridApprovals[monday];
-  });
+  const myTips = tips
+    .filter(t => t.employeeId === empId && t.monthKey === mk)
+    .filter(t => isTipPublished(t, ridApprovals));
   const grossTotal = myTips.reduce((a, t) => a + (t.myShare ?? 0), 0);
   const taxTotal   = myTips.reduce((a, t) => a + (t.myTax   ?? 0), 0);
   const netTotal   = myTips.reduce((a, t) => a + (t.myNet   ?? 0), 0);
@@ -9418,6 +9427,45 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
   const pFmt = privacyMask ? () => "R$ ••••,••" : fmt;
   const pText = privacyMask ? () => "••••••••••••••••" : (v => v);
 
+  // ── Helpers de versionamento (Onda 2 cleanup) ──
+  // Encapsulam o autor + snapshot + saveVersion num único call.
+  // Snapshot é opcional: se omitido, captura o estado atual.
+  function authorName() {
+    return currentUser?.name || (isOwner ? "Gestor AppTip" : "Gestor Adm.");
+  }
+  function saveTipsSnapshot(reason, snapshot) {
+    const snap = snapshot !== undefined ? snapshot : snapshotTipsMonth(tips, rid, mk);
+    saveVersion("tips", rid, mk, data?.tipVersions, snap, authorName(), reason, onUpdate, true);
+  }
+  function saveSchedulesSnapshot(reason, snapshot) {
+    const snap = snapshot !== undefined ? snapshot : snapshotSchedulesMonth(schedules, rid, mk);
+    saveVersion("schedules", rid, mk, data?.scheduleVersions, snap, authorName(), reason, onUpdate, true);
+  }
+  // Commit das edições pendentes em schedLocalEdits → escala persistida.
+  // Usado nos 3 caminhos onde o usuário sai com edições não salvas
+  // (mudar de aba, voltar pro dashboard mobile, mudar mês).
+  // O botão dedicado "Salvar nova versão" tem fluxo próprio (gera adjustments).
+  function commitPendingScheduleEdits(reason = "Edição manual") {
+    if (!schedLocalEdits) return;
+    // Freeze prevista no primeiro ajuste (depois disso vira read-only)
+    if (!data?.schedulePrevista?.[rid]?.[mk]) {
+      const frozenPrevista = JSON.parse(JSON.stringify(schedules?.[rid]?.[mk] ?? {}));
+      const newPrev = { ...(data?.schedulePrevista ?? {}) };
+      if (!newPrev[rid]) newPrev[rid] = {};
+      newPrev[rid][mk] = frozenPrevista;
+      onUpdate("schedulePrevista", newPrev);
+    }
+    saveSchedulesSnapshot(reason);
+    let newMonth = { ...(schedules?.[rid]?.[mk] ?? {}) };
+    Object.entries(schedLocalEdits).forEach(([eid, dayEdits]) => {
+      const empMap = { ...(newMonth[eid] ?? {}) };
+      Object.entries(dayEdits).forEach(([dt, val]) => { if (val === null) delete empMap[dt]; else empMap[dt] = val; });
+      newMonth[eid] = empMap;
+    });
+    onUpdate("schedules", { ...schedules, [rid]: { ...(schedules?.[rid]??{}), [mk]: newMonth } });
+    setSchedLocalEdits(null);
+  }
+
   const curSplit  = splits?.[rid]?.[mk] ?? DEFAULT_SPLIT;
   const monthTips = tips.filter(t => t.restaurantId === rid && t.monthKey === mk);
   const tipDates  = [...new Set(monthTips.map(t => t.date))].sort();
@@ -9442,7 +9490,6 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
 
   // forms
   const [tipRows, setTipRows]   = useState([{date:today(),total:"",note:""}]);
-  // showRecalc removido — recalcular agora fica na coluna de confirmação semanal
   const [splitForm, setSplitForm]         = useState(null);
   const [schedArea, setSchedArea]           = useState("Todos");
   const [showVacForm, setShowVacForm]       = useState(false);
@@ -9944,7 +9991,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
     if (count > 0) {
       // Snapshot pré-save das gorjetas do mês
       const preSnapT = snapshotTipsMonth(tips, rid, mk);
-      saveVersion("tips", rid, mk, data?.tipVersions, preSnapT, currentUser?.name || (isOwner?"Gestor AppTip":"Gestor Adm."), `Salvar gorjetas (${dirtyRows.length} dia${dirtyRows.length>1?"s":""})`, onUpdate, true);
+      saveTipsSnapshot(`Salvar gorjetas (${dirtyRows.length} dia${dirtyRows.length>1?"s":""})`, preSnapT);
       onUpdate("tips", currentTips);
       setTipRows([]);
       onUpdate("_toast", `✅ ${dirtyRows.length} dia${dirtyRows.length>1?"s":""} salvo${dirtyRows.length>1?"s":""}! (${count} empregados)`);
@@ -10001,27 +10048,8 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
             }
             if (tab === "schedule" && id !== "schedule" && schedDirty) {
               const action = window.confirm("Você tem edições na escala não salvas.\n\nDeseja salvar como nova versão antes de sair?");
-              if (action) {
-                if (!data?.schedulePrevista?.[rid]?.[mk]) {
-                  const frozenPrevista = JSON.parse(JSON.stringify(schedules?.[rid]?.[mk] ?? {}));
-                  const newPrev = { ...(data?.schedulePrevista ?? {}) };
-                  if (!newPrev[rid]) newPrev[rid] = {};
-                  newPrev[rid][mk] = frozenPrevista;
-                  onUpdate("schedulePrevista", newPrev);
-                }
-                const preSnap = snapshotSchedulesMonth(schedules, rid, mk);
-                saveVersion("schedules", rid, mk, data?.scheduleVersions, preSnap, currentUser?.name || (isOwner?"Gestor AppTip":"Gestor Adm."), "Edição manual", onUpdate, true);
-                let newMonth = { ...(schedules?.[rid]?.[mk] ?? {}) };
-                Object.entries(schedLocalEdits).forEach(([eid, dayEdits]) => {
-                  const empMap = { ...(newMonth[eid] ?? {}) };
-                  Object.entries(dayEdits).forEach(([dt, val]) => {
-                    if (val === null) delete empMap[dt]; else empMap[dt] = val;
-                  });
-                  newMonth[eid] = empMap;
-                });
-                onUpdate("schedules", { ...schedules, [rid]: { ...(schedules?.[rid]??{}), [mk]: newMonth } });
-              }
-              setSchedLocalEdits(null);
+              if (action) commitPendingScheduleEdits();
+              else setSchedLocalEdits(null);
             }
             if (id === tab && id === "employees") setEmpResetSignal(s => s + 1);
             setTab(id);
@@ -10038,26 +10066,8 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
         <button onClick={()=>{
           if (tab === "schedule" && schedDirty) {
             const action = window.confirm("Você tem edições na escala não salvas.\n\nDeseja salvar como nova versão antes de sair?");
-            if (action) {
-              // Freeze prevista on first adjustment
-              if (!data?.schedulePrevista?.[rid]?.[mk]) {
-                const frozenPrevista = JSON.parse(JSON.stringify(schedules?.[rid]?.[mk] ?? {}));
-                const newPrev = { ...(data?.schedulePrevista ?? {}) };
-                if (!newPrev[rid]) newPrev[rid] = {};
-                newPrev[rid][mk] = frozenPrevista;
-                onUpdate("schedulePrevista", newPrev);
-              }
-              const preSnap = snapshotSchedulesMonth(schedules, rid, mk);
-              saveVersion("schedules", rid, mk, data?.scheduleVersions, preSnap, currentUser?.name || (isOwner?"Gestor AppTip":"Gestor Adm."), "Edição manual", onUpdate, true);
-              let newMonth = { ...(schedules?.[rid]?.[mk] ?? {}) };
-              Object.entries(schedLocalEdits).forEach(([eid, dayEdits]) => {
-                const empMap = { ...(newMonth[eid] ?? {}) };
-                Object.entries(dayEdits).forEach(([dt, val]) => { if (val === null) delete empMap[dt]; else empMap[dt] = val; });
-                newMonth[eid] = empMap;
-              });
-              onUpdate("schedules", { ...schedules, [rid]: { ...(schedules?.[rid]??{}), [mk]: newMonth } });
-            }
-            setSchedLocalEdits(null);
+            if (action) commitPendingScheduleEdits();
+            else setSchedLocalEdits(null);
           }
           setTab("dashboard");
         }} style={{display:"flex",alignItems:"center",gap:6,padding:"10px 16px",background:"none",border:"none",borderBottom:"1px solid var(--border)",color:"var(--ac-text,var(--ac))",cursor:"pointer",fontSize:13,fontWeight:600,fontFamily:"'DM Sans',sans-serif",width:"100%"}}>
@@ -10070,26 +10080,8 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
           <div style={{ marginBottom: 20 }}><MonthNav year={year} month={month} onChange={(y,m)=>{
             if (tab === "schedule" && schedDirty) {
               const action = window.confirm("Você tem edições na escala não salvas.\n\nDeseja salvar como nova versão antes de mudar de mês?");
-              if (action) {
-                // Freeze prevista on first adjustment
-                if (!data?.schedulePrevista?.[rid]?.[mk]) {
-                  const frozenPrevista = JSON.parse(JSON.stringify(schedules?.[rid]?.[mk] ?? {}));
-                  const newPrev = { ...(data?.schedulePrevista ?? {}) };
-                  if (!newPrev[rid]) newPrev[rid] = {};
-                  newPrev[rid][mk] = frozenPrevista;
-                  onUpdate("schedulePrevista", newPrev);
-                }
-                const preSnap = snapshotSchedulesMonth(schedules, rid, mk);
-                saveVersion("schedules", rid, mk, data?.scheduleVersions, preSnap, currentUser?.name || (isOwner?"Gestor AppTip":"Gestor Adm."), "Edição manual", onUpdate, true);
-                let newMonth2 = { ...(schedules?.[rid]?.[mk] ?? {}) };
-                Object.entries(schedLocalEdits).forEach(([eid, dayEdits]) => {
-                  const empMap = { ...(newMonth2[eid] ?? {}) };
-                  Object.entries(dayEdits).forEach(([dt, val]) => { if (val === null) delete empMap[dt]; else empMap[dt] = val; });
-                  newMonth2[eid] = empMap;
-                });
-                onUpdate("schedules", { ...schedules, [rid]: { ...(schedules?.[rid]??{}), [mk]: newMonth2 } });
-              }
-              setSchedLocalEdits(null);
+              if (action) commitPendingScheduleEdits();
+              else setSchedLocalEdits(null);
             }
             setYear(y);setMonth(m);setWeekIdx(calcWeekForToday(y,m));
           }} /></div>
@@ -10479,7 +10471,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                     if (r && r.updatedTips) { cur = r.updatedTips; totalChanged += r.count; }
                   });
                   if (totalChanged > 0) {
-                    saveVersion("tips", rid, mk, data?.tipVersions, preSnap, currentUser?.name || (isOwner?"Gestor AppTip":"Gestor Adm."), `Recalcular mês inteiro (${monthDates.length} dias)`, onUpdate, true);
+                    saveTipsSnapshot(`Recalcular mês inteiro (${monthDates.length} dias)`, preSnap);
                     onUpdate("tips", cur);
                     onUpdate("_toast", `🔄 ${monthDates.length} dia(s) recalculados — ${totalChanged} lançamentos atualizados`);
                   } else {
@@ -10504,7 +10496,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                 onRestore={(v)=>{
                   // Salva estado atual como nova versão
                   const curSnap = snapshotTipsMonth(tips, rid, mk);
-                  saveVersion("tips", rid, mk, data?.tipVersions, curSnap, currentUser?.name || (isOwner?"Gestor AppTip":"Gestor Adm."), `Antes de restaurar "${v.reason}"`, onUpdate, true);
+                  saveTipsSnapshot(`Antes de restaurar "${v.reason}"`, curSnap);
                   // Aplica versão restaurada: remove tips atuais desse mês e adiciona os do snapshot
                   const otherTips = (tips ?? []).filter(t => !(t.restaurantId === rid && t.monthKey === mk));
                   const restoredTips = [...otherTips, ...((v.snapshot ?? []).map(t => ({...t})))];
@@ -10558,13 +10550,8 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                   if (checked) setTipRows(prev => prev.filter(r => r.date !== date));
                 };
 
-                // Helper: verifica se o tip está publicado (novo: publishedAt; legado: approval semanal)
-                const tipPublished = (tip) => {
-                  if (tip.publishedAt === null) return false; // explicitamente despublicado
-                  if (tip.publishedAt) return true;
-                  const monday = getWeekMonday(tip.date);
-                  return !!ridApprovals[monday];
-                };
+                // Helper local — delega ao isTipPublished centralizado
+                const tipPublished = (tip) => isTipPublished(tip, ridApprovals);
 
                 // Layout grid: desktop 7 col, mobile 4 col + segunda linha
                 const gridDesktop = "44px 1fr 44px 38px 110px 90px";
@@ -10673,7 +10660,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                       const removeDay = () => {
                         if(!window.confirm(`Zerar gorjeta de ${fmtDate(date)}?\n\n⚠️ Um backup será salvo no Histórico — você pode restaurar depois.`)) return;
                         const preSnap = snapshotTipsMonth(tips, rid, mk);
-                        saveVersion("tips", rid, mk, data?.tipVersions, preSnap, currentUser?.name || (isOwner?"Gestor AppTip":"Gestor Adm."), `Remover gorjeta de ${fmtDate(date)}`, onUpdate, true);
+                        saveTipsSnapshot(`Remover gorjeta de ${fmtDate(date)}`, preSnap);
                         onUpdate("tips",tips.filter(t=>!(t.restaurantId===rid&&t.date===date)));
                         setTipRows(prev=>prev.filter(r=>r.date!==date));
                         onUpdate("_toast",`🗑️ ${fmtDate(date)}: removido`);
@@ -10785,12 +10772,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
             {(() => {
               const weeks = getWeeksInMonth(year, month);
               const ridApprovals = data?.tipApprovals?.[rid] ?? {};
-              const tipPublished = (tip) => {
-                if (tip.publishedAt === null) return false;
-                if (tip.publishedAt) return true;
-                const monday = getWeekMonday(tip.date);
-                return !!ridApprovals[monday];
-              };
+              const tipPublished = (tip) => isTipPublished(tip, ridApprovals);
               const fmtDay = (ds) => { const [,mm,dd] = ds.split("-"); return `${dd}/${mm}`; };
               return (
                 <div style={{marginBottom:24}}>
@@ -10866,7 +10848,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                   <button onClick={()=>{
                     const ids=new Set(dT.map(t=>t.id));
                     const preSnap = snapshotTipsMonth(tips, rid, mk);
-                    saveVersion("tips", rid, mk, data?.tipVersions, preSnap, currentUser?.name || (isOwner?"Gestor AppTip":"Gestor Adm."), `Remover lançamento (${fmtDate(dT[0]?.date)})`, onUpdate, true);
+                    saveTipsSnapshot(`Remover lançamento (${fmtDate(dT[0]?.date)})`, preSnap);
                     onUpdate("tips",tips.filter(t=>!ids.has(t.id)));
                     onUpdate("_toast","Lançamento removido.");
                   }} style={{marginTop:10,background:"none",border:"1px solid #e74c3c33",borderRadius:8,color:"var(--red)",cursor:"pointer",fontSize:12,padding:"4px 12px",fontFamily:"'DM Mono',monospace"}}>Remover lançamento</button>
@@ -11228,7 +11210,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                   doc.setFontSize(7);
                   doc.setTextColor(185, 28, 28);
                   doc.setFont(undefined, "bold");
-                  const taxPct = (restaurant.taxRate ?? 0.33) * 100;
+                  const taxPct = (restaurant.taxRate ?? TAX) * 100;
                   doc.text(`DEDUÇÃO TOTAL GORJETA (${taxPct.toFixed(0)}%)`, bx12 + 3, y + 3.5);
                   doc.setFontSize(9);
                   doc.text(f2(grandDed), bx12 + boxW - 3, y + 3.5, { align: "right" });
@@ -11475,7 +11457,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                     }
                     // Save as new version
                     const preSnap = snapshotSchedulesMonth(schedules, rid, mk);
-                    saveVersion("schedules", rid, mk, data?.scheduleVersions, preSnap, currentUser?.name || (isOwner?"Gestor AppTip":"Gestor Adm."), "Edição manual", onUpdate, true);
+                    saveSchedulesSnapshot("Edição manual", preSnap);
                     // Record adjustments for Phase 2
                     const adjAuthor = currentUser?.name || (isOwner?"Gestor AppTip":"Gestor Adm.");
                     const adjTimestamp = new Date().toISOString();
@@ -11811,7 +11793,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                   onRestore={(v)=>{
                     // Salva o estado atual como nova versão (pra poder desfazer o restore)
                     const curSnap = snapshotSchedulesMonth(schedules, rid, mk);
-                    saveVersion("schedules", rid, mk, data?.scheduleVersions, curSnap, currentUser?.name || (isOwner?"Gestor AppTip":"Gestor Adm."), `Antes de restaurar "${v.reason}"`, onUpdate, true);
+                    saveSchedulesSnapshot(`Antes de restaurar "${v.reason}"`, curSnap);
                     // Aplica a versão restaurada
                     const newSched = JSON.parse(JSON.stringify(schedules ?? {}));
                     if (!newSched[rid]) newSched[rid] = {};
@@ -12916,7 +12898,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
               // eslint-disable-next-line no-unused-vars
               const ac = "var(--ac)";
               const splitType = (localRest.divisionMode ?? MODE_AREA_POINTS) === MODE_AREA_POINTS ? "area" : "points";
-              const taxRate = localRest.taxRate ?? 0.33;
+              const taxRate = localRest.taxRate ?? TAX;
               const taxLabel = taxRate===0.20?"20% (Simples Nacional)":"33% (Lucro Real/Presumido)";
               const restRolesCom = (data?.roles??[]).filter(r=>r.restaurantId===rid&&!r.inactive&&!r.noTip);
               const restRolesSem = (data?.roles??[]).filter(r=>r.restaurantId===rid&&!r.inactive&&r.noTip);
@@ -16881,7 +16863,7 @@ function MiseContagensAdmin({ restaurantId, employees, miseCategories, miseStock
 
     onUpdate("miseProductSuppliers", next);
     setBulkLinkSupplierId(null);
-    alert(`Vínculos atualizados: ${added} novo(s), ${updated} atualizado(s)${toUnlink.length?`, ${toUnlink.length} removido(s)`:""}.`);
+    onUpdate("_toast", `✓ Vínculos atualizados: ${added} novo(s), ${updated} atualizado(s)${toUnlink.length?`, ${toUnlink.length} removido(s)`:""}.`);
   }
 
   // Vincula categoria inteira: seleciona todos os produtos da categoria no modal
@@ -21797,7 +21779,7 @@ function MiseFtInsumos({ restaurantId, miseFtInsumos, onUpdate, mobileOnly }) {
     if (!file) return;
     ftImportInsumosXLSX(file, miseFtInsumos, restaurantId, ({ next, updated, added, total }) => {
       onUpdate("miseFtInsumos", next);
-      alert(`Importação concluída: ${added} novo(s), ${updated} atualizado(s), ${total} total.`);
+      onUpdate("_toast", `✓ Importação concluída: ${added} novo(s), ${updated} atualizado(s), ${total} total.`);
     });
     e.target.value = "";
   }
