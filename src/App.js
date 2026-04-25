@@ -18174,14 +18174,24 @@ function AppShell({ pessoa, data, activeRestaurantId, setActiveRestaurantId, use
 
     // Para kind="employee": renderiza EmployeePortal com hideHeader + hideTabNav + forceTab
     if (effectiveKind === "employee" && activeRest) {
-      const linkedEmpId = pessoa?.linkedEmployeeId;
+      // 1) Tenta o linkedEmployeeId direto. 2) Fallback: busca por CPF no restaurante atual.
+      // (Pessoas criadas via PessoasAdmin não têm linkedEmployeeId; só as migradas têm.)
+      let linkedEmpId = pessoa?.linkedEmployeeId;
+      if (!linkedEmpId && pessoa?.cpf) {
+        const cpfClean = String(pessoa.cpf).replace(/\D/g, "");
+        const matchByCpf = (data?.employees || []).find(e =>
+          e.restaurantId === activeRestaurantId && String(e.cpf || "").replace(/\D/g, "") === cpfClean
+        );
+        if (matchByCpf) linkedEmpId = matchByCpf.id;
+      }
       if (!linkedEmpId) {
         return (
           <div style={{padding:"60px 24px",textAlign:"center",color:"var(--text3)"}}>
             <div style={{fontSize:48,marginBottom:16}}>{activeItem.icon}</div>
             <h3 style={{color:"var(--text)",fontSize:18,fontWeight:700,margin:"0 0 8px"}}>{activeItem.label}</h3>
             <p style={{fontSize:14,lineHeight:1.6,maxWidth:460,margin:"0 auto"}}>
-              Esta área precisa de um registro de funcionário vinculado à sua pessoa. Peça ao gestor para te cadastrar como equipe.
+              Esta área precisa de um registro de funcionário vinculado a esta pessoa.
+              Peça ao gestor para vincular {pessoa?.name ? <b>{pessoa.name}</b> : "a pessoa"} à equipe (aba Pessoas → Editar → marque "É equipe") ou cadastre como empregado em <b>Equipe → Membros</b>.
             </p>
           </div>
         );
@@ -18922,38 +18932,39 @@ function PermissoesMatrix({ restaurantId, pessoas, employees, managers, owners, 
           {restPessoas.length === 0 ? "Nenhuma pessoa cadastrada. Vá na aba Pessoas para começar." : "Nenhuma pessoa encontrada."}
         </div>
       ) : (
-        <div style={{overflowX:"auto",border:"1px solid var(--border)",borderRadius:12,background:"var(--card-bg)"}}>
+        <div style={{overflowX:"auto",overflowY:"auto",maxHeight:"calc(100vh - 260px)",WebkitOverflowScrolling:"touch",border:"1px solid var(--border)",borderRadius:12,background:"var(--card-bg)"}}>
           <table style={{width:"100%",borderCollapse:"collapse",fontSize:12}}>
             <thead>
               <tr style={{background:"var(--bg2)",borderBottom:"1px solid var(--border)"}}>
-                <th style={{padding:"8px 12px",textAlign:"left",color:"var(--text)",fontWeight:700,position:"sticky",left:0,background:"var(--bg2)",zIndex:2,minWidth:180}}>Pessoa</th>
+                {/* Coluna "Pessoa" — sticky top + left (canto), z-index alto */}
+                <th style={{padding:"8px 12px",textAlign:"left",color:"var(--text)",fontWeight:700,position:"sticky",left:0,top:0,background:"var(--bg2)",zIndex:12,minWidth:180}}>Pessoa</th>
                 {PERM_GROUPS.map(g => (
                   expanded[g.id] ? (
                     g.perms.map(p => (
-                      <th key={p.key} style={{padding:"8px 6px",textAlign:"center",color:"var(--text)",fontWeight:600,minWidth:58,background:g.bg,borderLeft:"1px solid var(--border)"}} title={`${g.label} · ${p.label}`}>
+                      <th key={p.key} style={{padding:"8px 6px",textAlign:"center",color:"var(--text)",fontWeight:600,minWidth:58,background:g.bg,borderLeft:"1px solid var(--border)",position:"sticky",top:0,zIndex:11}} title={`${g.label} · ${p.label}`}>
                         <div style={{fontSize:14,marginBottom:2}}>{p.icon}</div>
                         <div style={{fontSize:9,color:g.color,fontWeight:700,textTransform:"uppercase",letterSpacing:0.3,lineHeight:1.1}}>{p.label.length > 10 ? p.label.slice(0,10)+'…' : p.label}</div>
                       </th>
                     ))
                   ) : (
-                    <th key={g.id} onClick={()=>toggleGroup(g.id)} style={{padding:"8px 10px",textAlign:"center",cursor:"pointer",color:g.color,fontWeight:700,fontSize:11,textTransform:"uppercase",letterSpacing:0.4,borderLeft:"1px solid var(--border)",background:g.bg,minWidth:90}} title={`Clique para expandir ${g.label}`}>
+                    <th key={g.id} onClick={()=>toggleGroup(g.id)} style={{padding:"8px 10px",textAlign:"center",cursor:"pointer",color:g.color,fontWeight:700,fontSize:11,textTransform:"uppercase",letterSpacing:0.4,borderLeft:"1px solid var(--border)",background:g.bg,minWidth:90,position:"sticky",top:0,zIndex:11}} title={`Clique para expandir ${g.label}`}>
                       ▶ {g.label}
                     </th>
                   )
                 ))}
               </tr>
-              {/* Row de grupos (sempre exibida, com botão de colapsar) */}
+              {/* Row de grupos (sempre exibida, com botão de colapsar) — sticky abaixo do row 1 */}
               <tr style={{background:"var(--bg2)",borderBottom:"1px solid var(--border)"}}>
-                <th style={{padding:"4px 12px",textAlign:"left",color:"var(--text3)",fontWeight:500,fontSize:10,position:"sticky",left:0,background:"var(--bg2)",zIndex:2}}>
+                <th style={{padding:"4px 12px",textAlign:"left",color:"var(--text3)",fontWeight:500,fontSize:10,position:"sticky",left:0,top:46,background:"var(--bg2)",zIndex:12}}>
                   {sorted.length} pessoa{sorted.length===1?"":"s"}
                 </th>
                 {PERM_GROUPS.map(g => (
                   expanded[g.id] ? (
-                    <th key={g.id+"_collapse"} colSpan={g.perms.length} onClick={()=>toggleGroup(g.id)} style={{padding:"4px 8px",cursor:"pointer",color:g.color,fontWeight:700,fontSize:10,textTransform:"uppercase",letterSpacing:0.4,borderLeft:"1px solid var(--border)",background:g.bg,textAlign:"center"}} title="Clique para colapsar">
+                    <th key={g.id+"_collapse"} colSpan={g.perms.length} onClick={()=>toggleGroup(g.id)} style={{padding:"4px 8px",cursor:"pointer",color:g.color,fontWeight:700,fontSize:10,textTransform:"uppercase",letterSpacing:0.4,borderLeft:"1px solid var(--border)",background:g.bg,textAlign:"center",position:"sticky",top:46,zIndex:11}} title="Clique para colapsar">
                       ▼ {g.label}
                     </th>
                   ) : (
-                    <th key={g.id+"_stub"} style={{borderLeft:"1px solid var(--border)",background:g.bg}}></th>
+                    <th key={g.id+"_stub"} style={{borderLeft:"1px solid var(--border)",background:g.bg,position:"sticky",top:46,zIndex:11}}></th>
                   )
                 ))}
               </tr>
