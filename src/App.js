@@ -9694,7 +9694,9 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
         emps.forEach(emp => {
           const myGross = poolTotal * (tSplit[area] / 100) * (emp.points / totalPoints);
           const myTaxShare = totalTaxAmt * (tSplit[area] / 100) * (emp.points / totalPoints);
-          newTips.push({ id: `${Date.now()}-${emp.id}-${Math.random().toString(36).slice(2,6)}`, restaurantId: rid, employeeId: emp.id, date, monthKey: tKey, poolTotal, areaPool, area, myShare: myGross, myTax: myTaxShare, myNet: myGross - myTaxShare, note: noteVal, taxRate, splitVersionId: splitVersion?.id });
+          const newTip = { id: `${Date.now()}-${emp.id}-${Math.random().toString(36).slice(2,6)}`, restaurantId: rid, employeeId: emp.id, date, monthKey: tKey, poolTotal, areaPool, area, myShare: myGross, myTax: myTaxShare, myNet: myGross - myTaxShare, note: noteVal, taxRate };
+          if (splitVersion?.id) newTip.splitVersionId = splitVersion.id;
+          newTips.push(newTip);
         });
       });
     }
@@ -10617,17 +10619,6 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                         onUpdate("tips", updatedTips);
                         onUpdate("_toast", `🔒 ${fmtDate(date)} despublicado`);
                       };
-                      const recalcDay = () => {
-                        const preSnap = snapshotTipsMonth(tips, rid, mk);
-                        const r = recalcTipDay(date, tips);
-                        if (r && r.count > 0) {
-                          saveVersion("tips", rid, mk, data?.tipVersions, preSnap, currentUser?.name || (isOwner?"Gestor AppTip":"Gestor Adm."), `Recalcular ${fmtDate(date)}`, onUpdate, true);
-                          onUpdate("tips", r.updatedTips);
-                          onUpdate("_toast", `🔄 ${fmtDate(date)} recalculado (${r.count} empregados)`);
-                        } else {
-                          onUpdate("_toast", `Nada para recalcular em ${fmtDate(date)}`);
-                        }
-                      };
                       const removeDay = () => {
                         if(!window.confirm(`Zerar gorjeta de ${fmtDate(date)}?\n\n⚠️ Um backup será salvo no Histórico — você pode restaurar depois.`)) return;
                         const preSnap = snapshotTipsMonth(tips, rid, mk);
@@ -10697,11 +10688,6 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                       );
                       const acoesCol = (
                         <div style={{display:"flex",gap:4,justifyContent:"center",alignItems:"center"}}>
-                          {isLaunched && isStale && (
-                            <button onClick={recalcDay} title="Recalcular este dia (regra mudou)" style={{padding:"3px 6px",borderRadius:6,border:"1px solid #f59e0b44",background:"transparent",color:"#f59e0b",cursor:"pointer",fontSize:11}}>
-                              🔄
-                            </button>
-                          )}
                           {isLaunched && (
                             <button onClick={removeDay} title="Remover lançamento" style={{padding:"3px 6px",borderRadius:6,border:"none",background:"transparent",color:"var(--red)",cursor:"pointer",fontSize:11}}>
                               ✕
@@ -10803,10 +10789,18 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                       <div key={a} style={{borderTop:"1px solid var(--border)",paddingTop:8,marginTop:8}}>
                         <div style={{marginBottom:4}}><AreaBadge area={a} /></div>
                         {aT.map(t => {
-                          const emp = restEmps.find(e => e.id === t.employeeId);
+                          // Busca em employees (todos), não em restEmps (que filtra inativos/demitidos)
+                          // — isso garante que demitido apareça com nome em gorjetas anteriores à demissão.
+                          const emp = employees.find(e => e.id === t.employeeId);
+                          const isDemit = emp?.demitidoEm && emp.demitidoEm <= t.date;
+                          const isInact = emp?.inactive && emp.inactiveFrom && emp.inactiveFrom <= t.date;
+                          const showInactive = (emp?.demitidoEm || emp?.inactive) && !isDemit && !isInact;
                           return (
                             <div key={t.id} style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",fontSize:12,padding:"4px 0",flexWrap:"wrap",gap:"2px 12px"}}>
-                              <span style={{color:"var(--text2)",minWidth:80,flex:"1 1 auto"}}>{emp?.name??"—"}</span>
+                              <span style={{color:"var(--text2)",minWidth:80,flex:"1 1 auto"}}>
+                                {emp?.name ?? "—"}
+                                {showInactive && <span style={{fontSize:10,color:"var(--text3)",marginLeft:6,fontStyle:"italic"}}>(ex-funcionário)</span>}
+                              </span>
                               <div style={{display:"flex",gap:8,flexShrink:0,fontSize:11}}>
                                 <span style={{color:"var(--text)"}}>{pFmt(t.myShare)}</span>
                                 <span style={{color:"var(--red)"}}>-{pFmt(t.myTax)}</span>
@@ -19821,10 +19815,13 @@ function RegraWizard({ editingVersion, restaurant, restaurantId, pessoas, employ
     }
     const v = buildVersion("active");
     onSave(v);
-    // Auto-recalc dos dias afetados
+    // Auto-recalc dos dias afetados (Fase B)
     if (affectedDays > 0) {
-      // Trigger recálculo via função externa — implementado em fase B
-      window.dispatchEvent(new CustomEvent("apptip:recalc-tips", { detail: { restaurantId, fromDate: effectiveFrom } }));
+      // Delay garante que o setState de splits propagou antes do listener
+      // no RestaurantPanel ler o novo splits[rid] via closure.
+      setTimeout(() => {
+        window.dispatchEvent(new CustomEvent("apptip:recalc-tips", { detail: { restaurantId, fromDate: effectiveFrom } }));
+      }, 400);
     }
   }
 
