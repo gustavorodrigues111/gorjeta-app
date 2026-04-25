@@ -3864,7 +3864,11 @@ function EmployeePortal({ employees, roles, tips, schedules, splits, restaurants
 
   const mk = monthKey(year, month);
   const ridApprovals = tipApprovals?.[emp?.restaurantId] ?? {};
+  // Fase D: filtra por publishedAt (novo) com fallback para tipApprovals semanal (legado)
   const myTips = tips.filter(t => t.employeeId === empId && t.monthKey === mk).filter(t => {
+    if (t.publishedAt === null) return false; // explicitamente despublicado pelo gestor
+    if (t.publishedAt) return true; // novo: publicado por dia
+    // Legado: cai no approval semanal
     const monday = getWeekMonday(t.date);
     return !!ridApprovals[monday];
   });
@@ -9811,6 +9815,41 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
   useEffect(() => {
     if (forceTab && forceTab !== tab) setTab(forceTab);
   }, [forceTab]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Fase B: Auto-recálculo quando uma nova regra de divisão é ativada.
+  // RegraWizard.activate() dispara CustomEvent "apptip:recalc-tips" com
+  // { restaurantId, fromDate }. Aqui a gente escuta, varre todos os dias
+  // com gorjeta lançada >= fromDate e recalcula em batch.
+  useEffect(() => {
+    function handleRecalc(ev) {
+      const detail = ev.detail || {};
+      if (detail.restaurantId !== rid) return;
+      const fromDate = detail.fromDate;
+      if (!fromDate) return;
+      const affectedDates = [...new Set(
+        (tips || [])
+          .filter(t => t.restaurantId === rid && t.date >= fromDate)
+          .map(t => t.date)
+      )].sort();
+      if (affectedDates.length === 0) return;
+      let cur = tips;
+      let anyChange = false;
+      affectedDates.forEach(d => {
+        const r = recalcTipDay(d, cur);
+        if (r && r.updatedTips) {
+          cur = r.updatedTips;
+          anyChange = true;
+        }
+      });
+      if (anyChange) {
+        onUpdate("tips", cur);
+        onUpdate("_toast", `🔄 ${affectedDates.length} dia(s) recalculados após mudança de regra`);
+      }
+    }
+    window.addEventListener("apptip:recalc-tips", handleRecalc);
+    return () => window.removeEventListener("apptip:recalc-tips", handleRecalc);
+  }, [tips, rid, employees, restRoles, splits, schedules, restaurant]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const [empResetSignal, setEmpResetSignal] = useState(0);
   const activeGroup = TAB_GROUPS_FINAL.find(g => g.id === tabGroup) ?? TAB_GROUPS_FINAL[0];
 
@@ -10435,15 +10474,25 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
               </div>
             )}
 
-            {/* Layout 2 colunas: Lançamento + Confirmação */}
-            <div style={{display:"grid",gridTemplateColumns: mobileOnly ? "1fr" : "1fr 1fr",gap:20,marginBottom:24}}>
-
-            {/* COLUNA ESQUERDA: Lançamento de gorjeta */}
-            <div style={{ ...S.card }}>
-              <p style={{color:ac,fontSize:14,fontWeight:700,margin:"0 0 12px"}}>💸 Lançamento Diário</p>
+            {/* Lançamento Diário — coluna única (Fase D) */}
+            <div style={{ ...S.card, marginBottom: 16 }}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:8,marginBottom:12}}>
+                <p style={{color:ac,fontSize:14,fontWeight:700,margin:0}}>💸 Lançamento Diário</p>
+                {!mobileOnly && (
+                  <div style={{display:"flex",gap:10,fontSize:10,color:"var(--text3)",flexWrap:"wrap"}}>
+                    <span><span style={{color:"var(--text3)"}}>○</span> Vazio</span>
+                    <span><span style={{color:"#f59e0b"}}>●</span> Rascunho</span>
+                    <span><span style={{color:ac}}>🔄</span> Pendente</span>
+                    <span><span style={{color:"var(--green)"}}>✓</span> Publicado</span>
+                    <span><span style={{color:"#f59e0b"}}>⚠</span> Recalcular</span>
+                  </div>
+                )}
+              </div>
               {(() => {
                 const daysInMonth = new Date(year, month+1, 0).getDate();
                 const noTipDays = data?.noTipDays?.[rid] ?? [];
+                const ridApprovals = data?.tipApprovals?.[rid] ?? {};
+                const canPublish = isDP || isOwner;
 
                 const allDays = Array.from({length: daysInMonth}, (_, i) => {
                   const d = i+1;
@@ -10456,14 +10505,35 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                   if (checked) setTipRows(prev => prev.filter(r => r.date !== date));
                 };
 
+                // Helper: verifica se o tip está publicado (novo: publishedAt; legado: approval semanal)
+                const tipPublished = (tip) => {
+                  if (tip.publishedAt === null) return false; // explicitamente despublicado
+                  if (tip.publishedAt) return true;
+                  const monday = getWeekMonday(tip.date);
+                  return !!ridApprovals[monday];
+                };
+
+                // Layout grid: desktop 7 col, mobile 4 col + segunda linha
+                const gridDesktop = "44px 1fr 44px 38px 110px 90px";
+                const gridMobile  = "40px 1fr 38px 32px";
+
                 return (
                   <div>
-                    {/* Cabeçalho */}
-                    <div style={{display:"grid",gridTemplateColumns:"40px 1fr 48px 36px",gap:4,padding:"0 6px 4px",marginBottom:2}}>
-                      {["","Valor (R$)","S/gorj",""].map((h,i)=>(
-                        <div key={i} style={{color:"var(--text3)",fontSize:10,fontWeight:700,textAlign:i>=2?"center":"left"}}>{h}</div>
-                      ))}
-                    </div>
+                    {/* Cabeçalho — só desktop */}
+                    {!mobileOnly && (
+                      <div style={{display:"grid",gridTemplateColumns:gridDesktop,gap:6,padding:"0 8px 6px",marginBottom:4,borderBottom:"1px solid var(--border)"}}>
+                        {[
+                          ["Data","left"],
+                          ["Valor (R$)","left"],
+                          ["S/g","center"],
+                          ["St","center"],
+                          ["Publicação","center"],
+                          ["Ações","center"],
+                        ].map(([h,a],i)=>(
+                          <div key={i} style={{color:"var(--text3)",fontSize:10,fontWeight:700,textAlign:a,textTransform:"uppercase",letterSpacing:0.4}}>{h}</div>
+                        ))}
+                      </div>
+                    )}
 
                     {allDays.map(date => {
                       const isNoTip    = noTipDays.includes(date);
@@ -10481,14 +10551,37 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                       const isWeekend = [0,6].includes(new Date(date+"T12:00:00").getDay());
                       const isBeforeVigencia = restaurant.serviceStartDate && date < restaurant.serviceStartDate;
 
+                      // Detecta stale (regra de divisão mudou após o lançamento)
+                      const splitVersion = getSplitForDate(splits?.[rid], date);
+                      const activeVersionId = splitVersion?.id;
+                      const tipVersionId = dayTips[0]?.splitVersionId;
+                      const isStale = isLaunched && activeVersionId && tipVersionId && activeVersionId !== tipVersionId;
+
+                      // Estado de publicação do dia
+                      const publishedTips  = isLaunched ? dayTips.filter(tipPublished) : [];
+                      const isPublished    = isLaunched && publishedTips.length === dayTips.length;
+                      const partialPublish = isLaunched && publishedTips.length > 0 && publishedTips.length < dayTips.length;
+
+                      // Status icon & cor
+                      let statusIcon, statusColor, statusTitle;
+                      if (isNoTip) { statusIcon = "—"; statusColor = "#6366f1"; statusTitle = "Sem gorjeta"; }
+                      else if (isStale) { statusIcon = "⚠"; statusColor = "#f59e0b"; statusTitle = "Regra de divisão mudou — clique em Recalcular"; }
+                      else if (isDirty) { statusIcon = "●"; statusColor = "#f59e0b"; statusTitle = "Rascunho não salvo"; }
+                      else if (isPublished) { statusIcon = "✓"; statusColor = "var(--green)"; statusTitle = "Publicado para empregados"; }
+                      else if (partialPublish) { statusIcon = "◐"; statusColor = "#f59e0b"; statusTitle = "Publicação parcial — re-publique"; }
+                      else if (isLaunched) { statusIcon = "🔄"; statusColor = ac; statusTitle = "Lançado, aguardando publicação"; }
+                      else { statusIcon = "○"; statusColor = "var(--text3)"; statusTitle = "Sem dados"; }
+
                       let bg = "var(--card-bg)", border = "var(--border)";
                       if      (isBeforeVigencia)            { bg = "var(--bg3)"; border = "var(--border)"; }
                       else if (isNoTip)                     { bg = "#f5f0ff"; border = "#6366f133"; }
                       else if (isDirty)                     { bg = "#fffbeb"; border = "#f59e0b44"; }
-                      else if (isLaunched)                  { bg = "#f0fdf4"; border = "#10b98133"; }
+                      else if (isStale)                     { bg = "#fffbeb"; border = "#f59e0b66"; }
+                      else if (isPublished)                 { bg = "#f0fdf4"; border = "#10b98144"; }
+                      else if (isLaunched)                  { bg = "#eff6ff"; border = "var(--ac)33"; }
 
                       if (isBeforeVigencia) return (
-                        <div key={date} style={{display:"grid",gridTemplateColumns:"40px 1fr",gap:4,padding:"5px 6px",marginBottom:3,borderRadius:10,background:bg,border:`1px solid ${border}`,alignItems:"center",opacity:0.4}}>
+                        <div key={date} style={{display:"grid",gridTemplateColumns:"40px 1fr",gap:4,padding:"5px 8px",marginBottom:3,borderRadius:10,background:bg,border:`1px solid ${border}`,alignItems:"center",opacity:0.4}}>
                           <div style={{textAlign:"center"}}>
                             <div style={{color:"var(--text3)",fontSize:13,fontWeight:700}}>{parseInt(date.slice(-2))}</div>
                             <div style={{color:"var(--text3)",fontSize:9}}>{weekday}</div>
@@ -10497,60 +10590,152 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                         </div>
                       );
 
-                      return (
-                        <div key={date} style={{display:"grid",gridTemplateColumns:"40px 1fr 48px 36px",gap:4,padding:"5px 6px",marginBottom:3,borderRadius:10,background:bg,border:`1px solid ${border}`,alignItems:"center"}}>
+                      // Ações: publicar/despublicar
+                      const publishDay = () => {
+                        if (!isLaunched) return;
+                        const now = new Date().toISOString();
+                        const author = currentUser?.name || (isOwner ? "Gestor AppTip" : "Gestor Adm.");
+                        const authorId = currentUser?.id || "admin";
+                        const updatedTips = tips.map(t => {
+                          if (t.restaurantId === rid && t.date === date) {
+                            return { ...t, publishedAt: now, publishedBy: authorId, publishedByName: author };
+                          }
+                          return t;
+                        });
+                        onUpdate("tips", updatedTips);
+                        onUpdate("_toast", `📢 ${fmtDate(date)} publicado para empregados`);
+                      };
+                      const unpublishDay = () => {
+                        if (!isLaunched) return;
+                        if (!window.confirm(`Despublicar ${fmtDate(date)}?\n\nOs valores deste dia serão ocultados do extrato do empregado.`)) return;
+                        const updatedTips = tips.map(t => {
+                          if (t.restaurantId === rid && t.date === date) {
+                            return { ...t, publishedAt: null, unpublishedAt: new Date().toISOString() };
+                          }
+                          return t;
+                        });
+                        onUpdate("tips", updatedTips);
+                        onUpdate("_toast", `🔒 ${fmtDate(date)} despublicado`);
+                      };
+                      const recalcDay = () => {
+                        const preSnap = snapshotTipsMonth(tips, rid, mk);
+                        const r = recalcTipDay(date, tips);
+                        if (r && r.count > 0) {
+                          saveVersion("tips", rid, mk, data?.tipVersions, preSnap, currentUser?.name || (isOwner?"Gestor AppTip":"Gestor Adm."), `Recalcular ${fmtDate(date)}`, onUpdate, true);
+                          onUpdate("tips", r.updatedTips);
+                          onUpdate("_toast", `🔄 ${fmtDate(date)} recalculado (${r.count} empregados)`);
+                        } else {
+                          onUpdate("_toast", `Nada para recalcular em ${fmtDate(date)}`);
+                        }
+                      };
+                      const removeDay = () => {
+                        if(!window.confirm(`Zerar gorjeta de ${fmtDate(date)}?\n\n⚠️ Um backup será salvo no Histórico — você pode restaurar depois.`)) return;
+                        const preSnap = snapshotTipsMonth(tips, rid, mk);
+                        saveVersion("tips", rid, mk, data?.tipVersions, preSnap, currentUser?.name || (isOwner?"Gestor AppTip":"Gestor Adm."), `Remover gorjeta de ${fmtDate(date)}`, onUpdate, true);
+                        onUpdate("tips",tips.filter(t=>!(t.restaurantId===rid&&t.date===date)));
+                        setTipRows(prev=>prev.filter(r=>r.date!==date));
+                        onUpdate("_toast",`🗑️ ${fmtDate(date)}: removido`);
+                      };
 
-                          {/* Data */}
-                          <div style={{textAlign:"center"}}>
-                            <div style={{color:isWeekend?"#f59e0b":isNoTip?"#818cf8":isLaunched&&!isDirty?"var(--green)":isDirty?"#f59e0b":"var(--text3)",fontSize:13,fontWeight:700}}>{parseInt(date.slice(-2))}</div>
-                            <div style={{color:"var(--text3)",fontSize:9}}>{weekday}</div>
+                      // Renders compactos reutilizáveis
+                      const dataCol = (
+                        <div style={{textAlign:"center"}}>
+                          <div style={{color:isWeekend?"#f59e0b":isNoTip?"#818cf8":isPublished?"var(--green)":isLaunched&&!isDirty?ac:isDirty?"#f59e0b":"var(--text3)",fontSize:13,fontWeight:700}}>{parseInt(date.slice(-2))}</div>
+                          <div style={{color:"var(--text3)",fontSize:9}}>{weekday}</div>
+                        </div>
+                      );
+                      const valorCol = (
+                        privacyMask && isLaunched && !isDirty ? (
+                          <div style={{...S.input, fontSize:14, padding:"8px 10px", background:"#e8faf0", color:"var(--green)", borderColor:"#10b98133", display:"flex", alignItems:"center"}}>
+                            ••••,••
                           </div>
-
-                          {/* Valor */}
-                          {privacyMask && isLaunched && !isDirty ? (
-                            <div style={{...S.input, fontSize:14, padding:"8px 10px", background:"#e8faf0", color:"var(--green)", borderColor:"#10b98133", display:"flex", alignItems:"center"}}>
-                              ••••,••
-                            </div>
-                          ) : (
-                            <input
-                              type="text" inputMode="decimal"
-                              value={isNoTip ? "" : displayVal}
-                              disabled={isNoTip}
-                              onChange={e=>{ const raw = e.target.value.replace(/[^0-9.,]/g,""); setTipRows(prev => { const without = prev.filter(r => r.date !== date); return [...without, { date, total: raw, note: "" }]; }); }}
-                              placeholder="0,00"
-                              style={{...S.input, fontSize:14, padding:"8px 10px",
-                                background:  isNoTip?"#f5f0ff" : isDirty?"#fef9e7" : isLaunched?"#e8faf0" : "var(--bg2)",
-                                color:       isNoTip?"#6366f1" : isDirty?"#f59e0b" : isLaunched?"var(--green)" : "var(--text)",
-                                borderColor: isNoTip?"transparent" : isDirty?"#f59e0b44" : isLaunched?"#10b98133" : "var(--border)",
-                                cursor:      isNoTip?"not-allowed" : "text",
-                              }}
-                            />
+                        ) : (
+                          <input
+                            type="text" inputMode="decimal"
+                            value={isNoTip ? "" : displayVal}
+                            disabled={isNoTip}
+                            onChange={e=>{ const raw = e.target.value.replace(/[^0-9.,]/g,""); setTipRows(prev => { const without = prev.filter(r => r.date !== date); return [...without, { date, total: raw, note: "" }]; }); }}
+                            placeholder="0,00"
+                            style={{...S.input, fontSize:14, padding:"8px 10px",
+                              background:  isNoTip?"#f5f0ff" : isDirty?"#fef9e7" : isStale?"#fef9e7" : isPublished?"#e8faf0" : isLaunched?"#eff6ff" : "var(--bg2)",
+                              color:       isNoTip?"#6366f1" : isDirty?"#f59e0b" : isStale?"#f59e0b" : isPublished?"var(--green)" : isLaunched?ac : "var(--text)",
+                              borderColor: isNoTip?"transparent" : isDirty?"#f59e0b44" : isStale?"#f59e0b66" : isPublished?"#10b98133" : isLaunched?"var(--ac)22" : "var(--border)",
+                              cursor:      isNoTip?"not-allowed" : "text",
+                            }}
+                          />
+                        )
+                      );
+                      const noTipCol = (
+                        <label style={{display:"flex",justifyContent:"center",alignItems:"center",cursor:isLaunched?"default":"pointer",userSelect:"none",opacity:isLaunched?0.3:1}}>
+                          <input type="checkbox" checked={isNoTip} disabled={isLaunched}
+                            onChange={e=>setNoTip(date, e.target.checked)}
+                            style={{width:18,height:18,cursor:isLaunched?"default":"pointer",accentColor:"#6366f1"}} />
+                        </label>
+                      );
+                      const statusCol = (
+                        <div title={statusTitle} style={{display:"flex",justifyContent:"center",alignItems:"center",fontSize:14,fontWeight:700,color:statusColor,cursor:"help"}}>
+                          {statusIcon}
+                        </div>
+                      );
+                      const pubCol = (
+                        <div style={{display:"flex",justifyContent:"center",alignItems:"center"}}>
+                          {!isLaunched && <span style={{color:"var(--text3)",fontSize:10}}>—</span>}
+                          {isLaunched && canPublish && !isPublished && (
+                            <button onClick={publishDay} title="Publicar este dia para os empregados" style={{padding:"4px 10px",borderRadius:8,border:"none",background:ac,color:"#fff",cursor:"pointer",fontSize:11,fontWeight:700,fontFamily:"'DM Mono',monospace",whiteSpace:"nowrap"}}>
+                              {partialPublish ? "Re-pub." : "Publicar"}
+                            </button>
                           )}
+                          {isLaunched && canPublish && isPublished && (
+                            <button onClick={unpublishDay} title="Despublicar — esconder do empregado" style={{padding:"4px 10px",borderRadius:8,border:"1px solid var(--border)",background:"var(--bg2)",color:"var(--text2)",cursor:"pointer",fontSize:11,fontWeight:600,fontFamily:"'DM Mono',monospace",whiteSpace:"nowrap"}}>
+                              Despublicar
+                            </button>
+                          )}
+                          {isLaunched && !canPublish && (
+                            <span style={{color:isPublished?"var(--green)":"var(--text3)",fontSize:10}}>{isPublished?"✓ pub.":"pendente"}</span>
+                          )}
+                        </div>
+                      );
+                      const acoesCol = (
+                        <div style={{display:"flex",gap:4,justifyContent:"center",alignItems:"center"}}>
+                          {isLaunched && isStale && (
+                            <button onClick={recalcDay} title="Recalcular este dia (regra mudou)" style={{padding:"3px 6px",borderRadius:6,border:"1px solid #f59e0b44",background:"transparent",color:"#f59e0b",cursor:"pointer",fontSize:11}}>
+                              🔄
+                            </button>
+                          )}
+                          {isLaunched && (
+                            <button onClick={removeDay} title="Remover lançamento" style={{padding:"3px 6px",borderRadius:6,border:"none",background:"transparent",color:"var(--red)",cursor:"pointer",fontSize:11}}>
+                              ✕
+                            </button>
+                          )}
+                        </div>
+                      );
 
-                          {/* Checkbox sem gorjeta */}
-                          <label style={{display:"flex",justifyContent:"center",alignItems:"center",cursor:isLaunched?"default":"pointer",userSelect:"none",opacity:isLaunched?0.3:1}}>
-                            <input type="checkbox" checked={isNoTip} disabled={isLaunched}
-                              onChange={e=>setNoTip(date, e.target.checked)}
-                              style={{width:18,height:18,cursor:isLaunched?"default":"pointer",accentColor:"#6366f1"}} />
-                          </label>
-
-                          {/* Status */}
-                          <div style={{display:"flex",justifyContent:"center",alignItems:"center"}}>
-                            {isLaunched && !isDirty && <span style={{color:"var(--green)",fontSize:14}}>✓</span>}
-                            {isDirty && <span style={{color:"#f59e0b",fontSize:12}}>●</span>}
-                            {isLaunched && (
-                              <button onClick={()=>{
-                                if(!window.confirm(`Zerar gorjeta de ${fmtDate(date)}?\n\n⚠️ Um backup será salvo no Histórico — você pode restaurar depois.`)) return;
-                                const preSnap = snapshotTipsMonth(tips, rid, mk);
-                                saveVersion("tips", rid, mk, data?.tipVersions, preSnap, currentUser?.name || (isOwner?"Gestor AppTip":"Gestor Adm."), `Remover gorjeta de ${fmtDate(date)}`, onUpdate, true);
-                                onUpdate("tips",tips.filter(t=>!(t.restaurantId===rid&&t.date===date)));
-                                setTipRows(prev=>prev.filter(r=>r.date!==date));
-                                onUpdate("_toast",`🗑️ ${fmtDate(date)}: removido`);
-                              }} style={{padding:"2px 5px",borderRadius:6,border:"none",background:"transparent",color:"var(--red)",cursor:"pointer",fontSize:10,marginLeft:2}}>
-                                ✕
-                              </button>
+                      // Mobile: empilha em 2 linhas (compactez)
+                      if (mobileOnly) {
+                        return (
+                          <div key={date} style={{padding:"6px 8px",marginBottom:3,borderRadius:10,background:bg,border:`1px solid ${border}`}}>
+                            <div style={{display:"grid",gridTemplateColumns:gridMobile,gap:4,alignItems:"center"}}>
+                              {dataCol}{valorCol}{noTipCol}{statusCol}
+                            </div>
+                            {(isLaunched || (canPublish && isLaunched)) && (
+                              <div style={{display:"flex",justifyContent:"flex-end",gap:6,marginTop:6,paddingTop:6,borderTop:"1px dashed var(--border)"}}>
+                                {pubCol}
+                                {acoesCol}
+                              </div>
                             )}
                           </div>
+                        );
+                      }
+
+                      // Desktop: tudo numa linha
+                      return (
+                        <div key={date} style={{display:"grid",gridTemplateColumns:gridDesktop,gap:6,padding:"5px 8px",marginBottom:3,borderRadius:10,background:bg,border:`1px solid ${border}`,alignItems:"center"}}>
+                          {dataCol}
+                          {valorCol}
+                          {noTipCol}
+                          {statusCol}
+                          {pubCol}
+                          {acoesCol}
                         </div>
                       );
                     })}
@@ -10559,70 +10744,39 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
               })()}
             </div>
 
-            {/* COLUNA DIREITA: Confirmação semanal */}
-            {(isDP || isOwner) ? (() => {
+            {/* Resumo Semanal — informativo (Fase D) */}
+            {(() => {
               const weeks = getWeeksInMonth(year, month);
               const ridApprovals = data?.tipApprovals?.[rid] ?? {};
-              const pendingCount = weeks.filter(w => !ridApprovals[w.monday]).length;
+              const tipPublished = (tip) => {
+                if (tip.publishedAt === null) return false;
+                if (tip.publishedAt) return true;
+                const monday = getWeekMonday(tip.date);
+                return !!ridApprovals[monday];
+              };
+              const fmtDay = (ds) => { const [,mm,dd] = ds.split("-"); return `${dd}/${mm}`; };
               return (
-                <div style={{...S.card, border: pendingCount > 0 ? "2px solid #f59e0b" : "2px solid var(--ac)33"}}>
-                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
-                    <p style={{color:ac,fontSize:14,fontWeight:700,margin:0}}>✅ Confirmação</p>
-                    {pendingCount > 0 ? (
-                      <span style={{background:"#f59e0b22",color:"#f59e0b",padding:"3px 10px",borderRadius:8,fontSize:11,fontWeight:700}}>{pendingCount} pendente{pendingCount>1?"s":""}</span>
-                    ) : (
-                      <span style={{background:"var(--ac)11",color:ac,padding:"3px 10px",borderRadius:8,fontSize:11,fontWeight:700}}>Tudo confirmado</span>
-                    )}
-                  </div>
-                  <p style={{color:"var(--text3)",fontSize:11,marginBottom:12,lineHeight:1.5}}>Confirme cada semana para liberar os valores no extrato do empregado.</p>
-                  <div style={{display:"flex",flexDirection:"column",gap:8}}>
+                <div style={{marginBottom:24}}>
+                  <p style={{color:"var(--text3)",fontSize:11,fontWeight:700,marginBottom:8,textTransform:"uppercase",letterSpacing:0.5}}>📊 Resumo Semanal</p>
+                  <div style={{display:"grid",gridTemplateColumns:`repeat(auto-fill, minmax(${mobileOnly?"100%":"200px"}, 1fr))`,gap:8}}>
                     {weeks.map(w => {
-                      const approval = ridApprovals[w.monday];
                       const weekTips = monthTips.filter(t => { const day = parseInt(t.date.split("-")[2]); return w.daysInMonth.includes(day); });
                       const weekTotal = weekTips.reduce((s,t) => s + (t.myNet ?? 0), 0);
                       const weekEmps = new Set(weekTips.map(t => t.employeeId)).size;
-                      const weekDates = [...new Set(weekTips.map(t => t.date))].sort();
-                      const fmtDay = (ds) => { const [,mm,dd] = ds.split("-"); return `${dd}/${mm}`; };
+                      const weekDates = [...new Set(weekTips.map(t => t.date))];
+                      const pubDates = [...new Set(weekTips.filter(tipPublished).map(t => t.date))];
+                      const allPub  = weekDates.length > 0 && pubDates.length === weekDates.length;
+                      const partial = pubDates.length > 0 && !allPub;
                       return (
-                        <div key={w.monday} style={{padding:"10px 12px",borderRadius:10,background:approval?"var(--ac)06":"var(--bg2)",border:`1px solid ${approval?"var(--ac)33":"var(--border)"}`}}>
-                          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:4}}>
-                            <div style={{fontWeight:700,fontSize:13,color:"var(--text)"}}>{fmtDay(w.monday)} — {fmtDay(w.sunday)}</div>
-                            {approval && <span style={{fontSize:9,color:ac,fontWeight:600}}>✓</span>}
+                        <div key={w.monday} style={{padding:"8px 10px",borderRadius:8,background:allPub?"#f0fdf4":"var(--bg2)",border:`1px solid ${allPub?"#10b98133":partial?"#f59e0b33":"var(--border)"}`}}>
+                          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:2}}>
+                            <div style={{fontWeight:700,fontSize:12,color:"var(--text)"}}>{fmtDay(w.monday)} — {fmtDay(w.sunday)}</div>
+                            {allPub && <span style={{fontSize:10,color:"var(--green)"}}>✓</span>}
+                            {partial && <span style={{fontSize:10,color:"#f59e0b"}}>{pubDates.length}/{weekDates.length}</span>}
                           </div>
-                          <div style={{fontSize:11,color:"var(--text3)",marginBottom:6}}>{weekTips.length} lanç. · {weekEmps} emp. · Líq. R$ {weekTotal.toFixed(2)}</div>
-                          {approval && <div style={{fontSize:10,color:"var(--text3)",marginBottom:6}}>Por {approval.approvedByName} em {new Date(approval.approvedAt).toLocaleDateString("pt-BR")} {new Date(approval.approvedAt).toLocaleTimeString("pt-BR",{hour:"2-digit",minute:"2-digit"})}</div>}
-                          <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
-                            {approval ? (<>
-                              <button onClick={() => {
-                                if (weekDates.length === 0) { onUpdate("_toast","Nenhum lançamento nesta semana para recalcular."); return; }
-                                let total=0, currentTips=tips;
-                                const preSnap = snapshotTipsMonth(tips, rid, mk);
-                                weekDates.forEach(d => { const r=recalcTipDay(d,currentTips); total+=r.count; currentTips=r.updatedTips; });
-                                if(total>0){
-                                  saveVersion("tips", rid, mk, data?.tipVersions, preSnap, currentUser?.name || (isOwner?"Gestor AppTip":"Gestor Adm."), `Recalcular semana ${fmtDay(w.monday)}—${fmtDay(w.sunday)}`, onUpdate, true);
-                                  onUpdate("tips",currentTips);
-                                }
-                                // Re-confirm after recalc
-                                const upd = { ...(data?.tipApprovals ?? {}) };
-                                upd[rid] = { ...(upd[rid] ?? {}), [w.monday]: { approvedAt: new Date().toISOString(), approvedBy: currentUser?.id || "admin", approvedByName: currentUser?.name || (isOwner ? "Gestor AppTip" : "Gestor Adm.") } };
-                                onUpdate("tipApprovals", upd);
-                                onUpdate("_toast",`🔄 Semana recalculada: ${total} empregados atualizados`);
-                              }} style={{padding:"5px 10px",borderRadius:8,border:"1px solid #f59e0b44",background:"transparent",color:"#f59e0b",cursor:"pointer",fontSize:11,fontFamily:"'DM Mono',monospace"}}>🔄 Recalcular</button>
-                              <button onClick={() => {
-                                if (!window.confirm(`Desconfirmar a semana ${fmtDay(w.monday)} — ${fmtDay(w.sunday)}?\n\nOs valores desta semana serão ocultados do extrato do empregado.`)) return;
-                                const updated = { ...(data?.tipApprovals ?? {}) };
-                                const ridObj = { ...(updated[rid] ?? {}) };
-                                delete ridObj[w.monday];
-                                updated[rid] = ridObj;
-                                onUpdate("tipApprovals", updated);
-                              }} style={{padding:"5px 10px",borderRadius:8,border:"1px solid var(--red)33",background:"transparent",color:"var(--red)",cursor:"pointer",fontSize:11,fontFamily:"'DM Mono',monospace"}}>Desconfirmar</button>
-                            </>) : (
-                              <button onClick={() => {
-                                const updated = { ...(data?.tipApprovals ?? {}) };
-                                updated[rid] = { ...(updated[rid] ?? {}), [w.monday]: { approvedAt: new Date().toISOString(), approvedBy: currentUser?.id || "admin", approvedByName: currentUser?.name || (isOwner ? "Gestor AppTip" : "Gestor Adm.") } };
-                                onUpdate("tipApprovals", updated);
-                              }} style={{...S.btnPrimary,fontSize:11,padding:"5px 12px"}}>Confirmar ✅</button>
-                            )}
+                          <div style={{fontSize:10,color:"var(--text3)"}}>{weekTips.length} lanç. · {weekEmps} emp.</div>
+                          <div style={{fontSize:11,color:ac,fontWeight:700,marginTop:2}}>
+                            {privacyMask ? "R$ ••••,••" : `R$ ${weekTotal.toFixed(2)}`}
                           </div>
                         </div>
                       );
@@ -10630,9 +10784,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                   </div>
                 </div>
               );
-            })() : <div/>}
-
-            </div>{/* Fecha grid 2 colunas */}
+            })()}
 
             {/* Divisão por dia — largura total */}
             {tipDates.length === 0 && <p style={{ color: "var(--text3)", textAlign: "center" }}>Nenhum lançamento neste mês.</p>}
@@ -11310,6 +11462,28 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                     });
                     setSchedLocalEdits(null);
                     onUpdate("_toast", "✅ Escala salva como nova versão");
+                    // Fase B: auto-recálculo dos dias editados que já têm gorjeta lançada
+                    try {
+                      const editedDates = new Set();
+                      Object.values(schedLocalEdits).forEach(dayEdits => {
+                        Object.keys(dayEdits).forEach(dt => editedDates.add(dt));
+                      });
+                      const datesWithTips = [...editedDates].filter(dt =>
+                        (tips || []).some(t => t.restaurantId === rid && t.date === dt)
+                      ).sort();
+                      if (datesWithTips.length > 0) {
+                        let cur = tips;
+                        let any = false;
+                        datesWithTips.forEach(dt => {
+                          const r = recalcTipDay(dt, cur);
+                          if (r && r.updatedTips) { cur = r.updatedTips; any = true; }
+                        });
+                        if (any) {
+                          onUpdate("tips", cur);
+                          setTimeout(() => onUpdate("_toast", `🔄 ${datesWithTips.length} dia(s) de gorjeta recalculados após mudança de escala`), 800);
+                        }
+                      }
+                    } catch (e) { /* silently */ }
                   }} style={{...S.btnPrimary,fontSize:mobileOnly?11:12,padding:mobileOnly?"8px 14px":"8px 18px",fontWeight:700}}>
                     💾 {mobileOnly?"Salvar":"Salvar nova versão"}
                   </button>
