@@ -9855,6 +9855,32 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
   const [empResetSignal, setEmpResetSignal] = useState(0);
   const activeGroup = TAB_GROUPS_FINAL.find(g => g.id === tabGroup) ?? TAB_GROUPS_FINAL[0];
 
+  // Fase B helper: recalcula gorjetas dos dias editados (chamado depois de TODO save de escala).
+  // Recebe o mapa de schedLocalEdits que está sendo persistido.
+  function recalcAfterScheduleSave(editedEdits) {
+    if (!editedEdits) return;
+    try {
+      const editedDates = new Set();
+      Object.values(editedEdits).forEach(dayEdits => {
+        Object.keys(dayEdits || {}).forEach(dt => editedDates.add(dt));
+      });
+      const datesWithTips = [...editedDates].filter(dt =>
+        (tips || []).some(t => t.restaurantId === rid && t.date === dt)
+      ).sort();
+      if (datesWithTips.length === 0) return;
+      let cur = tips;
+      let any = false;
+      datesWithTips.forEach(dt => {
+        const r = recalcTipDay(dt, cur);
+        if (r && r.updatedTips) { cur = r.updatedTips; any = true; }
+      });
+      if (any) {
+        onUpdate("tips", cur);
+        setTimeout(() => onUpdate("_toast", `🔄 ${datesWithTips.length} dia(s) de gorjeta recalculados após mudança de escala`), 800);
+      }
+    } catch (_) { /* silent */ }
+  }
+
   function switchGroup(gid) {
     const g = TAB_GROUPS_FINAL.find(x => x.id === gid);
     if (!g || g.tabs.length === 0) return;
@@ -9989,6 +10015,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                   newMonth[eid] = empMap;
                 });
                 onUpdate("schedules", { ...schedules, [rid]: { ...(schedules?.[rid]??{}), [mk]: newMonth } });
+                recalcAfterScheduleSave(schedLocalEdits);
               }
               setSchedLocalEdits(null);
             }
@@ -10025,6 +10052,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                 newMonth[eid] = empMap;
               });
               onUpdate("schedules", { ...schedules, [rid]: { ...(schedules?.[rid]??{}), [mk]: newMonth } });
+              recalcAfterScheduleSave(schedLocalEdits);
             }
             setSchedLocalEdits(null);
           }
@@ -10057,6 +10085,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                   newMonth2[eid] = empMap;
                 });
                 onUpdate("schedules", { ...schedules, [rid]: { ...(schedules?.[rid]??{}), [mk]: newMonth2 } });
+                recalcAfterScheduleSave(schedLocalEdits);
               }
               setSchedLocalEdits(null);
             }
@@ -10436,6 +10465,26 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                     </button>
                   );
                 })()}
+                {(isOwner || isDP) && <button onClick={()=>{
+                  const monthDates = [...new Set(monthTips.map(t => t.date))].sort();
+                  if (monthDates.length === 0) { onUpdate("_toast","Nada para recalcular neste mês."); return; }
+                  if (!window.confirm(`Recalcular ${monthDates.length} dia(s) com gorjeta lançada de ${monthLabel(year, month)}?\n\nUm backup será salvo no Histórico — você pode restaurar se algo sair errado.`)) return;
+                  const preSnap = snapshotTipsMonth(tips, rid, mk);
+                  let cur = tips;
+                  let totalChanged = 0;
+                  monthDates.forEach(d => {
+                    const r = recalcTipDay(d, cur);
+                    if (r && r.updatedTips) { cur = r.updatedTips; totalChanged += r.count; }
+                  });
+                  if (totalChanged > 0) {
+                    saveVersion("tips", rid, mk, data?.tipVersions, preSnap, currentUser?.name || (isOwner?"Gestor AppTip":"Gestor Adm."), `Recalcular mês inteiro (${monthDates.length} dias)`, onUpdate, true);
+                    onUpdate("tips", cur);
+                    onUpdate("_toast", `🔄 ${monthDates.length} dia(s) recalculados — ${totalChanged} lançamentos atualizados`);
+                  } else {
+                    onUpdate("_toast", "Nada mudou — gorjetas já estavam consistentes");
+                  }
+                }} title="Re-roda o cálculo em todos os dias com gorjeta lançada deste mês usando a escala e regra atuais"
+                  style={{...S.btnSecondary,fontSize:12,color:"#f59e0b",borderColor:"#f59e0b44"}}>🔄 Recalcular mês</button>}
                 {isOwner && <button onClick={()=>{
                   const ok = resetTab("tips","Gorjetas",()=>({tips:tips.filter(t=>t.restaurantId===rid), splits:splits?.[rid]}));
                   if(ok){ onUpdate("tips",tips.filter(t=>t.restaurantId!==rid)); onUpdate("_toast","🗑️ Gorjetas enviadas para a lixeira"); }
@@ -11454,30 +11503,9 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                       ...schedules,
                       [rid]: { ...(schedules?.[rid]??{}), [mk]: newMonth }
                     });
+                    recalcAfterScheduleSave(schedLocalEdits);
                     setSchedLocalEdits(null);
                     onUpdate("_toast", "✅ Escala salva como nova versão");
-                    // Fase B: auto-recálculo dos dias editados que já têm gorjeta lançada
-                    try {
-                      const editedDates = new Set();
-                      Object.values(schedLocalEdits).forEach(dayEdits => {
-                        Object.keys(dayEdits).forEach(dt => editedDates.add(dt));
-                      });
-                      const datesWithTips = [...editedDates].filter(dt =>
-                        (tips || []).some(t => t.restaurantId === rid && t.date === dt)
-                      ).sort();
-                      if (datesWithTips.length > 0) {
-                        let cur = tips;
-                        let any = false;
-                        datesWithTips.forEach(dt => {
-                          const r = recalcTipDay(dt, cur);
-                          if (r && r.updatedTips) { cur = r.updatedTips; any = true; }
-                        });
-                        if (any) {
-                          onUpdate("tips", cur);
-                          setTimeout(() => onUpdate("_toast", `🔄 ${datesWithTips.length} dia(s) de gorjeta recalculados após mudança de escala`), 800);
-                        }
-                      }
-                    } catch (e) { /* silently */ }
                   }} style={{...S.btnPrimary,fontSize:mobileOnly?11:12,padding:mobileOnly?"8px 14px":"8px 18px",fontWeight:700}}>
                     💾 {mobileOnly?"Salvar":"Salvar nova versão"}
                   </button>
