@@ -20010,12 +20010,12 @@ function generateAtaPDF({ version, restaurant, pessoas, roles, finalPct, employe
         { fontStyle: "bold", fontSize: 10, lineHeight: 5 }
       );
       writeText(
-        "Esses percentuais flutuam diariamente conforme o número de empregados registrados não-freela ativos na área naquela data. O cálculo é feito automaticamente em cada dia: percentual configurado × quantidade de empregados ativos = % da área. O saldo restante (100% menos a soma dos variáveis) é distribuído entre as áreas fixas, mantendo as proporções entre elas.",
+        "Esses percentuais flutuam diariamente conforme o número de empregados registrados ativos na área naquela data. O cálculo é feito automaticamente em cada dia: percentual configurado × quantidade de empregados ativos = % da área. O saldo restante (100% menos a soma dos variáveis) é distribuído entre as áreas fixas, mantendo as proporções entre elas.",
         { fontSize: 9, lineHeight: 4.2, color: TEXT2, gap: 3 }
       );
       writeText("Exemplo prático para uma área variável:", { fontStyle: "bold", fontSize: 9, lineHeight: 4.5 });
       writeText(
-        "• Empregado admitido no dia 1 do mês: contribui durante todos os 30 dias.\n• Empregado admitido no dia 10: contribui durante 21 dias (10 a 30).\n• Empregado demitido no dia 20: deixa de contar a partir do dia 20 (conta até o dia 19 inclusive).\n• Empregado em férias ou freela: NÃO conta no cálculo (mesmo que registrado na área).",
+        "• Empregado admitido no dia 1 do mês: contribui durante todos os 30 dias.\n• Empregado admitido no dia 10: contribui durante 21 dias (10 a 30).\n• Empregado demitido no dia 20: deixa de contar a partir do dia 20 (conta até o dia 19 inclusive).\n• Empregado em férias: NÃO conta no cálculo.",
         { fontSize: 9, lineHeight: 4.2, color: TEXT2, gap: 3 }
       );
     }
@@ -20063,7 +20063,6 @@ function generateAtaPDF({ version, restaurant, pessoas, roles, finalPct, employe
   bulletList([
     "Estão registrados no quadro do restaurante e não estão demitidos antes da data;",
     "Foram admitidos em data anterior ou igual ao dia (admissão futura não conta);",
-    "NÃO são empregados freela (freelas recebem direto pelo dia trabalhado, fora do pool);",
     "Têm cargo cadastrado e o cargo NÃO está marcado como 'sem participação na gorjeta';",
     "Estão escalados como TRABALHO (T), TRABALHO POR COMPENSAÇÃO (TC) ou COMPENSAÇÃO DE FOLGA (FC) — exceto produção, que entra todo dia;",
     "Empregados de PRODUÇÃO entram em todos os dias (independente do status de escala), exceto férias.",
@@ -20071,14 +20070,12 @@ function generateAtaPDF({ version, restaurant, pessoas, roles, finalPct, employe
   y += 2;
   writeText("NÃO PARTICIPAM da divisão da gorjeta (não recebem fração) os empregados que, no dia em questão:", { fontStyle: "bold", fontSize: 10, lineHeight: 5 });
   bulletList([
-    "São FREELAS — recebem o pagamento de gorjeta diretamente pelo dia trabalhado, em mecanismo separado fora deste cálculo;",
     "Estão DEMITIDOS em data anterior ou igual ao dia;",
     "Não foram admitidos ainda (admissão futura);",
     "Estão em FÉRIAS (status FÉR);",
     "Estão em FOLGA programada (status F);",
     "Estão em FALTA JUSTIFICADA (FJ) ou FALTA INJUSTIFICADA (FI);",
-    "Estão escalados como FREELA NO DIA (FL);",
-    "Têm cargo marcado como 'sem participação na gorjeta' (noTip).",
+    "Têm cargo marcado como 'sem participação na gorjeta'.",
   ]);
   y += 3;
 
@@ -20149,34 +20146,59 @@ function generateAtaPDF({ version, restaurant, pessoas, roles, finalPct, employe
     { fontSize: 10, lineHeight: 5, gap: 5 }
   );
 
-  // ─── 11) LISTA DE ASSINATURAS ───
-  sectionTitle("Participantes — Assinaturas");
+  // ─── 11) VOTAÇÃO + ASSINATURAS ───
+  sectionTitle("Votação e Assinaturas");
+  writeText(
+    "Cada participante marca abaixo seu voto (FAVOR, CONTRA ou ABSTÉM) com um X no quadrado correspondente e assina ao lado para confirmar o voto registrado.",
+    { fontSize: 9, lineHeight: 4.5, color: TEXT2, gap: 3 }
+  );
   const voters = version.ata?.voters || [];
   if (voters.length === 0) {
     writeText("(Nenhum participante selecionado.)", { fontSize: 10, color: TEXT3, gap: 4 });
   } else {
     doc.autoTable({
       startY: y,
-      head: [["Nome completo", "CPF", "Cargo", "Assinatura"]],
-      body: voters.map(v => [v.name, v.cpf || "—", v.roleName || "—", ""]),
+      head: [["Nome completo", "CPF", "Cargo", "FAVOR", "CONTRA", "ABSTÉM", "Assinatura"]],
+      body: voters.map(v => [v.name, v.cpf || "—", v.roleName || "—", "", "", "", ""]),
       theme: "grid",
-      styles: { fontSize: 9, cellPadding: 3, textColor: TEXT, lineColor: BORDER, lineWidth: 0.2, minCellHeight: 14 },
-      headStyles: { fillColor: ACCENT, textColor: [255,255,255], fontStyle: "bold", fontSize: 9 },
+      styles: { fontSize: 8.5, cellPadding: 2.5, textColor: TEXT, lineColor: BORDER, lineWidth: 0.2, minCellHeight: 13, valign: "middle" },
+      headStyles: { fillColor: ACCENT, textColor: [255,255,255], fontStyle: "bold", fontSize: 8, halign: "center" },
       columnStyles: {
-        0: { cellWidth: 60 },
-        1: { cellWidth: 35 },
-        2: { cellWidth: 35 },
-        3: { cellWidth: "auto" },
+        0: { cellWidth: 50 },                             // Nome
+        1: { cellWidth: 28 },                             // CPF
+        2: { cellWidth: 22 },                             // Cargo
+        3: { cellWidth: 13, halign: "center" },           // FAVOR
+        4: { cellWidth: 13, halign: "center" },           // CONTRA
+        5: { cellWidth: 13, halign: "center" },           // ABSTÉM
+        6: { cellWidth: "auto" },                         // Assinatura
       },
       margin: { left: MARGIN, right: MARGIN },
+      // Desenha quadradinho centralizado nas células de voto pra ficar claro onde marcar
+      didDrawCell: function(data) {
+        if (data.section === "body" && (data.column.index === 3 || data.column.index === 4 || data.column.index === 5)) {
+          const boxSize = 4;
+          const cx = data.cell.x + data.cell.width / 2 - boxSize / 2;
+          const cy = data.cell.y + data.cell.height / 2 - boxSize / 2;
+          doc.setDrawColor(...TEXT2);
+          doc.setLineWidth(0.4);
+          doc.rect(cx, cy, boxSize, boxSize, "S");
+        }
+      },
     });
-    y = doc.lastAutoTable.finalY + 12;
+    y = doc.lastAutoTable.finalY + 6;
+
+    // Linha de resumo do resultado (a ser preenchido manualmente)
+    writeText(
+      "Resultado da votação:  Favoráveis: _____   Contrários: _____   Abstenções: _____   Total: " + voters.length,
+      { fontSize: 10, fontStyle: "bold", lineHeight: 5, gap: 8 }
+    );
   }
 
   // ─── 12) RESPONSÁVEL PELA ASSEMBLEIA ───
+  // Nome / CPF / Assinatura ficam em branco para preenchimento manual no ato da assembleia.
   ensureSpace(40);
   writeText("Responsável pela Assembleia:", { fontStyle: "bold", fontSize: 10, lineHeight: 6 });
-  writeText(`Nome: ${version.proposedBy || "_______________________________________"}`, { fontSize: 10, lineHeight: 8 });
+  writeText("Nome: _______________________________________", { fontSize: 10, lineHeight: 8 });
   writeText("CPF: _______________________________________", { fontSize: 10, lineHeight: 8 });
   writeText("Assinatura: _______________________________________", { fontSize: 10, lineHeight: 8 });
   y += 4;
