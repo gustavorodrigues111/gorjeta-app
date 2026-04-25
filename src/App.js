@@ -20375,15 +20375,15 @@ function generateAtaPDF({ version, restaurant, pessoas, roles, finalPct, employe
       body: voters.map(v => [v.name, v.cpf || "—", v.roleName || "—", "", "", "", ""]),
       theme: "grid",
       styles: { fontSize: 8.5, cellPadding: 2.5, textColor: TEXT, lineColor: BORDER, lineWidth: 0.2, minCellHeight: 13, valign: "middle" },
-      headStyles: { fillColor: ACCENT, textColor: [255,255,255], fontStyle: "bold", fontSize: 6.5, halign: "center", cellPadding: 2 },
+      headStyles: { fillColor: ACCENT, textColor: [255,255,255], fontStyle: "bold", fontSize: 6.5, halign: "center", cellPadding: { top: 2, right: 0.5, bottom: 2, left: 0.5 }, overflow: "visible" },
       columnStyles: {
-        0: { cellWidth: 50 },                             // Nome
-        1: { cellWidth: 28 },                             // CPF
-        2: { cellWidth: 22 },                             // Cargo
-        3: { cellWidth: 13, halign: "center" },           // FAVOR
-        4: { cellWidth: 13, halign: "center" },           // CONTRA
-        5: { cellWidth: 13, halign: "center" },           // ABSTÉM
-        6: { cellWidth: "auto" },                         // Assinatura
+        0: { cellWidth: 44 },                             // Nome
+        1: { cellWidth: 26 },                             // CPF
+        2: { cellWidth: 20 },                             // Cargo
+        3: { cellWidth: 15, halign: "center" },           // FAVOR
+        4: { cellWidth: 16, halign: "center" },           // CONTRA
+        5: { cellWidth: 16, halign: "center" },           // ABSTÉM
+        6: { cellWidth: "auto" },                         // Assinatura (~33mm)
       },
       margin: { left: MARGIN, right: MARGIN },
       // Desenha quadradinho centralizado nas células de voto pra ficar claro onde marcar
@@ -20470,18 +20470,22 @@ function OperationalGorjetas({ employee, data }) {
   // Ranking por colaborador
   const byEmp = {};
   tips.forEach(t => {
-    if (!byEmp[t.employeeId]) byEmp[t.employeeId] = { employeeId: t.employeeId, net: 0, tax: 0, daysCount: new Set() };
+    if (!byEmp[t.employeeId]) byEmp[t.employeeId] = { employeeId: t.employeeId, net: 0, tax: 0, daysCount: new Set(), tipsList: [] };
     byEmp[t.employeeId].net += (t.myNet ?? 0);
     byEmp[t.employeeId].tax += (t.myTax ?? 0);
     byEmp[t.employeeId].daysCount.add(t.date);
+    byEmp[t.employeeId].tipsList.push({ date: t.date, myNet: t.myNet ?? 0, poolTotal: t.poolTotal ?? 0 });
   });
   const ranking = Object.values(byEmp)
     .map(r => {
       const emp = employees.find(e => e.id === r.employeeId);
       const role = emp ? roles.find(rl => rl.id === emp.roleId) : null;
-      return { ...r, emp, role, days: r.daysCount.size };
+      const tipsList = r.tipsList.sort((a,b) => a.date.localeCompare(b.date));
+      return { ...r, emp, role, days: r.daysCount.size, tipsList };
     })
     .sort((a,b) => b.net - a.net);
+
+  const [expandedEmpId, setExpandedEmpId] = useState(null);
 
   // Semana corrente (últimos 7 dias do mês ou do mês atual)
   const today_ = today();
@@ -20581,24 +20585,43 @@ function OperationalGorjetas({ employee, data }) {
             {ranking.map((r, idx) => {
               const areaColor = r.role?.area ? AREA_COLORS[r.role.area] : null;
               const medal = idx===0?"🥇":idx===1?"🥈":idx===2?"🥉":null;
+              const isExpanded = expandedEmpId === r.employeeId;
               return (
-                <div key={r.employeeId} style={{padding:"12px 14px",borderTop:"1px solid var(--border)",display:"flex",alignItems:"center",gap:12}}>
-                  <div style={{minWidth:32,textAlign:"center",fontSize:medal?20:15,fontFamily:"'DM Mono',monospace",color:idx<3?"var(--ac)":"var(--text3)",fontWeight:idx<3?700:400}}>
-                    {medal || (idx+1)}
-                  </div>
-                  <div style={{flex:1,minWidth:0}}>
-                    <div style={{color:"var(--text)",fontWeight:600,fontSize:14,lineHeight:1.2}}>{r.emp?.name ?? "—"}</div>
-                    <div style={{display:"flex",alignItems:"center",gap:6,marginTop:3,flexWrap:"wrap"}}>
-                      {r.role && <span style={{fontSize:11,color:"var(--text2)"}}>
-                        <span style={{display:"inline-block",width:6,height:6,borderRadius:3,background:areaColor ?? "var(--text3)",marginRight:5,verticalAlign:"middle"}}></span>
-                        {r.role.name}
-                      </span>}
-                      <span style={{fontSize:11,color:"var(--text3)"}}>· {r.days} dia{r.days!==1?"s":""}</span>
+                <div key={r.employeeId} style={{borderTop:"1px solid var(--border)"}}>
+                  <div onClick={()=>setExpandedEmpId(isExpanded?null:r.employeeId)} style={{padding:"12px 14px",display:"flex",alignItems:"center",gap:12,cursor:"pointer",background:isExpanded?"var(--bg2)":"transparent"}}>
+                    <div style={{minWidth:32,textAlign:"center",fontSize:medal?20:15,fontFamily:"'DM Mono',monospace",color:idx<3?"var(--ac)":"var(--text3)",fontWeight:idx<3?700:400}}>
+                      {medal || (idx+1)}
+                    </div>
+                    <div style={{flex:1,minWidth:0}}>
+                      <div style={{color:"var(--text)",fontWeight:600,fontSize:14,lineHeight:1.2}}>
+                        <span style={{color:"var(--text3)",marginRight:4,fontSize:9}}>{isExpanded?"▼":"▶"}</span>
+                        {r.emp?.name ?? "—"}
+                      </div>
+                      <div style={{display:"flex",alignItems:"center",gap:6,marginTop:3,flexWrap:"wrap"}}>
+                        {r.role && <span style={{fontSize:11,color:"var(--text2)"}}>
+                          <span style={{display:"inline-block",width:6,height:6,borderRadius:3,background:areaColor ?? "var(--text3)",marginRight:5,verticalAlign:"middle"}}></span>
+                          {r.role.name}
+                        </span>}
+                        <span style={{fontSize:11,color:"var(--text3)"}}>· {r.days} dia{r.days!==1?"s":""}</span>
+                      </div>
+                    </div>
+                    <div style={{textAlign:"right",color:"#15803d",fontFamily:"'DM Mono',monospace",fontWeight:700,fontSize:14,whiteSpace:"nowrap"}}>
+                      {fmt(r.net)}
                     </div>
                   </div>
-                  <div style={{textAlign:"right",color:"#15803d",fontFamily:"'DM Mono',monospace",fontWeight:700,fontSize:14,whiteSpace:"nowrap"}}>
-                    {fmt(r.net)}
-                  </div>
+                  {isExpanded && (
+                    <div style={{padding:"4px 14px 14px",background:"var(--bg2)"}}>
+                      <div style={{fontSize:10,color:"var(--text3)",marginBottom:6,fontWeight:600,textTransform:"uppercase"}}>📅 {r.tipsList.length} dia(s)</div>
+                      <div style={{display:"flex",flexDirection:"column",gap:4}}>
+                        {r.tipsList.map((t,i) => (
+                          <div key={i} style={{padding:"6px 10px",background:"var(--card-bg)",border:"1px solid var(--border)",borderRadius:8,display:"flex",justifyContent:"space-between",fontSize:12}}>
+                            <span style={{color:"var(--text2)"}}>{fmtDate(t.date)} <span style={{color:"var(--text3)",fontSize:10}}>{WEEKDAYS[new Date(t.date+"T12:00:00").getDay()]}</span></span>
+                            <span style={{color:"#15803d",fontFamily:"'DM Mono',monospace",fontWeight:700}}>{fmt(t.myNet)}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                 </div>
               );
             })}
@@ -20618,21 +20641,45 @@ function OperationalGorjetas({ employee, data }) {
               <tbody>
                 {ranking.map((r, idx) => {
                   const areaColor = r.role?.area ? AREA_COLORS[r.role.area] : null;
+                  const isExpanded = expandedEmpId === r.employeeId;
                   return (
-                    <tr key={r.employeeId} style={{borderTop:"1px solid var(--border)"}}>
-                      <td style={{padding:"8px 14px",color:idx<3?"var(--ac)":"var(--text3)",fontWeight:idx<3?700:400,fontFamily:"'DM Mono',monospace"}}>{idx===0?"🥇":idx===1?"🥈":idx===2?"🥉":idx+1}</td>
-                      <td style={{padding:"8px 14px",color:"var(--text)",fontWeight:600}}>{r.emp?.name ?? "—"}</td>
-                      <td style={{padding:"8px 12px",color:"var(--text2)",fontSize:12}}>
-                        {r.role ? (
-                          <span>
-                            <span style={{display:"inline-block",width:8,height:8,borderRadius:4,background:areaColor ?? "var(--text3)",marginRight:6}}></span>
-                            {r.role.name}
-                          </span>
-                        ) : "—"}
-                      </td>
-                      <td style={{padding:"8px 12px",textAlign:"right",color:"var(--text3)"}}>{r.days}</td>
-                      <td style={{padding:"8px 12px",textAlign:"right",color:"#15803d",fontFamily:"'DM Mono',monospace",fontWeight:700}}>{fmt(r.net)}</td>
-                    </tr>
+                    <React.Fragment key={r.employeeId}>
+                      <tr style={{borderTop:"1px solid var(--border)",cursor:"pointer",background:isExpanded?"var(--bg2)":"transparent"}}
+                          onClick={()=>setExpandedEmpId(isExpanded ? null : r.employeeId)}
+                          title="Clique para ver detalhamento dos dias">
+                        <td style={{padding:"8px 14px",color:idx<3?"var(--ac)":"var(--text3)",fontWeight:idx<3?700:400,fontFamily:"'DM Mono',monospace"}}>{idx===0?"🥇":idx===1?"🥈":idx===2?"🥉":idx+1}</td>
+                        <td style={{padding:"8px 14px",color:"var(--text)",fontWeight:600}}>
+                          <span style={{color:"var(--text3)",marginRight:6,fontSize:10}}>{isExpanded?"▼":"▶"}</span>
+                          {r.emp?.name ?? "—"}
+                        </td>
+                        <td style={{padding:"8px 12px",color:"var(--text2)",fontSize:12}}>
+                          {r.role ? (
+                            <span>
+                              <span style={{display:"inline-block",width:8,height:8,borderRadius:4,background:areaColor ?? "var(--text3)",marginRight:6}}></span>
+                              {r.role.name}
+                            </span>
+                          ) : "—"}
+                        </td>
+                        <td style={{padding:"8px 12px",textAlign:"right",color:"var(--text3)"}}>{r.days}</td>
+                        <td style={{padding:"8px 12px",textAlign:"right",color:"#15803d",fontFamily:"'DM Mono',monospace",fontWeight:700}}>{fmt(r.net)}</td>
+                      </tr>
+                      {isExpanded && (
+                        <tr style={{background:"var(--bg2)"}}>
+                          <td></td>
+                          <td colSpan={4} style={{padding:"6px 14px 14px"}}>
+                            <div style={{fontSize:11,color:"var(--text3)",marginBottom:6,fontWeight:600,textTransform:"uppercase",letterSpacing:0.4}}>📅 Detalhamento — {r.tipsList.length} dia(s)</div>
+                            <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(160px,1fr))",gap:6,fontSize:12}}>
+                              {r.tipsList.map((t,i) => (
+                                <div key={i} style={{padding:"6px 10px",background:"var(--card-bg)",border:"1px solid var(--border)",borderRadius:8,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                                  <span style={{color:"var(--text2)"}}>{fmtDate(t.date)} <span style={{color:"var(--text3)",fontSize:10}}>{WEEKDAYS[new Date(t.date+"T12:00:00").getDay()]}</span></span>
+                                  <span style={{color:"#15803d",fontFamily:"'DM Mono',monospace",fontWeight:700}}>{fmt(t.myNet)}</span>
+                                </div>
+                              ))}
+                            </div>
+                          </td>
+                        </tr>
+                      )}
+                    </React.Fragment>
                   );
                 })}
               </tbody>
