@@ -19527,6 +19527,26 @@ function RegraDivisaoAdmin({ restaurantId, restaurant, splits, pessoas, roles, e
     onUpdate("splits", { ...splits, [restaurantId]: versions.filter(v => v.id !== id) });
   }
 
+  function cancelFutureRule(v) {
+    if (!window.confirm(`Cancelar a regra programada para ${fmtDate(v.effectiveFrom)}?\n\nEla ainda não entrou em vigor — nada será recalculado.`)) return;
+    onUpdate("splits", { ...splits, [restaurantId]: versions.filter(x => x.id !== v.id) });
+    onUpdate("_toast", "🗑️ Regra futura cancelada");
+  }
+
+  function editPastRule(v) {
+    if (v._legacy) {
+      alert("Esta é uma regra importada do formato antigo (legado) — não pode ser editada diretamente. Crie uma nova regra com a data correta para sobrepô-la.");
+      return;
+    }
+    const tipsAfter = (tips || []).filter(t => t.restaurantId === restaurantId && t.date >= v.effectiveFrom);
+    const daysAfter = new Set(tipsAfter.map(t => t.date)).size;
+    if (daysAfter > 0) {
+      if (!window.confirm(`Editar esta regra vigente desde ${fmtDate(v.effectiveFrom)}?\n\n⚠️ Já existem ${daysAfter} dia(s) de gorjeta lançados que serão recalculados quando você ativar a versão editada.`)) return;
+    }
+    setEditingDraftId(v.id);
+    setWizardOpen(true);
+  }
+
   if (!isOwner) {
     return (
       <div style={{padding:"40px 20px",textAlign:"center",color:"var(--text3)"}}>
@@ -19577,7 +19597,12 @@ function RegraDivisaoAdmin({ restaurantId, restaurant, splits, pessoas, roles, e
           <h4 style={{fontSize:13,color:"var(--text3)",fontWeight:700,textTransform:"uppercase",letterSpacing:0.4,margin:"0 0 8px"}}>⏳ Futuras (já ativas, esperando data)</h4>
           {futureActive.map(v => (
             <RegraCard key={v.id} version={v} restaurant={restaurant} employees={employees} roles={roles}
-                       pessoas={pessoas} title={`Vigente desde ${fmtDate(v.effectiveFrom)}`} titleColor="#3b82f6" mobileOnly={mobileOnly} />
+                       pessoas={pessoas} title={`Vigente desde ${fmtDate(v.effectiveFrom)}`} titleColor="#3b82f6"
+                       onEdit={()=>{ setEditingDraftId(v.id); setWizardOpen(true); }}
+                       editLabel="✏️ Editar"
+                       onDelete={()=>cancelFutureRule(v)}
+                       deleteLabel="❌ Cancelar"
+                       mobileOnly={mobileOnly} />
           ))}
         </div>
       )}
@@ -19588,7 +19613,10 @@ function RegraDivisaoAdmin({ restaurantId, restaurant, splits, pessoas, roles, e
           <h4 style={{fontSize:13,color:"var(--text3)",fontWeight:700,textTransform:"uppercase",letterSpacing:0.4,margin:"0 0 8px"}}>🕐 Histórico ({past.length})</h4>
           {past.map(v => (
             <RegraCard key={v.id} version={v} restaurant={restaurant} employees={employees} roles={roles}
-                       pessoas={pessoas} title={`Vigente desde ${fmtDate(v.effectiveFrom)}`} titleColor="var(--text3)" compact mobileOnly={mobileOnly} />
+                       pessoas={pessoas} title={`Vigente desde ${fmtDate(v.effectiveFrom)}`} titleColor="var(--text3)" compact
+                       onEdit={v._legacy ? null : ()=>editPastRule(v)}
+                       editLabel="✏️ Corrigir"
+                       mobileOnly={mobileOnly} />
           ))}
         </div>
       )}
@@ -19622,7 +19650,7 @@ function RegraDivisaoAdmin({ restaurantId, restaurant, splits, pessoas, roles, e
 }
 
 // Card que mostra uma regra (vigente / rascunho / passada)
-function RegraCard({ version, restaurant, employees, roles, pessoas, title, titleColor, onEdit, onDelete, compact, mobileOnly }) {
+function RegraCard({ version, restaurant, employees, roles, pessoas, title, titleColor, onEdit, onDelete, editLabel, deleteLabel, compact, mobileOnly }) {
   const [expanded, setExpanded] = useState(!compact);
   const today_ = today();
   // Calcula employeesPerArea pra hoje (mostrar % efetivo agora)
@@ -19692,8 +19720,8 @@ function RegraCard({ version, restaurant, employees, roles, pessoas, title, titl
           </div>
           <div style={{marginTop:12,display:"flex",gap:8,flexWrap:"wrap"}}>
             {version.ata && <button onClick={downloadAta} style={{...S.btnSecondary,fontSize:12,padding:"7px 14px"}}>📄 Baixar ata</button>}
-            {onEdit && <button onClick={onEdit} style={{...S.btnSecondary,fontSize:12,padding:"7px 14px"}}>✏️ Editar / Ativar</button>}
-            {onDelete && <button onClick={onDelete} style={{...S.btnSecondary,fontSize:12,padding:"7px 14px",color:"var(--red)",borderColor:"var(--red)44"}}>Apagar</button>}
+            {onEdit && <button onClick={onEdit} style={{...S.btnSecondary,fontSize:12,padding:"7px 14px"}}>{editLabel || "✏️ Editar / Ativar"}</button>}
+            {onDelete && <button onClick={onDelete} style={{...S.btnSecondary,fontSize:12,padding:"7px 14px",color:"var(--red)",borderColor:"var(--red)44"}}>{deleteLabel || "Apagar"}</button>}
           </div>
         </div>
       )}
