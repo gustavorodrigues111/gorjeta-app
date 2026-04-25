@@ -19517,7 +19517,10 @@ function RegraDivisaoAdmin({ restaurantId, restaurant, splits, pessoas, roles, e
   const activeNow = versions.find(v => v.status === "active" && v.effectiveFrom <= today_);
   const futureActive = versions.filter(v => v.status === "active" && v.effectiveFrom > today_);
   const drafts = versions.filter(v => v.status === "draft");
-  const past = versions.filter(v => v.status === "active" && v.effectiveFrom <= today_ && v.id !== activeNow?.id);
+  // "Histórico" inclui TODAS as regras com vigência iniciada (inclusive a vigente atual).
+  // Assim a vigente fica editável a partir do histórico — corrigir ela atualiza a regra
+  // (e como é a mesma regra, o card "Vigente agora" no topo reflete a correção).
+  const past = versions.filter(v => v.status === "active" && v.effectiveFrom <= today_);
 
   const [wizardOpen, setWizardOpen] = useState(false);
   const [editingDraftId, setEditingDraftId] = useState(null);
@@ -19563,10 +19566,7 @@ function RegraDivisaoAdmin({ restaurantId, restaurant, splits, pessoas, roles, e
 
       {activeNow ? (
         <RegraCard version={activeNow} restaurant={restaurant} employees={employees} roles={roles}
-                   pessoas={pessoas} title="Vigente agora" titleColor="var(--green)"
-                   onEdit={activeNow._legacy ? null : ()=>editPastRule(activeNow)}
-                   editLabel="✏️ Corrigir"
-                   mobileOnly={mobileOnly} />
+                   pessoas={pessoas} title="Vigente agora" titleColor="var(--green)" mobileOnly={mobileOnly} />
       ) : (
         <div style={{padding:"24px 20px",background:"var(--card-bg)",border:"1px dashed var(--border)",borderRadius:12,marginBottom:16,textAlign:"center",color:"var(--text3)"}}>
           Nenhuma regra ativa. Configure abaixo a primeira regra deste restaurante.
@@ -19610,17 +19610,24 @@ function RegraDivisaoAdmin({ restaurantId, restaurant, splits, pessoas, roles, e
         </div>
       )}
 
-      {/* Histórico */}
+      {/* Histórico de regras com vigência iniciada (inclui a vigente atual) */}
       {past.length > 0 && (
         <div>
-          <h4 style={{fontSize:13,color:"var(--text3)",fontWeight:700,textTransform:"uppercase",letterSpacing:0.4,margin:"0 0 8px"}}>🕐 Histórico ({past.length})</h4>
-          {past.map(v => (
-            <RegraCard key={v.id} version={v} restaurant={restaurant} employees={employees} roles={roles}
-                       pessoas={pessoas} title={`Vigente desde ${fmtDate(v.effectiveFrom)}`} titleColor="var(--text3)" compact
-                       onEdit={v._legacy ? null : ()=>editPastRule(v)}
-                       editLabel="✏️ Corrigir"
-                       mobileOnly={mobileOnly} />
-          ))}
+          <h4 style={{fontSize:13,color:"var(--text3)",fontWeight:700,textTransform:"uppercase",letterSpacing:0.4,margin:"0 0 8px"}}>🕐 Histórico de regras ({past.length})</h4>
+          <p style={{fontSize:11,color:"var(--text3)",margin:"0 0 10px"}}>Para corrigir um erro de cadastro, edite a regra correspondente. Os tips dos dias afetados serão recalculados automaticamente.</p>
+          {past.map(v => {
+            const isCurrentVigente = v.id === activeNow?.id;
+            return (
+              <RegraCard key={v.id} version={v} restaurant={restaurant} employees={employees} roles={roles}
+                         pessoas={pessoas}
+                         title={isCurrentVigente ? `Vigente desde ${fmtDate(v.effectiveFrom)} · em uso agora` : `Vigente desde ${fmtDate(v.effectiveFrom)}`}
+                         titleColor={isCurrentVigente ? "var(--green)" : "var(--text3)"}
+                         compact={!isCurrentVigente}
+                         onEdit={v._legacy ? null : ()=>editPastRule(v)}
+                         editLabel="✏️ Corrigir"
+                         mobileOnly={mobileOnly} />
+            );
+          })}
         </div>
       )}
 
