@@ -18232,30 +18232,33 @@ function buildShellSections({ pessoa, restaurantId, isOwner }) {
       ),
     });
   }
-  if (op.checklists || ad.employees) {
+  // Configurar templates Mise (checklists, contagens, temperaturas, fichas) é gateway de admin
+  // master do restaurante — não derivado de "gestor de pessoas". Antes usava ad.employees, o que
+  // dava acesso indevido a quem só gerenciava equipe.
+  if (op.checklists || ad.tips) {
     opItems.push({
       id: "mod_mise_checklists", label: "Checklists", icon: "✅",
       subtabs: st(
         op.checklists && { id: "executar",  label: "Executar",  kind: "operational", tab: "checklists" },
-        ad.employees  && { id: "templates", label: "Templates", kind: "manager",     tab: "mise_checklists" },
+        ad.tips       && { id: "templates", label: "Templates", kind: "manager",     tab: "mise_checklists" },
       ),
     });
   }
-  if (op.contagens || ad.employees) {
+  if (op.contagens || ad.tips) {
     opItems.push({
       id: "mod_mise_contagens", label: "Contagens", icon: "📦",
       subtabs: st(
-        op.contagens  && { id: "contar", label: "Contar",    kind: "operational", tab: "contagens" },
-        ad.employees  && { id: "config", label: "Configurar", kind: "manager",    tab: "mise_contagens" },
+        op.contagens && { id: "contar", label: "Contar",    kind: "operational", tab: "contagens" },
+        ad.tips      && { id: "config", label: "Configurar", kind: "manager",    tab: "mise_contagens" },
       ),
     });
   }
-  if (op.temperaturas || ad.employees) {
+  if (op.temperaturas || ad.tips) {
     opItems.push({
       id: "mod_mise_temperaturas", label: "Temperaturas", icon: "🌡️",
       subtabs: st(
         op.temperaturas && { id: "monitor", label: "Monitorar",  kind: "operational", tab: "temperaturas" },
-        ad.employees    && { id: "config",  label: "Configurar", kind: "manager",     tab: "mise_temperaturas" },
+        ad.tips         && { id: "config",  label: "Configurar", kind: "manager",     tab: "mise_temperaturas" },
       ),
     });
   }
@@ -18268,12 +18271,12 @@ function buildShellSections({ pessoa, restaurantId, isOwner }) {
 
   // 4) PRODUÇÃO — receitas, custos, planejamento (por enquanto só Fichas Técnicas)
   const prodItems = [];
-  if (op.fichasTecnicas || ad.employees) {
+  if (op.fichasTecnicas || ad.tips) {
     prodItems.push({
       id: "mod_mise_fichas", label: "Fichas Técnicas", icon: "📋",
       subtabs: st(
         op.fichasTecnicas && { id: "consultar", label: "Consultar", kind: "operational", tab: "fichasTecnicas" },
-        ad.employees      && { id: "editar",    label: "Editar",    kind: "manager",     tab: "mise_fichas" },
+        ad.tips           && { id: "editar",    label: "Editar",    kind: "manager",     tab: "mise_fichas" },
       ),
     });
   }
@@ -19166,6 +19169,45 @@ function permSet(pessoa, restaurantId, key, value) {
   return { ...pessoa, permissions: perms };
 }
 
+// Profiles pré-prontos pra aplicar conjuntos de permissões com 1 clique.
+// Cada profile define quais chaves devem virar `true` (todas as outras viram `false`).
+const PERM_PROFILES = [
+  { id: "owner_total", label: "Owner total", icon: "👑", color: "#dc2626", desc: "Acesso total — tudo marcado",
+    keys: [
+      "operational.escalas","operational.gorjetas","operational.trilhas","operational.reunioes",
+      "operational.contagens","operational.compras","operational.checklists","operational.fichasTecnicas","operational.temperaturas",
+      "admin.tips","admin.schedule","admin.employees","admin.roles","admin.vt","admin.comunicados","admin.faq","admin.config","admin.pessoas",
+      "special.isDP",
+    ],
+  },
+  { id: "gestor_pessoas", label: "Gestor de pessoas", icon: "🛂", color: "#0284c7", desc: "Gerencia equipe, cargos, comunicações",
+    keys: ["admin.employees","admin.roles","admin.pessoas","admin.comunicados","admin.faq"],
+  },
+  { id: "gestor_gorjetas", label: "Gestor de gorjetas", icon: "💰", color: "#0284c7", desc: "Lança gorjetas, fecha escala, VT",
+    keys: ["admin.tips","admin.schedule","admin.vt","operational.escalas","operational.gorjetas"],
+  },
+  { id: "lider", label: "Líder de área", icon: "⭐", color: "#a855f7", desc: "Vê só funcionários das áreas que lidera",
+    keys: ["special.isLider","operational.escalas","operational.reunioes"],
+  },
+  { id: "op_cozinha", label: "Operacional cozinha", icon: "🍳", color: "#7c9e5e", desc: "AppMise + líder em Cozinha",
+    keys: ["operational.contagens","operational.checklists","operational.fichasTecnicas","operational.temperaturas","operational.compras"],
+  },
+  { id: "op_bar", label: "Operacional bar", icon: "🍷", color: "#7c9e5e", desc: "AppMise + líder em Bar",
+    keys: ["operational.contagens","operational.checklists","operational.fichasTecnicas","operational.temperaturas","operational.compras"],
+  },
+  { id: "limpar", label: "Limpar tudo", icon: "🚫", color: "var(--text3)", desc: "Remove todas as permissões",
+    keys: [],
+  },
+];
+
+// Lista plana de TODAS as keys de permissões — usada pelos profiles e pelo master toggle
+const ALL_PERM_KEYS = [
+  "operational.escalas","operational.gorjetas","operational.trilhas","operational.reunioes",
+  "operational.contagens","operational.compras","operational.checklists","operational.fichasTecnicas","operational.temperaturas",
+  "admin.tips","admin.schedule","admin.employees","admin.roles","admin.vt","admin.comunicados","admin.faq","admin.config","admin.pessoas",
+  "special.isDP","special.isLider",
+];
+
 function PermissoesMatrix({ restaurantId, pessoas, employees, managers, owners, onUpdate, mobileOnly }) {
   // Filtra owners do AppTip — acesso implícito, não aparecem na matriz
   const ownerCpfSet = new Set((owners || []).map(o => (o.cpf || "").replace(/\D/g, "")).filter(Boolean));
@@ -19177,7 +19219,10 @@ function PermissoesMatrix({ restaurantId, pessoas, employees, managers, owners, 
   });
   const [expanded, setExpanded] = useState({ tip_op: true, tip_adm: false, mise: false, esp: false });
   const [filter, setFilter] = useState("");
+  const [accessFilter, setAccessFilter] = useState("todos"); // todos | apptip_admin | apptip_op | mise | sem_perm
+  const [sortMode, setSortMode] = useState("az"); // az | mais_perms | menos_perms
   const [liderAreasModal, setLiderAreasModal] = useState(null); // pessoaId
+  const [profileMenuFor, setProfileMenuFor] = useState(null); // pessoaId pra dropdown de profile
 
   function saveLiderAreas(pessoaId, newAreas) {
     const updated = (pessoas || []).map(p => {
@@ -19203,6 +19248,83 @@ function PermissoesMatrix({ restaurantId, pessoas, employees, managers, owners, 
   }
   function expandAll() { setExpanded({ tip_op: true, tip_adm: true, mise: true, esp: true }); }
   function collapseAll() { setExpanded({ tip_op: false, tip_adm: false, mise: false, esp: false }); }
+
+  // Conta status agregado de um grupo de permissões para uma pessoa.
+  // Retorna 0 (nenhuma), 1 (algumas), 2 (todas).
+  function groupStateForPessoa(pessoa, group) {
+    const total = group.perms.length;
+    const checked = group.perms.filter(p => permGet(pessoa, restaurantId, p.key)).length;
+    if (checked === 0) return 0;
+    if (checked === total) return 2;
+    return 1;
+  }
+
+  // Toggle todas as permissões de um grupo para uma pessoa.
+  // Se já tem TODAS marcadas → desmarca tudo. Se tem zero ou parcial → marca tudo.
+  function toggleGroupForPessoa(pessoa, group) {
+    const state = groupStateForPessoa(pessoa, group);
+    const targetValue = state !== 2; // se não está full, vira full; se está full, vira zero
+    let updated = pessoa;
+    group.perms.forEach(p => {
+      updated = permSet(updated, restaurantId, p.key, targetValue);
+    });
+    persistPessoaWithLegacySync(pessoa, updated, group.perms.map(p => p.key), targetValue);
+  }
+
+  // Toggle TODAS as pessoas visíveis para um grupo.
+  // Se TODAS as visíveis têm TODAS as permissões do grupo → desmarca tudo. Senão → marca tudo.
+  function toggleGroupForAll(group, visibleList) {
+    const allFullySet = visibleList.every(p => groupStateForPessoa(p, group) === 2);
+    const targetValue = !allFullySet;
+    let nextPessoas = pessoas;
+    visibleList.forEach(pessoa => {
+      let updated = pessoa;
+      group.perms.forEach(p => {
+        updated = permSet(updated, restaurantId, p.key, targetValue);
+      });
+      nextPessoas = nextPessoas.map(x => x.id === pessoa.id ? updated : x);
+    });
+    onUpdate("pessoas", nextPessoas);
+    // Sincronia legado por simplicidade: dispara um togglePerm fictício (que faz a sync)
+    // mas isso seria caro. Pra master toggle, só sincronizamos pessoas — telas legadas
+    // se atualizam no próximo load.
+  }
+
+  // Aplica um profile pré-pronto a uma pessoa.
+  function applyProfile(pessoa, profileKeys) {
+    let updated = pessoa;
+    ALL_PERM_KEYS.forEach(key => {
+      const shouldBe = profileKeys.includes(key);
+      updated = permSet(updated, restaurantId, key, shouldBe);
+    });
+    persistPessoaWithLegacySync(pessoa, updated, ALL_PERM_KEYS, null);
+    setProfileMenuFor(null);
+  }
+
+  // Persiste uma pessoa atualizada e sincroniza nas estruturas legadas (employees + managers).
+  function persistPessoaWithLegacySync(originalPessoa, updatedPessoa, _affectedKeys, _value) {
+    onUpdate("pessoas", (pessoas || []).map(p => p.id === originalPessoa.id ? updatedPessoa : p));
+    // Sincronia legada: re-deriva employees e managers da pessoa atualizada.
+    const ridPerms = updatedPessoa.permissions?.[restaurantId] || {};
+    const opPerms = ridPerms.operational || {};
+    const adPerms = ridPerms.admin || {};
+    const spPerms = ridPerms.special || {};
+    if (originalPessoa.linkedEmployeeId) {
+      const empId = originalPessoa.linkedEmployeeId;
+      const newOpAreas = {};
+      Object.keys(opPerms).forEach(k => { if (opPerms[k]) newOpAreas[k] = true; });
+      onUpdate("employees", (employees || []).map(e => e.id === empId ? { ...e, operationalAreas: newOpAreas } : e));
+    }
+    if (originalPessoa.linkedManagerId) {
+      const mgrId = originalPessoa.linkedManagerId;
+      onUpdate("managers", (managers || []).map(m => m.id === mgrId ? {
+        ...m,
+        perms: { ...adPerms },
+        isDP: !!spPerms.isDP,
+        profile: spPerms.isLider ? "lider" : "custom",
+      } : m));
+    }
+  }
 
   function togglePerm(pessoa, permKey) {
     const current = permGet(pessoa, restaurantId, permKey);
@@ -19294,8 +19416,41 @@ function PermissoesMatrix({ restaurantId, pessoas, employees, managers, owners, 
   }
 
   const q = filter.trim().toLowerCase();
-  const filtered = q ? restPessoas.filter(p => p.name.toLowerCase().includes(q)) : restPessoas;
-  const sorted = [...filtered].sort((a,b)=>a.name.localeCompare(b.name));
+  let filtered = q ? restPessoas.filter(p => p.name.toLowerCase().includes(q)) : restPessoas;
+  // Filtro por área de acesso
+  if (accessFilter !== "todos") {
+    filtered = filtered.filter(p => {
+      const ridPerms = p.permissions?.[restaurantId] || {};
+      const op = ridPerms.operational || {};
+      const ad = ridPerms.admin || {};
+      const sp = ridPerms.special || {};
+      const opCount = Object.values(op).filter(Boolean).length;
+      const adCount = Object.values(ad).filter(Boolean).length;
+      const spCount = Object.values(sp).filter(Boolean).length;
+      const totalCount = opCount + adCount + spCount;
+      if (accessFilter === "sem_perm") return totalCount === 0;
+      if (accessFilter === "apptip_admin") return adCount > 0;
+      if (accessFilter === "apptip_op") return op.escalas || op.gorjetas || op.trilhas || op.reunioes;
+      if (accessFilter === "mise") return op.contagens || op.compras || op.checklists || op.fichasTecnicas || op.temperaturas;
+      return true;
+    });
+  }
+  // Ordenação
+  const countAllPerms = (p) => {
+    const ridPerms = p.permissions?.[restaurantId] || {};
+    return Object.values(ridPerms.operational || {}).filter(Boolean).length
+         + Object.values(ridPerms.admin || {}).filter(Boolean).length
+         + Object.values(ridPerms.special || {}).filter(Boolean).length;
+  };
+  const sorted = [...filtered].sort((a,b) => {
+    if (sortMode === "mais_perms") return countAllPerms(b) - countAllPerms(a) || a.name.localeCompare(b.name);
+    if (sortMode === "menos_perms") return countAllPerms(a) - countAllPerms(b) || a.name.localeCompare(b.name);
+    return a.name.localeCompare(b.name);
+  });
+
+  // Header sticky precisa de bg sólido pra não ficar transparente. Usa --card-bg que é opaco.
+  const HEADER_BG = "var(--card-bg)";
+  const HEADER_SHADOW = "0 2px 8px rgba(0,0,0,0.08)";
 
   return (
     <div>
@@ -19307,65 +19462,131 @@ function PermissoesMatrix({ restaurantId, pessoas, employees, managers, owners, 
         </div>
       </div>
 
-      <div style={{marginBottom:10}}>
-        <input value={filter} onChange={e=>setFilter(e.target.value)} placeholder="🔍 Buscar pessoa..." style={{...S.input,maxWidth:360}} />
+      {/* Linha de filtros — busca + área de acesso + ordenação */}
+      <div style={{display:"flex",gap:8,marginBottom:10,flexWrap:"wrap",alignItems:"center"}}>
+        <input value={filter} onChange={e=>setFilter(e.target.value)} placeholder="🔍 Buscar pessoa..." style={{...S.input,maxWidth:280,flex:"1 1 200px"}} />
+        <select value={accessFilter} onChange={e=>setAccessFilter(e.target.value)}
+          style={{...S.input,maxWidth:200,fontSize:12,padding:"7px 10px",cursor:"pointer"}}>
+          <option value="todos">📋 Todos</option>
+          <option value="apptip_admin">🛂 Com AppTip Admin</option>
+          <option value="apptip_op">📅 Com AppTip Operacional</option>
+          <option value="mise">📦 Com AppMise</option>
+          <option value="sem_perm">🚫 Sem permissões</option>
+        </select>
+        <select value={sortMode} onChange={e=>setSortMode(e.target.value)}
+          style={{...S.input,maxWidth:170,fontSize:12,padding:"7px 10px",cursor:"pointer"}}>
+          <option value="az">↕️ A-Z</option>
+          <option value="mais_perms">⬆ Mais permissões</option>
+          <option value="menos_perms">⬇ Menos permissões</option>
+        </select>
       </div>
 
       {sorted.length === 0 ? (
         <div style={{padding:"32px 16px",textAlign:"center",color:"var(--text3)",fontSize:14,background:"var(--card-bg)",borderRadius:12,border:"1px solid var(--border)"}}>
-          {restPessoas.length === 0 ? "Nenhuma pessoa cadastrada. Vá na aba Pessoas para começar." : "Nenhuma pessoa encontrada."}
+          {restPessoas.length === 0 ? "Nenhuma pessoa cadastrada. Vá na aba Pessoas para começar." : "Nenhuma pessoa encontrada com esses filtros."}
         </div>
       ) : (
-        <div style={{overflowX:"auto",overflowY:"auto",maxHeight:"calc(100vh - 260px)",WebkitOverflowScrolling:"touch",border:"1px solid var(--border)",borderRadius:12,background:"var(--card-bg)"}}>
+        <div style={{overflowX:"auto",overflowY:"auto",maxHeight:"calc(100vh - 280px)",WebkitOverflowScrolling:"touch",border:"1px solid var(--border)",borderRadius:12,background:"var(--card-bg)"}}>
           <table style={{width:"100%",borderCollapse:"collapse",fontSize:12}}>
             <thead>
-              <tr style={{background:"var(--bg2)",borderBottom:"1px solid var(--border)"}}>
-                {/* Coluna "Pessoa" — sticky top + left (canto), z-index alto */}
-                <th style={{padding:"8px 12px",textAlign:"left",color:"var(--text)",fontWeight:700,position:"sticky",left:0,top:0,background:"var(--bg2)",zIndex:12,minWidth:180}}>Pessoa</th>
+              {/* Linha 1 — coluna Pessoa + ícones por permissão (ou nome do grupo se colapsado) */}
+              <tr style={{borderBottom:"1px solid var(--border)"}}>
+                <th style={{padding:"10px 12px",textAlign:"left",color:"var(--text)",fontWeight:700,position:"sticky",left:0,top:0,background:HEADER_BG,zIndex:13,minWidth:180,boxShadow:HEADER_SHADOW}}>
+                  <div>Pessoa</div>
+                  <div style={{fontSize:10,color:"var(--text3)",fontWeight:500,marginTop:2}}>{sorted.length} de {restPessoas.length}</div>
+                </th>
                 {PERM_GROUPS.map(g => (
                   expanded[g.id] ? (
                     g.perms.map(p => (
-                      <th key={p.key} style={{padding:"8px 6px",textAlign:"center",color:"var(--text)",fontWeight:600,minWidth:58,background:g.bg,borderLeft:"1px solid var(--border)",position:"sticky",top:0,zIndex:11}} title={`${g.label} · ${p.label}`}>
+                      <th key={p.key} style={{padding:"8px 6px",textAlign:"center",color:"var(--text)",fontWeight:600,minWidth:62,background:g.bg,borderLeft:"1px solid var(--border)",position:"sticky",top:0,zIndex:11,boxShadow:HEADER_SHADOW}} title={`${g.label} · ${p.label}`}>
                         <div style={{fontSize:14,marginBottom:2}}>{p.icon}</div>
                         <div style={{fontSize:9,color:g.color,fontWeight:700,textTransform:"uppercase",letterSpacing:0.3,lineHeight:1.1}}>{p.label.length > 10 ? p.label.slice(0,10)+'…' : p.label}</div>
                       </th>
                     ))
                   ) : (
-                    <th key={g.id} onClick={()=>toggleGroup(g.id)} style={{padding:"8px 10px",textAlign:"center",cursor:"pointer",color:g.color,fontWeight:700,fontSize:11,textTransform:"uppercase",letterSpacing:0.4,borderLeft:"1px solid var(--border)",background:g.bg,minWidth:90,position:"sticky",top:0,zIndex:11}} title={`Clique para expandir ${g.label}`}>
+                    <th key={g.id} onClick={()=>toggleGroup(g.id)} style={{padding:"8px 10px",textAlign:"center",cursor:"pointer",color:g.color,fontWeight:700,fontSize:11,textTransform:"uppercase",letterSpacing:0.4,borderLeft:"1px solid var(--border)",background:g.bg,minWidth:100,position:"sticky",top:0,zIndex:11,boxShadow:HEADER_SHADOW}} title={`Clique para expandir ${g.label}`}>
                       ▶ {g.label}
                     </th>
                   )
                 ))}
               </tr>
-              {/* Row de grupos (sempre exibida, com botão de colapsar) — sticky abaixo do row 1 */}
-              <tr style={{background:"var(--bg2)",borderBottom:"1px solid var(--border)"}}>
-                <th style={{padding:"4px 12px",textAlign:"left",color:"var(--text3)",fontWeight:500,fontSize:10,position:"sticky",left:0,top:46,background:"var(--bg2)",zIndex:12}}>
-                  {sorted.length} pessoa{sorted.length===1?"":"s"}
+              {/* Linha 2 — botão de colapsar grupo + master toggle "marcar tudo do grupo pra todos" */}
+              <tr style={{borderBottom:"1px solid var(--border)"}}>
+                <th style={{padding:"6px 12px",textAlign:"left",color:"var(--text3)",fontWeight:600,fontSize:10,position:"sticky",left:0,top:50,background:HEADER_BG,zIndex:13,textTransform:"uppercase",letterSpacing:0.4}}>
+                  Master
                 </th>
-                {PERM_GROUPS.map(g => (
-                  expanded[g.id] ? (
-                    <th key={g.id+"_collapse"} colSpan={g.perms.length} onClick={()=>toggleGroup(g.id)} style={{padding:"4px 8px",cursor:"pointer",color:g.color,fontWeight:700,fontSize:10,textTransform:"uppercase",letterSpacing:0.4,borderLeft:"1px solid var(--border)",background:g.bg,textAlign:"center",position:"sticky",top:46,zIndex:11}} title="Clique para colapsar">
-                      ▼ {g.label}
+                {PERM_GROUPS.map(g => {
+                  if (!expanded[g.id]) {
+                    return <th key={g.id+"_stub"} style={{borderLeft:"1px solid var(--border)",background:g.bg,position:"sticky",top:50,zIndex:11}}></th>;
+                  }
+                  // Calcula estado agregado: se TODAS visíveis têm TUDO marcado, mostra ☑; se ninguém tem nada, ☐; se misto, ⊟
+                  const allFull = sorted.length > 0 && sorted.every(p => groupStateForPessoa(p, g) === 2);
+                  const anyHas = sorted.some(p => groupStateForPessoa(p, g) > 0);
+                  const masterIcon = allFull ? "☑" : anyHas ? "⊟" : "☐";
+                  return (
+                    <th key={g.id+"_master"} colSpan={g.perms.length} style={{padding:"4px 8px",borderLeft:"1px solid var(--border)",background:g.bg,textAlign:"center",position:"sticky",top:50,zIndex:11}}>
+                      <div style={{display:"flex",alignItems:"center",justifyContent:"center",gap:8}}>
+                        <button onClick={()=>toggleGroupForAll(g, sorted)}
+                          title={`${allFull ? "Desmarcar" : "Marcar"} todas as permissões deste grupo para todos visíveis (${sorted.length} pessoa${sorted.length===1?"":"s"})`}
+                          style={{background:allFull?g.color:"transparent",color:allFull?"#fff":g.color,border:`1px solid ${g.color}`,borderRadius:6,padding:"3px 10px",cursor:"pointer",fontSize:11,fontWeight:700,fontFamily:"'DM Mono',monospace",lineHeight:1.2}}>
+                          {masterIcon} marcar todos
+                        </button>
+                        <button onClick={()=>toggleGroup(g.id)} style={{background:"none",border:"none",cursor:"pointer",color:g.color,fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:0.4}} title="Colapsar grupo">
+                          ▼ colapsar
+                        </button>
+                      </div>
                     </th>
-                  ) : (
-                    <th key={g.id+"_stub"} style={{borderLeft:"1px solid var(--border)",background:g.bg,position:"sticky",top:46,zIndex:11}}></th>
-                  )
-                ))}
+                  );
+                })}
               </tr>
             </thead>
             <tbody>
-              {sorted.map(p => (
-                <tr key={p.id} style={{borderTop:"1px solid var(--border)"}}>
-                  <td style={{padding:"8px 12px",color:"var(--text)",fontWeight:500,position:"sticky",left:0,background:"var(--card-bg)",zIndex:1,minWidth:180}}>
-                    {p.name}
-                    {(!p.linkedEmployeeId && !p.linkedManagerId) && <div style={{fontSize:10,color:"var(--text3)",marginTop:2}}>não vinculada ao legado</div>}
+              {sorted.map((p, idx) => (
+                <tr key={p.id} style={{borderTop:"1px solid var(--border)",background:idx%2===0?"transparent":"var(--bg2)"}}>
+                  <td style={{padding:"8px 12px",color:"var(--text)",fontWeight:500,position:"sticky",left:0,background:idx%2===0?"var(--card-bg)":"var(--bg2)",zIndex:1,minWidth:180}}>
+                    <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:8}}>
+                      <div style={{flex:1,minWidth:0}}>
+                        <div style={{whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{p.name}</div>
+                        {(!p.linkedEmployeeId && !p.linkedManagerId) && <div style={{fontSize:10,color:"var(--text3)",marginTop:2}}>não vinculada ao legado</div>}
+                      </div>
+                      <div style={{position:"relative"}}>
+                        <button onClick={()=>setProfileMenuFor(profileMenuFor === p.id ? null : p.id)}
+                          title="Aplicar perfil pré-pronto"
+                          style={{background:"none",border:"1px solid var(--border)",borderRadius:6,padding:"3px 8px",cursor:"pointer",fontSize:10,color:"var(--text3)",fontWeight:600,whiteSpace:"nowrap"}}>
+                          ⚡ Perfil
+                        </button>
+                        {profileMenuFor === p.id && (
+                          <>
+                            <div onClick={()=>setProfileMenuFor(null)} style={{position:"fixed",inset:0,zIndex:50}} />
+                            <div style={{position:"absolute",top:"calc(100% + 4px)",right:0,zIndex:51,background:"var(--card-bg)",border:"1px solid var(--border)",borderRadius:10,boxShadow:"0 6px 24px rgba(0,0,0,0.18)",minWidth:230,padding:6}}>
+                              {PERM_PROFILES.map(prof => (
+                                <button key={prof.id} onClick={()=>applyProfile(p, prof.keys)}
+                                  style={{display:"flex",alignItems:"center",gap:8,padding:"7px 10px",background:"none",border:"none",borderRadius:6,cursor:"pointer",fontSize:12,color:"var(--text)",width:"100%",textAlign:"left",fontFamily:"'DM Sans',sans-serif"}}
+                                  onMouseEnter={e=>e.currentTarget.style.background="var(--bg2)"}
+                                  onMouseLeave={e=>e.currentTarget.style.background="none"}>
+                                  <span style={{fontSize:14}}>{prof.icon}</span>
+                                  <div style={{flex:1}}>
+                                    <div style={{fontWeight:600,color:prof.color,fontSize:11}}>{prof.label}</div>
+                                    <div style={{fontSize:10,color:"var(--text3)",marginTop:1,lineHeight:1.2}}>{prof.desc}</div>
+                                  </div>
+                                </button>
+                              ))}
+                            </div>
+                          </>
+                        )}
+                      </div>
+                    </div>
                   </td>
                   {PERM_GROUPS.map(g => {
                     if (!expanded[g.id]) {
+                      const state = groupStateForPessoa(p, g);
                       const count = g.perms.filter(perm => permGet(p, restaurantId, perm.key)).length;
+                      const cellLabel = state === 2 ? "todos" : state === 1 ? `${count}/${g.perms.length}` : "—";
                       return (
-                        <td key={g.id+"_count"} onClick={()=>toggleGroup(g.id)} style={{padding:"8px",textAlign:"center",color:count>0?g.color:"var(--text3)",fontWeight:count>0?700:400,fontFamily:"'DM Mono',monospace",fontSize:13,cursor:"pointer",borderLeft:"1px solid var(--border)",background:count>0?g.bg:"transparent"}} title="Clique para expandir">
-                          {count > 0 ? count : "—"}
+                        <td key={g.id+"_count"} onClick={()=>toggleGroupForPessoa(p, g)}
+                            title={`${state === 2 ? "Desmarcar" : "Marcar"} todas as permissões de ${g.label} para ${p.name}\n(clique no nome do grupo no header pra expandir)`}
+                            style={{padding:"8px",textAlign:"center",color:count>0?g.color:"var(--text3)",fontWeight:count>0?700:400,fontFamily:"'DM Mono',monospace",fontSize:12,cursor:"pointer",borderLeft:"1px solid var(--border)",background:count>0?g.bg:"transparent"}}>
+                          {cellLabel}
                         </td>
                       );
                     }
@@ -19396,7 +19617,7 @@ function PermissoesMatrix({ restaurantId, pessoas, employees, managers, owners, 
         </div>
       )}
       <div style={{marginTop:10,fontSize:11,color:"var(--text3)",lineHeight:1.5}}>
-        💡 Clique num cabeçalho de grupo pra expandir/colapsar suas colunas. O número na célula colapsada mostra quantas permissões do grupo estão concedidas. Alterações são salvas automaticamente.
+        💡 <strong>Atalhos:</strong> ⚡ Perfil aplica conjunto pré-pronto. Header do grupo expandido tem "marcar todos" pra grupo inteiro. Célula colapsada (com "todos"/"3/5"/"—") clicável marca/desmarca o grupo só pra aquela pessoa.
       </div>
 
       {/* MODAL: editor de áreas do Líder */}
