@@ -19464,7 +19464,7 @@ function RegraCard({ version, restaurant, employees, roles, pessoas, title, titl
 
   function downloadAta() {
     if (!window.jspdf) { alert("Lib PDF carregando, tente em 2s"); return; }
-    generateAtaPDF({ version, restaurant, pessoas, finalPct, employeesPerArea });
+    generateAtaPDF({ version, restaurant, pessoas, roles, finalPct, employeesPerArea });
   }
 
   return (
@@ -19657,7 +19657,7 @@ function RegraWizard({ editingVersion, restaurant, restaurantId, pessoas, employ
   function downloadAtaPreview() {
     if (!window.jspdf) { alert("Lib PDF carregando, tente em 2s"); return; }
     const v = buildVersion(editingVersion?.status || "draft");
-    generateAtaPDF({ version: v, restaurant, pessoas, finalPct, employeesPerArea });
+    generateAtaPDF({ version: v, restaurant, pessoas, roles, finalPct, employeesPerArea });
   }
 
   return (
@@ -19839,18 +19839,66 @@ function RegraWizard({ editingVersion, restaurant, restaurantId, pessoas, employ
   );
 }
 
-// Gera ata em PDF formal com lista de assinaturas
-function generateAtaPDF({ version, restaurant, pessoas, finalPct, employeesPerArea }) {
+// Gera ata em PDF formal com TODOS os detalhes da regra de divisão.
+// Inclui: quem entra/sai, modo de divisão, áreas e pontuações, exemplos numéricos, assinaturas.
+function generateAtaPDF({ version, restaurant, pessoas, roles, finalPct, employeesPerArea }) {
   const { jsPDF } = window.jspdf;
   const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
   const pageW = doc.internal.pageSize.getWidth();
   const pageH = doc.internal.pageSize.getHeight();
-  const ACCENT = [124, 158, 94]; // #7c9e5e
+  const MARGIN = 20;
+  const ACCENT = [124, 158, 94];
   const TEXT = [28, 23, 16];
+  const TEXT2 = [74, 63, 48];
   const TEXT3 = [154, 141, 122];
   const BORDER = [232, 226, 216];
 
-  // Header
+  let y = 15;
+
+  // ─── helpers de layout com auto-pagination ───
+  function ensureSpace(needed = 10) {
+    if (y + needed > pageH - 18) {
+      doc.addPage();
+      y = 15;
+    }
+  }
+  function writeText(text, opts = {}) {
+    const fontSize = opts.fontSize || 10;
+    const lineHeight = opts.lineHeight || (fontSize * 0.45);
+    const x = opts.x || MARGIN;
+    const maxWidth = opts.maxWidth || (pageW - 2 * MARGIN);
+    const color = opts.color || TEXT;
+    const fontStyle = opts.fontStyle || "normal";
+    doc.setFont("helvetica", fontStyle);
+    doc.setFontSize(fontSize);
+    doc.setTextColor(...color);
+    const lines = typeof text === "string" ? doc.splitTextToSize(text, maxWidth) : text;
+    lines.forEach(line => {
+      ensureSpace(lineHeight + 1);
+      doc.text(line, x, y);
+      y += lineHeight;
+    });
+    if (opts.gap) y += opts.gap;
+  }
+  function sectionTitle(title) {
+    ensureSpace(14);
+    y += 4;
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(11);
+    doc.setTextColor(...ACCENT);
+    doc.text(title.toUpperCase(), MARGIN, y);
+    doc.setDrawColor(...ACCENT);
+    doc.setLineWidth(0.4);
+    doc.line(MARGIN, y + 1.5, pageW - MARGIN, y + 1.5);
+    y += 8;
+  }
+  function bulletList(items) {
+    items.forEach(line => {
+      writeText(`•  ${line}`, { fontSize: 10, lineHeight: 5, x: MARGIN + 2 });
+    });
+  }
+
+  // ─── HEADER ───
   doc.setFillColor(...ACCENT);
   doc.rect(15, 15, 4, 18, "F");
   doc.setFont("helvetica", "bold");
@@ -19860,12 +19908,12 @@ function generateAtaPDF({ version, restaurant, pessoas, finalPct, employeesPerAr
   doc.setFont("helvetica", "normal");
   doc.setFontSize(9);
   doc.setTextColor(...TEXT3);
-  let metaLine = [];
+  const metaLine = [];
   if (restaurant?.cnpj) metaLine.push(`CNPJ: ${restaurant.cnpj}`);
   if (restaurant?.endereco || restaurant?.address) metaLine.push(restaurant.endereco || restaurant.address);
   if (metaLine.length > 0) doc.text(metaLine.join(" · "), 22, 28);
 
-  // Título principal
+  // ─── TÍTULO ───
   doc.setFont("helvetica", "bold");
   doc.setFontSize(16);
   doc.setTextColor(...TEXT);
@@ -19876,94 +19924,274 @@ function generateAtaPDF({ version, restaurant, pessoas, finalPct, employeesPerAr
   doc.setFont("helvetica", "normal");
   doc.setFontSize(10);
   doc.setTextColor(...TEXT3);
-  doc.text(`Data da assembleia: ${fmtDate(version.ata?.meetingDate || version.effectiveFrom)}`, pageW / 2, 60, { align: "center" });
+  const meetDate = version.ata?.meetingDate || version.effectiveFrom;
+  doc.text(`Data da assembleia: ${fmtDate(meetDate)}`, pageW / 2, 60, { align: "center" });
   doc.text(`Local: ${version.ata?.meetingLocation || restaurant?.name || "—"}`, pageW / 2, 65, { align: "center" });
 
-  // Texto introdutório
-  let y = 76;
-  doc.setFontSize(10);
-  doc.setTextColor(...TEXT);
-  const intro = `Aos ${new Date(version.ata?.meetingDate || version.effectiveFrom).toLocaleDateString("pt-BR", {day:"numeric", month:"long", year:"numeric"})}, reuniram-se os colaboradores listados ao final desta ata para deliberar e aprovar a regra de divisão das gorjetas recebidas pelo estabelecimento, conforme detalhamento abaixo. A presente regra entra em vigor a partir de ${fmtDate(version.effectiveFrom)}.`;
-  const introLines = doc.splitTextToSize(intro, pageW - 40);
-  doc.text(introLines, 20, y);
-  y += introLines.length * 5 + 4;
+  y = 76;
 
-  // Detalhamento da regra
-  doc.setFont("helvetica", "bold");
-  doc.setFontSize(11);
-  doc.setTextColor(...ACCENT);
-  doc.text("DETALHAMENTO DA REGRA", 20, y);
-  y += 6;
+  // ─── 1) INTRODUÇÃO ───
+  writeText(
+    `Aos ${new Date(meetDate).toLocaleDateString("pt-BR", {day:"numeric", month:"long", year:"numeric"})}, reuniram-se na sede do estabelecimento ${restaurant?.name || "—"} os colaboradores listados ao final desta ata, em assembleia convocada pela direção, com o objetivo de deliberar, aprovar e formalizar a regra de divisão das gorjetas recebidas pelo restaurante. A regra abaixo entra em vigor a partir de ${fmtDate(version.effectiveFrom)} e substitui qualquer regra anterior aplicável a este estabelecimento.`,
+    { fontSize: 10, lineHeight: 5, gap: 4 }
+  );
 
-  doc.setDrawColor(...BORDER);
-  doc.setLineWidth(0.3);
-  doc.rect(20, y, pageW - 40, 8 + AREAS.length * 6 + 8, "S");
-  doc.setFont("helvetica", "bold");
-  doc.setFontSize(10);
-  doc.setTextColor(...TEXT);
-  doc.text(`Modo: ${version.mode === MODE_GLOBAL_POINTS ? "Pontos Globais" : "Por Área + Pontos"}`, 25, y + 6);
-  y += 12;
-  doc.setFont("helvetica", "normal");
-  doc.setFontSize(9);
-  AREAS.forEach(area => {
-    const cfg = version.percentages?.[area];
-    let label = "—";
-    if (typeof cfg === "number") label = `${area}: ${cfg}% (fixo)`;
-    else if (cfg?.type === "fixed") label = `${area}: ${cfg.value}% (fixo)`;
-    else if (cfg?.type === "perEmployee") label = `${area}: ${cfg.valuePerEmp}% por empregado registrado (variável)`;
-    doc.setTextColor(...TEXT);
-    doc.text(label, 25, y);
-    y += 6;
-  });
-  y += 6;
+  // ─── 2) MODO DE DIVISÃO ───
+  sectionTitle("1. Modo de Divisão Adotado");
+  const modeLabel = version.mode === MODE_GLOBAL_POINTS ? "Pontos Globais" : "Por Área + Pontos";
+  writeText(`Modo: ${modeLabel}`, { fontStyle: "bold", fontSize: 11, lineHeight: 6 });
+  if (version.mode === MODE_GLOBAL_POINTS) {
+    writeText(
+      "Todo o pool líquido de gorjetas é distribuído entre os empregados que efetivamente trabalharam no dia, proporcionalmente aos pontos do cargo de cada um. Não há separação por área.",
+      { fontSize: 10, lineHeight: 5, gap: 3 }
+    );
+  } else {
+    writeText(
+      "O pool líquido de gorjetas é distribuído primeiro entre as áreas (Bar, Cozinha, Salão, Limpeza) conforme percentuais detalhados na seção seguinte. Dentro de cada área, o valor da área é distribuído entre os empregados ativos da área proporcionalmente aos pontos do cargo de cada um.",
+      { fontSize: 10, lineHeight: 5, gap: 3 }
+    );
+  }
 
-  // Explicação
-  doc.setFont("helvetica", "italic");
-  doc.setFontSize(9);
-  doc.setTextColor(...TEXT3);
-  const expl = "Áreas de tipo VARIÁVEL (por empregado) são calculadas primeiro, multiplicando-se o percentual pela quantidade de empregados registrados não-freela ativos na área naquela data. O saldo restante é distribuído entre as áreas de tipo FIXO mantendo as proporções entre elas.";
-  const explLines = doc.splitTextToSize(expl, pageW - 40);
-  doc.text(explLines, 20, y);
-  y += explLines.length * 4 + 6;
+  // ─── 3) IMPOSTO ───
+  sectionTitle("2. Imposto Retido");
+  const taxRate = restaurant?.taxRate ?? TAX;
+  writeText(
+    `Sobre o valor bruto da gorjeta arrecadada em cada dia, é descontado o imposto de ${(taxRate * 100).toFixed(2)}% antes da divisão. O saldo líquido (${((1 - taxRate) * 100).toFixed(2)}% do bruto) é o que efetivamente vai pra divisão entre os colaboradores.`,
+    { fontSize: 10, lineHeight: 5, gap: 3 }
+  );
 
-  // Lista de assinaturas
-  doc.setFont("helvetica", "bold");
-  doc.setFontSize(11);
-  doc.setTextColor(...ACCENT);
-  doc.text("PARTICIPANTES — ASSINATURAS", 20, y);
-  y += 4;
+  // ─── 4) DETALHAMENTO DAS ÁREAS (só se modo área) ───
+  if (version.mode !== MODE_GLOBAL_POINTS) {
+    sectionTitle("3. Percentuais por Área");
+    const tableRows = AREAS.map(area => {
+      const cfg = version.percentages?.[area];
+      let tipo = "Fixo", config = "—", efetivo = "—";
+      if (typeof cfg === "number") {
+        tipo = "Fixo";
+        config = `${cfg}%`;
+        efetivo = `${cfg}%`;
+      } else if (cfg?.type === "fixed") {
+        tipo = "Fixo";
+        config = `${cfg.value}%`;
+        efetivo = `${(finalPct[area] || 0).toFixed(2)}%`;
+      } else if (cfg?.type === "perEmployee") {
+        tipo = "Variável (por empregado)";
+        config = `${cfg.valuePerEmp}% × N empregados`;
+        const n = employeesPerArea?.[area] || 0;
+        efetivo = `${(finalPct[area] || 0).toFixed(2)}% (com ${n} empregado${n!==1?"s":""} hoje)`;
+      }
+      return [area, tipo, config, efetivo];
+    });
+    doc.autoTable({
+      startY: y,
+      head: [["Área", "Tipo", "Configuração", "% Efetivo (data da ata)"]],
+      body: tableRows,
+      theme: "grid",
+      styles: { fontSize: 9, cellPadding: 2.5, textColor: TEXT, lineColor: BORDER, lineWidth: 0.2 },
+      headStyles: { fillColor: ACCENT, textColor: [255,255,255], fontStyle: "bold", fontSize: 9 },
+      columnStyles: {
+        0: { cellWidth: 28, fontStyle: "bold" },
+        1: { cellWidth: 42 },
+        2: { cellWidth: 50 },
+        3: { cellWidth: "auto" },
+      },
+      margin: { left: MARGIN, right: MARGIN },
+    });
+    y = doc.lastAutoTable.finalY + 6;
 
-  const voters = version.ata?.voters || [];
+    // Explicação do tipo variável
+    const hasVariable = AREAS.some(a => {
+      const cfg = version.percentages?.[a];
+      return cfg && typeof cfg === "object" && cfg.type === "perEmployee";
+    });
+    if (hasVariable) {
+      writeText(
+        "ÁREAS DE TIPO VARIÁVEL (POR EMPREGADO):",
+        { fontStyle: "bold", fontSize: 10, lineHeight: 5 }
+      );
+      writeText(
+        "Esses percentuais flutuam diariamente conforme o número de empregados registrados não-freela ativos na área naquela data. O cálculo é feito automaticamente em cada dia: percentual configurado × quantidade de empregados ativos = % da área. O saldo restante (100% menos a soma dos variáveis) é distribuído entre as áreas fixas, mantendo as proporções entre elas.",
+        { fontSize: 9, lineHeight: 4.2, color: TEXT2, gap: 3 }
+      );
+      writeText("Exemplo prático para uma área variável:", { fontStyle: "bold", fontSize: 9, lineHeight: 4.5 });
+      writeText(
+        "• Empregado admitido no dia 1 do mês: contribui durante todos os 30 dias.\n• Empregado admitido no dia 10: contribui durante 21 dias (10 a 30).\n• Empregado demitido no dia 20: deixa de contar a partir do dia 20 (conta até o dia 19 inclusive).\n• Empregado em férias ou freela: NÃO conta no cálculo (mesmo que registrado na área).",
+        { fontSize: 9, lineHeight: 4.2, color: TEXT2, gap: 3 }
+      );
+    }
+  }
+
+  // ─── 5) PONTUAÇÃO POR CARGO ───
+  sectionTitle((version.mode !== MODE_GLOBAL_POINTS ? "4." : "3.") + " Pontuação por Cargo");
+  const restRoles = (roles || []).filter(r => r.restaurantId === restaurant?.id);
+  if (restRoles.length === 0) {
+    writeText("(Nenhum cargo cadastrado neste restaurante.)", { fontSize: 10, color: TEXT3, gap: 4 });
+  } else {
+    writeText(
+      "Cada cargo tem uma pontuação que define o peso do empregado na divisão dentro da sua área (modo Por Área + Pontos) ou no pool global (modo Pontos Globais). Quanto maior a pontuação, maior a fração da gorjeta que o empregado recebe em comparação aos colegas.",
+      { fontSize: 10, lineHeight: 5, gap: 3 }
+    );
+    const cargoRows = [...restRoles]
+      .sort((a, b) => (a.area || "z").localeCompare(b.area || "z") || (a.name || "").localeCompare(b.name || ""))
+      .map(r => [
+        r.name || "—",
+        r.area || "—",
+        r.points != null ? String(r.points) : "—",
+        r.noTip ? "❌ Não recebe gorjeta" : "✓ Recebe gorjeta",
+      ]);
+    doc.autoTable({
+      startY: y,
+      head: [["Cargo", "Área", "Pontos", "Participação na gorjeta"]],
+      body: cargoRows,
+      theme: "grid",
+      styles: { fontSize: 9, cellPadding: 2.5, textColor: TEXT, lineColor: BORDER, lineWidth: 0.2 },
+      headStyles: { fillColor: ACCENT, textColor: [255,255,255], fontStyle: "bold", fontSize: 9 },
+      columnStyles: {
+        0: { cellWidth: 60, fontStyle: "bold" },
+        1: { cellWidth: 35 },
+        2: { cellWidth: 25, halign: "right" },
+        3: { cellWidth: "auto" },
+      },
+      margin: { left: MARGIN, right: MARGIN },
+    });
+    y = doc.lastAutoTable.finalY + 6;
+  }
+
+  // ─── 6) QUEM PARTICIPA / NÃO PARTICIPA ───
+  sectionTitle((version.mode !== MODE_GLOBAL_POINTS ? "5." : "4.") + " Quem Participa da Divisão");
+  writeText("PARTICIPAM (recebem fração da gorjeta) os empregados que, no dia em questão:", { fontStyle: "bold", fontSize: 10, lineHeight: 5 });
+  bulletList([
+    "Estão registrados no quadro do restaurante e não estão demitidos antes da data;",
+    "Foram admitidos em data anterior ou igual ao dia (admissão futura não conta);",
+    "NÃO são empregados freela (freelas recebem direto pelo dia trabalhado, fora do pool);",
+    "Têm cargo cadastrado e o cargo NÃO está marcado como 'sem participação na gorjeta';",
+    "Estão escalados como TRABALHO (T), TRABALHO POR COMPENSAÇÃO (TC) ou COMPENSAÇÃO DE FOLGA (FC) — exceto produção, que entra todo dia;",
+    "Empregados de PRODUÇÃO entram em todos os dias (independente do status de escala), exceto férias.",
+  ]);
+  y += 2;
+  writeText("NÃO PARTICIPAM da divisão da gorjeta (não recebem fração) os empregados que, no dia em questão:", { fontStyle: "bold", fontSize: 10, lineHeight: 5 });
+  bulletList([
+    "São FREELAS — recebem o pagamento de gorjeta diretamente pelo dia trabalhado, em mecanismo separado fora deste cálculo;",
+    "Estão DEMITIDOS em data anterior ou igual ao dia;",
+    "Não foram admitidos ainda (admissão futura);",
+    "Estão em FÉRIAS (status FÉR);",
+    "Estão em FOLGA programada (status F);",
+    "Estão em FALTA JUSTIFICADA (FJ) ou FALTA INJUSTIFICADA (FI);",
+    "Estão escalados como FREELA NO DIA (FL);",
+    "Têm cargo marcado como 'sem participação na gorjeta' (noTip).",
+  ]);
+  y += 3;
+
+  // ─── 7) COMO O CÁLCULO FUNCIONA ───
+  sectionTitle((version.mode !== MODE_GLOBAL_POINTS ? "6." : "5.") + " Como o Cálculo Funciona Diariamente");
+  if (version.mode === MODE_GLOBAL_POINTS) {
+    writeText("Para cada dia em que houver gorjeta lançada, o sistema executa as seguintes etapas:", { fontSize: 10, lineHeight: 5, gap: 2 });
+    bulletList([
+      `Pega o valor BRUTO da gorjeta do dia (R$ X);`,
+      `Desconta o imposto: R$ X × ${(taxRate*100).toFixed(2)}% = R$ Y. Saldo líquido = R$ X - R$ Y;`,
+      `Lista todos os empregados ativos no dia (conforme regras da seção anterior);`,
+      `Soma os pontos dos cargos de todos esses empregados (TOTAL);`,
+      `Para cada empregado: parcela = (líquido) × (pontos do empregado / TOTAL);`,
+      `Cada parcela é arredondada e creditada no dia.`,
+    ]);
+  } else {
+    writeText("Para cada dia em que houver gorjeta lançada, o sistema executa as seguintes etapas:", { fontSize: 10, lineHeight: 5, gap: 2 });
+    bulletList([
+      `Pega o valor BRUTO da gorjeta do dia (R$ X);`,
+      `Desconta o imposto: R$ X × ${(taxRate*100).toFixed(2)}% = R$ Y. Saldo líquido = R$ X - R$ Y;`,
+      `Calcula o percentual EFETIVO de cada área conforme regras desta ata (variáveis primeiro, fixas depois);`,
+      `Para cada ÁREA: pool da área = (líquido) × (% da área);`,
+      `Para cada empregado da área: parcela = (pool da área) × (pontos do empregado / soma de pontos da área);`,
+      `Empregados de produção entram em todas as áreas que tiverem alocação;`,
+      `Cada parcela é arredondada e creditada no dia.`,
+    ]);
+  }
+  y += 2;
+
+  // ─── 8) ESCALA DE STATUS ───
+  sectionTitle((version.mode !== MODE_GLOBAL_POINTS ? "7." : "6.") + " Tabela de Status da Escala");
+  writeText("Os símbolos de status usados na escala diária definem se o empregado entra ou não na divisão da gorjeta:", { fontSize: 10, lineHeight: 5, gap: 2 });
   doc.autoTable({
-    startY: y + 2,
-    head: [["Nome completo", "CPF", "Cargo", "Assinatura"]],
-    body: voters.map(v => [v.name, v.cpf || "—", v.roleName || "—", ""]),
+    startY: y,
+    head: [["Sigla", "Status", "Recebe gorjeta?"]],
+    body: [
+      ["T",   "Trabalho normal", "Sim"],
+      ["F",   "Folga programada", "Não"],
+      ["FL",  "Freela no dia (cobrindo plantão)", "Não — recebe por outro mecanismo"],
+      ["FC",  "Folga compensada (banco de horas — folgando)", "Não"],
+      ["TC",  "Trabalho compensado (banco de horas — devendo)", "Sim"],
+      ["Fér", "Férias", "Não"],
+      ["FJ",  "Falta justificada", "Não"],
+      ["FI",  "Falta injustificada", "Não"],
+    ],
     theme: "grid",
-    styles: { fontSize: 9, cellPadding: 3, textColor: TEXT, lineColor: BORDER, lineWidth: 0.2, minCellHeight: 12 },
+    styles: { fontSize: 9, cellPadding: 2.5, textColor: TEXT, lineColor: BORDER, lineWidth: 0.2 },
     headStyles: { fillColor: ACCENT, textColor: [255,255,255], fontStyle: "bold", fontSize: 9 },
     columnStyles: {
-      0: { cellWidth: 60 },
-      1: { cellWidth: 35 },
-      2: { cellWidth: 35 },
-      3: { cellWidth: "auto" },
+      0: { cellWidth: 18, halign: "center", fontStyle: "bold" },
+      1: { cellWidth: 70 },
+      2: { cellWidth: "auto" },
     },
+    margin: { left: MARGIN, right: MARGIN },
   });
+  y = doc.lastAutoTable.finalY + 6;
 
-  // Linha pra responsável
-  let endY = doc.lastAutoTable.finalY + 14;
-  if (endY > pageH - 30) { doc.addPage(); endY = 30; }
-  doc.setFont("helvetica", "normal");
-  doc.setFontSize(10);
-  doc.setTextColor(...TEXT);
-  doc.text("Responsável pela assembleia (Owner / Gestor):", 20, endY);
-  doc.text(`Nome: ${version.proposedBy || "_____________________________________"}`, 20, endY + 8);
-  doc.text("Assinatura: _______________________________________", 20, endY + 16);
+  // ─── 9) OBSERVAÇÃO DA REGRA ───
+  if (version.note && version.note.trim()) {
+    sectionTitle((version.mode !== MODE_GLOBAL_POINTS ? "8." : "7.") + " Observação Adicional");
+    writeText(version.note.trim(), { fontSize: 10, lineHeight: 5, gap: 4 });
+  }
 
-  // Rodapé
-  doc.setFontSize(8);
-  doc.setTextColor(...TEXT3);
-  doc.text(`Documento gerado pelo AppTip em ${new Date().toLocaleString("pt-BR")}`, pageW / 2, pageH - 15, { align: "center" });
-  doc.text(`ID da regra: ${version.id} · Vigente desde: ${fmtDate(version.effectiveFrom)}`, pageW / 2, pageH - 10, { align: "center" });
+  // ─── 10) VALIDADE E COMPROMISSO ───
+  sectionTitle("Validade e Compromisso");
+  writeText(
+    `A regra acima passa a vigorar a partir de ${fmtDate(version.effectiveFrom)} e permanece em vigor até que outra ata, devidamente assinada, a substitua. Os colaboradores listados a seguir, ao assinar, declaram ciência e concordância com os termos aqui detalhados, comprometendo-se a respeitá-los enquanto vigentes. O histórico de regras anteriores e respectivas atas permanecerá registrado para fins de auditoria e consulta.`,
+    { fontSize: 10, lineHeight: 5, gap: 5 }
+  );
+
+  // ─── 11) LISTA DE ASSINATURAS ───
+  sectionTitle("Participantes — Assinaturas");
+  const voters = version.ata?.voters || [];
+  if (voters.length === 0) {
+    writeText("(Nenhum participante selecionado.)", { fontSize: 10, color: TEXT3, gap: 4 });
+  } else {
+    doc.autoTable({
+      startY: y,
+      head: [["Nome completo", "CPF", "Cargo", "Assinatura"]],
+      body: voters.map(v => [v.name, v.cpf || "—", v.roleName || "—", ""]),
+      theme: "grid",
+      styles: { fontSize: 9, cellPadding: 3, textColor: TEXT, lineColor: BORDER, lineWidth: 0.2, minCellHeight: 14 },
+      headStyles: { fillColor: ACCENT, textColor: [255,255,255], fontStyle: "bold", fontSize: 9 },
+      columnStyles: {
+        0: { cellWidth: 60 },
+        1: { cellWidth: 35 },
+        2: { cellWidth: 35 },
+        3: { cellWidth: "auto" },
+      },
+      margin: { left: MARGIN, right: MARGIN },
+    });
+    y = doc.lastAutoTable.finalY + 12;
+  }
+
+  // ─── 12) RESPONSÁVEL PELA ASSEMBLEIA ───
+  ensureSpace(40);
+  writeText("Responsável pela Assembleia:", { fontStyle: "bold", fontSize: 10, lineHeight: 6 });
+  writeText(`Nome: ${version.proposedBy || "_______________________________________"}`, { fontSize: 10, lineHeight: 8 });
+  writeText("CPF: _______________________________________", { fontSize: 10, lineHeight: 8 });
+  writeText("Assinatura: _______________________________________", { fontSize: 10, lineHeight: 8 });
+  y += 4;
+  writeText(`Local: ${restaurant?.name || "—"} · Data: ___ / ___ / _____`, { fontSize: 10, lineHeight: 5 });
+
+  // ─── RODAPÉ EM TODAS AS PÁGINAS ───
+  const totalPages = doc.internal.getNumberOfPages();
+  for (let i = 1; i <= totalPages; i++) {
+    doc.setPage(i);
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(8);
+    doc.setTextColor(...TEXT3);
+    doc.text(`Documento gerado pelo AppTip em ${new Date().toLocaleString("pt-BR")} · ID da regra: ${version.id}`, pageW / 2, pageH - 12, { align: "center" });
+    doc.text(`Página ${i} de ${totalPages}`, pageW / 2, pageH - 8, { align: "center" });
+  }
 
   doc.save(`ata_divisao_gorjetas_${(restaurant?.name||"rest").replace(/\s+/g,"_").toLowerCase()}_${version.effectiveFrom}.pdf`);
 }
