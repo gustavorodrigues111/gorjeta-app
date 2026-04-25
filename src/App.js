@@ -19703,13 +19703,13 @@ function RegraCard({ version, restaurant, employees, roles, pessoas, title, titl
                 let detailLabel = "";
                 if (typeof cfg === "number") {
                   typeLabel = "Fixo";
-                  detailLabel = `${cfg}%`;
+                  detailLabel = `${Number(cfg).toFixed(2)}%`;
                 } else if (cfg && cfg.type === "fixed") {
                   typeLabel = "Fixo";
-                  detailLabel = `${cfg.value}%`;
+                  detailLabel = `${Number(cfg.value).toFixed(2)}%`;
                 } else if (cfg && cfg.type === "perEmployee") {
                   typeLabel = "Por empregado";
-                  detailLabel = `${cfg.valuePerEmp}% × ${employeesPerArea[area]} = ${(cfg.valuePerEmp * employeesPerArea[area]).toFixed(2)}%`;
+                  detailLabel = `${Number(cfg.valuePerEmp).toFixed(2)}% × ${employeesPerArea[area]} = ${(cfg.valuePerEmp * employeesPerArea[area]).toFixed(2)}%`;
                 }
                 const pct = finalPct[area];
                 return (
