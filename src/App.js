@@ -1,5 +1,5 @@
 // AppTip — sistema de gestão de gorjetas e equipe para restaurantes
-import React, { useState, useEffect, Component } from "react";
+import React, { useState, useEffect, useMemo, Component } from "react";
 import { db } from "./firebase";
 import { doc, getDoc, setDoc } from "firebase/firestore";
 
@@ -113,6 +113,102 @@ const STATUS_COLORS = {
 // Division mode constants
 const MODE_AREA_POINTS = "area_points"; // default: split by area % then by points within area
 const MODE_GLOBAL_POINTS = "global_points"; // split only by total points across all employees
+
+// ─── Versioned splits + variable areas (perEmployee) ───
+// splits[restaurantId] aceita 2 formatos:
+//   LEGADO:  { [monthKey]: { Bar: 12, Cozinha: 40, ... } }
+//   NOVO:    Array<{ id, effectiveFrom: "YYYY-MM-DD", percentages, mode, status, ata, proposedBy, ... }>
+//
+// Funções abaixo absorvem ambos transparentemente — backend prepara, UI virá depois.
+
+// Retorna a regra vigente numa data específica.
+// percentages pode ser obj com números (legado) ou obj com {type, value/valuePerEmp} (novo).
+function getSplitForDate(splitsForRid, date) {
+  if (!splitsForRid) return null;
+  // Formato novo: array de versões
+  if (Array.isArray(splitsForRid)) {
+    const active = splitsForRid
+      .filter(v => v.status === "active" && v.effectiveFrom && v.effectiveFrom <= date)
+      .sort((a, b) => (b.effectiveFrom || "").localeCompare(a.effectiveFrom || ""));
+    if (active[0]) return active[0];
+    return null;
+  }
+  // Formato legado: { monthKey: percentages }
+  if (typeof splitsForRid === "object") {
+    const td = new Date(date + "T12:00:00");
+    const mk = monthKey(td.getFullYear(), td.getMonth());
+    if (splitsForRid[mk]) {
+      return { percentages: splitsForRid[mk], mode: null, status: "active", _legacy: true };
+    }
+  }
+  return null;
+}
+
+// Conta empregados ATIVOS numa área em uma data específica (per-day, conforme decisão).
+// Filtros: não freela, admitido ≤ date, demitido > date (ou nunca demitido), não inativo.
+function countActiveEmployeesInArea(employees, restRoles, areaName, date, restaurantId) {
+  return (employees || []).filter(e => {
+    if (e.restaurantId !== restaurantId) return false;
+    if (e.isFreela) return false;
+    const r = (restRoles || []).find(r => r.id === e.roleId);
+    if (!r || r.area !== areaName) return false;
+    if (e.admission && e.admission > date) return false;
+    if (e.demitidoEm && e.demitidoEm <= date) return false; // demitido conta ATÉ o dia da demissão (estrito menor)
+    if (e.inactive && e.inactiveFrom && e.inactiveFrom <= date) return false;
+    return true;
+  }).length;
+}
+
+// Calcula percentuais finais por área aplicando regras fixas + perEmployee.
+// Retorna { Bar: 12, Cozinha: 40.5, ... } sempre como número (totalizando ~100%).
+//
+// percentages aceita:
+//   Legado: { Bar: 12, Cozinha: 40 }
+//   Novo:   { Bar: { type: "fixed", value: 12 }, Limpeza: { type: "perEmployee", valuePerEmp: 1.5 } }
+function computeAreaPercentages(percentages, employeesPerArea) {
+  if (!percentages) return {};
+  // Normaliza pra novo formato internamente
+  const normalized = {};
+  Object.entries(percentages).forEach(([area, val]) => {
+    if (typeof val === "number") {
+      normalized[area] = { type: "fixed", value: val };
+    } else if (val && typeof val === "object" && val.type) {
+      normalized[area] = val;
+    } else {
+      normalized[area] = { type: "fixed", value: 0 };
+    }
+  });
+
+  const finalPct = {};
+  let dynamicTotal = 0;
+  // 1) Áreas perEmployee comem primeiro
+  for (const [area, cfg] of Object.entries(normalized)) {
+    if (cfg.type === "perEmployee") {
+      const n = (employeesPerArea && employeesPerArea[area]) || 0;
+      const pct = n * (cfg.valuePerEmp || 0);
+      finalPct[area] = pct;
+      dynamicTotal += pct;
+    }
+  }
+  // Cap em 100 (caso patológico de muitas pessoas em área variável)
+  if (dynamicTotal > 100) {
+    const scale = 100 / dynamicTotal;
+    Object.keys(finalPct).forEach(k => { finalPct[k] = finalPct[k] * scale; });
+    dynamicTotal = 100;
+  }
+  // 2) Saldo restante distribuído entre áreas fixas, re-normalizado pra somar (100 - dinâmica)
+  const remaining = Math.max(0, 100 - dynamicTotal);
+  let fixedSum = 0;
+  for (const cfg of Object.values(normalized)) {
+    if (cfg.type === "fixed") fixedSum += (cfg.value || 0);
+  }
+  for (const [area, cfg] of Object.entries(normalized)) {
+    if (cfg.type === "fixed") {
+      finalPct[area] = fixedSum > 0 ? ((cfg.value || 0) / fixedSum) * remaining : 0;
+    }
+  }
+  return finalPct;
+}
 
 //
 function nextEmpSeq(employees, restaurantCode) {
@@ -9501,7 +9597,13 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
         if (!totalPoints) return { count: 0, updatedTips: allTips };
         activeEmps.forEach(emp => { const g=round2(total*(emp.points/totalPoints)),tx=round2(totalTaxAmt*(emp.points/totalPoints)); newTips.push({id:`${Date.now()}-${emp.id}-${Math.random().toString(36).slice(2,6)}`,restaurantId:rid,employeeId:emp.id,date,monthKey:tKey,poolTotal:total,areaPool:toDistribute,area:emp.area??"—",myShare:g,myTax:tx,myNet:round2(g-tx),note:noteVal,taxRate}); });
       } else {
-        const tSplit = splits?.[rid]?.[tKey] ?? DEFAULT_SPLIT;
+        // Resolve regra vigente NA DATA do lançamento (suporta versionado novo + legado)
+        const splitVersion = getSplitForDate(splits?.[rid], date);
+        const rawPercentages = (splitVersion && splitVersion.percentages) || splits?.[rid]?.[tKey] || DEFAULT_SPLIT;
+        // Conta empregados ativos por área (pra áreas perEmployee)
+        const employeesPerArea = {};
+        AREAS.forEach(a => { employeesPerArea[a] = countActiveEmployeesInArea(employees, restRoles, a, date, rid); });
+        const tSplit = computeAreaPercentages(rawPercentages, employeesPerArea);
         const byArea = {}; AREAS.forEach(a=>{byArea[a]=[];}); activeEmps.forEach(emp=>{if(emp.area)byArea[emp.area].push(emp);});
         AREAS.forEach(area => { const emps=byArea[area],tp=emps.reduce((a,e)=>a+e.points,0); if(!tp)return; const ap=round2(toDistribute*(tSplit[area]/100)); emps.forEach(emp=>{const g=round2(total*(tSplit[area]/100)*(emp.points/tp)),tx=round2(totalTaxAmt*(tSplit[area]/100)*(emp.points/tp));newTips.push({id:`${Date.now()}-${emp.id}-${Math.random().toString(36).slice(2,6)}`,restaurantId:rid,employeeId:emp.id,date,monthKey:tKey,poolTotal:total,areaPool:ap,area,myShare:g,myTax:tx,myNet:round2(g-tx),note:noteVal,taxRate});}); });
       }
@@ -9571,7 +9673,12 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
         newTips.push({ id: `${Date.now()}-${emp.id}-${Math.random().toString(36).slice(2,6)}`, restaurantId: rid, employeeId: emp.id, date, monthKey: tKey, poolTotal, areaPool: toDistribute, area: emp.area ?? "—", myShare: myGross, myTax: myTaxShare, myNet: myGross - myTaxShare, note: noteVal, taxRate });
       });
     } else {
-      const tSplit = splits?.[rid]?.[tKey] ?? DEFAULT_SPLIT;
+      // Resolve regra vigente NA DATA (suporta versionado novo + legado)
+      const splitVersion = getSplitForDate(splits?.[rid], date);
+      const rawPercentages = (splitVersion && splitVersion.percentages) || splits?.[rid]?.[tKey] || DEFAULT_SPLIT;
+      const employeesPerArea = {};
+      AREAS.forEach(a => { employeesPerArea[a] = countActiveEmployeesInArea(employees, restRoles, a, date, rid); });
+      const tSplit = computeAreaPercentages(rawPercentages, employeesPerArea);
       const empsByArea = {};
       AREAS.forEach(a => { empsByArea[a] = []; });
       activeEmps.forEach(emp => { if (emp.area) empsByArea[emp.area].push(emp); });
@@ -9583,7 +9690,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
         emps.forEach(emp => {
           const myGross = poolTotal * (tSplit[area] / 100) * (emp.points / totalPoints);
           const myTaxShare = totalTaxAmt * (tSplit[area] / 100) * (emp.points / totalPoints);
-          newTips.push({ id: `${Date.now()}-${emp.id}-${Math.random().toString(36).slice(2,6)}`, restaurantId: rid, employeeId: emp.id, date, monthKey: tKey, poolTotal, areaPool, area, myShare: myGross, myTax: myTaxShare, myNet: myGross - myTaxShare, note: noteVal, taxRate });
+          newTips.push({ id: `${Date.now()}-${emp.id}-${Math.random().toString(36).slice(2,6)}`, restaurantId: rid, employeeId: emp.id, date, monthKey: tKey, poolTotal, areaPool, area, myShare: myGross, myTax: myTaxShare, myNet: myGross - myTaxShare, note: noteVal, taxRate, splitVersionId: splitVersion?.id });
         });
       });
     }
@@ -9657,6 +9764,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
     { id:"operacao", label:"💰 Operação", icon:"💰", tabs: [
       canTips && ["dashboard","Dashboard"],
       canTips && ["tips","Gorjetas"],
+      canTips && ["regra_divisao","Regra"],
       (isOwner || (perms.vt !== false && tabVisible("vt"))) && ["vt","Vale Transporte"],
     ].filter(Boolean) },
     { id:"equipe", label:"👥 Pessoas", icon:"👥", tabs: [
@@ -12753,6 +12861,23 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
           <ValeTransporteTab restaurantId={rid} employees={employees} roles={roles} workSchedules={data?.workSchedules??{}} schedules={data?.schedules??{}} vtConfig={data?.vtConfig??{}} vtMonthly={data?.vtMonthly??{}} vtPayments={data?.vtPayments??{}} onUpdate={onUpdate} currentUser={currentUser} isOwner={isOwner} mobileOnly={mobileOnly} schedulePrevista={data?.schedulePrevista??{}} scheduleStatus={data?.scheduleStatus??{}} scheduleVersions={data?.scheduleVersions??{}} />
         )}
 
+        {/* REGRA DE DIVISÃO — versionada com ata + ativação por data */}
+        {tab === "regra_divisao" && (
+          <RegraDivisaoAdmin
+            restaurantId={rid}
+            restaurant={restaurant}
+            splits={splits}
+            pessoas={data?.pessoas ?? []}
+            roles={restRoles}
+            employees={employees.filter(e => e.restaurantId === rid)}
+            tips={tips}
+            currentUser={currentUser}
+            onUpdate={onUpdate}
+            mobileOnly={mobileOnly}
+            isOwner={isOwner}
+          />
+        )}
+
         {/* TRILHA — integrada na aba Equipe */}
 
         {/* NOTIFICAÇÕES */}
@@ -13293,18 +13418,29 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
               <div style={{...S.card,marginBottom:20}}>
                 <p style={{color:ac,fontSize:14,fontWeight:700,margin:"0 0 4px"}}>Distribuição por Área</p>
                 <p style={{color:"var(--text3)",fontSize:11,margin:"0 0 14px"}}>Percentuais de cada área no pool total.</p>
-                <div style={{marginBottom:14}}><MonthNav year={year} month={month} onChange={(y,m)=>{setYear(y);setMonth(m);setSplitForm(null);}}/></div>
-                {splitForm ? (
-                  <div>
-                    {AREAS.map(a=><div key={a} style={{display:"flex",alignItems:"center",gap:10,marginBottom:10}}><div style={{minWidth:70}}><AreaBadge area={a}/></div><input type="number" min="0" max="100" step="0.5" value={splitForm[a]} onChange={e=>setSplitForm({...splitForm,[a]:e.target.value})} style={{...S.input,width:80,textAlign:"center"}}/><span style={{color:"var(--text3)",fontSize:13}}>%</span></div>)}
-                    <div style={{color:Math.abs(AREAS.reduce((a,k)=>a+parseFloat(splitForm[k]||0),0)-100)<0.01?"var(--green)":"var(--red)",fontSize:13,marginBottom:10}}>Total: {AREAS.reduce((a,k)=>a+parseFloat(splitForm[k]||0),0).toFixed(1)}%</div>
-                    <div style={{display:"flex",gap:8}}><button onClick={saveSplit} style={{...S.btnPrimary,flex:1}}>Salvar</button><button onClick={()=>setSplitForm(null)} style={S.btnSecondary}>Cancelar</button></div>
+                {Array.isArray(splits?.[rid]) ? (
+                  <div style={{padding:"12px 14px",background:"var(--ac)10",border:"1px solid var(--ac)44",borderRadius:8,fontSize:12,color:"var(--text2)",lineHeight:1.5}}>
+                    💡 A regra de divisão deste restaurante agora é gerida pela aba <b>Gorjetas → Regra</b>, com versionamento, ata em PDF e ativação por data. O editor antigo aqui foi descontinuado pra evitar conflitos.
                   </div>
                 ) : (
-                  <div>
-                    {AREAS.map(a=><div key={a} style={{display:"flex",justifyContent:"space-between",marginBottom:8,alignItems:"center"}}><AreaBadge area={a}/><span style={{color:"var(--text2)",fontSize:14}}>{curSplit[a]}%</span></div>)}
-                    <button onClick={()=>setSplitForm({...curSplit})} style={{...S.btnSecondary,marginTop:12,width:"100%",textAlign:"center"}}>Editar percentuais</button>
-                  </div>
+                  <>
+                    <div style={{marginBottom:14}}><MonthNav year={year} month={month} onChange={(y,m)=>{setYear(y);setMonth(m);setSplitForm(null);}}/></div>
+                    {splitForm ? (
+                      <div>
+                        {AREAS.map(a=><div key={a} style={{display:"flex",alignItems:"center",gap:10,marginBottom:10}}><div style={{minWidth:70}}><AreaBadge area={a}/></div><input type="number" min="0" max="100" step="0.5" value={splitForm[a]} onChange={e=>setSplitForm({...splitForm,[a]:e.target.value})} style={{...S.input,width:80,textAlign:"center"}}/><span style={{color:"var(--text3)",fontSize:13}}>%</span></div>)}
+                        <div style={{color:Math.abs(AREAS.reduce((a,k)=>a+parseFloat(splitForm[k]||0),0)-100)<0.01?"var(--green)":"var(--red)",fontSize:13,marginBottom:10}}>Total: {AREAS.reduce((a,k)=>a+parseFloat(splitForm[k]||0),0).toFixed(1)}%</div>
+                        <div style={{display:"flex",gap:8}}><button onClick={saveSplit} style={{...S.btnPrimary,flex:1}}>Salvar</button><button onClick={()=>setSplitForm(null)} style={S.btnSecondary}>Cancelar</button></div>
+                      </div>
+                    ) : (
+                      <div>
+                        {AREAS.map(a=><div key={a} style={{display:"flex",justifyContent:"space-between",marginBottom:8,alignItems:"center"}}><AreaBadge area={a}/><span style={{color:"var(--text2)",fontSize:14}}>{curSplit[a]}%</span></div>)}
+                        <button onClick={()=>setSplitForm({...curSplit})} style={{...S.btnSecondary,marginTop:12,width:"100%",textAlign:"center"}}>Editar percentuais</button>
+                        <div style={{marginTop:10,fontSize:11,color:"var(--text3)",lineHeight:1.5}}>
+                          💡 Regra de divisão evoluiu — passe a usar a aba <b>Gorjetas → Regra</b> pra ter versionamento, ata em PDF e ativação por data.
+                        </div>
+                      </div>
+                    )}
+                  </>
                 )}
               </div>
             )}
@@ -17845,6 +17981,8 @@ function buildShellSections({ pessoa, restaurantId, isOwner }) {
       subtabs: st(
         op.gorjetas && { id: "dashboard", label: "Dashboard",   kind: "operational", tab: "gorjetas" },
         ad.tips     && { id: "lancar",    label: "Lançamentos", kind: "manager",     tab: "tips" },
+        // Regra de divisão — só pra owner do restaurante (que aqui = isOwner do AppTip ou ad.tips)
+        ad.tips     && { id: "regra",     label: "Regra",       kind: "manager",     tab: "regra_divisao" },
       ),
     });
   }
@@ -19174,6 +19312,662 @@ function miseWhatsLink(whatsapp, message) {
 // ═══════════════════════════════════════════════════════════════
 // ──  OPERATIONAL GORJETAS — dashboard read-only                 ──
 // ═══════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════
+// ──  REGRA DE DIVISÃO DE GORJETAS — versionada + ata PDF        ──
+// ═══════════════════════════════════════════════════════════════
+function RegraDivisaoAdmin({ restaurantId, restaurant, splits, pessoas, roles, employees, tips, currentUser, onUpdate, mobileOnly, isOwner }) {
+  const ac = "var(--ac)";
+
+  // Lê splits[restaurantId] no formato novo (array) — se for legado (objeto), converte virtualmente
+  // pra exibição. Conversão real só acontece quando o user salvar uma nova regra.
+  const ridSplits = splits?.[restaurantId];
+  const versions = useMemo(() => {
+    if (!ridSplits) return [];
+    if (Array.isArray(ridSplits)) return [...ridSplits].sort((a,b) => (b.effectiveFrom||"").localeCompare(a.effectiveFrom||""));
+    // Legado: {monthKey: percentages} → cria 1 versão "virtual" pra cada mês
+    const out = [];
+    Object.entries(ridSplits).forEach(([mk, perc]) => {
+      out.push({
+        id: `legacy_${mk}`,
+        effectiveFrom: `${mk}-01`,
+        percentages: perc,
+        mode: restaurant?.divisionMode || MODE_AREA_POINTS,
+        status: "active",
+        proposedBy: "(legado)",
+        activatedBy: "(legado)",
+        proposedAt: `${mk}-01T00:00:00`,
+        activatedAt: `${mk}-01T00:00:00`,
+        ata: null,
+        note: "Regra importada do formato anterior (sem ata).",
+        _legacy: true,
+      });
+    });
+    return out.sort((a,b) => (b.effectiveFrom||"").localeCompare(a.effectiveFrom||""));
+  }, [ridSplits, restaurant]);
+
+  const today_ = today();
+  const activeNow = versions.find(v => v.status === "active" && v.effectiveFrom <= today_);
+  const futureActive = versions.filter(v => v.status === "active" && v.effectiveFrom > today_);
+  const drafts = versions.filter(v => v.status === "draft");
+  const past = versions.filter(v => v.status === "active" && v.effectiveFrom <= today_ && v.id !== activeNow?.id);
+
+  const [wizardOpen, setWizardOpen] = useState(false);
+  const [editingDraftId, setEditingDraftId] = useState(null);
+
+  function deleteDraft(id) {
+    if (!window.confirm("Apagar este rascunho?")) return;
+    onUpdate("splits", { ...splits, [restaurantId]: versions.filter(v => v.id !== id) });
+  }
+
+  if (!isOwner) {
+    return (
+      <div style={{padding:"40px 20px",textAlign:"center",color:"var(--text3)"}}>
+        <div style={{fontSize:36,marginBottom:8}}>🔒</div>
+        <div style={{color:"var(--text)",fontSize:14,fontWeight:600}}>Apenas o owner do restaurante pode mudar a regra de divisão</div>
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      {/* Vigente */}
+      <h3 style={{color:"var(--text)",margin:"0 0 12px",fontSize:mobileOnly?16:18}}>📜 Regra de divisão de gorjetas</h3>
+
+      {activeNow ? (
+        <RegraCard version={activeNow} restaurant={restaurant} employees={employees} roles={roles}
+                   pessoas={pessoas} title="Vigente agora" titleColor="var(--green)" mobileOnly={mobileOnly} />
+      ) : (
+        <div style={{padding:"24px 20px",background:"var(--card-bg)",border:"1px dashed var(--border)",borderRadius:12,marginBottom:16,textAlign:"center",color:"var(--text3)"}}>
+          Nenhuma regra ativa. Configure abaixo a primeira regra deste restaurante.
+        </div>
+      )}
+
+      {/* Botão de propor nova */}
+      <div style={{marginTop:16,marginBottom:24}}>
+        <button onClick={()=>{ setEditingDraftId(null); setWizardOpen(true); }}
+          style={{background:ac,color:"#fff",border:"none",borderRadius:10,padding:"10px 18px",fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:"'DM Sans',sans-serif"}}>
+          + Propor nova regra
+        </button>
+      </div>
+
+      {/* Rascunhos */}
+      {drafts.length > 0 && (
+        <div style={{marginBottom:24}}>
+          <h4 style={{fontSize:13,color:"var(--text3)",fontWeight:700,textTransform:"uppercase",letterSpacing:0.4,margin:"0 0 8px"}}>📝 Rascunhos ({drafts.length})</h4>
+          {drafts.map(v => (
+            <RegraCard key={v.id} version={v} restaurant={restaurant} employees={employees} roles={roles}
+                       pessoas={pessoas} title="Rascunho — aguarda assinaturas" titleColor="#f59e0b"
+                       onEdit={()=>{ setEditingDraftId(v.id); setWizardOpen(true); }}
+                       onDelete={()=>deleteDraft(v.id)} mobileOnly={mobileOnly} />
+          ))}
+        </div>
+      )}
+
+      {/* Futuras já ativadas */}
+      {futureActive.length > 0 && (
+        <div style={{marginBottom:24}}>
+          <h4 style={{fontSize:13,color:"var(--text3)",fontWeight:700,textTransform:"uppercase",letterSpacing:0.4,margin:"0 0 8px"}}>⏳ Futuras (já ativas, esperando data)</h4>
+          {futureActive.map(v => (
+            <RegraCard key={v.id} version={v} restaurant={restaurant} employees={employees} roles={roles}
+                       pessoas={pessoas} title={`Vigente desde ${fmtDate(v.effectiveFrom)}`} titleColor="#3b82f6" mobileOnly={mobileOnly} />
+          ))}
+        </div>
+      )}
+
+      {/* Histórico */}
+      {past.length > 0 && (
+        <div>
+          <h4 style={{fontSize:13,color:"var(--text3)",fontWeight:700,textTransform:"uppercase",letterSpacing:0.4,margin:"0 0 8px"}}>🕐 Histórico ({past.length})</h4>
+          {past.map(v => (
+            <RegraCard key={v.id} version={v} restaurant={restaurant} employees={employees} roles={roles}
+                       pessoas={pessoas} title={`Vigente desde ${fmtDate(v.effectiveFrom)}`} titleColor="var(--text3)" compact mobileOnly={mobileOnly} />
+          ))}
+        </div>
+      )}
+
+      {/* Wizard */}
+      {wizardOpen && (
+        <RegraWizard
+          editingVersion={editingDraftId ? versions.find(v=>v.id===editingDraftId) : null}
+          restaurant={restaurant}
+          restaurantId={restaurantId}
+          pessoas={pessoas}
+          employees={employees}
+          roles={roles}
+          currentUser={currentUser}
+          existingVersions={versions}
+          tips={tips}
+          onSave={(newOrUpdated) => {
+            const others = versions.filter(v => v.id !== newOrUpdated.id && !v._legacy);
+            const next = [...others, newOrUpdated];
+            onUpdate("splits", { ...splits, [restaurantId]: next });
+            setWizardOpen(false);
+            setEditingDraftId(null);
+            onUpdate("_toast", newOrUpdated.status === "active" ? "✓ Regra ativada" : "✓ Rascunho salvo");
+          }}
+          onClose={() => { setWizardOpen(false); setEditingDraftId(null); }}
+          mobileOnly={mobileOnly}
+        />
+      )}
+    </div>
+  );
+}
+
+// Card que mostra uma regra (vigente / rascunho / passada)
+function RegraCard({ version, restaurant, employees, roles, pessoas, title, titleColor, onEdit, onDelete, compact, mobileOnly }) {
+  const [expanded, setExpanded] = useState(!compact);
+  const today_ = today();
+  // Calcula employeesPerArea pra hoje (mostrar % efetivo agora)
+  const employeesPerArea = {};
+  AREAS.forEach(a => { employeesPerArea[a] = countActiveEmployeesInArea(employees, roles, a, today_, restaurant?.id); });
+  const finalPct = computeAreaPercentages(version.percentages, employeesPerArea);
+
+  function downloadAta() {
+    if (!window.jspdf) { alert("Lib PDF carregando, tente em 2s"); return; }
+    generateAtaPDF({ version, restaurant, pessoas, finalPct, employeesPerArea });
+  }
+
+  return (
+    <div style={{background:"var(--card-bg)",border:`1px solid ${titleColor}66`,borderRadius:12,marginBottom:10,overflow:"hidden"}}>
+      <div onClick={()=>setExpanded(!expanded)}
+        style={{padding:"12px 16px",background:"var(--bg2)",borderBottom:expanded?`1px solid var(--border)`:"none",display:"flex",alignItems:"center",justifyContent:"space-between",cursor:"pointer",flexWrap:"wrap",gap:8}}>
+        <div>
+          <div style={{fontSize:11,color:titleColor,fontWeight:700,textTransform:"uppercase",letterSpacing:0.4}}>{title}</div>
+          <div style={{fontSize:14,color:"var(--text)",fontWeight:700,marginTop:2}}>
+            {version.mode === MODE_GLOBAL_POINTS ? "Pontos Globais" : "Por Área + Pontos"}
+            {version.note && <span style={{fontSize:11,color:"var(--text3)",fontWeight:400,marginLeft:8}}>· {version.note}</span>}
+          </div>
+        </div>
+        <span style={{fontSize:14,color:"var(--text3)"}}>{expanded ? "▼" : "▶"}</span>
+      </div>
+      {expanded && (
+        <div style={{padding:"14px 16px"}}>
+          <table style={{width:"100%",fontSize:13,borderCollapse:"collapse"}}>
+            <thead>
+              <tr style={{borderBottom:"1px solid var(--border)"}}>
+                <th style={{textAlign:"left",padding:"6px 8px",color:"var(--text3)",fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:0.4}}>Área</th>
+                <th style={{textAlign:"left",padding:"6px 8px",color:"var(--text3)",fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:0.4}}>Tipo</th>
+                <th style={{textAlign:"right",padding:"6px 8px",color:"var(--text3)",fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:0.4}}>% Hoje</th>
+              </tr>
+            </thead>
+            <tbody>
+              {AREAS.map(area => {
+                const cfg = version.percentages?.[area];
+                let typeLabel = "—";
+                let detailLabel = "";
+                if (typeof cfg === "number") {
+                  typeLabel = "Fixo";
+                  detailLabel = `${cfg}%`;
+                } else if (cfg && cfg.type === "fixed") {
+                  typeLabel = "Fixo";
+                  detailLabel = `${cfg.value}%`;
+                } else if (cfg && cfg.type === "perEmployee") {
+                  typeLabel = "Por empregado";
+                  detailLabel = `${cfg.valuePerEmp}% × ${employeesPerArea[area]} = ${(cfg.valuePerEmp * employeesPerArea[area]).toFixed(2)}%`;
+                }
+                const pct = finalPct[area];
+                return (
+                  <tr key={area} style={{borderTop:"1px solid var(--border)"}}>
+                    <td style={{padding:"6px 8px",color:"var(--text)",fontWeight:600}}>{area}</td>
+                    <td style={{padding:"6px 8px",color:"var(--text2)",fontSize:12}}>{typeLabel} <span style={{color:"var(--text3)",fontSize:11,marginLeft:4}}>({detailLabel})</span></td>
+                    <td style={{padding:"6px 8px",textAlign:"right",color:"var(--text)",fontFamily:"'DM Mono',monospace",fontWeight:700}}>{pct != null ? `${pct.toFixed(2)}%` : "—"}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+          <div style={{marginTop:10,fontSize:11,color:"var(--text3)",lineHeight:1.5}}>
+            Vigente desde <b>{fmtDate(version.effectiveFrom)}</b>
+            {version.activatedBy && <> · ativada por {version.activatedBy}</>}
+            {version.activatedAt && <> em {new Date(version.activatedAt).toLocaleString("pt-BR")}</>}
+            {version.ata?.voters?.length > 0 && <> · {version.ata.voters.length} assinante(s) na ata</>}
+          </div>
+          <div style={{marginTop:12,display:"flex",gap:8,flexWrap:"wrap"}}>
+            {version.ata && <button onClick={downloadAta} style={{...S.btnSecondary,fontSize:12,padding:"7px 14px"}}>📄 Baixar ata</button>}
+            {onEdit && <button onClick={onEdit} style={{...S.btnSecondary,fontSize:12,padding:"7px 14px"}}>✏️ Editar / Ativar</button>}
+            {onDelete && <button onClick={onDelete} style={{...S.btnSecondary,fontSize:12,padding:"7px 14px",color:"var(--red)",borderColor:"var(--red)44"}}>Apagar</button>}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Wizard 3 etapas — Editar regra → Selecionar votantes → Gerar ata + Ativar
+function RegraWizard({ editingVersion, restaurant, restaurantId, pessoas, employees, roles, currentUser, existingVersions, tips, onSave, onClose, mobileOnly }) {
+  const [step, setStep] = useState(1);
+  const [mode, setMode] = useState(editingVersion?.mode || MODE_AREA_POINTS);
+  // Normaliza percentages pra editar
+  const initialAreas = {};
+  AREAS.forEach(a => {
+    const cfg = editingVersion?.percentages?.[a];
+    if (typeof cfg === "number") {
+      initialAreas[a] = { type: "fixed", value: cfg, valuePerEmp: 1.5 };
+    } else if (cfg && cfg.type === "perEmployee") {
+      initialAreas[a] = { type: "perEmployee", value: 0, valuePerEmp: cfg.valuePerEmp || 1.5 };
+    } else if (cfg && cfg.type === "fixed") {
+      initialAreas[a] = { type: "fixed", value: cfg.value || 0, valuePerEmp: 1.5 };
+    } else {
+      initialAreas[a] = { type: "fixed", value: 25, valuePerEmp: 1.5 };
+    }
+  });
+  const [areasCfg, setAreasCfg] = useState(initialAreas);
+  const [note, setNote] = useState(editingVersion?.note || "");
+  // Votantes — pessoas isTeam do restaurante
+  const restPessoas = (pessoas || []).filter(p => (p.restaurantIds||[]).includes(restaurantId) && p.isTeam?.[restaurantId]);
+  const [voters, setVoters] = useState(() => {
+    const initial = {};
+    if (editingVersion?.ata?.voters) {
+      editingVersion.ata.voters.forEach(v => { initial[v.pessoaId] = true; });
+    } else {
+      restPessoas.forEach(p => { initial[p.id] = true; });
+    }
+    return initial;
+  });
+  const [meetingDate, setMeetingDate] = useState(editingVersion?.ata?.meetingDate || today());
+  const [effectiveFrom, setEffectiveFrom] = useState(editingVersion?.effectiveFrom || today());
+
+  function setAreaType(area, type) {
+    setAreasCfg(c => ({ ...c, [area]: { ...c[area], type } }));
+  }
+  function setAreaValue(area, val) {
+    setAreasCfg(c => ({ ...c, [area]: { ...c[area], value: val } }));
+  }
+  function setAreaValuePerEmp(area, val) {
+    setAreasCfg(c => ({ ...c, [area]: { ...c[area], valuePerEmp: val } }));
+  }
+
+  // Calcula soma e preview
+  const today_ = today();
+  const employeesPerArea = {};
+  AREAS.forEach(a => { employeesPerArea[a] = countActiveEmployeesInArea(employees, roles, a, today_, restaurantId); });
+  const percentages = {};
+  AREAS.forEach(a => {
+    const cfg = areasCfg[a];
+    if (cfg.type === "perEmployee") {
+      percentages[a] = { type: "perEmployee", valuePerEmp: parseFloat(cfg.valuePerEmp) || 0 };
+    } else {
+      percentages[a] = { type: "fixed", value: parseFloat(cfg.value) || 0 };
+    }
+  });
+  const finalPct = computeAreaPercentages(percentages, employeesPerArea);
+  const sumFinal = Object.values(finalPct).reduce((s, v) => s + (v || 0), 0);
+
+  const selectedVoters = Object.entries(voters).filter(([_, v]) => v).map(([pid]) => pid);
+
+  function buildVersion(status) {
+    const id = editingVersion?.id || `spl_${Date.now().toString(36)}${Math.random().toString(36).slice(2,5)}`;
+    const ata = selectedVoters.length > 0 ? {
+      meetingDate,
+      meetingLocation: restaurant?.name || "—",
+      voters: selectedVoters.map(pid => {
+        const p = restPessoas.find(x => x.id === pid);
+        const td = p?.teamData?.[restaurantId];
+        const r = td ? roles.find(rr => rr.id === td.roleId) : null;
+        return {
+          pessoaId: pid,
+          name: p?.name || "—",
+          cpf: p?.cpf || "",
+          roleName: r?.name || "—",
+        };
+      }),
+      generatedAt: new Date().toISOString(),
+      generatedBy: currentUser?.name || "—",
+    } : null;
+    return {
+      id,
+      effectiveFrom,
+      percentages,
+      mode,
+      status,
+      proposedBy: editingVersion?.proposedBy || currentUser?.name || "—",
+      proposedById: editingVersion?.proposedById || currentUser?.id || null,
+      proposedAt: editingVersion?.proposedAt || new Date().toISOString(),
+      activatedBy: status === "active" ? (currentUser?.name || "—") : (editingVersion?.activatedBy || null),
+      activatedAt: status === "active" ? new Date().toISOString() : (editingVersion?.activatedAt || null),
+      ata,
+      note: note.trim() || null,
+    };
+  }
+
+  function saveDraft() {
+    if (selectedVoters.length === 0) { alert("Selecione pelo menos 1 votante."); return; }
+    onSave(buildVersion("draft"));
+  }
+  function activate() {
+    if (selectedVoters.length === 0) { alert("Selecione pelo menos 1 votante."); return; }
+    if (Math.abs(sumFinal - 100) > 0.5) {
+      if (!window.confirm(`A soma final dá ${sumFinal.toFixed(2)}% (esperado 100%). Ativar mesmo assim?`)) return;
+    }
+    // Conta dias afetados
+    const affectedTips = (tips || []).filter(t => t.restaurantId === restaurantId && t.date >= effectiveFrom);
+    const affectedDays = new Set(affectedTips.map(t => t.date)).size;
+    if (affectedDays > 0) {
+      if (!window.confirm(`Esta regra vigente desde ${fmtDate(effectiveFrom)} vai recalcular ${affectedDays} dia(s) com gorjeta lançada. Continuar?`)) return;
+    }
+    const v = buildVersion("active");
+    onSave(v);
+    // Auto-recalc dos dias afetados
+    if (affectedDays > 0) {
+      // Trigger recálculo via função externa — implementado em fase B
+      window.dispatchEvent(new CustomEvent("apptip:recalc-tips", { detail: { restaurantId, fromDate: effectiveFrom } }));
+    }
+  }
+
+  function downloadAtaPreview() {
+    if (!window.jspdf) { alert("Lib PDF carregando, tente em 2s"); return; }
+    const v = buildVersion(editingVersion?.status || "draft");
+    generateAtaPDF({ version: v, restaurant, pessoas, finalPct, employeesPerArea });
+  }
+
+  return (
+    <div onClick={onClose} style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.5)",zIndex:200,display:"flex",alignItems:"center",justifyContent:"center",padding:mobileOnly?12:20}}>
+      <div onClick={e=>e.stopPropagation()} style={{background:"var(--bg1)",borderRadius:12,padding:mobileOnly?16:24,maxWidth:680,width:"100%",maxHeight:"92vh",overflowY:"auto",boxShadow:"0 10px 40px rgba(0,0,0,0.3)"}}>
+        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:14}}>
+          <h3 style={{margin:0,fontSize:mobileOnly?16:18,fontWeight:700,color:"var(--text)"}}>
+            {editingVersion ? "Editar regra (rascunho)" : "Propor nova regra"} — etapa {step}/3
+          </h3>
+          <button onClick={onClose} style={{background:"none",border:"none",fontSize:18,color:"var(--text3)",cursor:"pointer",padding:"4px 8px"}}>×</button>
+        </div>
+
+        {/* ETAPA 1: Definir regra */}
+        {step === 1 && (
+          <div>
+            <div style={{marginBottom:14}}>
+              <label style={{fontSize:11,color:"var(--text3)",fontWeight:600,display:"block",marginBottom:4}}>Modo de divisão</label>
+              <div style={{display:"flex",gap:6}}>
+                {[[MODE_AREA_POINTS,"Por Área + Pontos"],[MODE_GLOBAL_POINTS,"Pontos Globais"]].map(([m,l]) => (
+                  <button key={m} onClick={()=>setMode(m)}
+                    style={{flex:1,padding:"10px",borderRadius:8,border:`1px solid ${mode===m?"var(--ac)":"var(--border)"}`,background:mode===m?"var(--ac)15":"transparent",color:mode===m?"var(--ac)":"var(--text2)",fontSize:12,fontWeight:mode===m?700:500,cursor:"pointer",fontFamily:"'DM Sans',sans-serif"}}>
+                    {l}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {mode === MODE_AREA_POINTS && (
+              <div style={{marginBottom:14}}>
+                <label style={{fontSize:11,color:"var(--text3)",fontWeight:600,display:"block",marginBottom:6}}>Configuração por área</label>
+                {AREAS.map(area => {
+                  const cfg = areasCfg[area];
+                  const isPerEmp = cfg.type === "perEmployee";
+                  const empCount = employeesPerArea[area];
+                  const effective = isPerEmp ? (parseFloat(cfg.valuePerEmp)||0) * empCount : (parseFloat(cfg.value)||0);
+                  return (
+                    <div key={area} style={{padding:"10px 12px",border:"1px solid var(--border)",borderRadius:8,marginBottom:6}}>
+                      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:6}}>
+                        <span style={{fontSize:13,fontWeight:700,color:"var(--text)"}}>{area}</span>
+                        <span style={{fontSize:10,color:"var(--text3)"}}>{empCount} empregado{empCount!==1?"s":""} hoje</span>
+                      </div>
+                      <div style={{display:"flex",gap:6,marginBottom:6}}>
+                        <button onClick={()=>setAreaType(area,"fixed")}
+                          style={{flex:1,padding:"6px 10px",borderRadius:6,border:`1px solid ${!isPerEmp?"var(--ac)":"var(--border)"}`,background:!isPerEmp?"var(--ac)15":"transparent",color:!isPerEmp?"var(--ac)":"var(--text3)",fontSize:11,fontWeight:!isPerEmp?700:500,cursor:"pointer",fontFamily:"'DM Sans',sans-serif"}}>
+                          Fixo
+                        </button>
+                        <button onClick={()=>setAreaType(area,"perEmployee")}
+                          style={{flex:1,padding:"6px 10px",borderRadius:6,border:`1px solid ${isPerEmp?"var(--ac)":"var(--border)"}`,background:isPerEmp?"var(--ac)15":"transparent",color:isPerEmp?"var(--ac)":"var(--text3)",fontSize:11,fontWeight:isPerEmp?700:500,cursor:"pointer",fontFamily:"'DM Sans',sans-serif"}}>
+                          Por empregado
+                        </button>
+                      </div>
+                      {!isPerEmp ? (
+                        <div style={{display:"flex",alignItems:"center",gap:8}}>
+                          <input type="number" step="0.01" value={cfg.value} onChange={e=>setAreaValue(area,e.target.value)} style={{...S.input,maxWidth:100}}/>
+                          <span style={{fontSize:13,color:"var(--text2)"}}>%</span>
+                        </div>
+                      ) : (
+                        <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
+                          <input type="number" step="0.1" value={cfg.valuePerEmp} onChange={e=>setAreaValuePerEmp(area,e.target.value)} style={{...S.input,maxWidth:100}}/>
+                          <span style={{fontSize:13,color:"var(--text2)"}}>% por empregado</span>
+                          <span style={{fontSize:11,color:"var(--text3)"}}>= {effective.toFixed(2)}% hoje</span>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+                <div style={{padding:"10px 12px",background:"var(--bg2)",borderRadius:8,marginTop:8}}>
+                  <div style={{fontSize:11,color:"var(--text3)",marginBottom:6}}>Resultado HOJE (com {Object.values(employeesPerArea).reduce((s,n)=>s+n,0)} empregados):</div>
+                  {AREAS.map(area => (
+                    <div key={area} style={{display:"flex",justifyContent:"space-between",fontSize:12,padding:"2px 0"}}>
+                      <span style={{color:"var(--text2)"}}>{area}</span>
+                      <span style={{color:"var(--text)",fontFamily:"'DM Mono',monospace",fontWeight:700}}>{(finalPct[area]||0).toFixed(2)}%</span>
+                    </div>
+                  ))}
+                  <div style={{borderTop:"1px solid var(--border)",marginTop:6,paddingTop:6,display:"flex",justifyContent:"space-between",fontSize:13,fontWeight:700}}>
+                    <span style={{color:"var(--text)"}}>Total</span>
+                    <span style={{color:Math.abs(sumFinal-100)<0.5?"var(--green)":"var(--red)",fontFamily:"'DM Mono',monospace"}}>{sumFinal.toFixed(2)}%</span>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            <div style={{marginBottom:14}}>
+              <label style={{fontSize:11,color:"var(--text3)",fontWeight:600,display:"block",marginBottom:4}}>Observação (opcional, fica no audit log)</label>
+              <textarea value={note} onChange={e=>setNote(e.target.value)} rows={2} placeholder="Ex: aumento Bar negociado em reunião 24/04" style={{...S.input,resize:"vertical"}}/>
+            </div>
+
+            <div style={{display:"flex",justifyContent:"flex-end",gap:8}}>
+              <button onClick={onClose} style={{...S.btnSecondary,fontSize:12,padding:"10px 16px"}}>Cancelar</button>
+              <button onClick={()=>setStep(2)} style={{background:"var(--ac)",color:"#fff",border:"none",borderRadius:8,padding:"10px 18px",fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:"'DM Sans',sans-serif"}}>Próximo →</button>
+            </div>
+          </div>
+        )}
+
+        {/* ETAPA 2: Selecionar votantes */}
+        {step === 2 && (
+          <div>
+            <div style={{fontSize:13,color:"var(--text2)",marginBottom:12}}>
+              Selecione os empregados que vão participar da votação. A ata será gerada com os nomes selecionados.
+            </div>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
+              <div style={{fontSize:12,color:"var(--text3)"}}>{selectedVoters.length} de {restPessoas.length} selecionado(s)</div>
+              <div style={{display:"flex",gap:6}}>
+                <button onClick={()=>{ const all={}; restPessoas.forEach(p=>all[p.id]=true); setVoters(all); }} style={{...S.btnSecondary,fontSize:11,padding:"4px 10px"}}>Marcar todos</button>
+                <button onClick={()=>setVoters({})} style={{...S.btnSecondary,fontSize:11,padding:"4px 10px"}}>Desmarcar</button>
+              </div>
+            </div>
+            <div style={{maxHeight:300,overflowY:"auto",border:"1px solid var(--border)",borderRadius:8}}>
+              {restPessoas.length === 0 ? (
+                <div style={{padding:"30px 20px",textAlign:"center",color:"var(--text3)",fontSize:13}}>
+                  Nenhum empregado da equipe encontrado. Cadastre pessoas em Pessoas → Cadastro com a flag "É equipe".
+                </div>
+              ) : restPessoas.map(p => {
+                const td = p.teamData?.[restaurantId];
+                const r = td ? roles.find(rr => rr.id === td.roleId) : null;
+                return (
+                  <label key={p.id} style={{display:"flex",alignItems:"center",gap:10,padding:"10px 12px",borderBottom:"1px solid var(--border)",cursor:"pointer",fontSize:13}}>
+                    <input type="checkbox" checked={!!voters[p.id]} onChange={e=>setVoters(v=>({...v,[p.id]:e.target.checked}))}/>
+                    <div style={{flex:1}}>
+                      <div style={{color:"var(--text)",fontWeight:600}}>{p.name}</div>
+                      <div style={{fontSize:11,color:"var(--text3)"}}>{p.cpf || "sem CPF"} · {r?.name || "sem cargo"}</div>
+                    </div>
+                  </label>
+                );
+              })}
+            </div>
+            <div style={{marginTop:14,display:"flex",justifyContent:"space-between",gap:8}}>
+              <button onClick={()=>setStep(1)} style={{...S.btnSecondary,fontSize:12,padding:"10px 16px"}}>← Voltar</button>
+              <button onClick={()=>setStep(3)} disabled={selectedVoters.length===0}
+                style={{background:selectedVoters.length===0?"var(--bg3)":"var(--ac)",color:selectedVoters.length===0?"var(--text3)":"#fff",border:"none",borderRadius:8,padding:"10px 18px",fontSize:13,fontWeight:700,cursor:selectedVoters.length===0?"not-allowed":"pointer",fontFamily:"'DM Sans',sans-serif"}}>Próximo →</button>
+            </div>
+          </div>
+        )}
+
+        {/* ETAPA 3: Gerar ata + Salvar/Ativar */}
+        {step === 3 && (
+          <div>
+            <div style={{padding:"12px 14px",background:"var(--bg2)",borderRadius:8,marginBottom:14,fontSize:12,color:"var(--text2)",lineHeight:1.5}}>
+              <b>Resumo:</b><br/>
+              Modo: <b>{mode === MODE_GLOBAL_POINTS ? "Pontos Globais" : "Por Área + Pontos"}</b><br/>
+              Total HOJE: <b>{sumFinal.toFixed(2)}%</b><br/>
+              Votantes: <b>{selectedVoters.length}</b> empregado(s)
+            </div>
+
+            <div style={{marginBottom:14}}>
+              <label style={{fontSize:11,color:"var(--text3)",fontWeight:600,display:"block",marginBottom:4}}>Data da assembleia</label>
+              <input type="date" value={meetingDate} onChange={e=>setMeetingDate(e.target.value)} style={S.input}/>
+            </div>
+
+            <div style={{marginBottom:14}}>
+              <label style={{fontSize:11,color:"var(--text3)",fontWeight:600,display:"block",marginBottom:4}}>Vigente desde (data em que regra começa a valer)</label>
+              <input type="date" value={effectiveFrom} onChange={e=>setEffectiveFrom(e.target.value)} style={S.input}/>
+              <div style={{fontSize:10,color:"var(--text3)",marginTop:4,lineHeight:1.5}}>
+                {effectiveFrom < today_ ? `⚠ Retroativo (${Math.ceil((new Date(today_)-new Date(effectiveFrom))/(1000*60*60*24))} dias) — vai recalcular gorjetas existentes nesse período.` : effectiveFrom > today_ ? "📅 Futuro — regra fica salva e aplica automaticamente quando a data chegar." : "Hoje — passa a valer imediatamente."}
+              </div>
+            </div>
+
+            <div style={{padding:"10px 14px",background:"var(--ac)10",border:"1px solid var(--ac)33",borderRadius:8,fontSize:12,color:"var(--text2)",marginBottom:14,lineHeight:1.5}}>
+              💡 <b>Fluxo recomendado:</b><br/>
+              1. Baixe a ata em PDF<br/>
+              2. Imprima e colete as assinaturas<br/>
+              3. Salve como rascunho enquanto coleta assinaturas<br/>
+              4. Quando todos assinarem, volte aqui e clique em <b>Ativar</b>
+            </div>
+
+            <div style={{display:"flex",justifyContent:"space-between",gap:8,flexWrap:"wrap"}}>
+              <button onClick={()=>setStep(2)} style={{...S.btnSecondary,fontSize:12,padding:"10px 16px"}}>← Voltar</button>
+              <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+                <button onClick={downloadAtaPreview} style={{...S.btnSecondary,fontSize:12,padding:"10px 14px"}}>📄 Baixar ata (preview)</button>
+                <button onClick={saveDraft} style={{...S.btnSecondary,fontSize:12,padding:"10px 14px"}}>💾 Salvar rascunho</button>
+                <button onClick={activate}
+                  style={{background:"var(--ac)",color:"#fff",border:"none",borderRadius:8,padding:"10px 18px",fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:"'DM Sans',sans-serif"}}>⚡ Ativar agora</button>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// Gera ata em PDF formal com lista de assinaturas
+function generateAtaPDF({ version, restaurant, pessoas, finalPct, employeesPerArea }) {
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
+  const pageW = doc.internal.pageSize.getWidth();
+  const pageH = doc.internal.pageSize.getHeight();
+  const ACCENT = [124, 158, 94]; // #7c9e5e
+  const TEXT = [28, 23, 16];
+  const TEXT3 = [154, 141, 122];
+  const BORDER = [232, 226, 216];
+
+  // Header
+  doc.setFillColor(...ACCENT);
+  doc.rect(15, 15, 4, 18, "F");
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(14);
+  doc.setTextColor(...TEXT);
+  doc.text(restaurant?.name || "Restaurante", 22, 22);
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(9);
+  doc.setTextColor(...TEXT3);
+  let metaLine = [];
+  if (restaurant?.cnpj) metaLine.push(`CNPJ: ${restaurant.cnpj}`);
+  if (restaurant?.endereco || restaurant?.address) metaLine.push(restaurant.endereco || restaurant.address);
+  if (metaLine.length > 0) doc.text(metaLine.join(" · "), 22, 28);
+
+  // Título principal
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(16);
+  doc.setTextColor(...TEXT);
+  doc.text("ATA DE ASSEMBLEIA", pageW / 2, 45, { align: "center" });
+  doc.setFontSize(11);
+  doc.text("Definição da Regra de Divisão de Gorjetas", pageW / 2, 52, { align: "center" });
+
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(10);
+  doc.setTextColor(...TEXT3);
+  doc.text(`Data da assembleia: ${fmtDate(version.ata?.meetingDate || version.effectiveFrom)}`, pageW / 2, 60, { align: "center" });
+  doc.text(`Local: ${version.ata?.meetingLocation || restaurant?.name || "—"}`, pageW / 2, 65, { align: "center" });
+
+  // Texto introdutório
+  let y = 76;
+  doc.setFontSize(10);
+  doc.setTextColor(...TEXT);
+  const intro = `Aos ${new Date(version.ata?.meetingDate || version.effectiveFrom).toLocaleDateString("pt-BR", {day:"numeric", month:"long", year:"numeric"})}, reuniram-se os colaboradores listados ao final desta ata para deliberar e aprovar a regra de divisão das gorjetas recebidas pelo estabelecimento, conforme detalhamento abaixo. A presente regra entra em vigor a partir de ${fmtDate(version.effectiveFrom)}.`;
+  const introLines = doc.splitTextToSize(intro, pageW - 40);
+  doc.text(introLines, 20, y);
+  y += introLines.length * 5 + 4;
+
+  // Detalhamento da regra
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(11);
+  doc.setTextColor(...ACCENT);
+  doc.text("DETALHAMENTO DA REGRA", 20, y);
+  y += 6;
+
+  doc.setDrawColor(...BORDER);
+  doc.setLineWidth(0.3);
+  doc.rect(20, y, pageW - 40, 8 + AREAS.length * 6 + 8, "S");
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(10);
+  doc.setTextColor(...TEXT);
+  doc.text(`Modo: ${version.mode === MODE_GLOBAL_POINTS ? "Pontos Globais" : "Por Área + Pontos"}`, 25, y + 6);
+  y += 12;
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(9);
+  AREAS.forEach(area => {
+    const cfg = version.percentages?.[area];
+    let label = "—";
+    if (typeof cfg === "number") label = `${area}: ${cfg}% (fixo)`;
+    else if (cfg?.type === "fixed") label = `${area}: ${cfg.value}% (fixo)`;
+    else if (cfg?.type === "perEmployee") label = `${area}: ${cfg.valuePerEmp}% por empregado registrado (variável)`;
+    doc.setTextColor(...TEXT);
+    doc.text(label, 25, y);
+    y += 6;
+  });
+  y += 6;
+
+  // Explicação
+  doc.setFont("helvetica", "italic");
+  doc.setFontSize(9);
+  doc.setTextColor(...TEXT3);
+  const expl = "Áreas de tipo VARIÁVEL (por empregado) são calculadas primeiro, multiplicando-se o percentual pela quantidade de empregados registrados não-freela ativos na área naquela data. O saldo restante é distribuído entre as áreas de tipo FIXO mantendo as proporções entre elas.";
+  const explLines = doc.splitTextToSize(expl, pageW - 40);
+  doc.text(explLines, 20, y);
+  y += explLines.length * 4 + 6;
+
+  // Lista de assinaturas
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(11);
+  doc.setTextColor(...ACCENT);
+  doc.text("PARTICIPANTES — ASSINATURAS", 20, y);
+  y += 4;
+
+  const voters = version.ata?.voters || [];
+  doc.autoTable({
+    startY: y + 2,
+    head: [["Nome completo", "CPF", "Cargo", "Assinatura"]],
+    body: voters.map(v => [v.name, v.cpf || "—", v.roleName || "—", ""]),
+    theme: "grid",
+    styles: { fontSize: 9, cellPadding: 3, textColor: TEXT, lineColor: BORDER, lineWidth: 0.2, minCellHeight: 12 },
+    headStyles: { fillColor: ACCENT, textColor: [255,255,255], fontStyle: "bold", fontSize: 9 },
+    columnStyles: {
+      0: { cellWidth: 60 },
+      1: { cellWidth: 35 },
+      2: { cellWidth: 35 },
+      3: { cellWidth: "auto" },
+    },
+  });
+
+  // Linha pra responsável
+  let endY = doc.lastAutoTable.finalY + 14;
+  if (endY > pageH - 30) { doc.addPage(); endY = 30; }
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(10);
+  doc.setTextColor(...TEXT);
+  doc.text("Responsável pela assembleia (Owner / Gestor):", 20, endY);
+  doc.text(`Nome: ${version.proposedBy || "_____________________________________"}`, 20, endY + 8);
+  doc.text("Assinatura: _______________________________________", 20, endY + 16);
+
+  // Rodapé
+  doc.setFontSize(8);
+  doc.setTextColor(...TEXT3);
+  doc.text(`Documento gerado pelo AppTip em ${new Date().toLocaleString("pt-BR")}`, pageW / 2, pageH - 15, { align: "center" });
+  doc.text(`ID da regra: ${version.id} · Vigente desde: ${fmtDate(version.effectiveFrom)}`, pageW / 2, pageH - 10, { align: "center" });
+
+  doc.save(`ata_divisao_gorjetas_${(restaurant?.name||"rest").replace(/\s+/g,"_").toLowerCase()}_${version.effectiveFrom}.pdf`);
+}
+
 function OperationalGorjetas({ employee, data }) {
   const restaurantId = employee.restaurantId;
   const now = new Date();
