@@ -44,6 +44,73 @@ function cacheGet(key) {
   } catch { return null; }
 }
 
+// ═══════════════════════════════════════════════════════════════
+// ── CONFIRM MODAL — substitui window.confirm com modal customizado
+// ═══════════════════════════════════════════════════════════════
+// API: appConfirm("Apagar?") ou appConfirm({ title, message, danger, confirmLabel, cancelLabel })
+// Retorna Promise<boolean>. Caller deve estar em função async.
+// O <ConfirmHost/> precisa estar montado em algum ponto da árvore (App raiz).
+let _setConfirmModal = null;
+function appConfirm(opts) {
+  if (typeof opts === "string") opts = { message: opts };
+  // Fallback se host não estiver montado (defesa, não deveria acontecer em prod).
+  // Usa window["confirm"] (bracket access) pra escapar do find/replace que mira "window.confirm(".
+  if (!_setConfirmModal) return Promise.resolve(window["confirm"](opts.message));
+  return new Promise(resolve => {
+    _setConfirmModal({ ...opts, resolve });
+  });
+}
+
+function ConfirmHost() {
+  const [modal, setModal] = useState(null);
+  useEffect(() => {
+    _setConfirmModal = setModal;
+    return () => { _setConfirmModal = null; };
+  }, []);
+
+  if (!modal) return null;
+
+  function close(result) {
+    modal.resolve(result);
+    setModal(null);
+  }
+
+  const danger = !!modal.danger;
+  const confirmLabel = modal.confirmLabel || (danger ? "Apagar" : "Confirmar");
+  const cancelLabel = modal.cancelLabel || "Cancelar";
+  const title = modal.title || "Confirmar?";
+
+  return (
+    <div onClick={() => close(false)}
+      style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.55)",zIndex:10000,display:"flex",alignItems:"center",justifyContent:"center",padding:16,fontFamily:"'DM Sans',sans-serif"}}>
+      <div onClick={e => e.stopPropagation()}
+        style={{background:"var(--bg1)",borderRadius:14,maxWidth:440,width:"100%",boxShadow:"0 10px 40px rgba(0,0,0,0.3)",overflow:"hidden"}}>
+        <div style={{padding:"18px 20px 12px",borderBottom:"1px solid var(--border)"}}>
+          <div style={{display:"flex",alignItems:"center",gap:10}}>
+            <span style={{fontSize:20}}>{danger ? "⚠️" : "❓"}</span>
+            <h3 style={{margin:0,fontSize:16,fontWeight:700,color:"var(--text)",lineHeight:1.3}}>{title}</h3>
+          </div>
+        </div>
+        {modal.message && (
+          <div style={{padding:"14px 20px",color:"var(--text2)",fontSize:13,lineHeight:1.6,whiteSpace:"pre-wrap",maxHeight:"50vh",overflowY:"auto"}}>
+            {modal.message}
+          </div>
+        )}
+        <div style={{padding:"12px 20px 18px",display:"flex",gap:10,justifyContent:"flex-end",borderTop:"1px solid var(--border)",background:"var(--bg2)"}}>
+          <button onClick={() => close(false)}
+            style={{padding:"9px 18px",borderRadius:9,border:"1px solid var(--border)",background:"var(--bg1)",color:"var(--text2)",cursor:"pointer",fontSize:13,fontWeight:600,fontFamily:"'DM Sans',sans-serif"}}>
+            {cancelLabel}
+          </button>
+          <button onClick={() => close(true)} autoFocus
+            style={{padding:"9px 20px",borderRadius:9,border:"none",background:danger?"#dc2626":"var(--ac)",color:"#fff",cursor:"pointer",fontSize:13,fontWeight:700,fontFamily:"'DM Sans',sans-serif"}}>
+            {confirmLabel}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 async function load(key, retries = 3) {
   for (let i = 0; i < retries; i++) {
     try {
@@ -1079,8 +1146,8 @@ function VersionHistoryModal({ title, versions, currentSnapshot, onRestore, onCl
                   <span title={new Date(v.ts).toLocaleString("pt-BR")}>🕐 {fmtRelTime(v.ts)}</span>
                 </div>
               </div>
-              <button onClick={()=>{
-                if (!window.confirm(`Restaurar esta versão?\n\n"${v.reason}" · ${fmtRelTime(v.ts)}\n\nA versão atual será salva como uma nova entrada no histórico — você pode desfazer depois.`)) return;
+              <button onClick={async ()=>{
+                if (!await appConfirm(`Restaurar esta versão?\n\n"${v.reason}" · ${fmtRelTime(v.ts)}\n\nA versão atual será salva como uma nova entrada no histórico — você pode desfazer depois.`)) return;
                 onRestore(v);
               }} style={{...S.btnSecondary,fontSize:12,padding:"8px 16px",color:"var(--ac-text)",borderColor:"var(--ac)44"}}>
                 ♻️ {restoreLabel}
@@ -1701,8 +1768,8 @@ function FaleDpTab({ empId, emp, restaurantId, dpMessages, onUpdate }) {
         <p style={{color:"var(--text3)",fontSize:11,margin:"0 0 12px",lineHeight:1.6}}>
           Pela Lei Geral de Proteção de Dados você pode solicitar acesso, correção ou exclusão dos seus dados pessoais a qualquer momento.
         </p>
-        <button onClick={()=>{
-          if(!window.confirm("Confirma a solicitação de exclusão dos seus dados? O gestor receberá sua solicitação.")) return;
+        <button onClick={async ()=>{
+          if(!await appConfirm("Confirma a solicitação de exclusão dos seus dados? O gestor receberá sua solicitação.")) return;
           const msg = {
             id: Date.now().toString(),
             restaurantId,
@@ -1770,14 +1837,14 @@ function ComunicadosManagerTab({ restaurantId, communications, commAcks, employe
     setTitle(""); setBody(""); setSelAreas([]); setSelEmps([]); setShowNew(false);
   }
 
-  function softDelete(id) {
-    if(!window.confirm("Mover este comunicado para a lixeira?")) return;
+  async function softDelete(id) {
+    if(!await appConfirm("Mover este comunicado para a lixeira?")) return;
     onUpdate("communications", communications.map(c => c.id === id ? { ...c, deleted: true, deletedAt: new Date().toISOString() } : c));
     onUpdate("_toast", "🗑️ Comunicado movido para a lixeira");
   }
 
-  function permanentDelete(id) {
-    if(!window.confirm("Apagar permanentemente este comunicado? Esta ação não pode ser desfeita.")) return;
+  async function permanentDelete(id) {
+    if(!await appConfirm("Apagar permanentemente este comunicado? Esta ação não pode ser desfeita.")) return;
     onUpdate("communications", communications.filter(c => c.id !== id));
     const newAcks = { ...commAcks };
     delete newAcks[id];
@@ -2258,8 +2325,8 @@ function NotificacoesTab({ restaurantId, dpMessages, notifications, onUpdate, is
     onUpdate("_toast", "📥 Restaurado para Entrada");
   }
 
-  function permDeleteItem(item) {
-    if (!window.confirm("Excluir definitivamente? Esta ação não pode ser desfeita.")) return;
+  async function permDeleteItem(item) {
+    if (!await appConfirm("Excluir definitivamente? Esta ação não pode ser desfeita.")) return;
     if (item._kind === "dp") onUpdate("dpMessages", (dpMessages??[]).filter(m=>m.id!==item.id));
     else if (item._kind === "inbox") onUpdate("inbox", (inbox??[]).filter(m=>m.id!==item.id));
     else onUpdate("notifications", (notifications??[]).filter(n=>n.id!==item.id));
@@ -2288,8 +2355,8 @@ function NotificacoesTab({ restaurantId, dpMessages, notifications, onUpdate, is
     onUpdate("_toast", "📁 Pasta salva");
   }
 
-  function deleteFolder(fid) {
-    if (!window.confirm("Excluir esta pasta? As mensagens serão movidas para Entrada.")) return;
+  async function deleteFolder(fid) {
+    if (!await appConfirm("Excluir esta pasta? As mensagens serão movidas para Entrada.")) return;
     onUpdate("inbox", (inbox ?? []).map(x => x.folder === fid ? {...x, folder: null} : x));
     const allF = { ...(inboxFolders ?? {}) };
     allF[managerId] = (allF[managerId] ?? []).filter(f => f.id !== fid);
@@ -3205,8 +3272,8 @@ function WorkScheduleManagerTab({ restaurantId, employees, roles, workSchedules,
           <div style={{color:"var(--text3)",fontSize:mobileOnly?10:11}}>{mobileOnly?`${activeDayCount} dias · ${folgaDayCount} folga(s)`:`Horario semanal · ${activeDayCount} dias · ${folgaDayCount} folga(s)`}</div>
         </div>
         {empSchedules.length > 0 && (
-          <button onClick={()=>{
-            if (!window.confirm(`Resetar o horário de ${selEmp?.name}?\n\nTodas as versões (${empSchedules.length}) serão apagadas permanentemente. O empregado ficará sem horário cadastrado.`)) return;
+          <button onClick={async ()=>{
+            if (!await appConfirm(`Resetar o horário de ${selEmp?.name}?\n\nTodas as versões (${empSchedules.length}) serão apagadas permanentemente. O empregado ficará sem horário cadastrado.`)) return;
             onUpdate("workSchedules", prev => {
               const w = { ...(prev ?? {}) };
               if (w[restaurantId]) {
@@ -3241,8 +3308,8 @@ function WorkScheduleManagerTab({ restaurantId, employees, roles, workSchedules,
               <div style={{padding:"6px 12px 10px",display:"flex",alignItems:"center",gap:10,flexWrap:"wrap"}}>
                 <span style={{color:"var(--text3)",fontSize:11}}>Selecione versoes para apagar:</span>
                 {selectedSchedIds.size > 0 && (
-                  <button onClick={()=>{
-                    if(!window.confirm(`Apagar ${selectedSchedIds.size} versao(oes)?`)) return;
+                  <button onClick={async ()=>{
+                    if(!await appConfirm(`Apagar ${selectedSchedIds.size} versao(oes)?`)) return;
                     onUpdate("workSchedules", prev => {
                       const remaining = (prev?.[restaurantId]?.[selEmpId] ?? []).filter(s => !selectedSchedIds.has(s.id));
                       return { ...prev, [restaurantId]: { ...(prev?.[restaurantId]??{}), [selEmpId]: remaining } };
@@ -3266,8 +3333,8 @@ function WorkScheduleManagerTab({ restaurantId, employees, roles, workSchedules,
                 <span style={{color:"var(--text2)",flex:1,minWidth:140}}>Vigente de {fmtDate(s.validFrom)}</span>
                 <span style={{color:"var(--text3)"}}>por {s.createdBy}</span>
                 <span style={{color:"var(--text3)"}}>{s.hoursComplete !== false ? `${fmtHHMM(s.totalContract)}/sem` : "dias apenas"}</span>
-                <button onClick={()=>{
-                  if(!window.confirm(`Reativar esta versão do horário?\n\nOs dias e horários dessa versão serão copiados como nova vigência (a mais recente fica preservada no histórico).`)) return;
+                <button onClick={async ()=>{
+                  if(!await appConfirm(`Reativar esta versão do horário?\n\nOs dias e horários dessa versão serão copiados como nova vigência (a mais recente fica preservada no histórico).`)) return;
                   // Cria uma nova entrada baseada nessa versão antiga, como a mais recente
                   const reactivated = {
                     ...s,
@@ -3741,14 +3808,14 @@ function DpManagerTab({ restaurantId, dpMessages, onUpdate, isOwner }) {
     setSelectedIds(next);
   }
 
-  function deleteSelected() {
+  async function deleteSelected() {
     if (isOwner) {
-      if(!window.confirm(`Apagar ${selectedIds.size} mensagem(ns) permanentemente? Esta ação não pode ser desfeita.`)) return;
+      if(!await appConfirm(`Apagar ${selectedIds.size} mensagem(ns) permanentemente? Esta ação não pode ser desfeita.`)) return;
       onUpdate("dpMessages", dpMessages.filter(m => !selectedIds.has(m.id)));
       setSelectedIds(new Set());
       onUpdate("_toast", `🗑️ ${selectedIds.size} mensagem(ns) apagada(s) permanentemente`);
     } else {
-      if(!window.confirm(`Mover ${selectedIds.size} mensagem(ns) para a lixeira?`)) return;
+      if(!await appConfirm(`Mover ${selectedIds.size} mensagem(ns) para a lixeira?`)) return;
       onUpdate("dpMessages", dpMessages.map(m => selectedIds.has(m.id) ? { ...m, deleted: true, deletedAt: new Date().toISOString(), read: true } : m));
       setSelectedIds(new Set());
       onUpdate("_toast", `🗑️ ${selectedIds.size} mensagem(ns) movida(s) para a lixeira`);
@@ -3760,8 +3827,8 @@ function DpManagerTab({ restaurantId, dpMessages, onUpdate, isOwner }) {
     onUpdate("_toast", "♻️ Mensagem restaurada");
   }
 
-  function permanentDeleteFromTrash(id) {
-    if(!window.confirm("Apagar permanentemente? Esta ação não pode ser desfeita.")) return;
+  async function permanentDeleteFromTrash(id) {
+    if(!await appConfirm("Apagar permanentemente? Esta ação não pode ser desfeita.")) return;
     onUpdate("dpMessages", dpMessages.filter(m => m.id !== id));
     onUpdate("_toast", "🗑️ Mensagem apagada permanentemente");
   }
@@ -4275,8 +4342,8 @@ function EmployeePortal({ employees, roles, tips, schedules, splits, restaurants
             onUpdate("inboxFolders", allF);
             setEFolderModal(null);
           }
-          function delFld(fid) {
-            if (!window.confirm("Excluir esta pasta?")) return;
+          async function delFld(fid) {
+            if (!await appConfirm("Excluir esta pasta?")) return;
             onUpdate("inbox", (inbox??[]).map(x => x.folder===fid?{...x,folder:null}:x));
             const allF = { ...(inboxFolders ?? {}) };
             allF[empId] = (allF[empId] ?? []).filter(f => f.id !== fid);
@@ -4547,14 +4614,14 @@ Inclua apenas as ações solicitadas. Arrays vazios se não houver ação daquel
   function inactivateRole(id) { onUpdate("roles", roles.map(x => x.id === id ? {...x, inactive: true} : x)); }
   function reactivateRole(id) { onUpdate("roles", roles.map(x => x.id === id ? {...x, inactive: false} : x)); }
 
-  function deleteRole(id) {
+  async function deleteRole(id) {
     const r = roles.find(x => x.id === id);
     const empCount = (employees ?? []).filter(e => e.roleId === id && e.restaurantId === rid).length;
     if (empCount > 0) {
       onUpdate("_toast", `⚠️ Não é possível apagar: ${empCount} empregado(s) vinculado(s) a este cargo`);
       return;
     }
-    if (!window.confirm(`Apagar permanentemente o cargo "${r?.name ?? ""}"?`)) return;
+    if (!await appConfirm(`Apagar permanentemente o cargo "${r?.name ?? ""}"?`)) return;
     onUpdate("roles", roles.filter(x => x.id !== id));
     onUpdate("_toast", "🗑️ Cargo apagado");
   }
@@ -4952,7 +5019,7 @@ Inclua apenas as ações solicitadas. Arrays vazios se não houver ação daquel
     onUpdate("employees", employees.map(x => x.id===emp.id ? {...emp, inactive:!emp.inactive, inactiveFrom:row.inactiveFrom||today()} : x));
   }
 
-  function dismissEmp(emp) {
+  async function dismissEmp(emp) {
     const dataStr = window.prompt(`Demitir "${emp.name}"?\n\nInforme a data da demissão (DD/MM/AAAA):`, new Date().toLocaleDateString("pt-BR"));
     if (!dataStr) return;
     const parts = dataStr.split("/");
@@ -4960,13 +5027,13 @@ Inclua apenas as ações solicitadas. Arrays vazios se não houver ação daquel
     const [dd,mm,yyyy] = parts;
     const demitidoEm = `${yyyy}-${mm.padStart(2,"0")}-${dd.padStart(2,"0")}`;
     if (isNaN(new Date(demitidoEm+"T12:00:00").getTime())) { window.alert("Data inválida."); return; }
-    if (!window.confirm(`Confirmar demissão de "${emp.name}" em ${dataStr}?\n\nA partir desta data:\n• Sai do cálculo de gorjeta\n• Consta como "DEM" na escala\n• No próximo mês será movido para inativo`)) return;
+    if (!await appConfirm(`Confirmar demissão de "${emp.name}" em ${dataStr}?\n\nA partir desta data:\n• Sai do cálculo de gorjeta\n• Consta como "DEM" na escala\n• No próximo mês será movido para inativo`)) return;
     onUpdate("employees", employees.map(x => x.id===emp.id ? {...x, demitidoEm, demitidoPor: isOwner ? "Gestor AppTip" : "Gestor Adm.", inactive: true, inactiveFrom: demitidoEm} : x));
     onUpdate("_toast", `📋 ${emp.name} demitido em ${dataStr}`);
   }
 
-  function undoDismiss(emp) {
-    if (!window.confirm(`Reverter demissão de "${emp.name}"?`)) return;
+  async function undoDismiss(emp) {
+    if (!await appConfirm(`Reverter demissão de "${emp.name}"?`)) return;
     onUpdate("employees", employees.map(x => {
       if (x.id !== emp.id) return x;
       const copy = {...x};
@@ -4977,7 +5044,7 @@ Inclua apenas as ações solicitadas. Arrays vazios se não houver ação daquel
     onUpdate("_toast", `↩️ Demissão de ${emp.name} revertida`);
   }
 
-  function promoteEmp(emp) {
+  async function promoteEmp(emp) {
     const available = restRoles.filter(r => !r.inactive && r.id !== emp.roleId);
     if (!available.length) { onUpdate("_toast", "Não há outros cargos ativos disponíveis."); return; }
     const options = available.map((r, i) => `${i+1}. ${r.name} (${r.area}, ${r.points}pt)`).join("\n");
@@ -5000,25 +5067,25 @@ Inclua apenas as ações solicitadas. Arrays vazios se não houver ação daquel
     if (effectiveDate <= today()) {
       const historyEntry = { fromRoleId: emp.roleId, toRoleId: newRole.id, date: effectiveDate, reason, changedBy };
       const history = [...(emp.roleHistory ?? []), historyEntry];
-      if (!window.confirm(`Confirmar mudança de cargo de "${emp.name}"?\n\n${oldRole?.name ?? "—"} → ${newRole.name}\nData: ${dataStr}\n${reason ? "Motivo: " + reason : ""}`)) return;
+      if (!await appConfirm(`Confirmar mudança de cargo de "${emp.name}"?\n\n${oldRole?.name ?? "—"} → ${newRole.name}\nData: ${dataStr}\n${reason ? "Motivo: " + reason : ""}`)) return;
       onUpdate("employees", employees.map(e => e.id === emp.id ? { ...e, roleId: newRole.id, roleHistory: history } : e));
       onUpdate("_toast", `⬆️ ${emp.name}: ${oldRole?.name ?? "—"} → ${newRole.name}`);
     } else {
-      if (!window.confirm(`Agendar mudança de cargo de "${emp.name}"?\n\n${oldRole?.name ?? "—"} → ${newRole.name}\nData efetiva: ${dataStr}\n${reason ? "Motivo: " + reason : ""}\n\nA troca será aplicada automaticamente na data.`)) return;
+      if (!await appConfirm(`Agendar mudança de cargo de "${emp.name}"?\n\n${oldRole?.name ?? "—"} → ${newRole.name}\nData efetiva: ${dataStr}\n${reason ? "Motivo: " + reason : ""}\n\nA troca será aplicada automaticamente na data.`)) return;
       const pending = { newRoleId: newRole.id, effectiveDate, reason, changedBy };
       onUpdate("employees", employees.map(e => e.id === emp.id ? { ...e, pendingRoleChange: pending } : e));
       onUpdate("_toast", `📅 Promoção de ${emp.name} agendada para ${dataStr}`);
     }
   }
 
-  function deleteEmp(emp) {
-    if (!window.confirm(`Excluir permanentemente "${emp.name}"? Esta ação não pode ser desfeita.`)) return;
+  async function deleteEmp(emp) {
+    if (!await appConfirm(`Excluir permanentemente "${emp.name}"? Esta ação não pode ser desfeita.`)) return;
     onUpdate("employees", employees.filter(x => x.id !== emp.id));
   }
 
-  function resetPin(emp) {
+  async function resetPin(emp) {
     const numericPin = (emp.empCode ?? "").replace(/\D/g, "").padStart(4, "0"); // sempre 4 dígitos ex: "0005"
-    if (!window.confirm(`Resetar PIN de "${emp.name}"?\n\nO PIN voltará para ${numericPin} e ele será obrigado a trocar no próximo acesso.`)) return;
+    if (!await appConfirm(`Resetar PIN de "${emp.name}"?\n\nO PIN voltará para ${numericPin} e ele será obrigado a trocar no próximo acesso.`)) return;
     onUpdate("employees", employees.map(x => x.id===emp.id ? {...x, pin: numericPin, mustChangePin: true} : x));
     onUpdate("_toast", `🔐 PIN de ${emp.name} resetado para ${numericPin}`);
   }
@@ -5770,10 +5837,10 @@ Inclua apenas as ações solicitadas. Arrays vazios se não houver ação daquel
                                 {ev.fb.improvements && <div style={{fontSize:12,color:"var(--text2)",marginBottom:4}}><strong style={{color:"#f59e0b"}}>Melhorias:</strong> {ev.fb.improvements}</div>}
                                 {ev.fb.internalNotes && <div style={{fontSize:11,color:"var(--text3)",fontStyle:"italic",marginBottom:4}}>📝 {ev.fb.internalNotes}</div>}
                                 {!ev.fb.notes && !ev.fb.strengths && !ev.fb.improvements && !ev.fb.internalNotes && !ev.fb.rating && <div style={{fontSize:11,color:"var(--text3)"}}>Sem anotações registradas</div>}
-                                {canDeleteFb && <div style={{marginTop:6,display:"flex",justifyContent:"flex-end"}}><button onClick={(e)=>{
+                                {canDeleteFb && <div style={{marginTop:6,display:"flex",justifyContent:"flex-end"}}><button onClick={async (e)=>{
                                   e.stopPropagation();
                                   const dateStr = ev.fb.meetingDate ? new Date(ev.fb.meetingDate+"T12:00:00").toLocaleDateString("pt-BR") : "";
-                                  if (!window.confirm(`Excluir reunião de ${dateStr}?\n\nO registro ficará na lixeira por 90 dias.`)) return;
+                                  if (!await appConfirm(`Excluir reunião de ${dateStr}?\n\nO registro ficará na lixeira por 90 dias.`)) return;
                                   const updated = (feedbacks??[]).map(f => f.id === ev.fb.id ? {...f, deletedAt: new Date().toISOString(), deletedBy: currentUser?.name || (isOwner ? "Gestor AppTip" : "Gestor Adm.")} : f);
                                   onUpdate("feedbacks", updated);
                                   setExpandedJornada(null);
@@ -5790,9 +5857,9 @@ Inclua apenas as ações solicitadas. Arrays vazios se não houver ação daquel
                                 {ev.inc.description && <div style={{fontSize:12,color:"var(--text2)",marginBottom:4}}>{ev.inc.description}</div>}
                                 {ev.inc.action && <div style={{fontSize:12,color:"var(--text2)",marginBottom:4}}><strong style={{color:"var(--ac)"}}>Ação:</strong> {ev.inc.action}</div>}
                                 <div style={{fontSize:10,color:"var(--text3)"}}>{ev.inc.createdBy ?? ""}</div>
-                                {canDeleteInc && <div style={{marginTop:6,display:"flex",justifyContent:"flex-end"}}><button onClick={(e)=>{
+                                {canDeleteInc && <div style={{marginTop:6,display:"flex",justifyContent:"flex-end"}}><button onClick={async (e)=>{
                                   e.stopPropagation();
-                                  if (!window.confirm(`Excluir ocorrência?\n\nO registro ficará na lixeira por 90 dias.`)) return;
+                                  if (!await appConfirm(`Excluir ocorrência?\n\nO registro ficará na lixeira por 90 dias.`)) return;
                                   const updated = (incidents??[]).map(inc => inc.id === ev.inc.id ? {...inc, deletedAt: new Date().toISOString(), deletedBy: currentUser?.name || (isOwner ? "Gestor AppTip" : "Gestor Adm.")} : inc);
                                   onUpdate("incidents", updated);
                                   setExpandedJornada(null);
@@ -5856,8 +5923,8 @@ Inclua apenas as ações solicitadas. Arrays vazios se não houver ação daquel
                                     const updated = (feedbacks??[]).map(f => f.id === fb.id ? (()=>{ const {deletedAt, deletedBy, ...rest} = f; return rest; })() : f);
                                     onUpdate("feedbacks", updated);
                                   }} style={{padding:"2px 8px",borderRadius:6,border:"1px solid var(--ac)44",background:"transparent",color:"var(--ac-text)",cursor:"pointer",fontSize:10,fontFamily:"'DM Mono',monospace"}}>Restaurar</button>
-                                  {isOwner && <button onClick={()=>{
-                                    if(!window.confirm("Excluir definitivamente esta reunião? Esta ação não pode ser desfeita.")) return;
+                                  {isOwner && <button onClick={async ()=>{
+                                    if(!await appConfirm("Excluir definitivamente esta reunião? Esta ação não pode ser desfeita.")) return;
                                     onUpdate("feedbacks", (feedbacks??[]).filter(f => f.id !== fb.id));
                                   }} style={{padding:"2px 8px",borderRadius:6,border:"1px solid var(--red)44",background:"transparent",color:"var(--red)",cursor:"pointer",fontSize:10,fontFamily:"'DM Mono',monospace"}}>Excluir</button>}
                                 </div>
@@ -5875,8 +5942,8 @@ Inclua apenas as ações solicitadas. Arrays vazios se não houver ação daquel
                                     const updated = (incidents??[]).map(i => i.id === inc.id ? (()=>{ const {deletedAt, deletedBy, ...rest} = i; return rest; })() : i);
                                     onUpdate("incidents", updated);
                                   }} style={{padding:"2px 8px",borderRadius:6,border:"1px solid var(--ac)44",background:"transparent",color:"var(--ac-text)",cursor:"pointer",fontSize:10,fontFamily:"'DM Mono',monospace"}}>Restaurar</button>
-                                  {isOwner && <button onClick={()=>{
-                                    if(!window.confirm("Excluir definitivamente esta ocorrência? Esta ação não pode ser desfeita.")) return;
+                                  {isOwner && <button onClick={async ()=>{
+                                    if(!await appConfirm("Excluir definitivamente esta ocorrência? Esta ação não pode ser desfeita.")) return;
                                     onUpdate("incidents", (incidents??[]).filter(i => i.id !== inc.id));
                                   }} style={{padding:"2px 8px",borderRadius:6,border:"1px solid var(--red)44",background:"transparent",color:"var(--red)",cursor:"pointer",fontSize:10,fontFamily:"'DM Mono',monospace"}}>Excluir</button>}
                                 </div>
@@ -6817,8 +6884,8 @@ function GoalsManager({ empId, employeeGoals, roles, restaurantId, onUpdate, cur
     saveGoals(all);
   }
 
-  function removeGoal(goalId) {
-    if (!window.confirm("Remover este objetivo?")) return;
+  async function removeGoal(goalId) {
+    if (!await appConfirm("Remover este objetivo?")) return;
     const all = [...(employeeGoals?.[empId] ?? [])];
     const idx = all.findIndex(g => g.id === goalId);
     if (idx < 0) return;
@@ -7243,8 +7310,8 @@ function MeetingPlannerSection({ restaurantId, employees, roles, areas, meetingP
     setAlinhTopics([]); setAlinhNewTopic("");
   }
 
-  function handleDeletePlan(planId) {
-    if (!window.confirm("Excluir esta reunião? Ficará na lixeira por 30 dias.")) return;
+  async function handleDeletePlan(planId) {
+    if (!await appConfirm("Excluir esta reunião? Ficará na lixeira por 30 dias.")) return;
     const all = [...(allMeetingPlans ?? [])];
     const idx = all.findIndex(p => p.id === planId);
     if (idx >= 0) { all[idx] = { ...all[idx], deletedAt: new Date().toISOString(), deletedBy: currentUser?.name ?? "Gestor" }; onUpdate("meetingPlans", all); }
@@ -7301,8 +7368,8 @@ function MeetingPlannerSection({ restaurantId, employees, roles, areas, meetingP
     if (idx >= 0) { all[idx] = { ...all[idx], status }; onUpdate("meetingIdeas", all); }
   }
 
-  function deleteIdea(ideaId) {
-    if (!window.confirm("Excluir esta ideia?")) return;
+  async function deleteIdea(ideaId) {
+    if (!await appConfirm("Excluir esta ideia?")) return;
     onUpdate("meetingIdeas", getData("meetingIdeas").filter(i => i.id !== ideaId));
   }
 
@@ -7421,8 +7488,8 @@ function MeetingPlannerSection({ restaurantId, employees, roles, areas, meetingP
     if (idx >= 0) { all[idx] = { ...all[idx], done: !all[idx].done }; onUpdate("meetingActions", all); }
   }
 
-  function handleDeletePauta(pautaId) {
-    if (!window.confirm("Excluir esta pauta? Ficará na lixeira por 30 dias.")) return;
+  async function handleDeletePauta(pautaId) {
+    if (!await appConfirm("Excluir esta pauta? Ficará na lixeira por 30 dias.")) return;
     const all = [...getData("meetingAgendas")];
     const idx = all.findIndex(p => p.id === pautaId);
     if (idx >= 0) { all[idx] = { ...all[idx], deletedAt: new Date().toISOString(), deletedBy: currentUser?.name ?? "Gestor" }; onUpdate("meetingAgendas", all); }
@@ -7476,8 +7543,8 @@ function MeetingPlannerSection({ restaurantId, employees, roles, areas, meetingP
     if (idx >= 0) { all[idx] = { ...all[idx], priority: !all[idx].priority }; onUpdate("meetingOccurrences", all); }
   }
 
-  function handleDeleteOccurrence(occId) {
-    if (!window.confirm("Excluir esta ocorrência?")) return;
+  async function handleDeleteOccurrence(occId) {
+    if (!await appConfirm("Excluir esta ocorrência?")) return;
     onUpdate("meetingOccurrences", getData("meetingOccurrences").filter(o => o.id !== occId));
   }
 
@@ -8379,8 +8446,8 @@ function MeetingPlannerSection({ restaurantId, employees, roles, areas, meetingP
                     <span style={{flex:1,fontSize:11,color:"var(--text3)",textDecoration:"line-through"}}>{p.title}</span>
                     <span style={{fontSize:9,color:"var(--text3)"}}>{daysLeft}d</span>
                     <button onClick={()=>handleRestorePauta(p.id)} style={{padding:"2px 8px",borderRadius:4,border:"1px solid #3b82f633",background:"transparent",color:"#3b82f6",cursor:"pointer",fontSize:10}}>↩ Restaurar</button>
-                    {isOwner && <button onClick={()=>{
-                      if(!window.confirm("Excluir definitivamente esta pauta? Esta ação não pode ser desfeita.")) return;
+                    {isOwner && <button onClick={async ()=>{
+                      if(!await appConfirm("Excluir definitivamente esta pauta? Esta ação não pode ser desfeita.")) return;
                       onUpdate("meetingAgendas", (data?.meetingAgendas??[]).filter(x => x.id !== p.id));
                     }} style={{padding:"2px 8px",borderRadius:4,border:"1px solid #ef444433",background:"transparent",color:"#ef4444",cursor:"pointer",fontSize:10}}>✕ Excluir</button>}
                   </div>
@@ -8395,8 +8462,8 @@ function MeetingPlannerSection({ restaurantId, employees, roles, areas, meetingP
                     <span style={{flex:1,fontSize:11,color:"var(--text3)",textDecoration:"line-through"}}>{p.type} {emp0?`— ${emp0.name?.split(" ")[0]}`:""} {p.plannedDate?new Date(p.plannedDate+"T12:00:00").toLocaleDateString("pt-BR"):""}</span>
                     <span style={{fontSize:9,color:"var(--text3)"}}>{daysLeft}d</span>
                     <button onClick={()=>handleRestorePlan(p.id)} style={{padding:"2px 8px",borderRadius:4,border:"1px solid #3b82f633",background:"transparent",color:"#3b82f6",cursor:"pointer",fontSize:10}}>↩ Restaurar</button>
-                    {isOwner && <button onClick={()=>{
-                      if(!window.confirm("Excluir definitivamente esta reunião planejada? Esta ação não pode ser desfeita.")) return;
+                    {isOwner && <button onClick={async ()=>{
+                      if(!await appConfirm("Excluir definitivamente esta reunião planejada? Esta ação não pode ser desfeita.")) return;
                       onUpdate("meetingPlans", (data?.meetingPlans??[]).filter(x => x.id !== p.id));
                     }} style={{padding:"2px 8px",borderRadius:4,border:"1px solid #ef444433",background:"transparent",color:"#ef4444",cursor:"pointer",fontSize:10}}>✕ Excluir</button>}
                   </div>
@@ -9753,14 +9820,14 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
     return { count: newTips.length, updatedTips };
   }
 
-  function saveSplit() {
+  async function saveSplit() {
     const total = AREAS.reduce((a, k) => a + parseFloat(splitForm[k] || 0), 0);
     if (Math.abs(total - 100) > 0.01) { alert("Os percentuais devem somar 100%."); return; }
     const newSplit = Object.fromEntries(AREAS.map(a => [a, parseFloat(splitForm[a])]));
     const updatedRestSplits = { ...(splits?.[rid] ?? {}), [mk]: newSplit };
 
     // Ask if they want to apply to future months too
-    const applyFuture = window.confirm("Deseja aplicar esses percentuais também para os próximos meses?");
+    const applyFuture = await appConfirm("Deseja aplicar esses percentuais também para os próximos meses?");
     if (applyFuture) {
       // Apply to 12 future months from current
       const [cy, cm] = mk.split("-").map(Number);
@@ -9943,9 +10010,9 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
   }
 
   // Reset de aba — só Admin AppTip (isOwner)
-  function resetTab(tabKey, tabLabel, getSnapshot) {
+  async function resetTab(tabKey, tabLabel, getSnapshot) {
     if (!isOwner) return;
-    if (!window.confirm(`Resetar "${tabLabel}"?\n\nOs dados ficam na lixeira por 90 dias e podem ser restaurados.`)) return;
+    if (!await appConfirm(`Resetar "${tabLabel}"?\n\nOs dados ficam na lixeira por 90 dias e podem ser restaurados.`)) return;
     const snapshot = getSnapshot();
     const entry = {
       id: Date.now().toString(),
@@ -10035,19 +10102,19 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
       {/* Tab groups — row 2: sub-tab pills */}
       <div style={{ display:"flex", borderBottom:"1px solid var(--border)", background:"var(--header-bg)", overflowX:"auto", scrollbarWidth:"none", WebkitOverflowScrolling:"touch" }}>
         {(activeGroup?.tabs??[]).map(([id, lbl]) => (
-          <button key={id} onClick={() => {
+          <button key={id} onClick={async () => {
             if (tab === "config" && id !== "config" && configDirty) {
-              const action = window.confirm("Você tem alterações não salvas nas configurações.\n\nDeseja salvar antes de sair?");
+              const action = await appConfirm("Você tem alterações não salvas nas configurações.\n\nDeseja salvar antes de sair?");
               if (action) { saveConfig(); }
               else { discardConfig(); }
             }
             if (tab === "tips" && id !== "tips" && tipsDirty) {
-              const action = window.confirm("Você tem gorjetas não salvas.\n\nDeseja salvar antes de sair?");
+              const action = await appConfirm("Você tem gorjetas não salvas.\n\nDeseja salvar antes de sair?");
               if (action) { saveTipRows(); }
               else { discardTipRows(); }
             }
             if (tab === "schedule" && id !== "schedule" && schedDirty) {
-              const action = window.confirm("Você tem edições na escala não salvas.\n\nDeseja salvar como nova versão antes de sair?");
+              const action = await appConfirm("Você tem edições na escala não salvas.\n\nDeseja salvar como nova versão antes de sair?");
               if (action) commitPendingScheduleEdits();
               else setSchedLocalEdits(null);
             }
@@ -10063,9 +10130,9 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
 
       {/* Botão voltar ao Dashboard no mobile */}
       {mobileOnly && !hideTabNav && tab !== "dashboard" && (
-        <button onClick={()=>{
+        <button onClick={async ()=>{
           if (tab === "schedule" && schedDirty) {
-            const action = window.confirm("Você tem edições na escala não salvas.\n\nDeseja salvar como nova versão antes de sair?");
+            const action = await appConfirm("Você tem edições na escala não salvas.\n\nDeseja salvar como nova versão antes de sair?");
             if (action) commitPendingScheduleEdits();
             else setSchedLocalEdits(null);
           }
@@ -10077,9 +10144,9 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
 
       <div style={{ padding:mobileOnly?"12px 10px":"20px 24px", maxWidth:1100, margin:"0 auto" }}>
         {["dashboard","tips","schedule"].includes(tab) && (
-          <div style={{ marginBottom: 20 }}><MonthNav year={year} month={month} onChange={(y,m)=>{
+          <div style={{ marginBottom: 20 }}><MonthNav year={year} month={month} onChange={async (y,m)=>{
             if (tab === "schedule" && schedDirty) {
-              const action = window.confirm("Você tem edições na escala não salvas.\n\nDeseja salvar como nova versão antes de mudar de mês?");
+              const action = await appConfirm("Você tem edições na escala não salvas.\n\nDeseja salvar como nova versão antes de mudar de mês?");
               if (action) commitPendingScheduleEdits();
               else setSchedLocalEdits(null);
             }
@@ -10459,10 +10526,10 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                     </button>
                   );
                 })()}
-                {(isOwner || isDP) && <button onClick={()=>{
+                {(isOwner || isDP) && <button onClick={async ()=>{
                   const monthDates = [...new Set(monthTips.map(t => t.date))].sort();
                   if (monthDates.length === 0) { onUpdate("_toast","Nada para recalcular neste mês."); return; }
-                  if (!window.confirm(`Recalcular ${monthDates.length} dia(s) com gorjeta lançada de ${monthLabel(year, month)}?\n\nUm backup será salvo no Histórico — você pode restaurar se algo sair errado.`)) return;
+                  if (!await appConfirm(`Recalcular ${monthDates.length} dia(s) com gorjeta lançada de ${monthLabel(year, month)}?\n\nUm backup será salvo no Histórico — você pode restaurar se algo sair errado.`)) return;
                   const preSnap = snapshotTipsMonth(tips, rid, mk);
                   let cur = tips;
                   let totalChanged = 0;
@@ -10645,9 +10712,9 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                         onUpdate("tips", updatedTips);
                         onUpdate("_toast", `📢 ${fmtDate(date)} publicado para empregados`);
                       };
-                      const unpublishDay = () => {
+                      const unpublishDay = async () => {
                         if (!isLaunched) return;
-                        if (!window.confirm(`Despublicar ${fmtDate(date)}?\n\nOs valores deste dia serão ocultados do extrato do empregado.`)) return;
+                        if (!await appConfirm(`Despublicar ${fmtDate(date)}?\n\nOs valores deste dia serão ocultados do extrato do empregado.`)) return;
                         const updatedTips = tips.map(t => {
                           if (t.restaurantId === rid && t.date === date) {
                             return { ...t, publishedAt: null, unpublishedAt: new Date().toISOString() };
@@ -10657,8 +10724,8 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                         onUpdate("tips", updatedTips);
                         onUpdate("_toast", `🔒 ${fmtDate(date)} despublicado`);
                       };
-                      const removeDay = () => {
-                        if(!window.confirm(`Zerar gorjeta de ${fmtDate(date)}?\n\n⚠️ Um backup será salvo no Histórico — você pode restaurar depois.`)) return;
+                      const removeDay = async () => {
+                        if(!await appConfirm(`Zerar gorjeta de ${fmtDate(date)}?\n\n⚠️ Um backup será salvo no Histórico — você pode restaurar depois.`)) return;
                         const preSnap = snapshotTipsMonth(tips, rid, mk);
                         saveTipsSnapshot(`Remover gorjeta de ${fmtDate(date)}`, preSnap);
                         onUpdate("tips",tips.filter(t=>!(t.restaurantId===rid&&t.date===date)));
@@ -11431,8 +11498,8 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                   ))}
                 </div>
               </div>
-              {isOwner && !mobileOnly && <button onClick={()=>{
-                if (schedDirty && !window.confirm("Você tem edições não salvas. Deseja descartar e resetar?")) return;
+              {isOwner && !mobileOnly && <button onClick={async ()=>{
+                if (schedDirty && !await appConfirm("Você tem edições não salvas. Deseja descartar e resetar?")) return;
                 const ok = resetTab("schedule","Escala",()=>({schedules:schedules?.[rid]}));
                 if(ok){ const s={...schedules}; delete s[rid]; onUpdate("schedules",s); setSchedLocalEdits(null); onUpdate("_toast","🗑️ Escala enviada para a lixeira"); }
               }} style={{...S.btnSecondary,fontSize:12,color:"var(--red)",borderColor:"var(--red)44"}}>🗑️ Reset</button>}
@@ -11492,8 +11559,8 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                   }} style={{...S.btnPrimary,fontSize:mobileOnly?11:12,padding:mobileOnly?"8px 14px":"8px 18px",fontWeight:700}}>
                     💾 {mobileOnly?"Salvar":"Salvar nova versão"}
                   </button>
-                  <button onClick={()=>{
-                    if (window.confirm("Descartar todas as edições pendentes?")) setSchedLocalEdits(null);
+                  <button onClick={async ()=>{
+                    if (await appConfirm("Descartar todas as edições pendentes?")) setSchedLocalEdits(null);
                   }} style={{...S.btnSecondary,fontSize:mobileOnly?11:12,padding:mobileOnly?"8px 10px":"8px 14px"}}>
                     Descartar
                   </button>
@@ -11520,11 +11587,11 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                 <div style={{display:"flex",gap:mobileOnly?4:8,flexWrap:"wrap"}}>
 
                 {/* Pre-fill contract days off */}
-                <button onClick={()=>{
+                <button onClick={async ()=>{
                   const emps = areaEmps;
                   if (!emps.length) return;
                   const mesNome = monthLabel(year, month);
-                  if (!window.confirm(`Aplicar folgas do contrato em ${mesNome}?\n\nIsso vai:\n• Marcar como Folga todos os dias do contrato\n• Remover folgas marcadas em dias que NÃO são de folga no contrato\n\nOutros status (férias, faltas, compensações) não serão alterados.`)) return;
+                  if (!await appConfirm(`Aplicar folgas do contrato em ${mesNome}?\n\nIsso vai:\n• Marcar como Folga todos os dias do contrato\n• Remover folgas marcadas em dias que NÃO são de folga no contrato\n\nOutros status (férias, faltas, compensações) não serão alterados.`)) return;
                   const daysInMonth = new Date(year, month+1, 0).getDate();
                   let added = 0, removed = 0;
                   const bulkEdits = {};
@@ -11564,11 +11631,11 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                   {mobileOnly?"📅 Folgas":"📅 Folgas do contrato"}
                 </button>
                 {/* Reiniciar escala */}
-                <button onClick={()=>{
+                <button onClick={async ()=>{
                   const mesNome = monthLabel(year, month);
                   const n = areaEmps.length;
                   if (!n) return;
-                  if (!window.confirm(`Reiniciar escala de ${mesNome}?\n\nTodos os ${n} empregado(s) ${schedArea==="Todos"?"":"da área "+schedArea+" "}voltarão ao status "Trabalho" em todos os dias.\n\nIsso remove folgas, freelas, férias, faltas e compensações do mês.\n\nSalve a escala para confirmar a alteração.`)) return;
+                  if (!await appConfirm(`Reiniciar escala de ${mesNome}?\n\nTodos os ${n} empregado(s) ${schedArea==="Todos"?"":"da área "+schedArea+" "}voltarão ao status "Trabalho" em todos os dias.\n\nIsso remove folgas, freelas, férias, faltas e compensações do mês.\n\nSalve a escala para confirmar a alteração.`)) return;
                   // Accumulate reset as local edits — null each existing day status
                   const resetEdits = {};
                   areaEmps.forEach(emp => {
@@ -11624,9 +11691,9 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
 
                 {/* Fechar / Reabrir mês */}
                 {(isOwner || isDP) && !monthClosed && (
-                  <button onClick={()=>{
+                  <button onClick={async ()=>{
                     const hasPonto = !!(data?.scheduleStatus?.[rid]?.[mk]?.lastPontoImport);
-                    if (!hasPonto && !window.confirm("Nenhum ponto importado para este mes. Deseja fechar mesmo assim?")) return;
+                    if (!hasPonto && !await appConfirm("Nenhum ponto importado para este mes. Deseja fechar mesmo assim?")) return;
                     // Phase 4: compute delta and show confirm modal
                     const curSched = effectiveMonth;
                     const prevSched = schedules?.[rid]?.[mk] ?? {};
@@ -13130,11 +13197,11 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                     </div>
                     {mine && (
                       <div style={{display:"flex",gap:6,flexShrink:0,flexWrap:"wrap"}}>
-                        <button onClick={()=>{
+                        <button onClick={async ()=>{
                           const cpfDigits = (m.cpf??"").replace(/\D/g,"");
                           if (cpfDigits.length < 4) { onUpdate("_toast","⚠️ CPF inválido — não foi possível gerar PIN automático"); return; }
                           const newPin = cpfDigits.slice(0,4);
-                          if(!window.confirm(`Resetar PIN de "${m.name}"?\n\nO PIN voltará para ${newPin} (4 primeiros dígitos do CPF) e ele será obrigado a trocar no próximo acesso.`)) return;
+                          if(!await appConfirm(`Resetar PIN de "${m.name}"?\n\nO PIN voltará para ${newPin} (4 primeiros dígitos do CPF) e ele será obrigado a trocar no próximo acesso.`)) return;
                           onUpdate("managers", managers.map(x=>x.id===m.id?{...x,pin:newPin,mustChangePin:true}:x));
                           onUpdate("_toast",`🔐 PIN de ${m.name} resetado para ${newPin}`);
                         }} title="Resetar PIN para os 4 primeiros dígitos do CPF" style={{...S.btnSecondary,fontSize:11,padding:"5px 10px"}}>🔐 Resetar PIN</button>
@@ -13143,9 +13210,9 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                           setDpMgrForm({name:m.name,cpf:m.cpf??"",pin:m.pin??"",restaurantIds:m.restaurantIds??[],perms:m.perms??{tips:true,schedule:true},isDP:m.isDP??false,profile:m.profile??"custom",areas:m.areas??[],masterRestaurantIds:m.masterRestaurantIds??[]});
                           setDpMgrModal(true);
                         }} style={{...S.btnSecondary,fontSize:11,padding:"5px 12px"}}>Editar</button>
-                        <button onClick={()=>{
+                        <button onClick={async ()=>{
                           if (isLastMaster) { onUpdate("_toast","⚠️ Este é o último Master do restaurante. Nomeie outro Master antes de excluir."); return; }
-                          if(!window.confirm(`Excluir gestor "${m.name}"?`)) return;
+                          if(!await appConfirm(`Excluir gestor "${m.name}"?`)) return;
                           onUpdate("managers",managers.filter(x=>x.id!==m.id));
                           onUpdate("_toast",`🗑️ ${m.name} excluído`);
                         }} style={{...S.btnSecondary,fontSize:11,padding:"5px 10px",color:isLastMaster?"var(--text3)":"var(--red)",borderColor:isLastMaster?"var(--border)":"var(--red)44"}}>✕</button>
@@ -13558,9 +13625,9 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
               <div style={{...S.card,marginBottom:20,border:"1px solid var(--red)33",background:"#fef2f2"}}>
                 <p style={{color:"var(--red)",fontSize:14,fontWeight:700,margin:"0 0 4px"}}>⚠️ Zona de Perigo</p>
                 <p style={{color:"var(--text3)",fontSize:12,marginBottom:14}}>Mover este restaurante para a lixeira. Você poderá restaurá-lo posteriormente pela aba Lixeira.</p>
-                <button onClick={()=>{
-                  if(!window.confirm(`Tem certeza que deseja mover "${restaurant.name}" para a lixeira?\n\nTodos os dados do restaurante serão preservados na lixeira.`)) return;
-                  if(window.confirm(`Deseja exportar um backup de "${restaurant.name}" antes de excluir?`)) {
+                <button onClick={async ()=>{
+                  if(!await appConfirm(`Tem certeza que deseja mover "${restaurant.name}" para a lixeira?\n\nTodos os dados do restaurante serão preservados na lixeira.`)) return;
+                  if(await appConfirm(`Deseja exportar um backup de "${restaurant.name}" antes de excluir?`)) {
                     const restEmps = employees.filter(e=>e.restaurantId===restaurant.id);
                     const restRoles = roles.filter(ro=>ro.restaurantId===restaurant.id);
                     const restTips = tips.filter(t=>t.restaurantId===restaurant.id);
@@ -13915,8 +13982,8 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme, 
     }
     onUpdate("_toast", `✅ ${item.name} restaurado!`);
   }
-  function hardDelete(type, item) {
-    if (!window.confirm(`Excluir permanentemente "${item.name}"? Esta ação não pode ser desfeita.`)) return;
+  async function hardDelete(type, item) {
+    if (!await appConfirm(`Excluir permanentemente "${item.name}"? Esta ação não pode ser desfeita.`)) return;
     const newTrash = { ...trash, [type]: (trash[type]??[]).filter(x=>x.id!==item.id) };
     onUpdate("trash", newTrash);
     onUpdate("_toast", `🗑️ ${item.name} excluído permanentemente.`);
@@ -14019,22 +14086,22 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme, 
                       )}
                     </div>
                     <div style={{display:"flex",gap:8,flexShrink:0,flexWrap:"nowrap"}}>
-                      <button onClick={()=>{
+                      <button onClick={async ()=>{
                         const cpfDigits = (m.cpf??"").replace(/\D/g,"");
                         if (cpfDigits.length < 4) { onUpdate("_toast","⚠️ CPF inválido — não foi possível gerar PIN automático"); return; }
                         const newPin = cpfDigits.slice(0,4);
-                        if(!window.confirm(`Resetar PIN de "${m.name}"?\n\nO PIN voltará para ${newPin} (4 primeiros dígitos do CPF) e ele será obrigado a trocar no próximo acesso.`)) return;
+                        if(!await appConfirm(`Resetar PIN de "${m.name}"?\n\nO PIN voltará para ${newPin} (4 primeiros dígitos do CPF) e ele será obrigado a trocar no próximo acesso.`)) return;
                         onUpdate("managers", managers.map(x=>x.id===m.id?{...x,pin:newPin,mustChangePin:true}:x));
                         onUpdate("_toast", `🔐 PIN de ${m.name} resetado para ${newPin}`);
                       }} title="Resetar PIN para os 4 primeiros dígitos do CPF" style={{...S.btnSecondary,fontSize:isMobile?11:12,flex:isMobile?1:undefined,textAlign:"center",padding:isMobile?"6px 8px":undefined}}>{isMobile?"🔐 PIN":"🔐 Resetar PIN"}</button>
                       <button onClick={()=>{setEditMgrId(m.id);setMgrForm({name:m.name,cpf:m.cpf??"",pin:m.pin??"",restaurantIds:m.restaurantIds??[],perms:m.perms??{tips:true,schedule:true},isDP:m.isDP??false,profile:m.profile??"custom",areas:m.areas??[],masterRestaurantIds:m.masterRestaurantIds??[]});setShowMgrModal(true);}} style={{...S.btnSecondary,fontSize:isMobile?11:12,flex:isMobile?1:undefined,textAlign:"center",padding:isMobile?"6px 8px":undefined}}>Editar</button>
-                      <button onClick={()=>{
+                      <button onClick={async ()=>{
                         // Proteger último master do restaurante
                         if ((m.masterRestaurantIds??[]).includes(selRestaurant)) {
                           const mastersHere = managers.filter(x => x.profile === "dp" && (x.masterRestaurantIds??[]).includes(selRestaurant) && x.id !== m.id);
                           if (mastersHere.length === 0) { onUpdate("_toast","⚠️ Este é o último Master do restaurante. Nomeie outro Master antes de remover."); return; }
                         }
-                        if(!window.confirm(`Remover ${m.name} deste restaurante?`)) return;
+                        if(!await appConfirm(`Remover ${m.name} deste restaurante?`)) return;
                         const newIds = (m.restaurantIds??[]).filter(rid=>rid!==selRestaurant);
                         if(newIds.length === 0) {
                           softDelete("managers", m);
@@ -14230,8 +14297,8 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme, 
                       }} style={{padding:"8px 16px",borderRadius:8,border:"1px solid #f59e0b44",background:"#fffbeb",color:"#92400e",cursor:"pointer",fontFamily:"'DM Sans',sans-serif",fontSize:13,fontWeight:600}}>
                         ⏰ Estender trial
                       </button>
-                      <button onClick={()=>{
-                        if(!window.confirm("Suspender o período de teste e bloquear o acesso?")) return;
+                      <button onClick={async ()=>{
+                        if(!await appConfirm("Suspender o período de teste e bloquear o acesso?")) return;
                         saveFin({ trialFim: addDays(hoje, -1), status:"inadimplente" });
                         onUpdate("_toast","🔴 Trial suspenso. Acesso bloqueado.");
                       }} style={{padding:"8px 16px",borderRadius:8,border:"1px solid var(--red)33",background:"transparent",color:"var(--red)",cursor:"pointer",fontFamily:"'DM Sans',sans-serif",fontSize:13,fontWeight:600}}>
@@ -14239,7 +14306,7 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme, 
                       </button>
                     </>}
 
-                    {!inadimplente && cicloIni && <button onClick={()=>{if(!window.confirm("Marcar como inadimplente e bloquear acesso?"))return; saveFin({status:"inadimplente"});}} style={{padding:"8px 16px",borderRadius:8,border:"1px solid var(--red)33",background:"transparent",color:"var(--red)",cursor:"pointer",fontFamily:"'DM Sans',sans-serif",fontSize:13,fontWeight:600}}>🔴 Inadimplente</button>}
+                    {!inadimplente && cicloIni && <button onClick={async ()=>{if(!await appConfirm("Marcar como inadimplente e bloquear acesso?"))return; saveFin({status:"inadimplente"});}} style={{padding:"8px 16px",borderRadius:8,border:"1px solid var(--red)33",background:"transparent",color:"var(--red)",cursor:"pointer",fontFamily:"'DM Sans',sans-serif",fontSize:13,fontWeight:600}}>🔴 Inadimplente</button>}
 
                     {/* Trial vencido — bloquear ou reativar */}
                     {!inadimplente && trialVencido && <>
@@ -14491,11 +14558,11 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme, 
                           <div style={{display:"flex",gap:6,flexShrink:0}}>
                             {c.status==="aguardando_confirmacao" && <>
                               <button onClick={()=>confirmar(c)} style={{padding:"7px 14px",borderRadius:8,border:"1px solid var(--green)44",background:"var(--green-bg)",color:"var(--green)",cursor:"pointer",fontFamily:"'DM Sans',sans-serif",fontSize:13,fontWeight:700}}>✅ Confirmar</button>
-                              <button onClick={()=>{if(!window.confirm("Negar e marcar inadimplente?"))return;saveFin({cobrancas:(fin.cobrancas??[]).map(x=>x.id===c.id?{...x,status:"pendente",clienteConfirmou:false}:x),status:"inadimplente"});onUpdate("_toast","🔴 Inadimplente.");}} style={{padding:"7px 10px",borderRadius:8,border:"1px solid var(--red)33",background:"transparent",color:"var(--red)",cursor:"pointer",fontFamily:"'DM Sans',sans-serif",fontSize:12}}>✕ Negar</button>
+                              <button onClick={async ()=>{if(!await appConfirm("Negar e marcar inadimplente?"))return;saveFin({cobrancas:(fin.cobrancas??[]).map(x=>x.id===c.id?{...x,status:"pendente",clienteConfirmou:false}:x),status:"inadimplente"});onUpdate("_toast","🔴 Inadimplente.");}} style={{padding:"7px 10px",borderRadius:8,border:"1px solid var(--red)33",background:"transparent",color:"var(--red)",cursor:"pointer",fontFamily:"'DM Sans',sans-serif",fontSize:12}}>✕ Negar</button>
                             </>}
                             {c.status==="pendente" && <>
-                              <button onClick={()=>{if(!window.confirm("Confirmar recebimento deste pagamento?"))return;confirmar(c);}} style={{padding:"7px 14px",borderRadius:8,border:"1px solid var(--green)44",background:"var(--green-bg)",color:"var(--green)",cursor:"pointer",fontFamily:"'DM Sans',sans-serif",fontSize:13,fontWeight:700}}>✅ Confirmar pago</button>
-                              <button onClick={()=>{if(!window.confirm("Cancelar esta cobrança?"))return;saveFin({cobrancas:(fin.cobrancas??[]).map(x=>x.id===c.id?{...x,status:"cancelada"}:x)});}} style={{padding:"7px 10px",borderRadius:8,border:"1px solid var(--border)",background:"transparent",color:"var(--text3)",cursor:"pointer",fontFamily:"'DM Sans',sans-serif",fontSize:12}}>✕ Cancelar</button>
+                              <button onClick={async ()=>{if(!await appConfirm("Confirmar recebimento deste pagamento?"))return;confirmar(c);}} style={{padding:"7px 14px",borderRadius:8,border:"1px solid var(--green)44",background:"var(--green-bg)",color:"var(--green)",cursor:"pointer",fontFamily:"'DM Sans',sans-serif",fontSize:13,fontWeight:700}}>✅ Confirmar pago</button>
+                              <button onClick={async ()=>{if(!await appConfirm("Cancelar esta cobrança?"))return;saveFin({cobrancas:(fin.cobrancas??[]).map(x=>x.id===c.id?{...x,status:"cancelada"}:x)});}} style={{padding:"7px 10px",borderRadius:8,border:"1px solid var(--border)",background:"transparent",color:"var(--text3)",cursor:"pointer",fontFamily:"'DM Sans',sans-serif",fontSize:12}}>✕ Cancelar</button>
                             </>}                          </div>
                         </div>
                       </div>
@@ -14520,7 +14587,7 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme, 
                         </div>
                         <div style={{color:"var(--green)",fontSize:11,marginTop:2,fontWeight:600}}>✅ Confirmado pelo Admin</div>
                       </div>
-                      <button onClick={()=>{if(!window.confirm("Cancelar este pagamento? O ciclo será revertido."))return;saveFin({pagamentos:pagamentos.filter(x=>x.id!==p.id),cicloInicio:null,cicloFim:null,status:"ativo"});onUpdate("_toast","↩ Pagamento cancelado.");}}
+                      <button onClick={async ()=>{if(!await appConfirm("Cancelar este pagamento? O ciclo será revertido."))return;saveFin({pagamentos:pagamentos.filter(x=>x.id!==p.id),cicloInicio:null,cicloFim:null,status:"ativo"});onUpdate("_toast","↩ Pagamento cancelado.");}}
                         style={{background:"none",border:"1px solid var(--red)33",borderRadius:8,color:"var(--red)",cursor:"pointer",fontSize:12,padding:"5px 10px",fontFamily:"'DM Sans',sans-serif"}}>
                         Cancelar
                       </button>
@@ -14953,8 +15020,8 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme, 
             onUpdate("inbox", (data?.inbox ?? []).map(x => x.id===msg.id ? {...x, deletedAt: null} : x));
             onUpdate("_toast","📥 Restaurado para Entrada");
           }
-          function permDelete(msg) {
-            if (!window.confirm("Excluir definitivamente? Esta ação não pode ser desfeita.")) return;
+          async function permDelete(msg) {
+            if (!await appConfirm("Excluir definitivamente? Esta ação não pode ser desfeita.")) return;
             onUpdate("inbox", (data?.inbox ?? []).filter(x => x.id!==msg.id));
             onUpdate("_toast","🗑️ Excluído definitivamente");
           }
@@ -14994,8 +15061,8 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme, 
             setFolderModal(null);
             onUpdate("_toast", "📁 Pasta salva");
           }
-          function deleteFolder(fid) {
-            if (!window.confirm("Excluir esta pasta? As mensagens serão movidas para Entrada.")) return;
+          async function deleteFolder(fid) {
+            if (!await appConfirm("Excluir esta pasta? As mensagens serão movidas para Entrada.")) return;
             // Move messages back to Entrada
             onUpdate("inbox", (data?.inbox ?? []).map(x => x.folder === fid ? {...x, folder: null} : x));
             const allFolders = { ...(data?.inboxFolders ?? {}) };
@@ -15568,8 +15635,8 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme, 
                   </div>
                   <div style={{display:"flex",gap:6,flexShrink:0,justifyContent:isMobile?"stretch":"flex-end"}}>
                     <button onClick={()=>{setEditMgrId(m.id);setMgrForm({name:m.name,cpf:m.cpf??"",pin:m.pin??"",restaurantIds:m.restaurantIds??[],perms:m.perms??{tips:true,schedule:true},isDP:m.isDP??false,profile:m.profile??"custom",areas:m.areas??[]});setShowMgrModal(true);}} style={{...S.btnSecondary,fontSize:isMobile?11:12,flex:isMobile?1:undefined,textAlign:"center"}}>✏️ Editar</button>
-                    <button onClick={()=>{
-                      if(!window.confirm(`Resetar o PIN de ${m.name}? O novo PIN temporário será 0000.`)) return;
+                    <button onClick={async ()=>{
+                      if(!await appConfirm(`Resetar o PIN de ${m.name}? O novo PIN temporário será 0000.`)) return;
                       onUpdate("managers", managers.map(x=>x.id===m.id?{...x,pin:"0000",mustChangePin:true}:x));
                       onUpdate("_toast",`🔐 PIN de ${m.name} resetado para 0000`);
                     }} style={{...S.btnSecondary,fontSize:isMobile?11:12,flex:isMobile?1:undefined,textAlign:"center"}}>{isMobile?"🔐 PIN":"🔐 Resetar PIN"}</button>
@@ -15597,8 +15664,8 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme, 
                 <div style={{display:"flex",gap:8}}>
                   <button onClick={()=>{setEditOwnerId(s.id);setOwnerForm({name:s.name,cpf:s.cpf??"",pin:s.pin??"",isMaster:s.isMaster??false});setShowOwnerModal(true);}} style={{...S.btnSecondary,fontSize:isMobile?11:12,flex:isMobile?1:undefined,textAlign:"center"}}>Editar</button>
                   {!s.isMaster && owners.length>1 && isMaster && (
-                    <button onClick={()=>{
-                      if(!window.confirm(`Excluir admin "${s.name}"?`)) return;
+                    <button onClick={async ()=>{
+                      if(!await appConfirm(`Excluir admin "${s.name}"?`)) return;
                       onUpdate("owners",owners.filter(x=>x.id!==s.id));
                     }} style={{background:"none",border:"1px solid var(--red)33",borderRadius:8,color:"var(--red)",cursor:"pointer",fontSize:isMobile?11:12,padding:"6px 12px",fontFamily:"'DM Sans',sans-serif",flex:isMobile?1:undefined,textAlign:"center"}}>✕ Excluir</button>
                   )}
@@ -15639,8 +15706,8 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme, 
             onUpdate("_toast", `↩ ${entry.tabLabel} restaurado!`);
           }
 
-          function hardDeleteTab(entry) {
-            if(!window.confirm(`Excluir permanentemente "${entry.tabLabel}" de ${entry.restaurantName}? Não tem volta.`)) return;
+          async function hardDeleteTab(entry) {
+            if(!await appConfirm(`Excluir permanentemente "${entry.tabLabel}" de ${entry.restaurantName}? Não tem volta.`)) return;
             onUpdate("trash", prev => ({...prev, tabData:(prev.tabData??[]).filter(x=>x.id!==entry.id)}));
             onUpdate("_toast","🗑️ Excluído permanentemente.");
           }
@@ -15655,8 +15722,8 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme, 
                   <p style={{color:"var(--text3)",fontSize:13,margin:0}}>Restaurantes/gestores/empregados: 30 dias · Dados de abas: 7 dias</p>
                 </div>
                 {totalCount > 0 && (
-                  <button onClick={()=>{
-                    if(!window.confirm("Esvaziar lixeira permanentemente? Esta ação não pode ser desfeita.")) return;
+                  <button onClick={async ()=>{
+                    if(!await appConfirm("Esvaziar lixeira permanentemente? Esta ação não pode ser desfeita.")) return;
                     onUpdate("trash", {restaurants:[],managers:[],employees:[],tabData:[]});
                     onUpdate("_toast","🗑️ Lixeira esvaziada.");
                   }} style={{padding:"8px 16px",borderRadius:10,border:"1px solid var(--red)33",background:"transparent",color:"var(--red)",cursor:"pointer",fontFamily:"'DM Sans',sans-serif",fontSize:13,fontWeight:600}}>
@@ -16689,11 +16756,11 @@ function MiseContagensAdmin({ restaurantId, employees, miseCategories, miseStock
       onUpdate("miseAssignments", miseAssignments.filter(a => !(a.categoryId === catId && a.stockId === stockId)));
     }
   }
-  function delCategory(id) {
+  async function delCategory(id) {
     const cat = restCategories.find(c => c.id === id);
     const linkedItems = restItems.filter(i => i.categoryId === id).length;
     const linkedAssigns = restAssignments.filter(a => a.categoryId === id).length;
-    if (!window.confirm(`Remover categoria "${cat?.name}"?\n${linkedItems} item(ns) e ${linkedAssigns} atribuição(ões) vinculadas serão apagadas.`)) return;
+    if (!await appConfirm(`Remover categoria "${cat?.name}"?\n${linkedItems} item(ns) e ${linkedAssigns} atribuição(ões) vinculadas serão apagadas.`)) return;
     onUpdate("miseCategories", miseCategories.filter(c => c.id !== id));
     onUpdate("miseItems", miseItems.filter(i => i.categoryId !== id));
     onUpdate("miseAssignments", miseAssignments.filter(a => a.categoryId !== id));
@@ -16713,10 +16780,10 @@ function MiseContagensAdmin({ restaurantId, employees, miseCategories, miseStock
     onUpdate("miseStocks", miseStocks.map(s => s.id === editingStockId ? { ...s, name: nm, location: editingStockLoc.trim() || null } : s));
     setEditingStockId(null); setEditingStockName(""); setEditingStockLoc("");
   }
-  function delStock(id) {
+  async function delStock(id) {
     const st = restStocks.find(s => s.id === id);
     const linkedAssigns = restAssignments.filter(a => a.stockId === id).length;
-    if (!window.confirm(`Remover estoque "${st?.name}"?\n${linkedAssigns} atribuição(ões) vinculadas serão apagadas.`)) return;
+    if (!await appConfirm(`Remover estoque "${st?.name}"?\n${linkedAssigns} atribuição(ões) vinculadas serão apagadas.`)) return;
     onUpdate("miseStocks", miseStocks.filter(s => s.id !== id));
     onUpdate("miseAssignments", miseAssignments.filter(a => a.stockId !== id));
   }
@@ -16729,8 +16796,8 @@ function MiseContagensAdmin({ restaurantId, employees, miseCategories, miseStock
     onUpdate("miseItems", [...miseItems, { id: mkId(), restaurantId, categoryId: newItemCat, name: nm, unit: newItemUnit.trim() || "un", minStock: isNaN(minStock) ? null : minStock }]);
     setNewItemName(""); setNewItemMinStock("");
   }
-  function delItem(id) {
-    if (!window.confirm("Remover este item? Vínculos com fornecedores também serão removidos.")) return;
+  async function delItem(id) {
+    if (!await appConfirm("Remover este item? Vínculos com fornecedores também serão removidos.")) return;
     onUpdate("miseItems", miseItems.filter(i => i.id !== id));
     onUpdate("miseProductSuppliers", (miseProductSuppliers || []).filter(ps => ps.productId !== id));
   }
@@ -16757,10 +16824,10 @@ function MiseContagensAdmin({ restaurantId, employees, miseCategories, miseStock
     onUpdate("miseSuppliers", (miseSuppliers || []).map(s => s.id === editingSupId ? { ...s, name: nm, whatsapp: editingSupForm.whatsapp.trim() || null, notes: editingSupForm.notes.trim() || null } : s));
     setEditingSupId(null);
   }
-  function delSupplier(id) {
+  async function delSupplier(id) {
     const s = restSuppliers.find(x => x.id === id);
     const linked = restProductSuppliers.filter(ps => ps.supplierId === id).length;
-    if (!window.confirm(`Remover fornecedor "${s?.name}"?\n${linked} vínculo(s) com produtos serão removidos.`)) return;
+    if (!await appConfirm(`Remover fornecedor "${s?.name}"?\n${linked} vínculo(s) com produtos serão removidos.`)) return;
     onUpdate("miseSuppliers", (miseSuppliers || []).filter(x => x.id !== id));
     onUpdate("miseProductSuppliers", (miseProductSuppliers || []).filter(ps => ps.supplierId !== id));
   }
@@ -16881,29 +16948,29 @@ function MiseContagensAdmin({ restaurantId, employees, miseCategories, miseStock
   }
 
   // Actions — Ciclos
-  function openNewCycle() {
+  async function openNewCycle() {
     const nm = newCycleName.trim() || `Contagem ${new Date().toLocaleDateString("pt-BR")}`;
     const hasOpen = restCycles.find(c => c.status === "open");
-    if (hasOpen && !window.confirm(`Já existe ciclo aberto: "${hasOpen.name}".\nFechar e abrir um novo?`)) return;
+    if (hasOpen && !await appConfirm(`Já existe ciclo aberto: "${hasOpen.name}".\nFechar e abrir um novo?`)) return;
     let next = [...miseCycles];
     if (hasOpen) next = next.map(c => c.id === hasOpen.id ? { ...c, status: "closed", endDate: today(), closedAt: new Date().toISOString() } : c);
     next.push({ id: mkId(), restaurantId, name: nm, startDate: today(), status: "open" });
     onUpdate("miseCycles", next);
     setNewCycleName("");
   }
-  function closeCycle(id) {
+  async function closeCycle(id) {
     const c = restCycles.find(x => x.id === id);
-    if (!window.confirm(`Fechar o ciclo "${c?.name}"? Depois de fechado, não pode receber novas contagens.`)) return;
+    if (!await appConfirm(`Fechar o ciclo "${c?.name}"? Depois de fechado, não pode receber novas contagens.`)) return;
     onUpdate("miseCycles", miseCycles.map(x => x.id === id ? { ...x, status: "closed", endDate: today(), closedAt: new Date().toISOString() } : x));
   }
-  function reopenCycle(id) {
-    if (!window.confirm("Reabrir este ciclo? Ele volta a aceitar contagens.")) return;
+  async function reopenCycle(id) {
+    if (!await appConfirm("Reabrir este ciclo? Ele volta a aceitar contagens.")) return;
     onUpdate("miseCycles", miseCycles.map(x => x.id === id ? { ...x, status: "open", endDate: null, closedAt: null } : x));
   }
-  function delCycle(id) {
+  async function delCycle(id) {
     const c = restCycles.find(x => x.id === id);
     const linked = miseCounts.filter(cnt => cnt.cycleId === id).length;
-    if (!window.confirm(`Apagar ciclo "${c?.name}" e ${linked} contagem(ns) vinculadas?`)) return;
+    if (!await appConfirm(`Apagar ciclo "${c?.name}" e ${linked} contagem(ns) vinculadas?`)) return;
     onUpdate("miseCycles", miseCycles.filter(x => x.id !== id));
     onUpdate("miseCounts", miseCounts.filter(cnt => cnt.cycleId !== id));
   }
@@ -16926,7 +16993,7 @@ function MiseContagensAdmin({ restaurantId, employees, miseCategories, miseStock
     e.target.value = "";
     if (!file) return;
     const reader = new FileReader();
-    reader.onload = ev => {
+    reader.onload = async ev => {
       try {
         const data = JSON.parse(ev.target.result);
         const srcStocks = Array.isArray(data.stocks) ? data.stocks : [];
@@ -16945,7 +17012,7 @@ function MiseContagensAdmin({ restaurantId, employees, miseCategories, miseStock
             ? `⚠ O restaurante já tem ${restCategories.length} categoria(s), ${restStocks.length} estoque(s), ${restItems.length} item(ns). Duplicatas por nome serão detectadas; novos serão adicionados.\n\n`
             : ``) +
           `Continuar?`;
-        if (!window.confirm(msg)) return;
+        if (!await appConfirm(msg)) return;
 
         // 1. Stocks — merge por nome (case-insensitive)
         const stocksNext = [...miseStocks];
@@ -18796,7 +18863,7 @@ function PessoasAdmin({ restaurantId, pessoas, roles, owners, onUpdate, mobileOn
     return d.padEnd(4, "0");
   }
 
-  function addPessoa() {
+  async function addPessoa() {
     const nm = form.name.trim();
     const cpfRaw = (form.cpf || "").replace(/\D/g, "");
     if (!nm) { alert("Nome é obrigatório."); return; }
@@ -18806,7 +18873,7 @@ function PessoasAdmin({ restaurantId, pessoas, roles, owners, onUpdate, mobileOn
     // Verifica se existe em outro restaurante (pessoa com mesmo CPF)
     const globalExisting = (pessoas || []).find(p => (p.cpf || "").replace(/\D/g, "") === cpfRaw);
     if (globalExisting) {
-      if (!window.confirm(`Já existe uma pessoa com esse CPF cadastrada em outro restaurante: ${globalExisting.name}. Adicionar este restaurante à pessoa existente?`)) return;
+      if (!await appConfirm(`Já existe uma pessoa com esse CPF cadastrada em outro restaurante: ${globalExisting.name}. Adicionar este restaurante à pessoa existente?`)) return;
       const next = (pessoas || []).map(p => p.id === globalExisting.id ? {
         ...p,
         restaurantIds: [...p.restaurantIds, restaurantId],
@@ -18877,11 +18944,11 @@ function PessoasAdmin({ restaurantId, pessoas, roles, owners, onUpdate, mobileOn
     onUpdate("pessoas", next);
     setEditingId(null);
   }
-  function delPessoa(id) {
+  async function delPessoa(id) {
     const p = restPessoas.find(x => x.id === id);
     if (!p) return;
     if (p.restaurantIds.length > 1) {
-      if (!window.confirm(`Remover ${p.name} apenas deste restaurante? A pessoa continua em outros ${p.restaurantIds.length - 1} restaurante(s).`)) return;
+      if (!await appConfirm(`Remover ${p.name} apenas deste restaurante? A pessoa continua em outros ${p.restaurantIds.length - 1} restaurante(s).`)) return;
       const next = (pessoas || []).map(x => x.id === id ? {
         ...x,
         restaurantIds: x.restaurantIds.filter(r => r !== restaurantId),
@@ -18891,7 +18958,7 @@ function PessoasAdmin({ restaurantId, pessoas, roles, owners, onUpdate, mobileOn
       } : x);
       onUpdate("pessoas", next);
     } else {
-      if (!window.confirm(`Apagar ${p.name} definitivamente? Esta pessoa não está em nenhum outro restaurante.`)) return;
+      if (!await appConfirm(`Apagar ${p.name} definitivamente? Esta pessoa não está em nenhum outro restaurante.`)) return;
       onUpdate("pessoas", (pessoas || []).filter(x => x.id !== id));
     }
   }
@@ -19536,18 +19603,18 @@ function RegraDivisaoAdmin({ restaurantId, restaurant, splits, pessoas, roles, e
   const [wizardOpen, setWizardOpen] = useState(false);
   const [editingDraftId, setEditingDraftId] = useState(null);
 
-  function deleteDraft(id) {
-    if (!window.confirm("Apagar este rascunho?")) return;
+  async function deleteDraft(id) {
+    if (!await appConfirm("Apagar este rascunho?")) return;
     onUpdate("splits", { ...splits, [restaurantId]: versions.filter(v => v.id !== id) });
   }
 
-  function cancelFutureRule(v) {
-    if (!window.confirm(`Cancelar a regra programada para ${fmtDate(v.effectiveFrom)}?\n\nEla ainda não entrou em vigor — nada será recalculado.`)) return;
+  async function cancelFutureRule(v) {
+    if (!await appConfirm(`Cancelar a regra programada para ${fmtDate(v.effectiveFrom)}?\n\nEla ainda não entrou em vigor — nada será recalculado.`)) return;
     onUpdate("splits", { ...splits, [restaurantId]: versions.filter(x => x.id !== v.id) });
     onUpdate("_toast", "🗑️ Regra futura cancelada");
   }
 
-  function editPastRule(v) {
+  async function editPastRule(v) {
     if (v._legacy) {
       alert("Esta é uma regra importada do formato antigo (legado) — não pode ser editada diretamente. Crie uma nova regra com a data correta para sobrepô-la.");
       return;
@@ -19555,7 +19622,7 @@ function RegraDivisaoAdmin({ restaurantId, restaurant, splits, pessoas, roles, e
     const tipsAfter = (tips || []).filter(t => t.restaurantId === restaurantId && t.date >= v.effectiveFrom);
     const daysAfter = new Set(tipsAfter.map(t => t.date)).size;
     if (daysAfter > 0) {
-      if (!window.confirm(`Editar esta regra vigente desde ${fmtDate(v.effectiveFrom)}?\n\n⚠️ Já existem ${daysAfter} dia(s) de gorjeta lançados que serão recalculados quando você ativar a versão editada.`)) return;
+      if (!await appConfirm(`Editar esta regra vigente desde ${fmtDate(v.effectiveFrom)}?\n\n⚠️ Já existem ${daysAfter} dia(s) de gorjeta lançados que serão recalculados quando você ativar a versão editada.`)) return;
     }
     setEditingDraftId(v.id);
     setWizardOpen(true);
@@ -19851,16 +19918,16 @@ function RegraWizard({ editingVersion, restaurant, restaurantId, pessoas, employ
     if (selectedVoters.length === 0) { alert("Selecione pelo menos 1 votante."); return; }
     onSave(buildVersion("draft"));
   }
-  function activate() {
+  async function activate() {
     if (selectedVoters.length === 0) { alert("Selecione pelo menos 1 votante."); return; }
     if (Math.abs(sumFinal - 100) > 0.5) {
-      if (!window.confirm(`A soma final dá ${sumFinal.toFixed(2)}% (esperado 100%). Ativar mesmo assim?`)) return;
+      if (!await appConfirm(`A soma final dá ${sumFinal.toFixed(2)}% (esperado 100%). Ativar mesmo assim?`)) return;
     }
     // Conta dias afetados
     const affectedTips = (tips || []).filter(t => t.restaurantId === restaurantId && t.date >= effectiveFrom);
     const affectedDays = new Set(affectedTips.map(t => t.date)).size;
     if (affectedDays > 0) {
-      if (!window.confirm(`Esta regra vigente desde ${fmtDate(effectiveFrom)} vai recalcular ${affectedDays} dia(s) com gorjeta lançada. Continuar?`)) return;
+      if (!await appConfirm(`Esta regra vigente desde ${fmtDate(effectiveFrom)} vai recalcular ${affectedDays} dia(s) com gorjeta lançada. Continuar?`)) return;
     }
     const v = buildVersion("active");
     onSave(v);
@@ -20721,10 +20788,10 @@ function MiseChecklistsAdmin({ restaurantId, miseChecklistTemplates, miseCheckli
     setNewTplName("");
     setEditingTplId(t.id);
   }
-  function delTemplate(id) {
+  async function delTemplate(id) {
     const t = restTemplates.find(x => x.id === id);
     const linkedRuns = restRuns.filter(r => r.templateId === id).length;
-    if (!window.confirm(`Apagar template "${t?.name}"?\n${linkedRuns} execução(ões) também serão apagadas.`)) return;
+    if (!await appConfirm(`Apagar template "${t?.name}"?\n${linkedRuns} execução(ões) também serão apagadas.`)) return;
     onUpdate("miseChecklistTemplates", (miseChecklistTemplates || []).filter(x => x.id !== id));
     onUpdate("miseChecklistRuns", (miseChecklistRuns || []).filter(r => r.templateId !== id));
   }
@@ -20856,8 +20923,8 @@ function MiseChecklistTemplateEditor({ tpl, updateTpl, onBack, mobileOnly, mkId 
   const miseAc = "#7c9e5e";
 
   function save() { updateTpl(local); }
-  function handleBack() {
-    if (dirty && !window.confirm("Descartar alterações e voltar?")) return;
+  async function handleBack() {
+    if (dirty && !await appConfirm("Descartar alterações e voltar?")) return;
     onBack();
   }
   function addItem() {
@@ -20980,12 +21047,12 @@ function OperationalChecklists({ employee, miseChecklistTemplates, miseChecklist
     });
   }
 
-  function submitChecklist(tpl) {
+  async function submitChecklist(tpl) {
     const draft = drafts[tpl.id] || ensureDraft(tpl);
     const now = new Date().toISOString();
     const doneCount = Object.values(draft).filter(i => i?.done).length;
     if (doneCount === 0) {
-      if (!window.confirm("Nenhum item foi marcado. Enviar checklist vazio?")) return;
+      if (!await appConfirm("Nenhum item foi marcado. Enviar checklist vazio?")) return;
     }
     const newItems = (tpl.items || []).map(it => {
       const d = draft[it.id] || {};
@@ -21574,7 +21641,7 @@ function MiseFichasTecnicasAdmin({ restaurantId, miseFtInsumos, miseFtEquipament
     e.target.value = "";
     if (!file) return;
     const reader = new FileReader();
-    reader.onload = ev => {
+    reader.onload = async ev => {
       try {
         const data = JSON.parse(ev.target.result);
         const dishes = data.dishes || [];
@@ -21595,7 +21662,7 @@ function MiseFichasTecnicasAdmin({ restaurantId, miseFtInsumos, miseFtEquipament
             ? `⚠ O restaurante já tem ${existingDishes} ficha(s) e ${existingInsumos} insumo(s). Itens com mesmo ID/nome serão sobrescritos; novos serão adicionados.\n\n`
             : ``) +
           `Continuar?`;
-        if (!window.confirm(confirmMsg)) return;
+        if (!await appConfirm(confirmMsg)) return;
 
         // ── Insumos: merge por ID; se não tem mesmo ID mas tem mesmo nome em outra origem, mantém o do arquivo
         const insumosNext = [...miseFtInsumos];
@@ -21765,9 +21832,9 @@ function MiseFtInsumos({ restaurantId, miseFtInsumos, onUpdate, mobileOnly }) {
     }));
     setEditingId(null);
   }
-  function delInsumo(id) {
+  async function delInsumo(id) {
     const i = restInsumos.find(x => x.id === id);
-    if (!window.confirm(`Remover insumo "${i?.name}"?`)) return;
+    if (!await appConfirm(`Remover insumo "${i?.name}"?`)) return;
     onUpdate("miseFtInsumos", miseFtInsumos.filter(x => x.id !== id));
   }
 
@@ -21932,8 +21999,8 @@ function MiseFtEquipamentos({ restaurantId, miseFtEquipamentos, onUpdate, mobile
     setEditingIdx(null);
     setEditName("");
   }
-  function remove(idx) {
-    if (!window.confirm(`Remover equipamento "${list[idx]}"?`)) return;
+  async function remove(idx) {
+    if (!await appConfirm(`Remover equipamento "${list[idx]}"?`)) return;
     save(list.filter((_, i) => i !== idx));
   }
 
@@ -22012,9 +22079,9 @@ function MiseFtDishesAdmin({ restaurantId, miseFtInsumos, miseFtEquipamentos, mi
     onUpdate("miseFtDishes", [...miseFtDishes, dish]);
     setEditingDishId(id);
   }
-  function delDish(id) {
+  async function delDish(id) {
     const d = restDishes.find(x => x.id === id);
-    if (!window.confirm(`Apagar ficha "${d?.name}"? Esta ação não pode ser desfeita.`)) return;
+    if (!await appConfirm(`Apagar ficha "${d?.name}"? Esta ação não pode ser desfeita.`)) return;
     onUpdate("miseFtDishes", miseFtDishes.filter(x => x.id !== id));
   }
   function duplicateDish(id) {
@@ -22128,8 +22195,8 @@ function MiseFtDishEditor({ dish, restaurantId, restDishes, insumos, equipamento
   function save() {
     onUpdate("miseFtDishes", miseFtDishes.map(d => d.id === local.id ? local : d));
   }
-  function handleBack() {
-    if (dirty && !window.confirm("Descartar alterações e voltar?")) return;
+  async function handleBack() {
+    if (dirty && !await appConfirm("Descartar alterações e voltar?")) return;
     onBack();
   }
 
@@ -22142,8 +22209,8 @@ function MiseFtDishEditor({ dish, restaurantId, restDishes, insumos, equipamento
       return { ...l, sub_fichas: [...(l.sub_fichas || []), { id: ftUid(), name: `Sub-ficha ${n}`, rendimento: "", rendimento_qty: null, rendimento_unit: "", ingredientes: [], modo_preparo: "" }] };
     });
   }
-  function delSubFicha(sfId) {
-    if (!window.confirm("Apagar essa sub-ficha?")) return;
+  async function delSubFicha(sfId) {
+    if (!await appConfirm("Apagar essa sub-ficha?")) return;
     setLocal(l => ({ ...l, sub_fichas: (l.sub_fichas || []).filter(sf => sf.id !== sfId) }));
   }
   function moveSf(sfId, dir) {
@@ -22440,11 +22507,11 @@ function MiseFtSubFichaEditor({ sf, sfIdx, total, isFinal, sfCost, insumos, allS
                                     updateIng(idx, { insumo_name: v, insumo_id: null });
                                   }
                                 }}
-                                onBlur={e => {
+                                onBlur={async e => {
                                   const v = e.target.value.trim();
                                   if (!v || ing.insumo_id) return;
                                   if (insumos.some(i => ftNrm(i.name) === ftNrm(v))) return;
-                                  if (window.confirm(`Criar novo insumo "${v}" (preço 0, unidade kg)? Você pode editá-lo depois em Insumos.`)) {
+                                  if (await appConfirm(`Criar novo insumo "${v}" (preço 0, unidade kg)? Você pode editá-lo depois em Insumos.`)) {
                                     const ins = quickAddInsumo(v);
                                     if (ins) updateIng(idx, { insumo_id: ins.id, insumo_name: ins.name, unit: ing.unit || ins.unit });
                                   }
@@ -23413,8 +23480,8 @@ function MiseTemperaturasAdmin({ restaurantId, tuyaLink, tempSensors, tempReadin
     setShowLinkWizard(false);
     onUpdate("_toast", `✓ Conta SmartLife "${accountEmail}" vinculada`);
   }
-  function doUnlink() {
-    if (!window.confirm("Desvincular a conta SmartLife deste restaurante?\n\nSensores cadastrados serão mantidos mas deixarão de receber leituras até religar.")) return;
+  async function doUnlink() {
+    if (!await appConfirm("Desvincular a conta SmartLife deste restaurante?\n\nSensores cadastrados serão mantidos mas deixarão de receber leituras até religar.")) return;
     onUpdate("tuyaLinks", prev => {
       const next = { ...(prev || {}) };
       delete next[restaurantId];
@@ -23445,9 +23512,9 @@ function MiseTemperaturasAdmin({ restaurantId, tuyaLink, tempSensors, tempReadin
     setEditingId(null);
     setEditForm(null);
   }
-  function delSensor(id) {
+  async function delSensor(id) {
     const s = restSensors.find(x => x.id === id);
-    if (!window.confirm(`Remover sensor "${s?.name}"? Histórico de leituras também será descartado.`)) return;
+    if (!await appConfirm(`Remover sensor "${s?.name}"? Histórico de leituras também será descartado.`)) return;
     onUpdate("tempSensors", (tempSensors || []).filter(x => x.id !== id));
     onUpdate("tempReadings", prev => (prev || []).filter(r => r.sensorId !== id));
     onUpdate("_toast", "Sensor removido");
@@ -24439,8 +24506,8 @@ function OperationalCompras({ employee, data, onUpdate }) {
       .filter(o => o.supplier);
   }
 
-  function approveGroup(group) {
-    if (!window.confirm(`Aprovar pedido com ${group.items.length} ite${group.items.length===1?"m":"ns"} para ${group.supplier.name}?`)) return;
+  async function approveGroup(group) {
+    if (!await appConfirm(`Aprovar pedido com ${group.items.length} ite${group.items.length===1?"m":"ns"} para ${group.supplier.name}?`)) return;
     const order = {
       id: `ord_${Date.now()}_${Math.random().toString(36).slice(2,7)}`,
       restaurantId,
@@ -24472,9 +24539,9 @@ function OperationalCompras({ employee, data, onUpdate }) {
     setQtyEdits(clearedQtys);
   }
 
-  function approveAll() {
+  async function approveAll() {
     if (suggested.length === 0) return;
-    if (!window.confirm(`Aprovar ${suggested.length} pedido(s) sugerido(s) (${totalSuggestedItems} ite${totalSuggestedItems===1?"m":"ns"} no total)?`)) return;
+    if (!await appConfirm(`Aprovar ${suggested.length} pedido(s) sugerido(s) (${totalSuggestedItems} ite${totalSuggestedItems===1?"m":"ns"} no total)?`)) return;
     const now = new Date().toISOString();
     const newOrders = suggested.map(group => ({
       id: `ord_${Date.now()}_${Math.random().toString(36).slice(2,7)}_${group.supplierId.slice(0,5)}`,
@@ -24503,11 +24570,11 @@ function OperationalCompras({ employee, data, onUpdate }) {
     setQtyEdits({});
   }
 
-  function sendOrder(order) {
+  async function sendOrder(order) {
     const supplier = suppliers.find(s => s.id === order.supplierId);
     if (!supplier) { alert("Fornecedor não encontrado."); return; }
     if (!supplier.whatsapp) {
-      if (!window.confirm(`Fornecedor "${supplier.name}" não tem WhatsApp cadastrado. Apenas marcar como enviado?`)) return;
+      if (!await appConfirm(`Fornecedor "${supplier.name}" não tem WhatsApp cadastrado. Apenas marcar como enviado?`)) return;
     } else {
       const msg = miseBuildWhatsMessage({
         order, supplier, items: order.items,
@@ -24577,9 +24644,9 @@ function OperationalCompras({ employee, data, onUpdate }) {
   ];
 
   // Com ciclo aberto + contagens soltas: oferece puxar contagens pro ciclo atual
-  function pullLooseToOpenCycle() {
+  async function pullLooseToOpenCycle() {
     if (!openCycle || !hasLooseCounts) return;
-    if (!window.confirm(`Puxar ${looseCounts.length} contagem(ns) solta(s) pra dentro do ciclo "${openCycle.name}"?`)) return;
+    if (!await appConfirm(`Puxar ${looseCounts.length} contagem(ns) solta(s) pra dentro do ciclo "${openCycle.name}"?`)) return;
     const looseIds = new Set(looseCounts.map(c => c.id));
     const updatedCounts = (data.miseCounts || []).map(c =>
       looseIds.has(c.id) ? { ...c, cycleId: openCycle.id } : c
@@ -24852,7 +24919,7 @@ function OperationalCompras({ employee, data, onUpdate }) {
                 <button onClick={()=>openReceiveForm(order)} style={{background:miseAc,color:"#fff",border:"none",borderRadius:8,padding:"6px 12px",fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"'DM Sans',sans-serif"}}>📦 Registrar recebimento</button>
               )}
               {order.status === "approved" && (
-                <button onClick={()=>{ if(window.confirm("Descartar este pedido aprovado?")) onUpdate("miseSupplierOrders", (data.miseSupplierOrders || []).filter(o => o.id !== order.id)); }} style={{...S.btnSecondary,fontSize:11,padding:"6px 10px",color:"var(--red)",borderColor:"var(--red)44"}}>✕</button>
+                <button onClick={async ()=>{ if(await appConfirm("Descartar este pedido aprovado?")) onUpdate("miseSupplierOrders", (data.miseSupplierOrders || []).filter(o => o.id !== order.id)); }} style={{...S.btnSecondary,fontSize:11,padding:"6px 10px",color:"var(--red)",borderColor:"var(--red)44"}}>✕</button>
               )}
             </div>
           )}
@@ -27144,6 +27211,7 @@ export default function App() {
       </div>
 
       <PrivacyModal open={showPrivacy} onClose={()=>setShowPrivacy(false)} />
+      <ConfirmHost />
     </>
   );
 }
