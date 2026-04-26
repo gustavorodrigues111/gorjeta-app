@@ -821,6 +821,9 @@ const K = {
   tempAlerts:          "v4:tempAlerts",           // [{id, sensorId, restaurantId, openedAt, closedAt?, firstTemp, peakTemp, notifiedAt?, acknowledgedBy?, acknowledgedAt?, note?}]
   // ═══ Permissões — perfis customizados por restaurante ═══
   permProfiles:        "v4:permProfiles",          // {[restaurantId]: [{id, label, icon, color, desc, keys:["operational.contagens", ...]}]}
+  // ═══ Freelas ═══
+  freelaShifts:        "v4:freelaShifts",          // [{id, restaurantId, pessoaId, date, entrada, saida, intervalo, area, valorTipo:"hora"|"diaria", valorUnit, totalCalc, status:"aberto"|"fechamento"|"pago", lotePagamentoId?, lancadoPor, lancadoEm, observacao}]
+  freelaPagamentos:    "v4:freelaPagamentos",      // [{id, restaurantId, criadoEm, criadoPor, shiftIds:[], totalGeral, status:"em_fechamento"|"pago", pagoEm?, pagoPor?}]
 };
 
 // ── Inbox helpers ──
@@ -9902,6 +9905,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
       (isOwner || canTips) && ["pessoas","Pessoas"],
       (isOwner || canTips) && ["permissoes","Permissões"],
       (isOwner || canTips || tabVisible("employees")) && ["employees","Equipe"],
+      (isOwner || isDP || isLider) && ["freelas","🎒 Freelas"],
       (isOwner || tabVisible("roles")) && ["roles","Cargos"],
       (isOwner || canTips || tabVisible("employees")) && ["reunioes","Reuniões"],
     ].filter(Boolean) },
@@ -11404,6 +11408,25 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
             mobileOnly={mobileOnly}
             realIsOwner={realIsOwner || isOwner}
             onStartImpersonate={onStartImpersonate}
+          />
+        )}
+
+        {/* FREELAS — Lançamento, Fechamento, Histórico */}
+        {tab === "freelas" && (
+          <FreelasModule
+            restaurantId={rid}
+            pessoas={data?.pessoas ?? []}
+            freelaShifts={data?.freelaShifts ?? []}
+            freelaPagamentos={data?.freelaPagamentos ?? []}
+            employees={employees}
+            roles={roles}
+            schedules={schedules}
+            currentUser={currentUser}
+            isDP={isDP}
+            isLider={isLider}
+            isOwner={isOwner}
+            onUpdate={onUpdate}
+            mobileOnly={mobileOnly}
           />
         )}
 
@@ -18773,6 +18796,445 @@ function buildVirtualEmpForPessoa(pessoa, restaurantId) {
 // ═══════════════════════════════════════════════════════════════
 // ──  PESSOAS — CRUD                                             ──
 // ═══════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════
+// ──  FREELAS — módulo dedicado (Fase 1: fundação + 3 sub-tabs)  ──
+// ═══════════════════════════════════════════════════════════════
+function FreelasModule({ restaurantId, pessoas, freelaShifts, freelaPagamentos, employees, roles, schedules, currentUser, isDP, isLider, isOwner, onUpdate, mobileOnly }) {
+  const [subTab, setSubTab] = useState("lancamento");
+  const ac = "#7c3aed"; // roxo Freelas — distingue dos outros módulos
+  const restPessoas = (pessoas || []).filter(p => (p.restaurantIds || []).includes(restaurantId));
+  const restFreelas = restPessoas.filter(p => p.isFreela === true);
+  const restShifts = (freelaShifts || []).filter(s => s.restaurantId === restaurantId);
+  // (restLotes vai ser usado nas fases 5+ — mantido como referência mas comentado)
+  // const restLotes = (freelaPagamentos || []).filter(l => l.restaurantId === restaurantId);
+
+  // ── Helpers ──
+  // Calcula horas trabalhadas (entrada/saída em "HH:MM", intervalo em minutos)
+  function calcHoras(entrada, saida, intervalo) {
+    if (!entrada || !saida) return 0;
+    const [eh, em] = entrada.split(":").map(Number);
+    const [sh, sm] = saida.split(":").map(Number);
+    if (isNaN(eh) || isNaN(sh)) return 0;
+    let mins = (sh * 60 + sm) - (eh * 60 + em);
+    if (mins < 0) mins += 24 * 60; // virou madrugada
+    mins -= (parseInt(intervalo) || 0);
+    return Math.max(0, mins / 60);
+  }
+
+  function fmtHoras(h) {
+    if (!h || h <= 0) return "—";
+    const horas = Math.floor(h);
+    const mins = Math.round((h - horas) * 60);
+    return mins > 0 ? `${horas}h${String(mins).padStart(2,"0")}` : `${horas}h`;
+  }
+
+  function autoMarcaEscalaFreela(pessoaId, date) {
+    // Marca o dia da escala daquela pessoa como DAY_FREELA (caso ela seja CLT)
+    const pessoa = restPessoas.find(p => p.id === pessoaId);
+    if (!pessoa?.isTeam?.[restaurantId]) return; // só pra CLT
+    const empId = pessoa.linkedEmployeeId || (employees || []).find(e => e.linkedPessoaId === pessoaId && e.restaurantId === restaurantId)?.id;
+    if (!empId) return;
+    const td = new Date(date + "T12:00:00");
+    const mk = monthKey(td.getFullYear(), td.getMonth());
+    const cur = schedules?.[restaurantId]?.[mk] || {};
+    const empMap = { ...(cur[empId] || {}), [date]: DAY_FREELA };
+    const newMonth = { ...cur, [empId]: empMap };
+    onUpdate("schedules", { ...(schedules || {}), [restaurantId]: { ...(schedules?.[restaurantId] || {}), [mk]: newMonth } });
+  }
+
+  // ── Adicionar shift ──
+  async function addShift(shiftData) {
+    const pessoa = restPessoas.find(p => p.id === shiftData.pessoaId);
+    if (!pessoa) return;
+    // Aviso se for CLT
+    if (pessoa.isTeam?.[restaurantId]) {
+      if (!await appConfirm(`${pessoa.name} é da equipe (CLT). Lançar shift de freela vai marcar ${fmtDate(shiftData.date)} como folga-freela na escala dela e excluir esse dia da gorjeta. Confirmar?`)) return;
+      autoMarcaEscalaFreela(shiftData.pessoaId, shiftData.date);
+    }
+    const horas = calcHoras(shiftData.entrada, shiftData.saida, shiftData.intervalo);
+    const newShift = {
+      id: `shf_${Date.now().toString(36)}${Math.random().toString(36).slice(2,5)}`,
+      restaurantId,
+      pessoaId: shiftData.pessoaId,
+      date: shiftData.date,
+      entrada: shiftData.entrada || "",
+      saida: shiftData.saida || "",
+      intervalo: parseInt(shiftData.intervalo) || 0,
+      horas,
+      area: shiftData.area || null,
+      valorTipo: null, // preenchido pelo DP/admin depois
+      valorUnit: null,
+      totalCalc: null,
+      observacao: shiftData.observacao || "",
+      status: "aberto",
+      lotePagamentoId: null,
+      lancadoPor: currentUser?.name || "—",
+      lancadoPorId: currentUser?.id || null,
+      lancadoEm: new Date().toISOString(),
+    };
+    onUpdate("freelaShifts", [...(freelaShifts || []), newShift]);
+    onUpdate("_toast", `✅ Shift de ${pessoa.name} em ${fmtDate(shiftData.date)} lançado`);
+  }
+
+  function updateShift(shiftId, patch) {
+    const updated = (freelaShifts || []).map(s => {
+      if (s.id !== shiftId) return s;
+      const next = { ...s, ...patch };
+      // Recalcula horas se mudou entrada/saida/intervalo
+      if (patch.entrada !== undefined || patch.saida !== undefined || patch.intervalo !== undefined) {
+        next.horas = calcHoras(next.entrada, next.saida, next.intervalo);
+      }
+      // Recalcula total se mudou valor ou tipo
+      if (patch.valorTipo !== undefined || patch.valorUnit !== undefined || next.horas !== s.horas) {
+        if (next.valorTipo === "hora") next.totalCalc = (next.valorUnit || 0) * (next.horas || 0);
+        else if (next.valorTipo === "diaria") next.totalCalc = next.valorUnit || 0;
+        else next.totalCalc = null;
+      }
+      return next;
+    });
+    onUpdate("freelaShifts", updated);
+  }
+
+  async function deleteShift(shiftId) {
+    const s = (freelaShifts || []).find(x => x.id === shiftId);
+    if (!s) return;
+    if (s.status !== "aberto") { alert("Shift travado em fechamento — corrija o lote primeiro."); return; }
+    const pessoa = restPessoas.find(p => p.id === s.pessoaId);
+    if (!await appConfirm(`Apagar o shift de ${pessoa?.name || "?"} em ${fmtDate(s.date)}?`)) return;
+    onUpdate("freelaShifts", (freelaShifts || []).filter(x => x.id !== shiftId));
+  }
+
+  // Quem pode ver cada sub-tab
+  const canFechamento = isDP || isOwner; // só DP/Owner faz fechamento e marca pago
+  const canHistorico = isDP || isOwner;
+
+  const SUB_TABS = [
+    { id: "lancamento", label: "Lançamento", visible: true },
+    { id: "fechamento", label: "Fechamento", visible: canFechamento },
+    { id: "historico",  label: "Histórico",  visible: canHistorico },
+  ].filter(t => t.visible);
+
+  return (
+    <div>
+      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",flexWrap:"wrap",gap:8,marginBottom:14}}>
+        <h3 style={{color:"var(--text)",margin:0,fontSize:mobileOnly?16:18}}>🎒 Freelas</h3>
+        <div style={{fontSize:11,color:"var(--text3)"}}>
+          {restFreelas.length} freelancer{restFreelas.length===1?"":"s"} cadastrado{restFreelas.length===1?"":"s"} · {restShifts.filter(s => s.status === "aberto").length} shift(s) abertos
+        </div>
+      </div>
+
+      {/* Sub-tabs internas */}
+      <div style={{display:"flex",gap:4,marginBottom:16,borderBottom:"1px solid var(--border)",overflowX:"auto"}}>
+        {SUB_TABS.map(t => (
+          <button key={t.id} onClick={()=>setSubTab(t.id)}
+            style={{background:"none",border:"none",borderBottom: subTab===t.id ? `2px solid ${ac}` : "2px solid transparent",padding:"8px 14px",cursor:"pointer",fontSize:13,fontWeight: subTab===t.id ? 700 : 500,color: subTab===t.id ? "var(--text)" : "var(--text3)",whiteSpace:"nowrap",flexShrink:0}}>
+            {t.label}
+          </button>
+        ))}
+      </div>
+
+      {/* Sub-tab: Lançamento — tabela de shifts em status Aberto */}
+      {subTab === "lancamento" && (
+        <FreelaLancamentoTab
+          restPessoas={restPessoas}
+          restFreelas={restFreelas}
+          shifts={restShifts}
+          addShift={addShift}
+          updateShift={updateShift}
+          deleteShift={deleteShift}
+          calcHoras={calcHoras}
+          fmtHoras={fmtHoras}
+          isDP={isDP}
+          isOwner={isOwner}
+          currentUser={currentUser}
+          mobileOnly={mobileOnly}
+          ac={ac}
+        />
+      )}
+
+      {/* Sub-tab: Fechamento (placeholder Fase 1) */}
+      {subTab === "fechamento" && (
+        <div style={{padding:"40px 24px",textAlign:"center",color:"var(--text3)",fontSize:13,background:"var(--card-bg)",border:"1px dashed var(--border)",borderRadius:12}}>
+          <div style={{fontSize:40,marginBottom:12}}>📑</div>
+          <div style={{color:"var(--text)",fontWeight:600,fontSize:15,marginBottom:6}}>Fechamento e pagamento</div>
+          <p style={{lineHeight:1.6,maxWidth:420,margin:"0 auto"}}>
+            Em construção. Selecione shifts abertos pra gerar o PDF do lote, depois marque como pago com data.
+          </p>
+          <p style={{fontSize:11,color:"var(--text3)",marginTop:14,opacity:0.7}}>
+            Fase 5
+          </p>
+        </div>
+      )}
+
+      {/* Sub-tab: Histórico (placeholder Fase 1) */}
+      {subTab === "historico" && (
+        <div style={{padding:"40px 24px",textAlign:"center",color:"var(--text3)",fontSize:13,background:"var(--card-bg)",border:"1px dashed var(--border)",borderRadius:12}}>
+          <div style={{fontSize:40,marginBottom:12}}>🗂️</div>
+          <div style={{color:"var(--text)",fontWeight:600,fontSize:15,marginBottom:6}}>Histórico de pagamentos</div>
+          <p style={{lineHeight:1.6,maxWidth:420,margin:"0 auto"}}>
+            Em construção. Lotes pagos, PDF re-baixável, dashboard de custos por freela e setor.
+          </p>
+          <p style={{fontSize:11,color:"var(--text3)",marginTop:14,opacity:0.7}}>
+            Fase 7
+          </p>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════
+// ──  FREELAS — sub-componente Lançamento (tabela de shifts)     ──
+// ═══════════════════════════════════════════════════════════════
+function FreelaLancamentoTab({ restPessoas, restFreelas, shifts, addShift, updateShift, deleteShift, calcHoras, fmtHoras, isDP, isOwner, currentUser, mobileOnly, ac }) {
+  const [showAddForm, setShowAddForm] = useState(false);
+  const [newShift, setNewShift] = useState({ pessoaId: "", date: today(), entrada: "", saida: "", intervalo: 0, area: "", observacao: "" });
+  const [filterStatus, setFilterStatus] = useState("todos"); // todos | aberto | fechamento | pago
+  const [filterPeriod, setFilterPeriod] = useState({ from: "", to: "" });
+  const [filterPessoa, setFilterPessoa] = useState("");
+
+  // canEditAll = DP/Owner pode editar qualquer shift; senão só os próprios e só status aberto
+  const canEditAll = isDP || isOwner;
+  const canEditShift = (s) => {
+    if (s.status !== "aberto") return false; // travado
+    if (canEditAll) return true;
+    return s.lancadoPorId === currentUser?.id;
+  };
+
+  // Filtros aplicados
+  const filtered = shifts.filter(s => {
+    if (filterStatus !== "todos" && s.status !== filterStatus) return false;
+    if (filterPessoa && s.pessoaId !== filterPessoa) return false;
+    if (filterPeriod.from && s.date < filterPeriod.from) return false;
+    if (filterPeriod.to && s.date > filterPeriod.to) return false;
+    return true;
+  }).sort((a,b) => (b.date || "").localeCompare(a.date || "") || (b.lancadoEm || "").localeCompare(a.lancadoEm || ""));
+
+  function pessoaName(pessoaId) {
+    const p = restPessoas.find(x => x.id === pessoaId);
+    return p?.name || "(removido)";
+  }
+
+  function handleAddSubmit() {
+    if (!newShift.pessoaId) { alert("Selecione a pessoa."); return; }
+    if (!newShift.date) { alert("Selecione a data."); return; }
+    if (!newShift.entrada || !newShift.saida) { alert("Preencha entrada e saída."); return; }
+    addShift(newShift);
+    setNewShift({ pessoaId: "", date: today(), entrada: "", saida: "", intervalo: 0, area: "", observacao: "" });
+    setShowAddForm(false);
+  }
+
+  // Pessoas disponíveis pra escolher: freelas + CLTs (líder pode pegar freela ad-hoc)
+  const elegiveis = restPessoas.filter(p => p.isFreela || p.isTeam).sort((a,b) => a.name.localeCompare(b.name));
+
+  return (
+    <div>
+      {/* Toolbar: botão + filtros */}
+      <div style={{display:"flex",gap:8,marginBottom:12,flexWrap:"wrap",alignItems:"center"}}>
+        <button onClick={()=>setShowAddForm(!showAddForm)}
+          style={{background:showAddForm?"var(--bg2)":ac,color:showAddForm?"var(--text)":"#fff",border:`1px solid ${ac}`,borderRadius:8,padding:"7px 16px",fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:"'DM Sans',sans-serif"}}>
+          {showAddForm ? "✕ Fechar" : "+ Novo shift"}
+        </button>
+        <select value={filterStatus} onChange={e=>setFilterStatus(e.target.value)}
+          style={{...S.input,maxWidth:160,fontSize:12,padding:"7px 10px",cursor:"pointer"}}>
+          <option value="todos">📋 Todos status</option>
+          <option value="aberto">🟢 Abertos</option>
+          <option value="fechamento">🔒 Em fechamento</option>
+          <option value="pago">💸 Pagos</option>
+        </select>
+        <select value={filterPessoa} onChange={e=>setFilterPessoa(e.target.value)}
+          style={{...S.input,maxWidth:200,fontSize:12,padding:"7px 10px",cursor:"pointer"}}>
+          <option value="">🎒 Todas as pessoas</option>
+          {elegiveis.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+        </select>
+        <input type="date" value={filterPeriod.from} onChange={e=>setFilterPeriod({...filterPeriod,from:e.target.value})}
+          title="De" style={{...S.input,maxWidth:140,fontSize:12,padding:"7px 10px"}}/>
+        <input type="date" value={filterPeriod.to} onChange={e=>setFilterPeriod({...filterPeriod,to:e.target.value})}
+          title="Até" style={{...S.input,maxWidth:140,fontSize:12,padding:"7px 10px"}}/>
+      </div>
+
+      {/* Form de adicionar shift */}
+      {showAddForm && (
+        <div style={{background:`${ac}08`,border:`1px solid ${ac}44`,borderRadius:10,padding:14,marginBottom:14}}>
+          <div style={{fontSize:11,color:ac,fontWeight:700,textTransform:"uppercase",letterSpacing:0.4,marginBottom:10}}>Novo shift</div>
+          <div style={{display:"grid",gridTemplateColumns:mobileOnly?"1fr":"2fr 1fr 1fr 1fr 0.8fr",gap:8,marginBottom:10}}>
+            <div>
+              <label style={{...S.label,fontSize:11}}>Pessoa</label>
+              <select value={newShift.pessoaId} onChange={e=>setNewShift({...newShift,pessoaId:e.target.value})} style={{...S.input,cursor:"pointer"}}>
+                <option value="">— Selecione —</option>
+                {restFreelas.length > 0 && (
+                  <optgroup label="🎒 Freelas">
+                    {restFreelas.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                  </optgroup>
+                )}
+                <optgroup label="👥 Equipe (CLT pegando freela)">
+                  {restPessoas.filter(p => p.isTeam && !p.isFreela).map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                </optgroup>
+              </select>
+            </div>
+            <div>
+              <label style={{...S.label,fontSize:11}}>Data</label>
+              <input type="date" value={newShift.date} onChange={e=>setNewShift({...newShift,date:e.target.value})} style={S.input}/>
+            </div>
+            <div>
+              <label style={{...S.label,fontSize:11}}>Entrada</label>
+              <input type="time" value={newShift.entrada} onChange={e=>setNewShift({...newShift,entrada:e.target.value})} style={S.input}/>
+            </div>
+            <div>
+              <label style={{...S.label,fontSize:11}}>Saída</label>
+              <input type="time" value={newShift.saida} onChange={e=>setNewShift({...newShift,saida:e.target.value})} style={S.input}/>
+            </div>
+            <div>
+              <label style={{...S.label,fontSize:11}}>Interv. (min)</label>
+              <input type="number" min="0" value={newShift.intervalo} onChange={e=>setNewShift({...newShift,intervalo:e.target.value})} style={S.input}/>
+            </div>
+          </div>
+          <div style={{display:"grid",gridTemplateColumns:mobileOnly?"1fr":"1fr 2fr",gap:8,marginBottom:10}}>
+            <div>
+              <label style={{...S.label,fontSize:11}}>Área</label>
+              <select value={newShift.area} onChange={e=>setNewShift({...newShift,area:e.target.value})} style={{...S.input,cursor:"pointer"}}>
+                <option value="">— Sem área —</option>
+                {AREAS.map(a => <option key={a} value={a}>{a}</option>)}
+              </select>
+            </div>
+            <div>
+              <label style={{...S.label,fontSize:11}}>Observação (opcional)</label>
+              <input value={newShift.observacao} onChange={e=>setNewShift({...newShift,observacao:e.target.value})} placeholder="ex: chegou atrasado, cobriu evento, etc" style={S.input}/>
+            </div>
+          </div>
+          {/* Preview de horas */}
+          {newShift.entrada && newShift.saida && (
+            <div style={{padding:"6px 10px",background:"var(--bg2)",borderRadius:6,marginBottom:10,fontSize:12,color:"var(--text2)"}}>
+              ⏱️ Horas trabalhadas: <strong>{fmtHoras(calcHoras(newShift.entrada, newShift.saida, newShift.intervalo))}</strong>
+            </div>
+          )}
+          <div style={{display:"flex",gap:8,justifyContent:"flex-end"}}>
+            <button onClick={()=>setShowAddForm(false)} style={{...S.btnSecondary,fontSize:12,padding:"7px 14px"}}>Cancelar</button>
+            <button onClick={handleAddSubmit} style={{background:ac,color:"#fff",border:"none",borderRadius:8,padding:"7px 18px",fontSize:13,fontWeight:700,cursor:"pointer"}}>+ Lançar shift</button>
+          </div>
+        </div>
+      )}
+
+      {/* Tabela de shifts */}
+      {filtered.length === 0 ? (
+        <div style={{padding:"40px 24px",textAlign:"center",color:"var(--text3)",fontSize:13,background:"var(--card-bg)",border:"1px dashed var(--border)",borderRadius:12}}>
+          <div style={{fontSize:36,marginBottom:10}}>🎒</div>
+          <div style={{color:"var(--text)",fontWeight:600,fontSize:14,marginBottom:6}}>Nenhum shift {filterStatus!=="todos"||filterPessoa||filterPeriod.from||filterPeriod.to ? "com esses filtros" : "lançado ainda"}</div>
+          {restFreelas.length === 0 && (
+            <p style={{fontSize:12,marginTop:8}}>
+              Cadastre primeiro um freelancer em <strong>Pessoas → marcar "É freela"</strong>.
+            </p>
+          )}
+        </div>
+      ) : (
+        <div style={{background:"var(--card-bg)",border:"1px solid var(--border)",borderRadius:10,overflow:"hidden"}}>
+          <div style={{overflowX:"auto"}}>
+            <table style={{width:"100%",borderCollapse:"collapse",fontSize:12}}>
+              <thead>
+                <tr style={{background:"var(--bg2)",borderBottom:"1px solid var(--border)"}}>
+                  <th style={{padding:"8px 10px",textAlign:"left",color:"var(--text3)",fontWeight:700,fontSize:10,textTransform:"uppercase",letterSpacing:0.3}}>Pessoa</th>
+                  <th style={{padding:"8px 10px",textAlign:"left",color:"var(--text3)",fontWeight:700,fontSize:10,textTransform:"uppercase",letterSpacing:0.3,whiteSpace:"nowrap"}}>Data</th>
+                  <th style={{padding:"8px 10px",textAlign:"center",color:"var(--text3)",fontWeight:700,fontSize:10,textTransform:"uppercase",letterSpacing:0.3}}>Ent.</th>
+                  <th style={{padding:"8px 10px",textAlign:"center",color:"var(--text3)",fontWeight:700,fontSize:10,textTransform:"uppercase",letterSpacing:0.3}}>Saí.</th>
+                  <th style={{padding:"8px 10px",textAlign:"center",color:"var(--text3)",fontWeight:700,fontSize:10,textTransform:"uppercase",letterSpacing:0.3}}>Int.</th>
+                  <th style={{padding:"8px 10px",textAlign:"right",color:"var(--text3)",fontWeight:700,fontSize:10,textTransform:"uppercase",letterSpacing:0.3}}>Horas</th>
+                  <th style={{padding:"8px 10px",textAlign:"left",color:"var(--text3)",fontWeight:700,fontSize:10,textTransform:"uppercase",letterSpacing:0.3}}>Área</th>
+                  <th style={{padding:"8px 10px",textAlign:"center",color:"var(--text3)",fontWeight:700,fontSize:10,textTransform:"uppercase",letterSpacing:0.3,minWidth:140}}>Valor</th>
+                  <th style={{padding:"8px 10px",textAlign:"right",color:"var(--text3)",fontWeight:700,fontSize:10,textTransform:"uppercase",letterSpacing:0.3}}>Total</th>
+                  <th style={{padding:"8px 10px",textAlign:"center",color:"var(--text3)",fontWeight:700,fontSize:10,textTransform:"uppercase",letterSpacing:0.3}}>St.</th>
+                  <th style={{padding:"8px 10px",textAlign:"center",color:"var(--text3)",fontWeight:700,fontSize:10,textTransform:"uppercase",letterSpacing:0.3,width:30}}></th>
+                </tr>
+              </thead>
+              <tbody>
+                {filtered.map(s => {
+                  const editable = canEditShift(s);
+                  const statusBadge = s.status === "pago"
+                    ? { icon: "💸", color: "#15803d", bg: "#10b98122", label: "Pago" }
+                    : s.status === "fechamento"
+                      ? { icon: "🔒", color: "#92400e", bg: "#fef3c7", label: "Fechamento" }
+                      : { icon: "🟢", color: ac, bg: `${ac}22`, label: "Aberto" };
+                  return (
+                    <tr key={s.id} style={{borderTop:"1px solid var(--border)"}}>
+                      <td style={{padding:"6px 10px",color:"var(--text)",fontWeight:600}}>{pessoaName(s.pessoaId)}</td>
+                      <td style={{padding:"6px 10px",color:"var(--text2)",whiteSpace:"nowrap"}}>{fmtDate(s.date)}</td>
+                      <td style={{padding:"4px 6px",textAlign:"center"}}>
+                        {editable ? (
+                          <input type="time" value={s.entrada || ""} onChange={e=>updateShift(s.id, {entrada: e.target.value})} style={{...S.input,fontSize:11,padding:"3px 6px",width:80}}/>
+                        ) : <span style={{fontSize:11,color:"var(--text2)",fontFamily:"'DM Mono',monospace"}}>{s.entrada || "—"}</span>}
+                      </td>
+                      <td style={{padding:"4px 6px",textAlign:"center"}}>
+                        {editable ? (
+                          <input type="time" value={s.saida || ""} onChange={e=>updateShift(s.id, {saida: e.target.value})} style={{...S.input,fontSize:11,padding:"3px 6px",width:80}}/>
+                        ) : <span style={{fontSize:11,color:"var(--text2)",fontFamily:"'DM Mono',monospace"}}>{s.saida || "—"}</span>}
+                      </td>
+                      <td style={{padding:"4px 6px",textAlign:"center"}}>
+                        {editable ? (
+                          <input type="number" min="0" value={s.intervalo || 0} onChange={e=>updateShift(s.id, {intervalo: parseInt(e.target.value) || 0})} style={{...S.input,fontSize:11,padding:"3px 6px",width:50,textAlign:"center"}}/>
+                        ) : <span style={{fontSize:11,color:"var(--text2)"}}>{s.intervalo || 0}min</span>}
+                      </td>
+                      <td style={{padding:"6px 10px",textAlign:"right",fontFamily:"'DM Mono',monospace",fontWeight:700,color:"var(--text)"}}>{fmtHoras(s.horas)}</td>
+                      <td style={{padding:"4px 6px"}}>
+                        {editable ? (
+                          <select value={s.area || ""} onChange={e=>updateShift(s.id, {area: e.target.value || null})} style={{...S.input,fontSize:11,padding:"3px 6px"}}>
+                            <option value="">—</option>
+                            {AREAS.map(a => <option key={a} value={a}>{a}</option>)}
+                          </select>
+                        ) : <span style={{fontSize:11,color:"var(--text2)"}}>{s.area || "—"}</span>}
+                      </td>
+                      <td style={{padding:"4px 6px"}}>
+                        {canEditAll && s.status === "aberto" ? (
+                          <div style={{display:"flex",gap:3,alignItems:"center"}}>
+                            <select value={s.valorTipo || ""} onChange={e=>updateShift(s.id, {valorTipo: e.target.value || null, valorUnit: null, totalCalc: null})}
+                              style={{...S.input,fontSize:10,padding:"3px 4px",width:54,cursor:"pointer"}}>
+                              <option value="">—</option>
+                              <option value="hora">Hora</option>
+                              <option value="diaria">Diária</option>
+                            </select>
+                            {s.valorTipo && (
+                              <input type="number" step="0.01" min="0" placeholder="R$"
+                                value={s.valorUnit || ""}
+                                onChange={e=>updateShift(s.id, {valorUnit: parseFloat(e.target.value) || 0})}
+                                style={{...S.input,fontSize:11,padding:"3px 6px",width:70,textAlign:"right",fontFamily:"'DM Mono',monospace"}}/>
+                            )}
+                          </div>
+                        ) : (
+                          <span style={{fontSize:11,color:"var(--text3)"}}>
+                            {s.valorTipo === "hora" ? `R$${(s.valorUnit||0).toFixed(2)}/h` : s.valorTipo === "diaria" ? `R$${(s.valorUnit||0).toFixed(2)} diária` : "—"}
+                          </span>
+                        )}
+                      </td>
+                      <td style={{padding:"6px 10px",textAlign:"right",fontFamily:"'DM Mono',monospace",fontWeight:700,color: s.totalCalc != null ? ac : "var(--text3)"}}>
+                        {s.totalCalc != null ? `R$ ${s.totalCalc.toFixed(2)}` : "—"}
+                      </td>
+                      <td style={{padding:"4px 6px",textAlign:"center"}}>
+                        <span title={statusBadge.label}
+                          style={{display:"inline-block",padding:"2px 6px",background:statusBadge.bg,color:statusBadge.color,borderRadius:6,fontSize:10,fontWeight:700}}>
+                          {statusBadge.icon}
+                        </span>
+                      </td>
+                      <td style={{padding:"4px 6px",textAlign:"center"}}>
+                        {editable && (
+                          <button onClick={()=>deleteShift(s.id)} title="Apagar shift"
+                            style={{background:"none",border:"none",cursor:"pointer",color:"var(--red)",fontSize:14,padding:2}}>
+                            ✕
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+          <div style={{padding:"8px 12px",borderTop:"1px solid var(--border)",fontSize:11,color:"var(--text3)",background:"var(--bg2)"}}>
+            {filtered.length} shift{filtered.length===1?"":"s"} · {filtered.filter(s=>s.status==="aberto").length} abertos · Total: R$ {filtered.reduce((sum, s) => sum + (s.totalCalc || 0), 0).toFixed(2)}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function PessoasAdmin({ restaurantId, pessoas, roles, owners, employees, restCode, onUpdate, mobileOnly, realIsOwner, onStartImpersonate }) {
   // Filtra owners do AppTip — eles têm acesso implícito, não constam como pessoa do restaurante
   const ownerCpfSet = new Set((owners || []).map(o => (o.cpf || "").replace(/\D/g, "")).filter(Boolean));
@@ -18783,17 +19245,20 @@ function PessoasAdmin({ restaurantId, pessoas, roles, owners, employees, restCod
     return true;
   });
   const [filter, setFilter] = useState("");
-  // Form expandido: globais (nome/CPF/email/wa/emergência) + por-rest (cargo/admissão se for equipe)
+  const [vincFilter, setVincFilter] = useState("todos"); // todos | equipe | freela | sem
+  // Form expandido: globais (nome/CPF/email/wa/emergência/pix) + por-rest (cargo/admissão se equipe; isFreela)
   const [form, setForm] = useState({
     name: "", cpf: "", email: "", whatsapp: "", pin: "",
-    emergencyName: "", emergencyPhone: "",
+    emergencyName: "", emergencyPhone: "", pix: "",
     isTeam: false, roleId: "", admission: "",
+    isFreela: false,
   });
   const [editingId, setEditingId] = useState(null);
   const [editForm, setEditForm] = useState({
     name: "", cpf: "", email: "", whatsapp: "", pin: "",
-    emergencyName: "", emergencyPhone: "",
+    emergencyName: "", emergencyPhone: "", pix: "",
     isTeam: false, roleId: "", admission: "",
+    isFreela: false,
   });
   const [vincularOpen, setVincularOpen] = useState(false);
   const [vincularFilter, setVincularFilter] = useState("");
@@ -19133,6 +19598,11 @@ Regras:
       onUpdate("pessoas", next);
       return;
     }
+    // Validações extras para freela
+    if (form.isFreela) {
+      if (!form.whatsapp.trim()) { alert("Telefone/WhatsApp é obrigatório para freela."); return; }
+      if (!form.pix.trim()) { alert("Chave PIX é obrigatória para freela."); return; }
+    }
     const id = `pes_${Date.now().toString(36)}${Math.random().toString(36).slice(2,6)}`;
     const newP = {
       id,
@@ -19145,6 +19615,8 @@ Regras:
       whatsapp: form.whatsapp.trim() || null,
       emergencyName: form.emergencyName.trim() || null,
       emergencyPhone: form.emergencyPhone.trim() || null,
+      pix: form.pix.trim() || null,
+      isFreela: !!form.isFreela,
       isTeam: form.isTeam ? { [restaurantId]: true } : {},
       teamData: form.isTeam ? {
         [restaurantId]: {
@@ -19163,10 +19635,13 @@ Regras:
       onUpdate("employees", nextEmployees);
     }
     onUpdate("pessoas", [...(pessoas || []), pessoaToSave]);
-    setForm({ name: "", cpf: "", email: "", whatsapp: "", pin: "", emergencyName: "", emergencyPhone: "", isTeam: false, roleId: "", admission: "" });
-    onUpdate("_toast", form.isTeam
-      ? `✅ ${nm} cadastrada e vinculada como empregado`
-      : `✅ ${nm} cadastrada (sem vínculo de equipe)`);
+    setForm({ name: "", cpf: "", email: "", whatsapp: "", pin: "", emergencyName: "", emergencyPhone: "", pix: "", isTeam: false, roleId: "", admission: "", isFreela: false });
+    const tags = [];
+    if (form.isTeam) tags.push("equipe");
+    if (form.isFreela) tags.push("freela");
+    onUpdate("_toast", tags.length > 0
+      ? `✅ ${nm} cadastrada (${tags.join(" + ")})`
+      : `✅ ${nm} cadastrada`);
   }
 
   function startEdit(p) {
@@ -19180,9 +19655,11 @@ Regras:
       pin: p.pin ?? "",
       emergencyName: p.emergencyName ?? "",
       emergencyPhone: p.emergencyPhone ?? "",
+      pix: p.pix ?? "",
       isTeam: !!p.isTeam?.[restaurantId],
       roleId: td.roleId ?? "",
       admission: td.admission ?? "",
+      isFreela: !!p.isFreela,
     });
   }
   function saveEdit() {
@@ -19205,6 +19682,8 @@ Regras:
         whatsapp: editForm.whatsapp.trim() || null,
         emergencyName: editForm.emergencyName.trim() || null,
         emergencyPhone: editForm.emergencyPhone.trim() || null,
+        pix: editForm.pix.trim() || null,
+        isFreela: !!editForm.isFreela,
         pin: editForm.pin.trim() || p.pin,
         isTeam: { ...(p.isTeam || {}), [restaurantId]: willBeTeam },
         teamData: {
@@ -19256,7 +19735,18 @@ Regras:
   }
 
   const q = filter.trim().toLowerCase();
-  const filtered = q ? restPessoas.filter(p => p.name.toLowerCase().includes(q) || (p.cpf || "").includes(q)) : restPessoas;
+  let filtered = q ? restPessoas.filter(p => p.name.toLowerCase().includes(q) || (p.cpf || "").includes(q)) : restPessoas;
+  // Filtro por vínculo
+  if (vincFilter !== "todos") {
+    filtered = filtered.filter(p => {
+      const isTeam = !!p.isTeam?.[restaurantId];
+      const isFreela = !!p.isFreela;
+      if (vincFilter === "equipe") return isTeam;
+      if (vincFilter === "freela") return isFreela;
+      if (vincFilter === "sem") return !isTeam && !isFreela;
+      return true;
+    });
+  }
   const restRoles = (roles || []).filter(r => r.restaurantId === restaurantId);
 
   return (
@@ -19323,14 +19813,18 @@ Regras:
 
         {/* SEÇÃO: Contato */}
         <div style={{fontSize:10,color:"var(--text3)",fontWeight:700,textTransform:"uppercase",letterSpacing:0.4,marginBottom:8,marginTop:6}}>Contato</div>
-        <div style={{display:"grid",gridTemplateColumns:mobileOnly?"1fr":"1fr 1fr",gap:8,marginBottom:10}}>
+        <div style={{display:"grid",gridTemplateColumns:mobileOnly?"1fr":"1fr 1fr 1fr",gap:8,marginBottom:10}}>
           <div>
             <label style={{...S.label,fontSize:11}}>Email</label>
             <input value={form.email} onChange={e=>setForm({...form,email:e.target.value})} placeholder="opcional" style={S.input} />
           </div>
           <div>
-            <label style={{...S.label,fontSize:11}}>WhatsApp</label>
-            <input value={form.whatsapp} onChange={e=>setForm({...form,whatsapp:e.target.value})} placeholder="opcional" style={S.input} />
+            <label style={{...S.label,fontSize:11}}>WhatsApp {form.isFreela && <span style={{color:"#7c3aed"}}>*</span>}</label>
+            <input value={form.whatsapp} onChange={e=>setForm({...form,whatsapp:e.target.value})} placeholder={form.isFreela?"obrigatório":"opcional"} style={{...S.input,borderColor:form.isFreela&&!form.whatsapp.trim()?"#7c3aed66":"var(--border)"}} />
+          </div>
+          <div>
+            <label style={{...S.label,fontSize:11}}>PIX {form.isFreela && <span style={{color:"#7c3aed"}}>*</span>}</label>
+            <input value={form.pix} onChange={e=>setForm({...form,pix:e.target.value})} placeholder={form.isFreela?"obrigatório (CPF/email/tel/chave)":"opcional"} style={{...S.input,borderColor:form.isFreela&&!form.pix.trim()?"#7c3aed66":"var(--border)"}} />
           </div>
         </div>
 
@@ -19376,6 +19870,20 @@ Regras:
           )}
         </div>
 
+        {/* SEÇÃO: É freela neste restaurante (toggle independente — pode coexistir com equipe) */}
+        <div style={{marginTop:8,padding:"10px 12px",background: form.isFreela?"#7c3aed11":"var(--bg2)",border:`1px solid ${form.isFreela?"#7c3aed44":"var(--border)"}`,borderRadius:10}}>
+          <label style={{display:"flex",alignItems:"center",gap:10,cursor:"pointer",userSelect:"none"}}>
+            <input type="checkbox" checked={form.isFreela} onChange={e=>setForm({...form,isFreela:e.target.checked})}
+              style={{cursor:"pointer",width:18,height:18,accentColor:"#7c3aed"}}/>
+            <div style={{flex:1}}>
+              <div style={{fontSize:13,fontWeight:700,color:form.isFreela?"#7c3aed":"var(--text)"}}>🎒 É freela neste restaurante</div>
+              <div style={{fontSize:11,color:"var(--text3)",marginTop:2,lineHeight:1.45}}>
+                Pega shifts pontuais (não entra em gorjeta). PIX e WhatsApp viram <strong>obrigatórios</strong> — necessários pra pagamento.
+              </div>
+            </div>
+          </label>
+        </div>
+
         <div style={{display:"flex",justifyContent:"flex-end",marginTop:12}}>
           <button onClick={addPessoa} disabled={!form.name.trim()} style={{background:"var(--ac)",color:"#fff",border:"none",borderRadius:8,padding:"10px 24px",fontSize:13,fontWeight:700,cursor:!form.name.trim()?"not-allowed":"pointer",fontFamily:"'DM Sans',sans-serif",opacity:!form.name.trim()?0.5:1}}>
             + Adicionar pessoa
@@ -19389,8 +19897,16 @@ Regras:
 
       {/* Filter */}
       <div style={{marginBottom:10,display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
-        <input value={filter} onChange={e=>setFilter(e.target.value)} placeholder="🔍 Buscar por nome ou CPF..." style={{...S.input,maxWidth:360,flex:"1 1 220px"}} />
-        <div style={{fontSize:11,color:"var(--text3)"}}>{restPessoas.length} pessoa(s) · {restPessoas.filter(p => p.isTeam?.[restaurantId]).length} na equipe</div>
+        <input value={filter} onChange={e=>setFilter(e.target.value)} placeholder="🔍 Buscar por nome ou CPF..." style={{...S.input,maxWidth:280,flex:"1 1 200px"}} />
+        <select value={vincFilter} onChange={e=>setVincFilter(e.target.value)} style={{...S.input,maxWidth:170,fontSize:12,padding:"7px 10px",cursor:"pointer"}}>
+          <option value="todos">📋 Todos</option>
+          <option value="equipe">👥 Equipe (CLT)</option>
+          <option value="freela">🎒 Freelas</option>
+          <option value="sem">— Sem vínculo</option>
+        </select>
+        <div style={{fontSize:11,color:"var(--text3)"}}>
+          {restPessoas.length} pessoa(s) · {restPessoas.filter(p => p.isTeam?.[restaurantId]).length} equipe · {restPessoas.filter(p => p.isFreela).length} freela
+        </div>
       </div>
 
       {/* Lista */}
@@ -19408,7 +19924,7 @@ Regras:
             if (isEditing) {
               return (
                 <div key={p.id} style={{padding:"14px",background:"var(--bg2)",border:`1px solid ${miseAc}66`,borderRadius:10}}>
-                  <div style={{display:"grid",gridTemplateColumns:mobileOnly?"1fr":"2fr 1.5fr 1fr 1.5fr 1.5fr",gap:8,marginBottom:10}}>
+                  <div style={{display:"grid",gridTemplateColumns:mobileOnly?"1fr":"2fr 1.5fr 1fr",gap:8,marginBottom:10}}>
                     <div>
                       <label style={{...S.label,fontSize:11}}>Nome</label>
                       <input value={editForm.name} onChange={e=>setEditForm({...editForm,name:e.target.value})} style={S.input} autoFocus />
@@ -19421,13 +19937,19 @@ Regras:
                       <label style={{...S.label,fontSize:11}}>PIN</label>
                       <input maxLength={4} value={editForm.pin} onChange={e=>setEditForm({...editForm,pin:e.target.value.replace(/\D/g,"").slice(0,4)})} style={{...S.input,fontFamily:"'DM Mono',monospace",textAlign:"center",letterSpacing:4}} />
                     </div>
+                  </div>
+                  <div style={{display:"grid",gridTemplateColumns:mobileOnly?"1fr":"1fr 1fr 1fr",gap:8,marginBottom:10}}>
                     <div>
                       <label style={{...S.label,fontSize:11}}>Email</label>
                       <input value={editForm.email} onChange={e=>setEditForm({...editForm,email:e.target.value})} style={S.input} />
                     </div>
                     <div>
-                      <label style={{...S.label,fontSize:11}}>WhatsApp</label>
-                      <input value={editForm.whatsapp} onChange={e=>setEditForm({...editForm,whatsapp:e.target.value})} style={S.input} />
+                      <label style={{...S.label,fontSize:11}}>WhatsApp {editForm.isFreela && <span style={{color:"#7c3aed"}}>*</span>}</label>
+                      <input value={editForm.whatsapp} onChange={e=>setEditForm({...editForm,whatsapp:e.target.value})} style={{...S.input,borderColor:editForm.isFreela&&!editForm.whatsapp.trim()?"#7c3aed66":"var(--border)"}} />
+                    </div>
+                    <div>
+                      <label style={{...S.label,fontSize:11}}>PIX {editForm.isFreela && <span style={{color:"#7c3aed"}}>*</span>}</label>
+                      <input value={editForm.pix} onChange={e=>setEditForm({...editForm,pix:e.target.value})} placeholder="CPF/email/tel/chave" style={{...S.input,borderColor:editForm.isFreela&&!editForm.pix.trim()?"#7c3aed66":"var(--border)"}} />
                     </div>
                   </div>
                   {/* Campos de equipe */}
@@ -19453,9 +19975,23 @@ Regras:
                       </div>
                     )}
                   </div>
+                  {/* Toggle freela */}
+                  <div style={{padding:"10px 12px",background:editForm.isFreela?"#7c3aed11":"var(--card-bg)",border:`1px solid ${editForm.isFreela?"#7c3aed44":"var(--border)"}`,borderRadius:8,marginBottom:10}}>
+                    <label style={{display:"flex",alignItems:"center",gap:8,cursor:"pointer"}}>
+                      <input type="checkbox" checked={editForm.isFreela} onChange={e=>setEditForm({...editForm,isFreela:e.target.checked})} style={{cursor:"pointer",accentColor:"#7c3aed",width:18,height:18}} />
+                      <span style={{fontSize:13,color:editForm.isFreela?"#7c3aed":"var(--text)",fontWeight:600}}>🎒 É freela neste restaurante</span>
+                      <span style={{fontSize:11,color:"var(--text3)",fontWeight:400}}>(pega shifts pontuais — PIX e WhatsApp obrigatórios)</span>
+                    </label>
+                  </div>
                   <div style={{display:"flex",gap:8,justifyContent:"flex-end"}}>
                     <button onClick={()=>setEditingId(null)} style={{...S.btnSecondary,fontSize:12,padding:"6px 14px"}}>Cancelar</button>
-                    <button onClick={saveEdit} style={{...S.btnPrimary,fontSize:12,padding:"6px 14px"}}>💾 Salvar</button>
+                    <button onClick={()=>{
+                      if (editForm.isFreela) {
+                        if (!editForm.whatsapp.trim()) { alert("Telefone/WhatsApp é obrigatório para freela."); return; }
+                        if (!editForm.pix.trim()) { alert("Chave PIX é obrigatória para freela."); return; }
+                      }
+                      saveEdit();
+                    }} style={{...S.btnPrimary,fontSize:12,padding:"6px 14px"}}>💾 Salvar</button>
                   </div>
                 </div>
               );
@@ -19466,6 +20002,7 @@ Regras:
                   <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
                     <span style={{color:"var(--text)",fontWeight:600}}>{p.name}</span>
                     {isTeam && <span style={{fontSize:10,padding:"1px 8px",borderRadius:10,background:miseAc+"22",color:"#15803d",fontWeight:700,letterSpacing:0.4}}>EQUIPE</span>}
+                    {p.isFreela && <span style={{fontSize:10,padding:"1px 8px",borderRadius:10,background:"#7c3aed22",color:"#7c3aed",fontWeight:700,letterSpacing:0.4}}>FREELA</span>}
                     {p.linkedManagerId && <span style={{fontSize:10,padding:"1px 8px",borderRadius:10,background:"var(--ac)22",color:"var(--ac)",fontWeight:700,letterSpacing:0.4}}>GESTOR</span>}
                     {p.restaurantIds.length > 1 && <span style={{fontSize:10,padding:"1px 8px",borderRadius:10,background:"var(--bg2)",color:"var(--text3)",fontWeight:700}}>{p.restaurantIds.length}× rest.</span>}
                     {p.mustChangePin && <span style={{fontSize:10,padding:"1px 8px",borderRadius:10,background:"#fffbeb",color:"#d97706",fontWeight:700,letterSpacing:0.4}}>PIN INICIAL</span>}
@@ -27704,6 +28241,8 @@ export default function App() {
   const [tempReadings,       setTempReadings]       = useState([]);
   const [tempAlerts,         setTempAlerts]         = useState([]);
   const [permProfiles,       setPermProfiles]       = useState({});
+  const [freelaShifts,       setFreelaShifts]       = useState([]);
+  const [freelaPagamentos,   setFreelaPagamentos]   = useState([]);
 
   useEffect(() => {
     const savedId = currentUserId;
@@ -27731,7 +28270,7 @@ export default function App() {
       setLoadProgress("Preparando o sistema...");
 
       const keys = keyNames;
-      const map = { owners:setOwners, managers:setManagers, restaurants:setRestaurants, employees:setEmployees, roles:setRoles, tips:setTips, splits:setSplits, schedules:setSchedules, communications:setCommunications, commAcks:setCommAcks, faq:setFaq, dpMessages:setDpMessages, workSchedules:setWorkSchedules, notifications:setNotifications, noTipDays:setNoTipDays, trash:setTrash, schedTemplates:setSchedTemplates, schedDrafts:setSchedDrafts, scheduleVersions:setScheduleVersions, tipVersions:setTipVersions, vtConfig:setVtConfig, vtMonthly:setVtMonthly, vtPayments:setVtPayments, incidents:setIncidents, feedbacks:setFeedbacks, devChecklists:setDevChecklists, scheduleAdjustments:setScheduleAdjustments, scheduleStatus:setScheduleStatus, schedulePrevista:setSchedulePrevista, employeeGoals:setEmployeeGoals, delays:setDelays, tipApprovals:setTipApprovals, meetingPlans:setMeetingPlans, meetingIdeas:setMeetingIdeas, meetingAgendas:setMeetingAgendas, meetingActions:setMeetingActions, meetingOccurrences:setMeetingOccurrences, meetingPendencias:setMeetingPendencias, inbox:setInbox, inboxFolders:setInboxFolders, miseCategories:setMiseCategories, miseStocks:setMiseStocks, miseAssignments:setMiseAssignments, miseItems:setMiseItems, miseCycles:setMiseCycles, miseCounts:setMiseCounts, miseSuppliers:setMiseSuppliers, miseProductSuppliers:setMiseProductSuppliers, miseSupplierOrders:setMiseSupplierOrders, miseChecklistTemplates:setMiseChecklistTemplates, miseChecklistRuns:setMiseChecklistRuns, miseFtInsumos:setMiseFtInsumos, miseFtEquipamentos:setMiseFtEquipamentos, miseFtDishes:setMiseFtDishes, pessoas:setPessoas, pessoasMigratedAt:setPessoasMigratedAt, tuyaLinks:setTuyaLinks, tempSensors:setTempSensors, tempReadings:setTempReadings, tempAlerts:setTempAlerts, permProfiles:setPermProfiles };
+      const map = { owners:setOwners, managers:setManagers, restaurants:setRestaurants, employees:setEmployees, roles:setRoles, tips:setTips, splits:setSplits, schedules:setSchedules, communications:setCommunications, commAcks:setCommAcks, faq:setFaq, dpMessages:setDpMessages, workSchedules:setWorkSchedules, notifications:setNotifications, noTipDays:setNoTipDays, trash:setTrash, schedTemplates:setSchedTemplates, schedDrafts:setSchedDrafts, scheduleVersions:setScheduleVersions, tipVersions:setTipVersions, vtConfig:setVtConfig, vtMonthly:setVtMonthly, vtPayments:setVtPayments, incidents:setIncidents, feedbacks:setFeedbacks, devChecklists:setDevChecklists, scheduleAdjustments:setScheduleAdjustments, scheduleStatus:setScheduleStatus, schedulePrevista:setSchedulePrevista, employeeGoals:setEmployeeGoals, delays:setDelays, tipApprovals:setTipApprovals, meetingPlans:setMeetingPlans, meetingIdeas:setMeetingIdeas, meetingAgendas:setMeetingAgendas, meetingActions:setMeetingActions, meetingOccurrences:setMeetingOccurrences, meetingPendencias:setMeetingPendencias, inbox:setInbox, inboxFolders:setInboxFolders, miseCategories:setMiseCategories, miseStocks:setMiseStocks, miseAssignments:setMiseAssignments, miseItems:setMiseItems, miseCycles:setMiseCycles, miseCounts:setMiseCounts, miseSuppliers:setMiseSuppliers, miseProductSuppliers:setMiseProductSuppliers, miseSupplierOrders:setMiseSupplierOrders, miseChecklistTemplates:setMiseChecklistTemplates, miseChecklistRuns:setMiseChecklistRuns, miseFtInsumos:setMiseFtInsumos, miseFtEquipamentos:setMiseFtEquipamentos, miseFtDishes:setMiseFtDishes, pessoas:setPessoas, pessoasMigratedAt:setPessoasMigratedAt, tuyaLinks:setTuyaLinks, tempSensors:setTempSensors, tempReadings:setTempReadings, tempAlerts:setTempAlerts, permProfiles:setPermProfiles, freelaShifts:setFreelaShifts, freelaPagamentos:setFreelaPagamentos };
       const loaded_data = {};
       let successCount = 0;
       keys.forEach((k, i) => {
@@ -27907,7 +28446,7 @@ export default function App() {
     }
   }, [loaded, employees.length, managers.length]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const data = { owners, managers, restaurants, employees, roles, tips, splits, schedules, communications, commAcks, faq, dpMessages, workSchedules, notifications, noTipDays, trash, schedTemplates, schedDrafts, scheduleVersions, tipVersions, vtConfig, vtMonthly, vtPayments, incidents, feedbacks, devChecklists, scheduleAdjustments, scheduleStatus, schedulePrevista, employeeGoals, delays, tipApprovals, meetingPlans, meetingIdeas, meetingAgendas, meetingActions, meetingOccurrences, meetingPendencias, inbox, inboxFolders, miseCategories, miseStocks, miseAssignments, miseItems, miseCycles, miseCounts, miseSuppliers, miseProductSuppliers, miseSupplierOrders, miseChecklistTemplates, miseChecklistRuns, miseFtInsumos, miseFtEquipamentos, miseFtDishes, pessoas, pessoasMigratedAt, tuyaLinks, tempSensors, tempReadings, tempAlerts, permProfiles };
+  const data = { owners, managers, restaurants, employees, roles, tips, splits, schedules, communications, commAcks, faq, dpMessages, workSchedules, notifications, noTipDays, trash, schedTemplates, schedDrafts, scheduleVersions, tipVersions, vtConfig, vtMonthly, vtPayments, incidents, feedbacks, devChecklists, scheduleAdjustments, scheduleStatus, schedulePrevista, employeeGoals, delays, tipApprovals, meetingPlans, meetingIdeas, meetingAgendas, meetingActions, meetingOccurrences, meetingPendencias, inbox, inboxFolders, miseCategories, miseStocks, miseAssignments, miseItems, miseCycles, miseCounts, miseSuppliers, miseProductSuppliers, miseSupplierOrders, miseChecklistTemplates, miseChecklistRuns, miseFtInsumos, miseFtEquipamentos, miseFtDishes, pessoas, pessoasMigratedAt, tuyaLinks, tempSensors, tempReadings, tempAlerts, permProfiles, freelaShifts, freelaPagamentos };
 
   async function handleUpdate(field, value) {
     if (field === "_toast") { setToast(value); return; }
@@ -27916,8 +28455,8 @@ export default function App() {
       setToast("⚠️ Você está offline — conecte à internet para salvar alterações");
       return;
     }
-    const setters = { owners:setOwners, managers:setManagers, restaurants:setRestaurants, employees:setEmployees, roles:setRoles, tips:setTips, splits:setSplits, schedules:setSchedules, communications:setCommunications, commAcks:setCommAcks, faq:setFaq, dpMessages:setDpMessages, workSchedules:setWorkSchedules, notifications:setNotifications, noTipDays:setNoTipDays, trash:setTrash, schedTemplates:setSchedTemplates, schedDrafts:setSchedDrafts, scheduleVersions:setScheduleVersions, tipVersions:setTipVersions, vtConfig:setVtConfig, vtMonthly:setVtMonthly, vtPayments:setVtPayments, incidents:setIncidents, feedbacks:setFeedbacks, devChecklists:setDevChecklists, scheduleAdjustments:setScheduleAdjustments, scheduleStatus:setScheduleStatus, schedulePrevista:setSchedulePrevista, employeeGoals:setEmployeeGoals, delays:setDelays, tipApprovals:setTipApprovals, meetingPlans:setMeetingPlans, meetingIdeas:setMeetingIdeas, meetingAgendas:setMeetingAgendas, meetingActions:setMeetingActions, meetingOccurrences:setMeetingOccurrences, meetingPendencias:setMeetingPendencias, inbox:setInbox, inboxFolders:setInboxFolders, miseCategories:setMiseCategories, miseStocks:setMiseStocks, miseAssignments:setMiseAssignments, miseItems:setMiseItems, miseCycles:setMiseCycles, miseCounts:setMiseCounts, miseSuppliers:setMiseSuppliers, miseProductSuppliers:setMiseProductSuppliers, miseSupplierOrders:setMiseSupplierOrders, miseChecklistTemplates:setMiseChecklistTemplates, miseChecklistRuns:setMiseChecklistRuns, miseFtInsumos:setMiseFtInsumos, miseFtEquipamentos:setMiseFtEquipamentos, miseFtDishes:setMiseFtDishes, pessoas:setPessoas, pessoasMigratedAt:setPessoasMigratedAt, tuyaLinks:setTuyaLinks, tempSensors:setTempSensors, tempReadings:setTempReadings, tempAlerts:setTempAlerts, permProfiles:setPermProfiles };
-    const keys    = { owners:K.owners, managers:K.managers, restaurants:K.restaurants, employees:K.employees, roles:K.roles, tips:K.tips, splits:K.splits, schedules:K.schedules, communications:K.communications, commAcks:K.commAcks, faq:K.faq, dpMessages:K.dpMessages, workSchedules:K.workSchedules, notifications:K.notifications, noTipDays:K.noTipDays, trash:K.trash, schedTemplates:K.schedTemplates, schedDrafts:K.schedDrafts, scheduleVersions:K.scheduleVersions, tipVersions:K.tipVersions, vtConfig:K.vtConfig, vtMonthly:K.vtMonthly, vtPayments:K.vtPayments, incidents:K.incidents, feedbacks:K.feedbacks, devChecklists:K.devChecklists, scheduleAdjustments:K.scheduleAdjustments, scheduleStatus:K.scheduleStatus, schedulePrevista:K.schedulePrevista, employeeGoals:K.employeeGoals, delays:K.delays, tipApprovals:K.tipApprovals, meetingPlans:K.meetingPlans, meetingIdeas:K.meetingIdeas, meetingAgendas:K.meetingAgendas, meetingActions:K.meetingActions, inbox:K.inbox, inboxFolders:K.inboxFolders, miseCategories:K.miseCategories, miseStocks:K.miseStocks, miseAssignments:K.miseAssignments, miseItems:K.miseItems, miseCycles:K.miseCycles, miseCounts:K.miseCounts, miseSuppliers:K.miseSuppliers, miseProductSuppliers:K.miseProductSuppliers, miseSupplierOrders:K.miseSupplierOrders, miseChecklistTemplates:K.miseChecklistTemplates, miseChecklistRuns:K.miseChecklistRuns, miseFtInsumos:K.miseFtInsumos, miseFtEquipamentos:K.miseFtEquipamentos, miseFtDishes:K.miseFtDishes, pessoas:K.pessoas, pessoasMigratedAt:K.pessoasMigratedAt, tuyaLinks:K.tuyaLinks, tempSensors:K.tempSensors, tempReadings:K.tempReadings, tempAlerts:K.tempAlerts, permProfiles:K.permProfiles };
+    const setters = { owners:setOwners, managers:setManagers, restaurants:setRestaurants, employees:setEmployees, roles:setRoles, tips:setTips, splits:setSplits, schedules:setSchedules, communications:setCommunications, commAcks:setCommAcks, faq:setFaq, dpMessages:setDpMessages, workSchedules:setWorkSchedules, notifications:setNotifications, noTipDays:setNoTipDays, trash:setTrash, schedTemplates:setSchedTemplates, schedDrafts:setSchedDrafts, scheduleVersions:setScheduleVersions, tipVersions:setTipVersions, vtConfig:setVtConfig, vtMonthly:setVtMonthly, vtPayments:setVtPayments, incidents:setIncidents, feedbacks:setFeedbacks, devChecklists:setDevChecklists, scheduleAdjustments:setScheduleAdjustments, scheduleStatus:setScheduleStatus, schedulePrevista:setSchedulePrevista, employeeGoals:setEmployeeGoals, delays:setDelays, tipApprovals:setTipApprovals, meetingPlans:setMeetingPlans, meetingIdeas:setMeetingIdeas, meetingAgendas:setMeetingAgendas, meetingActions:setMeetingActions, meetingOccurrences:setMeetingOccurrences, meetingPendencias:setMeetingPendencias, inbox:setInbox, inboxFolders:setInboxFolders, miseCategories:setMiseCategories, miseStocks:setMiseStocks, miseAssignments:setMiseAssignments, miseItems:setMiseItems, miseCycles:setMiseCycles, miseCounts:setMiseCounts, miseSuppliers:setMiseSuppliers, miseProductSuppliers:setMiseProductSuppliers, miseSupplierOrders:setMiseSupplierOrders, miseChecklistTemplates:setMiseChecklistTemplates, miseChecklistRuns:setMiseChecklistRuns, miseFtInsumos:setMiseFtInsumos, miseFtEquipamentos:setMiseFtEquipamentos, miseFtDishes:setMiseFtDishes, pessoas:setPessoas, pessoasMigratedAt:setPessoasMigratedAt, tuyaLinks:setTuyaLinks, tempSensors:setTempSensors, tempReadings:setTempReadings, tempAlerts:setTempAlerts, permProfiles:setPermProfiles, freelaShifts:setFreelaShifts, freelaPagamentos:setFreelaPagamentos };
+    const keys    = { owners:K.owners, managers:K.managers, restaurants:K.restaurants, employees:K.employees, roles:K.roles, tips:K.tips, splits:K.splits, schedules:K.schedules, communications:K.communications, commAcks:K.commAcks, faq:K.faq, dpMessages:K.dpMessages, workSchedules:K.workSchedules, notifications:K.notifications, noTipDays:K.noTipDays, trash:K.trash, schedTemplates:K.schedTemplates, schedDrafts:K.schedDrafts, scheduleVersions:K.scheduleVersions, tipVersions:K.tipVersions, vtConfig:K.vtConfig, vtMonthly:K.vtMonthly, vtPayments:K.vtPayments, incidents:K.incidents, feedbacks:K.feedbacks, devChecklists:K.devChecklists, scheduleAdjustments:K.scheduleAdjustments, scheduleStatus:K.scheduleStatus, schedulePrevista:K.schedulePrevista, employeeGoals:K.employeeGoals, delays:K.delays, tipApprovals:K.tipApprovals, meetingPlans:K.meetingPlans, meetingIdeas:K.meetingIdeas, meetingAgendas:K.meetingAgendas, meetingActions:K.meetingActions, inbox:K.inbox, inboxFolders:K.inboxFolders, miseCategories:K.miseCategories, miseStocks:K.miseStocks, miseAssignments:K.miseAssignments, miseItems:K.miseItems, miseCycles:K.miseCycles, miseCounts:K.miseCounts, miseSuppliers:K.miseSuppliers, miseProductSuppliers:K.miseProductSuppliers, miseSupplierOrders:K.miseSupplierOrders, miseChecklistTemplates:K.miseChecklistTemplates, miseChecklistRuns:K.miseChecklistRuns, miseFtInsumos:K.miseFtInsumos, miseFtEquipamentos:K.miseFtEquipamentos, miseFtDishes:K.miseFtDishes, pessoas:K.pessoas, pessoasMigratedAt:K.pessoasMigratedAt, tuyaLinks:K.tuyaLinks, tempSensors:K.tempSensors, tempReadings:K.tempReadings, tempAlerts:K.tempAlerts, permProfiles:K.permProfiles, freelaShifts:K.freelaShifts, freelaPagamentos:K.freelaPagamentos };
     // Support functional updates to prevent stale-state race conditions:
     // When value is a function, it receives the latest state (like setState(prev => ...))
     let resolvedValue;
