@@ -19056,6 +19056,32 @@ Regras:
     });
   }
 
+  // ── Detecção de pessoas órfãs (isTeam=true mas sem employee record correspondente) ──
+  // Pode acontecer com cadastros antigos feitos antes do auto-vínculo.
+  const orphanPessoas = restPessoas.filter(p => {
+    if (!p.isTeam?.[restaurantId]) return false;
+    const hasEmp = (employees || []).some(e =>
+      e.restaurantId === restaurantId && (e.linkedPessoaId === p.id || e.id === p.linkedEmployeeId)
+    );
+    return !hasEmp;
+  });
+
+  async function syncOrphanPessoas() {
+    if (orphanPessoas.length === 0) return;
+    if (!await appConfirm(`${orphanPessoas.length} pessoa${orphanPessoas.length===1?"":"s"} marcada${orphanPessoas.length===1?"":"s"} como equipe ainda não está${orphanPessoas.length===1?"":"o"} vinculada${orphanPessoas.length===1?"":"s"} ao registro de Empregados.\n\nCriar agora os registros e fazer aparecer em Equipe?`)) return;
+    let nextEmployees = [...(employees || [])];
+    let nextPessoas = [...(pessoas || [])];
+    orphanPessoas.forEach(p => {
+      const td = p.teamData?.[restaurantId] || {};
+      const sync = syncEmployeeForPessoa(p, nextEmployees, td.roleId, td.admission);
+      nextEmployees = sync.nextEmployees;
+      nextPessoas = nextPessoas.map(x => x.id === p.id ? { ...x, linkedEmployeeId: sync.employeeId } : x);
+    });
+    onUpdate("employees", nextEmployees);
+    onUpdate("pessoas", nextPessoas);
+    onUpdate("_toast", `✅ ${orphanPessoas.length} pessoa${orphanPessoas.length===1?"":"s"} sincronizada${orphanPessoas.length===1?"":"s"} com Equipe`);
+  }
+
   async function addPessoa() {
     const nm = form.name.trim();
     const cpfRaw = (form.cpf || "").replace(/\D/g, "");
@@ -19220,6 +19246,30 @@ Regras:
           )}
         </div>
       </div>
+
+      {/* Banner de órfãs — pessoas marcadas como equipe sem employee record */}
+      {orphanPessoas.length > 0 && (
+        <div style={{padding:"12px 14px",background:"#fef3c7",border:"1px solid #f59e0b66",borderRadius:10,marginBottom:14,display:"flex",alignItems:"center",justifyContent:"space-between",flexWrap:"wrap",gap:10}}>
+          <div style={{display:"flex",alignItems:"flex-start",gap:10,flex:"1 1 300px"}}>
+            <span style={{fontSize:18,marginTop:1}}>⚠️</span>
+            <div>
+              <div style={{fontSize:13,color:"#92400e",fontWeight:700}}>
+                {orphanPessoas.length} pessoa{orphanPessoas.length===1?"":"s"} marcada{orphanPessoas.length===1?"":"s"} como equipe ainda não aparece{orphanPessoas.length===1?"":"m"} em Equipe
+              </div>
+              <div style={{fontSize:11,color:"#92400e",marginTop:3,lineHeight:1.5}}>
+                Cadastros antigos sem o vínculo automático. Click pra criar os registros faltantes.
+              </div>
+              <div style={{fontSize:10,color:"#78350f",marginTop:4,fontFamily:"'DM Mono',monospace",opacity:0.8}}>
+                {orphanPessoas.slice(0,5).map(p => p.name).join(" · ")}{orphanPessoas.length > 5 ? ` · +${orphanPessoas.length-5}` : ""}
+              </div>
+            </div>
+          </div>
+          <button onClick={syncOrphanPessoas}
+            style={{background:"#f59e0b",color:"#fff",border:"none",borderRadius:8,padding:"8px 16px",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"'DM Sans',sans-serif",whiteSpace:"nowrap"}}>
+            🔄 Sincronizar com Equipe
+          </button>
+        </div>
+      )}
       {/* Form adicionar — todos os campos da pessoa, com toggle "É equipe" liberando cargo + admissão */}
       <div style={{padding:"14px 16px",background:"var(--card-bg)",border:"1px solid var(--border)",borderRadius:10,marginBottom:16}}>
         {/* SEÇÃO: Dados pessoais (globais) */}
