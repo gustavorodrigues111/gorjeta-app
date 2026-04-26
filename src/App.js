@@ -2628,12 +2628,13 @@ function validateWeekSchedule(days) {
 }
 
 // ── Work Schedule Manager Tab ─────────────────────────────────────────────────
-function WorkScheduleManagerTab({ restaurantId, employees, roles, workSchedules, notifications, managers, currentManagerName, onUpdate, communications, isOwner, mobileOnly }) {
+function WorkScheduleManagerTab({ restaurantId, employees, roles, workSchedules, notifications, managers, currentManagerName, onUpdate, communications, isOwner, mobileOnly, forcedEmpId }) {
   const ac = "var(--ac)";
   const restEmps = employees.filter(e => e.restaurantId === restaurantId && !e.inactive);
 
   // ── State ──
-  const [selEmpId, setSelEmpId]             = useState(null);
+  // Se `forcedEmpId` vier (uso embutido em detalhe do empregado), pré-seleciona e esconde dropdown
+  const [selEmpId, setSelEmpId]             = useState(forcedEmpId || null);
   const [editDays, setEditDays]             = useState({});   // {dayIdx: {active:bool, in?, out?, break?}}
   const [errors, setErrors]                 = useState([]);
   const [showValidFrom, setShowValidFrom]   = useState(false);
@@ -2644,6 +2645,11 @@ function WorkScheduleManagerTab({ restaurantId, employees, roles, workSchedules,
 
   const selEmp = restEmps.find(e => e.id === selEmpId);
   const empSchedules = workSchedules?.[restaurantId]?.[selEmpId] ?? [];
+
+  // Sincroniza com forcedEmpId externo (modo embutido em detalhe do empregado)
+  useEffect(() => {
+    if (forcedEmpId && forcedEmpId !== selEmpId) setSelEmpId(forcedEmpId);
+  }, [forcedEmpId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Helpers: convert between internal format (with active flag) and storage format ──
   function toInternal(storedEntry) {
@@ -3268,9 +3274,11 @@ function WorkScheduleManagerTab({ restaurantId, employees, roles, workSchedules,
     <div>
       {/* Header */}
       <div style={{display:"flex",alignItems:"center",gap:mobileOnly?6:10,marginBottom:mobileOnly?10:16,flexWrap:"wrap"}}>
-        <button onClick={()=>{setSelEmpId(null);setErrors([]);setShowValidFrom(false);setSaveMode(null);setValidated(false);}} style={{...S.btnSecondary,fontSize:mobileOnly?11:12,padding:mobileOnly?"5px 10px":"6px 14px"}}>← Voltar</button>
+        {!forcedEmpId && (
+          <button onClick={()=>{setSelEmpId(null);setErrors([]);setShowValidFrom(false);setSaveMode(null);setValidated(false);}} style={{...S.btnSecondary,fontSize:mobileOnly?11:12,padding:mobileOnly?"5px 10px":"6px 14px"}}>← Voltar</button>
+        )}
         <div style={{flex:1,minWidth:0}}>
-          <div style={{color:"var(--text)",fontWeight:700,fontSize:mobileOnly?14:15}}>{selEmp?.name}</div>
+          {!forcedEmpId && <div style={{color:"var(--text)",fontWeight:700,fontSize:mobileOnly?14:15}}>{selEmp?.name}</div>}
           <div style={{color:"var(--text3)",fontSize:mobileOnly?10:11}}>{mobileOnly?`${activeDayCount} dias · ${folgaDayCount} folga(s)`:`Horario semanal · ${activeDayCount} dias · ${folgaDayCount} folga(s)`}</div>
         </div>
         {empSchedules.length > 0 && (
@@ -4820,7 +4828,7 @@ Inclua apenas as ações solicitadas. Arrays vazios se não houver ação daquel
 
 
 
-function EmployeeSpreadsheet({ restEmps, restRoles, rid, employees, pessoas, onUpdate, restCode: restCode_, isOwner, restaurant, notifications, privacyMask, onGenerateDismissalReport, incidents, feedbacks, devChecklists, schedules, currentUser, isLider, mobileOnly: mobileOnlyProp, roles, vtPayments, vtConfig, scheduleStatus, employeeGoals, delays, meetingPlans, meetingOccurrences, resetSignal }) {
+function EmployeeSpreadsheet({ restEmps, restRoles, rid, employees, pessoas, onUpdate, restCode: restCode_, isOwner, restaurant, notifications, privacyMask, onGenerateDismissalReport, incidents, feedbacks, devChecklists, schedules, currentUser, isLider, mobileOnly: mobileOnlyProp, roles, vtPayments, vtConfig, scheduleStatus, employeeGoals, delays, meetingPlans, meetingOccurrences, resetSignal, workSchedules, managers, communications }) {
   const mobileOnly = mobileOnlyProp ?? false; // eslint-disable-line no-unused-vars
   const PLANOS = [
     { id:"pIsento", empMax:999 },
@@ -5090,8 +5098,9 @@ function EmployeeSpreadsheet({ restEmps, restRoles, rid, employees, pessoas, onU
             {/* Nome da pessoa */}
             <div style={{fontSize:15,fontWeight:700,color:"var(--text)",marginBottom:8}}>{emp.name}</div>
             {/* Tab pills */}
-            <div style={{display:"flex",gap:6,marginBottom:16}}>
+            <div style={{display:"flex",gap:6,marginBottom:16,flexWrap:"wrap"}}>
               <button onClick={()=>setDetailTab("cadastro")} style={dtPill("cadastro",detailTab==="cadastro")}>Cadastro</button>
+              <button onClick={()=>setDetailTab("horario")} style={dtPill("horario",detailTab==="horario")}>🕐 Horário</button>
               <button onClick={()=>setDetailTab("acoes")} style={dtPill("acoes",detailTab==="acoes")}>Ações</button>
               <button onClick={()=>setDetailTab("trilha")} style={dtPill("trilha",detailTab==="trilha")}>Trilha</button>
             </div>
@@ -5167,6 +5176,25 @@ function EmployeeSpreadsheet({ restEmps, restRoles, rid, employees, pessoas, onU
             )}
 
             {/* ── TAB: Ações ── */}
+            {detailTab === "horario" && (
+              <div style={{background:"var(--card-bg)",border:"1px solid var(--border)",borderRadius:12,padding:mobileOnly?12:16}}>
+                <WorkScheduleManagerTab
+                  restaurantId={rid}
+                  employees={employees}
+                  roles={roles}
+                  workSchedules={workSchedules}
+                  notifications={notifications}
+                  managers={managers}
+                  currentManagerName={currentUser?.name ?? (isOwner?"Gestor AppTip":"Gestor Adm.")}
+                  onUpdate={onUpdate}
+                  communications={communications}
+                  isOwner={isOwner}
+                  mobileOnly={mobileOnly}
+                  forcedEmpId={emp.id}
+                />
+              </div>
+            )}
+
             {detailTab === "acoes" && (
               <div>
                 {/* Resumo da pessoa */}
@@ -9857,27 +9885,30 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
     { id:"equipe", label:"👥 Pessoas", icon:"👥", tabs: [
       ["employees","Equipe"],
       ["reunioes","Reuniões"],
-      canSched && ["schedule","Escala"],
-      ["horarios","Horários"],
     ].filter(Boolean) },
+    canSched && { id:"escalas", label:"📅 Escalas", icon:"📅", tabs: [
+      ["schedule","Escala"],
+    ] },
     { id:"comunicacao", label:"📢 Comunicação", icon:"📢", tabs: [
       ["notificacoes",`Caixa${liderInboxCount>0?` (${liderInboxCount})`:""}`],
     ] },
-  ] : [
+  ].filter(Boolean) : [
     { id:"operacao", label:"💰 Operação", icon:"💰", tabs: [
       canTips && ["dashboard","Dashboard"],
       canTips && ["tips","Gorjetas"],
       canTips && ["regra_divisao","Regra"],
-      (isOwner || (perms.vt !== false && tabVisible("vt"))) && ["vt","Vale Transporte"],
     ].filter(Boolean) },
     { id:"equipe", label:"👥 Pessoas", icon:"👥", tabs: [
       (isOwner || canTips) && ["pessoas","Pessoas"],
       (isOwner || canTips) && ["permissoes","Permissões"],
       (isOwner || canTips || tabVisible("employees")) && ["employees","Equipe"],
       (isOwner || tabVisible("roles")) && ["roles","Cargos"],
-      (isOwner || tabVisible("horarios")) && ["horarios","Horários"],
-      canSched && ["schedule","Escala"],
       (isOwner || canTips || tabVisible("employees")) && ["reunioes","Reuniões"],
+    ].filter(Boolean) },
+    // Novo grupo: Escalas + VT (jornada e pagamento de transporte ficam juntos)
+    { id:"escalas", label:"📅 Escalas e VT", icon:"📅", tabs: [
+      canSched && ["schedule","Escala"],
+      (isOwner || (perms.vt !== false && tabVisible("vt"))) && ["vt","Vale Transporte"],
     ].filter(Boolean) },
     { id:"comunicacao", label:"📢 Comunicação", icon:"📢", tabs: [
       (isOwner || tabVisible("comunicados")) && ["comunicados","Comunicados"],
@@ -10924,6 +10955,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
               restRoles={restRoles} rid={rid}
               employees={employees} pessoas={data?.pessoas ?? []} onUpdate={onUpdate} restCode={restaurant.shortCode}
               isOwner={isOwner} restaurant={restaurant}
+              workSchedules={data?.workSchedules ?? {}} managers={data?.managers ?? []} communications={data?.communications ?? []}
               resetSignal={empResetSignal}
               notifications={data?.notifications??[]}
               privacyMask={privacyMask}
