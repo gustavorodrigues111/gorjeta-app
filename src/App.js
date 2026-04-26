@@ -4863,19 +4863,70 @@ function EmployeeSpreadsheet({ restEmps, restRoles, rid, employees, pessoas, onU
   function vincularPessoaComoEmpregado() {
     if (!vincularPessoaSelected) return;
     const p = vincularPessoaSelected;
-    const next = (pessoas || []).map(x => x.id === p.id ? {
-      ...x,
-      isTeam: { ...(x.isTeam || {}), [rid]: true },
+    const admission = vincularPessoaAdmission || today();
+    const updatedPessoa = {
+      ...p,
+      isTeam: { ...(p.isTeam || {}), [rid]: true },
       teamData: {
-        ...(x.teamData || {}),
+        ...(p.teamData || {}),
         [rid]: {
-          ...(x.teamData?.[rid] || {}),
+          ...(p.teamData?.[rid] || {}),
           roleId: vincularPessoaRole || null,
-          admission: vincularPessoaAdmission || today(),
+          admission,
         },
       },
-    } : x);
-    onUpdate("pessoas", next);
+    };
+    // Cria/atualiza o employee record correspondente — fonte única
+    let emp = (employees || []).find(e =>
+      e.restaurantId === rid && (e.linkedPessoaId === p.id || e.id === p.linkedEmployeeId)
+    );
+    let nextEmployees;
+    let employeeId;
+    if (emp) {
+      const updated = {
+        ...emp,
+        name: p.name,
+        cpf: p.cpf || emp.cpf,
+        roleId: vincularPessoaRole || emp.roleId || null,
+        admission,
+        phone: p.whatsapp || emp.phone || null,
+        email: p.email || emp.email || null,
+        emergencyName: p.emergencyName || emp.emergencyName || null,
+        emergencyPhone: p.emergencyPhone || emp.emergencyPhone || null,
+        inactive: false,
+        inactiveFrom: null,
+        linkedPessoaId: p.id,
+      };
+      nextEmployees = (employees || []).map(e => e.id === emp.id ? updated : e);
+      employeeId = emp.id;
+    } else {
+      const code = restCode_ || "XXX";
+      const seq = nextEmpSeq(employees || [], code);
+      const empCode = makeEmpCode(code, seq);
+      employeeId = `emp_${Date.now().toString(36)}${Math.random().toString(36).slice(2,5)}`;
+      const newEmp = {
+        id: employeeId,
+        restaurantId: rid,
+        empCode,
+        name: p.name,
+        cpf: p.cpf || "",
+        pin: p.pin || (p.cpf ? p.cpf.slice(0,4).padEnd(4,"0") : "0000"),
+        mustChangePin: !!p.mustChangePin,
+        roleId: vincularPessoaRole || null,
+        admission,
+        phone: p.whatsapp || null,
+        email: p.email || null,
+        emergencyName: p.emergencyName || null,
+        emergencyPhone: p.emergencyPhone || null,
+        linkedPessoaId: p.id,
+        createdAt: new Date().toISOString(),
+        createdViaPessoa: true,
+      };
+      nextEmployees = [...(employees || []), newEmp];
+    }
+    updatedPessoa.linkedEmployeeId = employeeId;
+    onUpdate("employees", nextEmployees);
+    onUpdate("pessoas", (pessoas || []).map(x => x.id === p.id ? updatedPessoa : x));
     onUpdate("_toast", `✅ ${p.name} vinculada como empregado`);
     setVincularPessoaOpen(false);
     setVincularPessoaSelected(null);
@@ -11315,6 +11366,8 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
             pessoas={data?.pessoas ?? []}
             roles={roles}
             owners={data?.owners ?? []}
+            employees={employees}
+            restCode={restaurant.shortCode}
             onUpdate={onUpdate}
             mobileOnly={mobileOnly}
             realIsOwner={realIsOwner || isOwner}
@@ -18688,7 +18741,7 @@ function buildVirtualEmpForPessoa(pessoa, restaurantId) {
 // ═══════════════════════════════════════════════════════════════
 // ──  PESSOAS — CRUD                                             ──
 // ═══════════════════════════════════════════════════════════════
-function PessoasAdmin({ restaurantId, pessoas, roles, owners, onUpdate, mobileOnly, realIsOwner, onStartImpersonate }) {
+function PessoasAdmin({ restaurantId, pessoas, roles, owners, employees, restCode, onUpdate, mobileOnly, realIsOwner, onStartImpersonate }) {
   // Filtra owners do AppTip — eles têm acesso implícito, não constam como pessoa do restaurante
   const ownerCpfSet = new Set((owners || []).map(o => (o.cpf || "").replace(/\D/g, "")).filter(Boolean));
   const restPessoas = (pessoas || []).filter(p => {
@@ -18837,6 +18890,7 @@ Regras:
     if (toAccept.length === 0) { alert("Selecione pelo menos uma pessoa."); return; }
 
     let nextPessoas = [...(pessoas || [])];
+    let nextEmployees = [...(employees || [])];
     let createdN = 0, linkedN = 0, skippedN = 0, asTeamN = 0;
 
     for (const { p } of toAccept) {
@@ -18868,24 +18922,30 @@ Regras:
           continue;
         }
         // Vincula ao rest atual + adiciona dados de equipe se aplicável
-        nextPessoas = nextPessoas.map(x => x.id === globalExisting.id ? {
-          ...x,
-          restaurantIds: [...(x.restaurantIds || []), restaurantId],
-          permissions: { ...(x.permissions || {}), [restaurantId]: { operational: {}, admin: {}, special: {} } },
-          // Preserva info adicional se a IA trouxe e a pessoa não tinha
-          email: x.email || (p.email || "").trim() || null,
-          whatsapp: x.whatsapp || (p.whatsapp || "").replace(/\D/g, "") || null,
-          emergencyName: x.emergencyName || emergencyName,
-          emergencyPhone: x.emergencyPhone || emergencyPhone,
-          isTeam: { ...(x.isTeam || {}), ...(shouldBeTeam ? { [restaurantId]: true } : {}) },
-          teamData: { ...(x.teamData || {}), ...(teamDataEntry ? { [restaurantId]: teamDataEntry } : {}) },
-        } : x);
-        if (shouldBeTeam) asTeamN++;
+        const updatedPessoa = {
+          ...globalExisting,
+          restaurantIds: [...(globalExisting.restaurantIds || []), restaurantId],
+          permissions: { ...(globalExisting.permissions || {}), [restaurantId]: { operational: {}, admin: {}, special: {} } },
+          email: globalExisting.email || (p.email || "").trim() || null,
+          whatsapp: globalExisting.whatsapp || (p.whatsapp || "").replace(/\D/g, "") || null,
+          emergencyName: globalExisting.emergencyName || emergencyName,
+          emergencyPhone: globalExisting.emergencyPhone || emergencyPhone,
+          isTeam: { ...(globalExisting.isTeam || {}), ...(shouldBeTeam ? { [restaurantId]: true } : {}) },
+          teamData: { ...(globalExisting.teamData || {}), ...(teamDataEntry ? { [restaurantId]: teamDataEntry } : {}) },
+        };
+        // Se virou equipe, cria employee record
+        if (shouldBeTeam) {
+          const sync = syncEmployeeForPessoa(updatedPessoa, nextEmployees, matchedRole?.id, admission);
+          nextEmployees = sync.nextEmployees;
+          updatedPessoa.linkedEmployeeId = sync.employeeId;
+          asTeamN++;
+        }
+        nextPessoas = nextPessoas.map(x => x.id === globalExisting.id ? updatedPessoa : x);
         linkedN++;
       } else {
         // Cria nova
         const id = `pes_${Date.now().toString(36)}${Math.random().toString(36).slice(2,6)}_${createdN}`;
-        nextPessoas.push({
+        const newPessoa = {
           id,
           restaurantIds: [restaurantId],
           name: nm,
@@ -18901,17 +18961,25 @@ Regras:
           permissions: { [restaurantId]: { operational: {}, admin: {}, special: {} } },
           createdAt: new Date().toISOString(),
           createdViaBulkAi: true,
-        });
-        if (shouldBeTeam) asTeamN++;
+        };
+        // Se equipe, cria employee record antes de salvar pessoa
+        if (shouldBeTeam) {
+          const sync = syncEmployeeForPessoa(newPessoa, nextEmployees, matchedRole?.id, admission);
+          nextEmployees = sync.nextEmployees;
+          newPessoa.linkedEmployeeId = sync.employeeId;
+          asTeamN++;
+        }
+        nextPessoas.push(newPessoa);
         createdN++;
       }
     }
 
     onUpdate("pessoas", nextPessoas);
+    if (asTeamN > 0) onUpdate("employees", nextEmployees);
     const parts = [];
     if (createdN > 0) parts.push(`${createdN} criada${createdN===1?"":"s"}`);
     if (linkedN > 0) parts.push(`${linkedN} vinculada${linkedN===1?"":"s"}`);
-    if (asTeamN > 0) parts.push(`${asTeamN} marcada${asTeamN===1?"":"s"} como equipe`);
+    if (asTeamN > 0) parts.push(`${asTeamN} virou empregado${asTeamN===1?"":"s"}`);
     if (skippedN > 0) parts.push(`${skippedN} pulada${skippedN===1?"":"s"} (já no rest. ou sem dados)`);
     onUpdate("_toast", `✅ ${parts.join(" · ")}`);
     bulkAiClose();
@@ -18920,6 +18988,72 @@ Regras:
   function pinFromCpf(cpf) {
     const d = (cpf || "").replace(/\D/g, "").slice(0, 4);
     return d.padEnd(4, "0");
+  }
+
+  // ── Sincronização Pessoa ↔ Employee ──
+  // Quando uma pessoa vira equipe (isTeam[rid]=true), garante que existe um employee
+  // record correspondente em `employees` com nome/CPF/PIN/cargo/admissão sincronizados.
+  // Retorna { nextEmployees, employeeId } pra encadear updates.
+  function syncEmployeeForPessoa(pessoa, currentEmployees, teamRoleId, teamAdmission) {
+    // Procura employee existente vinculado (por linkedPessoaId ou linkedEmployeeId direto)
+    let emp = (currentEmployees || []).find(e =>
+      e.restaurantId === restaurantId && (
+        e.linkedPessoaId === pessoa.id ||
+        (pessoa.linkedEmployeeId && e.id === pessoa.linkedEmployeeId)
+      )
+    );
+    const now = new Date().toISOString();
+    if (emp) {
+      // Atualiza dados (nome, CPF, cargo, admissão) — mantém empCode/PIN
+      const updated = {
+        ...emp,
+        name: pessoa.name,
+        cpf: pessoa.cpf || emp.cpf,
+        roleId: teamRoleId || emp.roleId || null,
+        admission: teamAdmission || emp.admission || today(),
+        phone: pessoa.whatsapp || emp.phone || null,
+        email: pessoa.email || emp.email || null,
+        emergencyName: pessoa.emergencyName || emp.emergencyName || null,
+        emergencyPhone: pessoa.emergencyPhone || emp.emergencyPhone || null,
+        // Reativa se estava inativo (vai voltar a ser equipe)
+        inactive: false,
+        inactiveFrom: null,
+        linkedPessoaId: pessoa.id,
+      };
+      const nextEmployees = (currentEmployees || []).map(e => e.id === emp.id ? updated : e);
+      return { nextEmployees, employeeId: emp.id };
+    }
+    // Cria novo employee
+    const seq = nextEmpSeq(currentEmployees || [], restCode || "XXX");
+    const empCode = makeEmpCode(restCode || "XXX", seq);
+    const newEmpId = `emp_${Date.now().toString(36)}${Math.random().toString(36).slice(2,5)}`;
+    const newEmp = {
+      id: newEmpId,
+      restaurantId,
+      empCode,
+      name: pessoa.name,
+      cpf: pessoa.cpf || "",
+      pin: pessoa.pin || pinFromCpf(pessoa.cpf || ""),
+      mustChangePin: !!pessoa.mustChangePin,
+      roleId: teamRoleId || null,
+      admission: teamAdmission || today(),
+      phone: pessoa.whatsapp || null,
+      email: pessoa.email || null,
+      emergencyName: pessoa.emergencyName || null,
+      emergencyPhone: pessoa.emergencyPhone || null,
+      linkedPessoaId: pessoa.id,
+      createdAt: now,
+      createdViaPessoa: true,
+    };
+    return { nextEmployees: [...(currentEmployees || []), newEmp], employeeId: newEmpId };
+  }
+
+  // Marca employee como inativo quando pessoa deixa de ser equipe
+  function inactivateEmployeeForPessoa(pessoaId, currentEmployees) {
+    return (currentEmployees || []).map(e => {
+      if (e.restaurantId !== restaurantId || e.linkedPessoaId !== pessoaId || e.inactive) return e;
+      return { ...e, inactive: true, inactiveFrom: today() };
+    });
   }
 
   async function addPessoa() {
@@ -18963,10 +19097,17 @@ Regras:
       permissions: { [restaurantId]: { operational: {}, admin: {}, special: {} } },
       createdAt: new Date().toISOString(),
     };
-    onUpdate("pessoas", [...(pessoas || []), newP]);
+    let pessoaToSave = newP;
+    // Se equipe, cria employee record sincronizado e linka
+    if (form.isTeam) {
+      const { nextEmployees, employeeId } = syncEmployeeForPessoa(newP, employees, form.roleId, form.admission);
+      pessoaToSave = { ...newP, linkedEmployeeId: employeeId };
+      onUpdate("employees", nextEmployees);
+    }
+    onUpdate("pessoas", [...(pessoas || []), pessoaToSave]);
     setForm({ name: "", cpf: "", email: "", whatsapp: "", pin: "", emergencyName: "", emergencyPhone: "", isTeam: false, roleId: "", admission: "" });
     onUpdate("_toast", form.isTeam
-      ? `✅ ${nm} cadastrada e marcada como equipe`
+      ? `✅ ${nm} cadastrada e vinculada como empregado`
       : `✅ ${nm} cadastrada (sem vínculo de equipe)`);
   }
 
@@ -18991,9 +19132,14 @@ Regras:
     const nm = editForm.name.trim();
     if (!nm) { alert("Nome é obrigatório."); return; }
     const cpfRaw = (editForm.cpf || "").replace(/\D/g, "");
+    const original = (pessoas || []).find(p => p.id === editingId);
+    const wasTeam = !!original?.isTeam?.[restaurantId];
+    const willBeTeam = !!editForm.isTeam;
+
+    let updatedPessoa = null;
     const next = (pessoas || []).map(p => {
       if (p.id !== editingId) return p;
-      const updated = {
+      updatedPessoa = {
         ...p,
         name: nm,
         cpf: cpfRaw,
@@ -19002,19 +19148,34 @@ Regras:
         emergencyName: editForm.emergencyName.trim() || null,
         emergencyPhone: editForm.emergencyPhone.trim() || null,
         pin: editForm.pin.trim() || p.pin,
-        isTeam: { ...(p.isTeam || {}), [restaurantId]: !!editForm.isTeam },
+        isTeam: { ...(p.isTeam || {}), [restaurantId]: willBeTeam },
         teamData: {
           ...(p.teamData || {}),
-          [restaurantId]: editForm.isTeam ? {
+          [restaurantId]: willBeTeam ? {
             ...(p.teamData?.[restaurantId] || {}),
             roleId: editForm.roleId || null,
             admission: editForm.admission || null,
           } : (p.teamData?.[restaurantId] || {}),
         },
       };
-      return updated;
+      return updatedPessoa;
     });
-    onUpdate("pessoas", next);
+
+    // Sincroniza employee record:
+    // — virou equipe (ou continua) → cria/atualiza employee
+    // — saiu da equipe → inativa employee
+    if (willBeTeam) {
+      const { nextEmployees, employeeId } = syncEmployeeForPessoa(updatedPessoa, employees, editForm.roleId, editForm.admission);
+      onUpdate("employees", nextEmployees);
+      // Atualiza linkedEmployeeId na pessoa também
+      const finalPessoas = next.map(p => p.id === editingId ? { ...p, linkedEmployeeId: employeeId } : p);
+      onUpdate("pessoas", finalPessoas);
+    } else if (wasTeam && !willBeTeam) {
+      onUpdate("employees", inactivateEmployeeForPessoa(editingId, employees));
+      onUpdate("pessoas", next);
+    } else {
+      onUpdate("pessoas", next);
+    }
     setEditingId(null);
   }
   async function delPessoa(id) {
