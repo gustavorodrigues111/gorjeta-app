@@ -19388,10 +19388,15 @@ function PermissoesMatrix({ restaurantId, pessoas, employees, managers, owners, 
     // Sincroniza no legado para compatibilidade com telas antigas
     if (group === "operational" && pessoa.linkedEmployeeId) {
       const empId = pessoa.linkedEmployeeId;
-      const newEmps = (employees || []).map(e => e.id === empId ? {
-        ...e,
-        operationalAreas: { ...(e.operationalAreas || {}), [name]: value || undefined },
-      } : e);
+      const newEmps = (employees || []).map(e => {
+        if (e.id !== empId) return e;
+        // IMPORTANTE: Firestore rejeita undefined. Quando desmarca (value=false),
+        // DELETAMOS a chave em vez de setar undefined.
+        const newOpAreas = { ...(e.operationalAreas || {}) };
+        if (value) newOpAreas[name] = true;
+        else delete newOpAreas[name];
+        return { ...e, operationalAreas: newOpAreas };
+      });
       onUpdate("employees", newEmps);
     } else if (group === "admin" && pessoa.linkedManagerId) {
       const mgrId = pessoa.linkedManagerId;
@@ -19559,9 +19564,18 @@ function PermissoesMatrix({ restaurantId, pessoas, employees, managers, owners, 
                       <button onClick={(e)=>{
                           if (profileMenuFor?.pessoaId === p.id) { setProfileMenuFor(null); return; }
                           // Calcula posição via getBoundingClientRect pra renderizar como `position: fixed`
-                          // (necessário porque sticky <td> cria stacking context que prende dropdown atrás)
+                          // (sticky <td> cria stacking context que prende dropdown atrás).
+                          // Se não couber abaixo do botão, flipa pra abrir acima.
                           const r = e.currentTarget.getBoundingClientRect();
-                          setProfileMenuFor({ pessoaId: p.id, top: r.bottom + 4, right: window.innerWidth - r.right });
+                          const MENU_H_EST = 380; // altura aproximada do menu (7 opções + header)
+                          const spaceBelow = window.innerHeight - r.bottom;
+                          const openUp = spaceBelow < MENU_H_EST && r.top > MENU_H_EST;
+                          setProfileMenuFor({
+                            pessoaId: p.id,
+                            top: openUp ? null : r.bottom + 4,
+                            bottom: openUp ? window.innerHeight - r.top + 4 : null,
+                            right: window.innerWidth - r.right,
+                          });
                         }}
                         title="Aplicar perfil pré-pronto"
                         style={{background:"none",border:"1px solid var(--border)",borderRadius:6,padding:"3px 8px",cursor:"pointer",fontSize:10,color:"var(--text3)",fontWeight:600,whiteSpace:"nowrap"}}>
@@ -19622,8 +19636,8 @@ function PermissoesMatrix({ restaurantId, pessoas, employees, managers, owners, 
           <>
             {/* Backdrop pra fechar ao clicar fora */}
             <div onClick={()=>setProfileMenuFor(null)} style={{position:"fixed",inset:0,zIndex:9000,background:"transparent"}} />
-            {/* Menu */}
-            <div style={{position:"fixed",top:profileMenuFor.top,right:profileMenuFor.right,zIndex:9001,background:"var(--card-bg)",border:"1px solid var(--border)",borderRadius:10,boxShadow:"0 8px 28px rgba(0,0,0,0.22)",minWidth:240,padding:6,fontFamily:"'DM Sans',sans-serif"}}>
+            {/* Menu — top OU bottom, dependendo do espaço disponível na tela */}
+            <div style={{position:"fixed",top:profileMenuFor.top??undefined,bottom:profileMenuFor.bottom??undefined,right:profileMenuFor.right,zIndex:9001,background:"var(--card-bg)",border:"1px solid var(--border)",borderRadius:10,boxShadow:"0 8px 28px rgba(0,0,0,0.22)",minWidth:240,maxHeight:"calc(100vh - 40px)",overflowY:"auto",padding:6,fontFamily:"'DM Sans',sans-serif"}}>
               <div style={{padding:"6px 10px 8px",borderBottom:"1px solid var(--border)",marginBottom:4}}>
                 <div style={{fontSize:10,color:"var(--text3)",fontWeight:700,textTransform:"uppercase",letterSpacing:0.4}}>Aplicar perfil em</div>
                 <div style={{fontSize:13,color:"var(--text)",fontWeight:700,marginTop:1}}>{targetPessoa.name}</div>
