@@ -819,6 +819,8 @@ const K = {
   tempSensors:         "v4:tempSensors",          // [{id, restaurantId, tuyaDeviceId, name, equipmentId?, location?, minTemp, maxTemp, alertMinutes, alertWhatsapp?, alertPessoaId?, createdAt, active}]
   tempReadings:        "v4:tempReadings",         // [{id, sensorId, restaurantId, timestamp, temp, battery?, online:bool}]   // histórico — pode ser truncado/arquivado
   tempAlerts:          "v4:tempAlerts",           // [{id, sensorId, restaurantId, openedAt, closedAt?, firstTemp, peakTemp, notifiedAt?, acknowledgedBy?, acknowledgedAt?, note?}]
+  // ═══ Permissões — perfis customizados por restaurante ═══
+  permProfiles:        "v4:permProfiles",          // {[restaurantId]: [{id, label, icon, color, desc, keys:["operational.contagens", ...]}]}
 };
 
 // ── Inbox helpers ──
@@ -11398,6 +11400,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
             employees={employees}
             managers={data?.managers ?? []}
             owners={data?.owners ?? []}
+            permProfiles={data?.permProfiles ?? {}}
             onUpdate={onUpdate}
             mobileOnly={mobileOnly}
           />
@@ -19208,7 +19211,20 @@ const ALL_PERM_KEYS = [
   "special.isDP","special.isLider",
 ];
 
-function PermissoesMatrix({ restaurantId, pessoas, employees, managers, owners, onUpdate, mobileOnly }) {
+// Ícones e cores disponíveis pro editor de perfis customizados
+const PROFILE_ICONS = ["👑","🛂","💰","⭐","🍳","🍷","📅","🎯","🌡️","📦","✅","📋","🚌","📢","❓","⚙️","👥","🏷️","🗂️","🔧","🚫","🛒","🔥","🧊","⚡","🎓","🎩"];
+const PROFILE_COLORS = [
+  { id: "amber",  label: "Dourado", color: "#d4a017" },
+  { id: "blue",   label: "Azul",    color: "#0284c7" },
+  { id: "green",  label: "Verde",   color: "#7c9e5e" },
+  { id: "purple", label: "Roxo",    color: "#a855f7" },
+  { id: "red",    label: "Vermelho",color: "#dc2626" },
+  { id: "gray",   label: "Cinza",   color: "var(--text3)" },
+];
+
+function PermissoesMatrix({ restaurantId, pessoas, employees, managers, owners, permProfiles, onUpdate, mobileOnly }) {
+  // Customs (do restaurante atual) — vão pro topo do dropdown e do modal de gerenciamento
+  const customProfiles = (permProfiles?.[restaurantId] || []);
   // Filtra owners do AppTip — acesso implícito, não aparecem na matriz
   const ownerCpfSet = new Set((owners || []).map(o => (o.cpf || "").replace(/\D/g, "")).filter(Boolean));
   const restPessoas = (pessoas || []).filter(p => {
@@ -19223,6 +19239,44 @@ function PermissoesMatrix({ restaurantId, pessoas, employees, managers, owners, 
   const [sortMode, setSortMode] = useState("az"); // az | mais_perms | menos_perms
   const [liderAreasModal, setLiderAreasModal] = useState(null); // pessoaId
   const [profileMenuFor, setProfileMenuFor] = useState(null); // { pessoaId, top, right }
+  const [profileManagerOpen, setProfileManagerOpen] = useState(false); // modal de gerenciar perfis
+  const [editingProfile, setEditingProfile] = useState(null); // perfil sendo editado/criado
+
+  // CRUD de perfis customizados
+  function saveCustomProfile(profile) {
+    const ridProfiles = permProfiles?.[restaurantId] || [];
+    const exists = ridProfiles.some(p => p.id === profile.id);
+    const next = exists
+      ? ridProfiles.map(p => p.id === profile.id ? profile : p)
+      : [...ridProfiles, profile];
+    onUpdate("permProfiles", { ...(permProfiles || {}), [restaurantId]: next });
+    setEditingProfile(null);
+  }
+  async function deleteCustomProfile(profileId) {
+    if (!await appConfirm("Apagar este perfil personalizado?")) return;
+    const ridProfiles = permProfiles?.[restaurantId] || [];
+    onUpdate("permProfiles", { ...(permProfiles || {}), [restaurantId]: ridProfiles.filter(p => p.id !== profileId) });
+  }
+  function duplicateProfile(source) {
+    const newProfile = {
+      ...source,
+      id: `prof_${Date.now().toString(36)}${Math.random().toString(36).slice(2,5)}`,
+      label: source.label + " (cópia)",
+      _isCustom: true,
+    };
+    delete newProfile._isCustom;
+    setEditingProfile(newProfile);
+  }
+  function newBlankProfile() {
+    setEditingProfile({
+      id: `prof_${Date.now().toString(36)}${Math.random().toString(36).slice(2,5)}`,
+      label: "",
+      icon: "🎯",
+      color: "#0284c7",
+      desc: "",
+      keys: [],
+    });
+  }
 
   function saveLiderAreas(pessoaId, newAreas) {
     const updated = (pessoas || []).map(p => {
@@ -19463,7 +19517,8 @@ function PermissoesMatrix({ restaurantId, pessoas, employees, managers, owners, 
     <div>
       <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",flexWrap:"wrap",gap:8,marginBottom:12}}>
         <h3 style={{color:"var(--text)",margin:0,fontSize:mobileOnly?16:18}}>🛂 Permissões</h3>
-        <div style={{display:"flex",gap:6}}>
+        <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+          <button onClick={()=>setProfileManagerOpen(true)} style={{...S.btnSecondary,fontSize:11,padding:"5px 10px",color:"var(--ac)",borderColor:"var(--ac)44"}}>✏️ Gerenciar perfis</button>
           <button onClick={expandAll} style={{...S.btnSecondary,fontSize:11,padding:"5px 10px"}}>Expandir todos</button>
           <button onClick={collapseAll} style={{...S.btnSecondary,fontSize:11,padding:"5px 10px"}}>Colapsar todos</button>
         </div>
@@ -19642,6 +19697,24 @@ function PermissoesMatrix({ restaurantId, pessoas, employees, managers, owners, 
                 <div style={{fontSize:10,color:"var(--text3)",fontWeight:700,textTransform:"uppercase",letterSpacing:0.4}}>Aplicar perfil em</div>
                 <div style={{fontSize:13,color:"var(--text)",fontWeight:700,marginTop:1}}>{targetPessoa.name}</div>
               </div>
+              {customProfiles.length > 0 && (
+                <div style={{padding:"4px 10px 2px",fontSize:9,color:"var(--text3)",fontWeight:700,textTransform:"uppercase",letterSpacing:0.4}}>Personalizados</div>
+              )}
+              {customProfiles.map(prof => (
+                <button key={prof.id} onClick={()=>applyProfile(targetPessoa, prof.keys)}
+                  style={{display:"flex",alignItems:"center",gap:8,padding:"7px 10px",background:"none",border:"none",borderRadius:6,cursor:"pointer",fontSize:12,color:"var(--text)",width:"100%",textAlign:"left",fontFamily:"'DM Sans',sans-serif"}}
+                  onMouseEnter={e=>e.currentTarget.style.background="var(--bg2)"}
+                  onMouseLeave={e=>e.currentTarget.style.background="none"}>
+                  <span style={{fontSize:14}}>{prof.icon}</span>
+                  <div style={{flex:1}}>
+                    <div style={{fontWeight:600,color:prof.color,fontSize:11}}>{prof.label}</div>
+                    <div style={{fontSize:10,color:"var(--text3)",marginTop:1,lineHeight:1.2}}>{prof.desc || `${prof.keys.length} permissões`}</div>
+                  </div>
+                </button>
+              ))}
+              {customProfiles.length > 0 && (
+                <div style={{padding:"4px 10px 2px",marginTop:4,borderTop:"1px solid var(--border)",fontSize:9,color:"var(--text3)",fontWeight:700,textTransform:"uppercase",letterSpacing:0.4}}>Padrões</div>
+              )}
               {PERM_PROFILES.map(prof => (
                 <button key={prof.id} onClick={()=>applyProfile(targetPessoa, prof.keys)}
                   style={{display:"flex",alignItems:"center",gap:8,padding:"7px 10px",background:"none",border:"none",borderRadius:6,cursor:"pointer",fontSize:12,color:"var(--text)",width:"100%",textAlign:"left",fontFamily:"'DM Sans',sans-serif"}}
@@ -19658,6 +19731,157 @@ function PermissoesMatrix({ restaurantId, pessoas, employees, managers, owners, 
           </>
         );
       })()}
+
+      {/* MODAL: gerenciar perfis (lista + criar/duplicar/editar/apagar) */}
+      {profileManagerOpen && !editingProfile && (
+        <div onClick={()=>setProfileManagerOpen(false)} style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.5)",zIndex:9500,display:"flex",alignItems:"center",justifyContent:"center",padding:20}}>
+          <div onClick={e=>e.stopPropagation()} style={{background:"var(--card-bg)",borderRadius:14,maxWidth:560,width:"100%",maxHeight:"85vh",display:"flex",flexDirection:"column",boxShadow:"0 10px 40px rgba(0,0,0,0.3)"}}>
+            <div style={{padding:"16px 20px",borderBottom:"1px solid var(--border)",display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+              <div>
+                <div style={{fontSize:11,color:"var(--text3)",fontWeight:700,textTransform:"uppercase",letterSpacing:0.4}}>Permissões</div>
+                <div style={{fontSize:16,color:"var(--text)",fontWeight:700,marginTop:2}}>✏️ Gerenciar perfis</div>
+              </div>
+              <button onClick={()=>setProfileManagerOpen(false)} style={{background:"none",border:"none",fontSize:22,color:"var(--text3)",cursor:"pointer",padding:"0 4px"}}>×</button>
+            </div>
+            <div style={{padding:"14px 20px",overflowY:"auto",flex:1}}>
+              {/* Personalizados */}
+              <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:10}}>
+                <div style={{fontSize:11,color:"var(--text3)",fontWeight:700,textTransform:"uppercase",letterSpacing:0.4}}>Perfis personalizados ({customProfiles.length})</div>
+                <button onClick={newBlankProfile} style={{...S.btnPrimary,fontSize:11,padding:"5px 12px"}}>+ Novo perfil</button>
+              </div>
+              {customProfiles.length === 0 ? (
+                <div style={{padding:"16px",textAlign:"center",color:"var(--text3)",fontSize:12,background:"var(--bg2)",borderRadius:10,border:"1px dashed var(--border)",marginBottom:18}}>
+                  Nenhum perfil personalizado ainda. Crie um do zero ou duplique um padrão abaixo.
+                </div>
+              ) : (
+                <div style={{display:"flex",flexDirection:"column",gap:6,marginBottom:18}}>
+                  {customProfiles.map(prof => (
+                    <div key={prof.id} style={{display:"flex",alignItems:"center",gap:10,padding:"10px 12px",background:"var(--bg2)",borderRadius:10,border:"1px solid var(--border)"}}>
+                      <span style={{fontSize:18}}>{prof.icon}</span>
+                      <div style={{flex:1,minWidth:0}}>
+                        <div style={{fontSize:13,fontWeight:700,color:prof.color}}>{prof.label}</div>
+                        <div style={{fontSize:10,color:"var(--text3)",marginTop:1}}>{prof.desc || `${prof.keys.length} permissões`}</div>
+                      </div>
+                      <button onClick={()=>setEditingProfile(prof)} style={{...S.btnSecondary,fontSize:10,padding:"4px 10px"}}>✏️ Editar</button>
+                      <button onClick={()=>deleteCustomProfile(prof.id)} style={{...S.btnSecondary,fontSize:10,padding:"4px 10px",color:"var(--red)",borderColor:"var(--red)44"}}>🗑️</button>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* Padrões (read-only com botão duplicar) */}
+              <div style={{fontSize:11,color:"var(--text3)",fontWeight:700,textTransform:"uppercase",letterSpacing:0.4,marginBottom:10}}>Perfis padrão (sempre disponíveis)</div>
+              <div style={{display:"flex",flexDirection:"column",gap:6}}>
+                {PERM_PROFILES.map(prof => (
+                  <div key={prof.id} style={{display:"flex",alignItems:"center",gap:10,padding:"10px 12px",background:"var(--bg2)",borderRadius:10,border:"1px solid var(--border)",opacity:0.85}}>
+                    <span style={{fontSize:18}}>{prof.icon}</span>
+                    <div style={{flex:1,minWidth:0}}>
+                      <div style={{fontSize:13,fontWeight:700,color:prof.color}}>{prof.label}</div>
+                      <div style={{fontSize:10,color:"var(--text3)",marginTop:1}}>{prof.desc}</div>
+                    </div>
+                    <button onClick={()=>duplicateProfile(prof)} style={{...S.btnSecondary,fontSize:10,padding:"4px 10px"}}>📋 Duplicar</button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: editor de perfil (criar ou editar) */}
+      {editingProfile && (
+        <div onClick={()=>setEditingProfile(null)} style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.5)",zIndex:9600,display:"flex",alignItems:"center",justifyContent:"center",padding:20}}>
+          <div onClick={e=>e.stopPropagation()} style={{background:"var(--card-bg)",borderRadius:14,maxWidth:540,width:"100%",maxHeight:"90vh",display:"flex",flexDirection:"column",boxShadow:"0 10px 40px rgba(0,0,0,0.3)"}}>
+            <div style={{padding:"16px 20px",borderBottom:"1px solid var(--border)",display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+              <div style={{fontSize:15,color:"var(--text)",fontWeight:700}}>
+                <span style={{fontSize:18,marginRight:6}}>{editingProfile.icon}</span>
+                {editingProfile.label || "Novo perfil"}
+              </div>
+              <button onClick={()=>setEditingProfile(null)} style={{background:"none",border:"none",fontSize:22,color:"var(--text3)",cursor:"pointer",padding:"0 4px"}}>×</button>
+            </div>
+            <div style={{padding:"14px 20px",overflowY:"auto",flex:1,display:"flex",flexDirection:"column",gap:14}}>
+              <div>
+                <label style={S.label}>Nome do perfil</label>
+                <input value={editingProfile.label} onChange={e=>setEditingProfile({...editingProfile, label:e.target.value})} placeholder="ex: Gestor de Salão" style={S.input} />
+              </div>
+              <div>
+                <label style={S.label}>Ícone</label>
+                <div style={{display:"flex",flexWrap:"wrap",gap:4,padding:8,background:"var(--bg2)",borderRadius:10,border:"1px solid var(--border)"}}>
+                  {PROFILE_ICONS.map(icon => (
+                    <button key={icon} onClick={()=>setEditingProfile({...editingProfile, icon})}
+                      style={{padding:"6px 8px",background:editingProfile.icon===icon?"var(--ac)22":"transparent",border:editingProfile.icon===icon?"1px solid var(--ac)":"1px solid transparent",borderRadius:6,cursor:"pointer",fontSize:18}}>
+                      {icon}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div>
+                <label style={S.label}>Cor</label>
+                <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+                  {PROFILE_COLORS.map(c => (
+                    <button key={c.id} onClick={()=>setEditingProfile({...editingProfile, color:c.color})}
+                      style={{display:"flex",alignItems:"center",gap:6,padding:"6px 10px",background:editingProfile.color===c.color?c.color+"22":"var(--bg2)",border:`1px solid ${editingProfile.color===c.color?c.color:"var(--border)"}`,borderRadius:8,cursor:"pointer",fontSize:11,fontWeight:600,color:c.color}}>
+                      <span style={{display:"inline-block",width:10,height:10,borderRadius:5,background:c.color}}></span>
+                      {c.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div>
+                <label style={S.label}>Descrição (curta)</label>
+                <input value={editingProfile.desc} onChange={e=>setEditingProfile({...editingProfile, desc:e.target.value})} placeholder="ex: Gerencia salão, escala e gorjetas" style={S.input} />
+              </div>
+              <div>
+                <label style={S.label}>Permissões neste perfil ({editingProfile.keys.length} marcadas)</label>
+                <div style={{padding:10,background:"var(--bg2)",borderRadius:10,border:"1px solid var(--border)",display:"flex",flexDirection:"column",gap:10}}>
+                  {PERM_GROUPS.map(g => (
+                    <div key={g.id}>
+                      <div style={{fontSize:10,color:g.color,fontWeight:700,textTransform:"uppercase",letterSpacing:0.4,marginBottom:6,display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+                        <span>{g.label}</span>
+                        <button onClick={()=>{
+                          const allKeys = g.perms.map(p => p.key);
+                          const allChecked = allKeys.every(k => editingProfile.keys.includes(k));
+                          const newKeys = allChecked
+                            ? editingProfile.keys.filter(k => !allKeys.includes(k))
+                            : [...new Set([...editingProfile.keys, ...allKeys])];
+                          setEditingProfile({...editingProfile, keys:newKeys});
+                        }} style={{background:"none",border:"none",color:g.color,fontSize:10,fontWeight:700,cursor:"pointer",textDecoration:"underline"}}>
+                          {g.perms.every(p => editingProfile.keys.includes(p.key)) ? "desmarcar grupo" : "marcar grupo"}
+                        </button>
+                      </div>
+                      <div style={{display:"flex",flexWrap:"wrap",gap:6}}>
+                        {g.perms.map(perm => {
+                          const checked = editingProfile.keys.includes(perm.key);
+                          return (
+                            <label key={perm.key} style={{display:"flex",alignItems:"center",gap:5,padding:"5px 9px",background:checked?g.color+"22":"var(--card-bg)",border:`1px solid ${checked?g.color:"var(--border)"}`,borderRadius:8,cursor:"pointer",fontSize:11,color:checked?g.color:"var(--text2)",fontWeight:checked?600:400}}>
+                              <input type="checkbox" checked={checked} style={{cursor:"pointer",accentColor:g.color}}
+                                onChange={()=>{
+                                  const newKeys = checked
+                                    ? editingProfile.keys.filter(k => k !== perm.key)
+                                    : [...editingProfile.keys, perm.key];
+                                  setEditingProfile({...editingProfile, keys:newKeys});
+                                }} />
+                              {perm.icon} {perm.label}
+                            </label>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+            <div style={{padding:"12px 20px",borderTop:"1px solid var(--border)",display:"flex",gap:8,justifyContent:"flex-end",background:"var(--bg2)"}}>
+              <button onClick={()=>setEditingProfile(null)} style={{...S.btnSecondary,fontSize:12,padding:"8px 16px"}}>Cancelar</button>
+              <button onClick={()=>{
+                if (!editingProfile.label.trim()) { alert("Nome é obrigatório"); return; }
+                if (editingProfile.keys.length === 0) { alert("Selecione pelo menos 1 permissão"); return; }
+                saveCustomProfile(editingProfile);
+              }} style={{...S.btnPrimary,fontSize:12,padding:"8px 18px"}}>💾 Salvar perfil</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* MODAL: editor de áreas do Líder */}
       {liderAreasModal && (() => {
@@ -26931,6 +27155,7 @@ export default function App() {
   const [tempSensors,        setTempSensors]        = useState([]);
   const [tempReadings,       setTempReadings]       = useState([]);
   const [tempAlerts,         setTempAlerts]         = useState([]);
+  const [permProfiles,       setPermProfiles]       = useState({});
 
   useEffect(() => {
     const savedId = currentUserId;
@@ -26958,7 +27183,7 @@ export default function App() {
       setLoadProgress("Preparando o sistema...");
 
       const keys = keyNames;
-      const map = { owners:setOwners, managers:setManagers, restaurants:setRestaurants, employees:setEmployees, roles:setRoles, tips:setTips, splits:setSplits, schedules:setSchedules, communications:setCommunications, commAcks:setCommAcks, faq:setFaq, dpMessages:setDpMessages, workSchedules:setWorkSchedules, notifications:setNotifications, noTipDays:setNoTipDays, trash:setTrash, schedTemplates:setSchedTemplates, schedDrafts:setSchedDrafts, scheduleVersions:setScheduleVersions, tipVersions:setTipVersions, vtConfig:setVtConfig, vtMonthly:setVtMonthly, vtPayments:setVtPayments, incidents:setIncidents, feedbacks:setFeedbacks, devChecklists:setDevChecklists, scheduleAdjustments:setScheduleAdjustments, scheduleStatus:setScheduleStatus, schedulePrevista:setSchedulePrevista, employeeGoals:setEmployeeGoals, delays:setDelays, tipApprovals:setTipApprovals, meetingPlans:setMeetingPlans, meetingIdeas:setMeetingIdeas, meetingAgendas:setMeetingAgendas, meetingActions:setMeetingActions, meetingOccurrences:setMeetingOccurrences, meetingPendencias:setMeetingPendencias, inbox:setInbox, inboxFolders:setInboxFolders, miseCategories:setMiseCategories, miseStocks:setMiseStocks, miseAssignments:setMiseAssignments, miseItems:setMiseItems, miseCycles:setMiseCycles, miseCounts:setMiseCounts, miseSuppliers:setMiseSuppliers, miseProductSuppliers:setMiseProductSuppliers, miseSupplierOrders:setMiseSupplierOrders, miseChecklistTemplates:setMiseChecklistTemplates, miseChecklistRuns:setMiseChecklistRuns, miseFtInsumos:setMiseFtInsumos, miseFtEquipamentos:setMiseFtEquipamentos, miseFtDishes:setMiseFtDishes, pessoas:setPessoas, pessoasMigratedAt:setPessoasMigratedAt, tuyaLinks:setTuyaLinks, tempSensors:setTempSensors, tempReadings:setTempReadings, tempAlerts:setTempAlerts };
+      const map = { owners:setOwners, managers:setManagers, restaurants:setRestaurants, employees:setEmployees, roles:setRoles, tips:setTips, splits:setSplits, schedules:setSchedules, communications:setCommunications, commAcks:setCommAcks, faq:setFaq, dpMessages:setDpMessages, workSchedules:setWorkSchedules, notifications:setNotifications, noTipDays:setNoTipDays, trash:setTrash, schedTemplates:setSchedTemplates, schedDrafts:setSchedDrafts, scheduleVersions:setScheduleVersions, tipVersions:setTipVersions, vtConfig:setVtConfig, vtMonthly:setVtMonthly, vtPayments:setVtPayments, incidents:setIncidents, feedbacks:setFeedbacks, devChecklists:setDevChecklists, scheduleAdjustments:setScheduleAdjustments, scheduleStatus:setScheduleStatus, schedulePrevista:setSchedulePrevista, employeeGoals:setEmployeeGoals, delays:setDelays, tipApprovals:setTipApprovals, meetingPlans:setMeetingPlans, meetingIdeas:setMeetingIdeas, meetingAgendas:setMeetingAgendas, meetingActions:setMeetingActions, meetingOccurrences:setMeetingOccurrences, meetingPendencias:setMeetingPendencias, inbox:setInbox, inboxFolders:setInboxFolders, miseCategories:setMiseCategories, miseStocks:setMiseStocks, miseAssignments:setMiseAssignments, miseItems:setMiseItems, miseCycles:setMiseCycles, miseCounts:setMiseCounts, miseSuppliers:setMiseSuppliers, miseProductSuppliers:setMiseProductSuppliers, miseSupplierOrders:setMiseSupplierOrders, miseChecklistTemplates:setMiseChecklistTemplates, miseChecklistRuns:setMiseChecklistRuns, miseFtInsumos:setMiseFtInsumos, miseFtEquipamentos:setMiseFtEquipamentos, miseFtDishes:setMiseFtDishes, pessoas:setPessoas, pessoasMigratedAt:setPessoasMigratedAt, tuyaLinks:setTuyaLinks, tempSensors:setTempSensors, tempReadings:setTempReadings, tempAlerts:setTempAlerts, permProfiles:setPermProfiles };
       const loaded_data = {};
       let successCount = 0;
       keys.forEach((k, i) => {
@@ -27134,7 +27359,7 @@ export default function App() {
     }
   }, [loaded, employees.length, managers.length]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const data = { owners, managers, restaurants, employees, roles, tips, splits, schedules, communications, commAcks, faq, dpMessages, workSchedules, notifications, noTipDays, trash, schedTemplates, schedDrafts, scheduleVersions, tipVersions, vtConfig, vtMonthly, vtPayments, incidents, feedbacks, devChecklists, scheduleAdjustments, scheduleStatus, schedulePrevista, employeeGoals, delays, tipApprovals, meetingPlans, meetingIdeas, meetingAgendas, meetingActions, meetingOccurrences, meetingPendencias, inbox, inboxFolders, miseCategories, miseStocks, miseAssignments, miseItems, miseCycles, miseCounts, miseSuppliers, miseProductSuppliers, miseSupplierOrders, miseChecklistTemplates, miseChecklistRuns, miseFtInsumos, miseFtEquipamentos, miseFtDishes, pessoas, pessoasMigratedAt, tuyaLinks, tempSensors, tempReadings, tempAlerts };
+  const data = { owners, managers, restaurants, employees, roles, tips, splits, schedules, communications, commAcks, faq, dpMessages, workSchedules, notifications, noTipDays, trash, schedTemplates, schedDrafts, scheduleVersions, tipVersions, vtConfig, vtMonthly, vtPayments, incidents, feedbacks, devChecklists, scheduleAdjustments, scheduleStatus, schedulePrevista, employeeGoals, delays, tipApprovals, meetingPlans, meetingIdeas, meetingAgendas, meetingActions, meetingOccurrences, meetingPendencias, inbox, inboxFolders, miseCategories, miseStocks, miseAssignments, miseItems, miseCycles, miseCounts, miseSuppliers, miseProductSuppliers, miseSupplierOrders, miseChecklistTemplates, miseChecklistRuns, miseFtInsumos, miseFtEquipamentos, miseFtDishes, pessoas, pessoasMigratedAt, tuyaLinks, tempSensors, tempReadings, tempAlerts, permProfiles };
 
   async function handleUpdate(field, value) {
     if (field === "_toast") { setToast(value); return; }
@@ -27143,8 +27368,8 @@ export default function App() {
       setToast("⚠️ Você está offline — conecte à internet para salvar alterações");
       return;
     }
-    const setters = { owners:setOwners, managers:setManagers, restaurants:setRestaurants, employees:setEmployees, roles:setRoles, tips:setTips, splits:setSplits, schedules:setSchedules, communications:setCommunications, commAcks:setCommAcks, faq:setFaq, dpMessages:setDpMessages, workSchedules:setWorkSchedules, notifications:setNotifications, noTipDays:setNoTipDays, trash:setTrash, schedTemplates:setSchedTemplates, schedDrafts:setSchedDrafts, scheduleVersions:setScheduleVersions, tipVersions:setTipVersions, vtConfig:setVtConfig, vtMonthly:setVtMonthly, vtPayments:setVtPayments, incidents:setIncidents, feedbacks:setFeedbacks, devChecklists:setDevChecklists, scheduleAdjustments:setScheduleAdjustments, scheduleStatus:setScheduleStatus, schedulePrevista:setSchedulePrevista, employeeGoals:setEmployeeGoals, delays:setDelays, tipApprovals:setTipApprovals, meetingPlans:setMeetingPlans, meetingIdeas:setMeetingIdeas, meetingAgendas:setMeetingAgendas, meetingActions:setMeetingActions, meetingOccurrences:setMeetingOccurrences, meetingPendencias:setMeetingPendencias, inbox:setInbox, inboxFolders:setInboxFolders, miseCategories:setMiseCategories, miseStocks:setMiseStocks, miseAssignments:setMiseAssignments, miseItems:setMiseItems, miseCycles:setMiseCycles, miseCounts:setMiseCounts, miseSuppliers:setMiseSuppliers, miseProductSuppliers:setMiseProductSuppliers, miseSupplierOrders:setMiseSupplierOrders, miseChecklistTemplates:setMiseChecklistTemplates, miseChecklistRuns:setMiseChecklistRuns, miseFtInsumos:setMiseFtInsumos, miseFtEquipamentos:setMiseFtEquipamentos, miseFtDishes:setMiseFtDishes, pessoas:setPessoas, pessoasMigratedAt:setPessoasMigratedAt, tuyaLinks:setTuyaLinks, tempSensors:setTempSensors, tempReadings:setTempReadings, tempAlerts:setTempAlerts };
-    const keys    = { owners:K.owners, managers:K.managers, restaurants:K.restaurants, employees:K.employees, roles:K.roles, tips:K.tips, splits:K.splits, schedules:K.schedules, communications:K.communications, commAcks:K.commAcks, faq:K.faq, dpMessages:K.dpMessages, workSchedules:K.workSchedules, notifications:K.notifications, noTipDays:K.noTipDays, trash:K.trash, schedTemplates:K.schedTemplates, schedDrafts:K.schedDrafts, scheduleVersions:K.scheduleVersions, tipVersions:K.tipVersions, vtConfig:K.vtConfig, vtMonthly:K.vtMonthly, vtPayments:K.vtPayments, incidents:K.incidents, feedbacks:K.feedbacks, devChecklists:K.devChecklists, scheduleAdjustments:K.scheduleAdjustments, scheduleStatus:K.scheduleStatus, schedulePrevista:K.schedulePrevista, employeeGoals:K.employeeGoals, delays:K.delays, tipApprovals:K.tipApprovals, meetingPlans:K.meetingPlans, meetingIdeas:K.meetingIdeas, meetingAgendas:K.meetingAgendas, meetingActions:K.meetingActions, inbox:K.inbox, inboxFolders:K.inboxFolders, miseCategories:K.miseCategories, miseStocks:K.miseStocks, miseAssignments:K.miseAssignments, miseItems:K.miseItems, miseCycles:K.miseCycles, miseCounts:K.miseCounts, miseSuppliers:K.miseSuppliers, miseProductSuppliers:K.miseProductSuppliers, miseSupplierOrders:K.miseSupplierOrders, miseChecklistTemplates:K.miseChecklistTemplates, miseChecklistRuns:K.miseChecklistRuns, miseFtInsumos:K.miseFtInsumos, miseFtEquipamentos:K.miseFtEquipamentos, miseFtDishes:K.miseFtDishes, pessoas:K.pessoas, pessoasMigratedAt:K.pessoasMigratedAt, tuyaLinks:K.tuyaLinks, tempSensors:K.tempSensors, tempReadings:K.tempReadings, tempAlerts:K.tempAlerts };
+    const setters = { owners:setOwners, managers:setManagers, restaurants:setRestaurants, employees:setEmployees, roles:setRoles, tips:setTips, splits:setSplits, schedules:setSchedules, communications:setCommunications, commAcks:setCommAcks, faq:setFaq, dpMessages:setDpMessages, workSchedules:setWorkSchedules, notifications:setNotifications, noTipDays:setNoTipDays, trash:setTrash, schedTemplates:setSchedTemplates, schedDrafts:setSchedDrafts, scheduleVersions:setScheduleVersions, tipVersions:setTipVersions, vtConfig:setVtConfig, vtMonthly:setVtMonthly, vtPayments:setVtPayments, incidents:setIncidents, feedbacks:setFeedbacks, devChecklists:setDevChecklists, scheduleAdjustments:setScheduleAdjustments, scheduleStatus:setScheduleStatus, schedulePrevista:setSchedulePrevista, employeeGoals:setEmployeeGoals, delays:setDelays, tipApprovals:setTipApprovals, meetingPlans:setMeetingPlans, meetingIdeas:setMeetingIdeas, meetingAgendas:setMeetingAgendas, meetingActions:setMeetingActions, meetingOccurrences:setMeetingOccurrences, meetingPendencias:setMeetingPendencias, inbox:setInbox, inboxFolders:setInboxFolders, miseCategories:setMiseCategories, miseStocks:setMiseStocks, miseAssignments:setMiseAssignments, miseItems:setMiseItems, miseCycles:setMiseCycles, miseCounts:setMiseCounts, miseSuppliers:setMiseSuppliers, miseProductSuppliers:setMiseProductSuppliers, miseSupplierOrders:setMiseSupplierOrders, miseChecklistTemplates:setMiseChecklistTemplates, miseChecklistRuns:setMiseChecklistRuns, miseFtInsumos:setMiseFtInsumos, miseFtEquipamentos:setMiseFtEquipamentos, miseFtDishes:setMiseFtDishes, pessoas:setPessoas, pessoasMigratedAt:setPessoasMigratedAt, tuyaLinks:setTuyaLinks, tempSensors:setTempSensors, tempReadings:setTempReadings, tempAlerts:setTempAlerts, permProfiles:setPermProfiles };
+    const keys    = { owners:K.owners, managers:K.managers, restaurants:K.restaurants, employees:K.employees, roles:K.roles, tips:K.tips, splits:K.splits, schedules:K.schedules, communications:K.communications, commAcks:K.commAcks, faq:K.faq, dpMessages:K.dpMessages, workSchedules:K.workSchedules, notifications:K.notifications, noTipDays:K.noTipDays, trash:K.trash, schedTemplates:K.schedTemplates, schedDrafts:K.schedDrafts, scheduleVersions:K.scheduleVersions, tipVersions:K.tipVersions, vtConfig:K.vtConfig, vtMonthly:K.vtMonthly, vtPayments:K.vtPayments, incidents:K.incidents, feedbacks:K.feedbacks, devChecklists:K.devChecklists, scheduleAdjustments:K.scheduleAdjustments, scheduleStatus:K.scheduleStatus, schedulePrevista:K.schedulePrevista, employeeGoals:K.employeeGoals, delays:K.delays, tipApprovals:K.tipApprovals, meetingPlans:K.meetingPlans, meetingIdeas:K.meetingIdeas, meetingAgendas:K.meetingAgendas, meetingActions:K.meetingActions, inbox:K.inbox, inboxFolders:K.inboxFolders, miseCategories:K.miseCategories, miseStocks:K.miseStocks, miseAssignments:K.miseAssignments, miseItems:K.miseItems, miseCycles:K.miseCycles, miseCounts:K.miseCounts, miseSuppliers:K.miseSuppliers, miseProductSuppliers:K.miseProductSuppliers, miseSupplierOrders:K.miseSupplierOrders, miseChecklistTemplates:K.miseChecklistTemplates, miseChecklistRuns:K.miseChecklistRuns, miseFtInsumos:K.miseFtInsumos, miseFtEquipamentos:K.miseFtEquipamentos, miseFtDishes:K.miseFtDishes, pessoas:K.pessoas, pessoasMigratedAt:K.pessoasMigratedAt, tuyaLinks:K.tuyaLinks, tempSensors:K.tempSensors, tempReadings:K.tempReadings, tempAlerts:K.tempAlerts, permProfiles:K.permProfiles };
     // Support functional updates to prevent stale-state race conditions:
     // When value is a function, it receives the latest state (like setState(prev => ...))
     let resolvedValue;
