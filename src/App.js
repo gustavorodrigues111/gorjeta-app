@@ -9887,6 +9887,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
   const TAB_GROUPS = isLider ? [
     { id:"equipe", label:"👥 Pessoas", icon:"👥", tabs: [
       ["employees","Equipe"],
+      ["freelas","🎒 Freelas"],
       ["reunioes","Reuniões"],
     ].filter(Boolean) },
     canSched && { id:"escalas", label:"📅 Escalas", icon:"📅", tabs: [
@@ -9934,7 +9935,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
   ].filter(g => g.tabs.length > 0);
 
   // Mobile: restrict to dashboard, schedule, horarios, employees, reunioes, notificacoes, config, dp_gestores
-  const MOBILE_ALLOWED = ["dashboard","schedule","horarios","employees","reunioes","notificacoes","config","dp_gestores"];
+  const MOBILE_ALLOWED = ["dashboard","schedule","horarios","employees","freelas","reunioes","notificacoes","config","dp_gestores"];
   const TAB_GROUPS_FINAL = mobileOnly
     ? TAB_GROUPS.map(g => ({ ...g, tabs: g.tabs.filter(([id]) => MOBILE_ALLOWED.includes(id)) })).filter(g => g.tabs.length > 0)
     : TAB_GROUPS;
