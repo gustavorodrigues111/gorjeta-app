@@ -19448,9 +19448,11 @@ function PermissoesMatrix({ restaurantId, pessoas, employees, managers, owners, 
     return a.name.localeCompare(b.name);
   });
 
-  // Header sticky precisa de bg sólido pra não ficar transparente. Usa --card-bg que é opaco.
-  const HEADER_BG = "var(--card-bg)";
-  const HEADER_SHADOW = "0 2px 8px rgba(0,0,0,0.08)";
+  // Header sticky precisa de bg 100% opaco pra não ficar transparente.
+  // --sticky-bg é definido em index.html como #ffffff (light) / #211c16 (dark) — totalmente opaco.
+  // Os g.bg dos grupos tinham alpha (var(--ac)22) que deixava conteúdo passar — não usar no sticky.
+  const HEADER_BG = "var(--sticky-bg)";
+  const HEADER_SHADOW = "0 2px 4px rgba(0,0,0,0.08)";
 
   return (
     <div>
@@ -19486,45 +19488,45 @@ function PermissoesMatrix({ restaurantId, pessoas, employees, managers, owners, 
           {restPessoas.length === 0 ? "Nenhuma pessoa cadastrada. Vá na aba Pessoas para começar." : "Nenhuma pessoa encontrada com esses filtros."}
         </div>
       ) : (
-        <div style={{overflowX:"auto",overflowY:"auto",maxHeight:"calc(100vh - 280px)",WebkitOverflowScrolling:"touch",border:"1px solid var(--border)",borderRadius:12,background:"var(--card-bg)"}}>
-          <table style={{width:"100%",borderCollapse:"collapse",fontSize:12}}>
+        <div className="permissoes-scroll-area" style={{overflowX:"auto",overflowY:"auto",maxHeight:"calc(100vh - 280px)",WebkitOverflowScrolling:"touch",border:"1px solid var(--border)",borderRadius:12,background:"var(--card-bg)"}}>
+          <table style={{width:"100%",borderCollapse:"separate",borderSpacing:0,fontSize:12}}>
             <thead>
               {/* Linha 1 — coluna Pessoa + ícones por permissão (ou nome do grupo se colapsado) */}
-              <tr style={{borderBottom:"1px solid var(--border)"}}>
-                <th style={{padding:"10px 12px",textAlign:"left",color:"var(--text)",fontWeight:700,position:"sticky",left:0,top:0,background:HEADER_BG,zIndex:13,minWidth:180,boxShadow:HEADER_SHADOW}}>
+              <tr>
+                <th style={{padding:"10px 12px",textAlign:"left",color:"var(--text)",fontWeight:700,position:"sticky",left:0,top:0,background:HEADER_BG,zIndex:13,minWidth:180,boxShadow:HEADER_SHADOW,borderBottom:"1px solid var(--border)"}}>
                   <div>Pessoa</div>
                   <div style={{fontSize:10,color:"var(--text3)",fontWeight:500,marginTop:2}}>{sorted.length} de {restPessoas.length}</div>
                 </th>
                 {PERM_GROUPS.map(g => (
                   expanded[g.id] ? (
                     g.perms.map(p => (
-                      <th key={p.key} style={{padding:"8px 6px",textAlign:"center",color:"var(--text)",fontWeight:600,minWidth:62,background:g.bg,borderLeft:"1px solid var(--border)",position:"sticky",top:0,zIndex:11,boxShadow:HEADER_SHADOW}} title={`${g.label} · ${p.label}`}>
+                      <th key={p.key} style={{padding:"8px 6px",textAlign:"center",color:"var(--text)",fontWeight:600,minWidth:62,background:HEADER_BG,borderLeft:"1px solid var(--border)",borderBottom:`3px solid ${g.color}`,position:"sticky",top:0,zIndex:11,boxShadow:HEADER_SHADOW}} title={`${g.label} · ${p.label}`}>
                         <div style={{fontSize:14,marginBottom:2}}>{p.icon}</div>
                         <div style={{fontSize:9,color:g.color,fontWeight:700,textTransform:"uppercase",letterSpacing:0.3,lineHeight:1.1}}>{p.label.length > 10 ? p.label.slice(0,10)+'…' : p.label}</div>
                       </th>
                     ))
                   ) : (
-                    <th key={g.id} onClick={()=>toggleGroup(g.id)} style={{padding:"8px 10px",textAlign:"center",cursor:"pointer",color:g.color,fontWeight:700,fontSize:11,textTransform:"uppercase",letterSpacing:0.4,borderLeft:"1px solid var(--border)",background:g.bg,minWidth:100,position:"sticky",top:0,zIndex:11,boxShadow:HEADER_SHADOW}} title={`Clique para expandir ${g.label}`}>
+                    <th key={g.id} onClick={()=>toggleGroup(g.id)} style={{padding:"8px 10px",textAlign:"center",cursor:"pointer",color:g.color,fontWeight:700,fontSize:11,textTransform:"uppercase",letterSpacing:0.4,borderLeft:"1px solid var(--border)",borderBottom:`3px solid ${g.color}`,background:HEADER_BG,minWidth:100,position:"sticky",top:0,zIndex:11,boxShadow:HEADER_SHADOW}} title={`Clique para expandir ${g.label}`}>
                       ▶ {g.label}
                     </th>
                   )
                 ))}
               </tr>
               {/* Linha 2 — botão de colapsar grupo + master toggle "marcar tudo do grupo pra todos" */}
-              <tr style={{borderBottom:"1px solid var(--border)"}}>
-                <th style={{padding:"6px 12px",textAlign:"left",color:"var(--text3)",fontWeight:600,fontSize:10,position:"sticky",left:0,top:50,background:HEADER_BG,zIndex:13,textTransform:"uppercase",letterSpacing:0.4}}>
+              <tr>
+                <th style={{padding:"6px 12px",textAlign:"left",color:"var(--text3)",fontWeight:600,fontSize:10,position:"sticky",left:0,top:50,background:HEADER_BG,zIndex:13,textTransform:"uppercase",letterSpacing:0.4,borderBottom:"1px solid var(--border)"}}>
                   Master
                 </th>
                 {PERM_GROUPS.map(g => {
                   if (!expanded[g.id]) {
-                    return <th key={g.id+"_stub"} style={{borderLeft:"1px solid var(--border)",background:g.bg,position:"sticky",top:50,zIndex:11}}></th>;
+                    return <th key={g.id+"_stub"} style={{borderLeft:"1px solid var(--border)",borderBottom:"1px solid var(--border)",background:HEADER_BG,position:"sticky",top:50,zIndex:11}}></th>;
                   }
                   // Calcula estado agregado: se TODAS visíveis têm TUDO marcado, mostra ☑; se ninguém tem nada, ☐; se misto, ⊟
                   const allFull = sorted.length > 0 && sorted.every(p => groupStateForPessoa(p, g) === 2);
                   const anyHas = sorted.some(p => groupStateForPessoa(p, g) > 0);
                   const masterIcon = allFull ? "☑" : anyHas ? "⊟" : "☐";
                   return (
-                    <th key={g.id+"_master"} colSpan={g.perms.length} style={{padding:"4px 8px",borderLeft:"1px solid var(--border)",background:g.bg,textAlign:"center",position:"sticky",top:50,zIndex:11}}>
+                    <th key={g.id+"_master"} colSpan={g.perms.length} style={{padding:"4px 8px",borderLeft:"1px solid var(--border)",borderBottom:"1px solid var(--border)",background:HEADER_BG,textAlign:"center",position:"sticky",top:50,zIndex:11}}>
                       <div style={{display:"flex",alignItems:"center",justifyContent:"center",gap:8}}>
                         <button onClick={()=>toggleGroupForAll(g, sorted)}
                           title={`${allFull ? "Desmarcar" : "Marcar"} todas as permissões deste grupo para todos visíveis (${sorted.length} pessoa${sorted.length===1?"":"s"})`}
@@ -19541,9 +19543,14 @@ function PermissoesMatrix({ restaurantId, pessoas, employees, managers, owners, 
               </tr>
             </thead>
             <tbody>
-              {sorted.map((p, idx) => (
-                <tr key={p.id} style={{borderTop:"1px solid var(--border)",background:idx%2===0?"transparent":"var(--bg2)"}}>
-                  <td style={{padding:"8px 12px",color:"var(--text)",fontWeight:500,position:"sticky",left:0,background:idx%2===0?"var(--card-bg)":"var(--bg2)",zIndex:1,minWidth:180}}>
+              {sorted.map((p, idx) => {
+                // Cor da linha (zebra). Com border-collapse:separate, o bg precisa ir em cada <td>
+                // (bg em <tr> é ignorado), então definimos uma var local pra reusar.
+                const rowBg = idx % 2 === 0 ? "var(--card-bg)" : "var(--bg2)";
+                const rowBorder = "1px solid var(--border)";
+                return (
+                <tr key={p.id}>
+                  <td style={{padding:"8px 12px",color:"var(--text)",fontWeight:500,position:"sticky",left:0,background:rowBg,zIndex:5,minWidth:180,borderTop:rowBorder,boxShadow:"2px 0 4px rgba(0,0,0,0.04)"}}>
                     <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:8}}>
                       <div style={{flex:1,minWidth:0}}>
                         <div style={{whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{p.name}</div>
@@ -19585,7 +19592,7 @@ function PermissoesMatrix({ restaurantId, pessoas, employees, managers, owners, 
                       return (
                         <td key={g.id+"_count"} onClick={()=>toggleGroupForPessoa(p, g)}
                             title={`${state === 2 ? "Desmarcar" : "Marcar"} todas as permissões de ${g.label} para ${p.name}\n(clique no nome do grupo no header pra expandir)`}
-                            style={{padding:"8px",textAlign:"center",color:count>0?g.color:"var(--text3)",fontWeight:count>0?700:400,fontFamily:"'DM Mono',monospace",fontSize:12,cursor:"pointer",borderLeft:"1px solid var(--border)",background:count>0?g.bg:"transparent"}}>
+                            style={{padding:"8px",textAlign:"center",color:count>0?g.color:"var(--text3)",fontWeight:count>0?700:400,fontFamily:"'DM Mono',monospace",fontSize:12,cursor:"pointer",borderLeft:"1px solid var(--border)",borderTop:rowBorder,background:count>0?g.bg:rowBg}}>
                           {cellLabel}
                         </td>
                       );
@@ -19595,7 +19602,7 @@ function PermissoesMatrix({ restaurantId, pessoas, employees, managers, owners, 
                       const isLiderKey = perm.key === "special.isLider";
                       const areas = (p.permissions?.[restaurantId]?.special?.areas) || [];
                       return (
-                        <td key={perm.key} style={{padding:"6px",textAlign:"center",borderLeft:"1px solid var(--border)"}}>
+                        <td key={perm.key} style={{padding:"6px",textAlign:"center",borderLeft:"1px solid var(--border)",borderTop:rowBorder,background:rowBg}}>
                           <input type="checkbox" checked={checked} onChange={()=>togglePerm(p, perm.key)} style={{cursor:"pointer",width:16,height:16,accentColor:g.color}} />
                           {isLiderKey && checked && (
                             <div style={{marginTop:4}}>
@@ -19611,7 +19618,8 @@ function PermissoesMatrix({ restaurantId, pessoas, employees, managers, owners, 
                     });
                   })}
                 </tr>
-              ))}
+                );
+              })}
             </tbody>
           </table>
         </div>
