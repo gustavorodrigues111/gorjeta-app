@@ -19312,8 +19312,18 @@ const PROFILE_COLORS = [
 ];
 
 function PermissoesMatrix({ restaurantId, pessoas, employees, managers, owners, permProfiles, onUpdate, mobileOnly }) {
-  // Customs (do restaurante atual) — vão pro topo do dropdown e do modal de gerenciamento
-  const customProfiles = (permProfiles?.[restaurantId] || []);
+  // permProfiles[restaurantId] aceita 2 formatos pra compat:
+  //   LEGADO: Array<profile>            → custom apenas, sem hidden
+  //   NOVO:   { custom: [], hiddenDefaults: [] }
+  const ridProfilesRaw = permProfiles?.[restaurantId];
+  const customProfiles = Array.isArray(ridProfilesRaw)
+    ? ridProfilesRaw
+    : (ridProfilesRaw?.custom || []);
+  const hiddenDefaultIds = Array.isArray(ridProfilesRaw)
+    ? []
+    : (ridProfilesRaw?.hiddenDefaults || []);
+  const visibleDefaults = PERM_PROFILES.filter(p => !hiddenDefaultIds.includes(p.id));
+  const hiddenDefaults = PERM_PROFILES.filter(p => hiddenDefaultIds.includes(p.id));
   // Filtra owners do AppTip — acesso implícito, não aparecem na matriz
   const ownerCpfSet = new Set((owners || []).map(o => (o.cpf || "").replace(/\D/g, "")).filter(Boolean));
   const restPessoas = (pessoas || []).filter(p => {
@@ -19331,30 +19341,66 @@ function PermissoesMatrix({ restaurantId, pessoas, employees, managers, owners, 
   const [profileManagerOpen, setProfileManagerOpen] = useState(false); // modal de gerenciar perfis
   const [editingProfile, setEditingProfile] = useState(null); // perfil sendo editado/criado
 
+  // Helper que devolve o estado normalizado (formato novo) pra escrita
+  function getRidProfilesObj() {
+    const raw = permProfiles?.[restaurantId];
+    if (Array.isArray(raw)) return { custom: raw, hiddenDefaults: [] };
+    return { custom: raw?.custom || [], hiddenDefaults: raw?.hiddenDefaults || [] };
+  }
+  function persistRidProfiles(obj) {
+    onUpdate("permProfiles", { ...(permProfiles || {}), [restaurantId]: obj });
+  }
+
   // CRUD de perfis customizados
-  function saveCustomProfile(profile) {
-    const ridProfiles = permProfiles?.[restaurantId] || [];
-    const exists = ridProfiles.some(p => p.id === profile.id);
-    const next = exists
-      ? ridProfiles.map(p => p.id === profile.id ? profile : p)
-      : [...ridProfiles, profile];
-    onUpdate("permProfiles", { ...(permProfiles || {}), [restaurantId]: next });
+  function saveCustomProfile(profile, sourceDefaultId) {
+    const ridObj = getRidProfilesObj();
+    const exists = ridObj.custom.some(p => p.id === profile.id);
+    const nextCustom = exists
+      ? ridObj.custom.map(p => p.id === profile.id ? profile : p)
+      : [...ridObj.custom, profile];
+    // Se foi clonado de um default ("Editar" no default), oculta o default original do menu
+    const nextHidden = sourceDefaultId && !ridObj.hiddenDefaults.includes(sourceDefaultId)
+      ? [...ridObj.hiddenDefaults, sourceDefaultId]
+      : ridObj.hiddenDefaults;
+    persistRidProfiles({ custom: nextCustom, hiddenDefaults: nextHidden });
     setEditingProfile(null);
   }
   async function deleteCustomProfile(profileId) {
     if (!await appConfirm("Apagar este perfil personalizado?")) return;
-    const ridProfiles = permProfiles?.[restaurantId] || [];
-    onUpdate("permProfiles", { ...(permProfiles || {}), [restaurantId]: ridProfiles.filter(p => p.id !== profileId) });
+    const ridObj = getRidProfilesObj();
+    persistRidProfiles({ ...ridObj, custom: ridObj.custom.filter(p => p.id !== profileId) });
   }
   function duplicateProfile(source) {
-    const newProfile = {
-      ...source,
+    setEditingProfile({
       id: `prof_${Date.now().toString(36)}${Math.random().toString(36).slice(2,5)}`,
       label: source.label + " (cópia)",
-      _isCustom: true,
-    };
-    delete newProfile._isCustom;
-    setEditingProfile(newProfile);
+      icon: source.icon,
+      color: source.color,
+      desc: source.desc,
+      keys: [...source.keys],
+    });
+  }
+  // "Editar" num default = clona pra custom + oculta o default ao salvar
+  function editDefaultAsCustom(source) {
+    setEditingProfile({
+      id: `prof_${Date.now().toString(36)}${Math.random().toString(36).slice(2,5)}`,
+      label: source.label,
+      icon: source.icon,
+      color: source.color,
+      desc: source.desc,
+      keys: [...source.keys],
+      _sourceDefaultId: source.id, // marca pra ocultar o default ao salvar
+    });
+  }
+  async function hideDefault(defaultId) {
+    if (!await appConfirm("Ocultar este perfil padrão do menu? Você pode mostrar de volta a qualquer momento.")) return;
+    const ridObj = getRidProfilesObj();
+    if (ridObj.hiddenDefaults.includes(defaultId)) return;
+    persistRidProfiles({ ...ridObj, hiddenDefaults: [...ridObj.hiddenDefaults, defaultId] });
+  }
+  function showDefault(defaultId) {
+    const ridObj = getRidProfilesObj();
+    persistRidProfiles({ ...ridObj, hiddenDefaults: ridObj.hiddenDefaults.filter(id => id !== defaultId) });
   }
   function newBlankProfile() {
     setEditingProfile({
@@ -19801,10 +19847,10 @@ function PermissoesMatrix({ restaurantId, pessoas, employees, managers, owners, 
                   </div>
                 </button>
               ))}
-              {customProfiles.length > 0 && (
+              {customProfiles.length > 0 && visibleDefaults.length > 0 && (
                 <div style={{padding:"4px 10px 2px",marginTop:4,borderTop:"1px solid var(--border)",fontSize:9,color:"var(--text3)",fontWeight:700,textTransform:"uppercase",letterSpacing:0.4}}>Padrões</div>
               )}
-              {PERM_PROFILES.map(prof => (
+              {visibleDefaults.map(prof => (
                 <button key={prof.id} onClick={()=>applyProfile(targetPessoa, prof.keys)}
                   style={{display:"flex",alignItems:"center",gap:8,padding:"7px 10px",background:"none",border:"none",borderRadius:6,cursor:"pointer",fontSize:12,color:"var(--text)",width:"100%",textAlign:"left",fontFamily:"'DM Sans',sans-serif"}}
                   onMouseEnter={e=>e.currentTarget.style.background="var(--bg2)"}
@@ -19858,20 +19904,43 @@ function PermissoesMatrix({ restaurantId, pessoas, employees, managers, owners, 
                 </div>
               )}
 
-              {/* Padrões (read-only com botão duplicar) */}
-              <div style={{fontSize:11,color:"var(--text3)",fontWeight:700,textTransform:"uppercase",letterSpacing:0.4,marginBottom:10}}>Perfis padrão (sempre disponíveis)</div>
-              <div style={{display:"flex",flexDirection:"column",gap:6}}>
-                {PERM_PROFILES.map(prof => (
-                  <div key={prof.id} style={{display:"flex",alignItems:"center",gap:10,padding:"10px 12px",background:"var(--bg2)",borderRadius:10,border:"1px solid var(--border)",opacity:0.85}}>
+              {/* Padrões visíveis no menu */}
+              <div style={{fontSize:11,color:"var(--text3)",fontWeight:700,textTransform:"uppercase",letterSpacing:0.4,marginBottom:10}}>Perfis padrão ({visibleDefaults.length} no menu)</div>
+              <div style={{display:"flex",flexDirection:"column",gap:6,marginBottom:hiddenDefaults.length > 0 ? 18 : 0}}>
+                {visibleDefaults.map(prof => (
+                  <div key={prof.id} style={{display:"flex",alignItems:"center",gap:8,padding:"10px 12px",background:"var(--bg2)",borderRadius:10,border:"1px solid var(--border)",flexWrap:"wrap"}}>
                     <span style={{fontSize:18}}>{prof.icon}</span>
-                    <div style={{flex:1,minWidth:0}}>
+                    <div style={{flex:"1 1 200px",minWidth:120}}>
                       <div style={{fontSize:13,fontWeight:700,color:prof.color}}>{prof.label}</div>
                       <div style={{fontSize:10,color:"var(--text3)",marginTop:1}}>{prof.desc}</div>
                     </div>
-                    <button onClick={()=>duplicateProfile(prof)} style={{...S.btnSecondary,fontSize:10,padding:"4px 10px"}}>📋 Duplicar</button>
+                    <div style={{display:"flex",gap:4,flexWrap:"wrap"}}>
+                      <button onClick={()=>duplicateProfile(prof)} style={{...S.btnSecondary,fontSize:10,padding:"4px 10px"}} title="Cria um novo perfil custom como cópia, mantém o original">📋 Duplicar</button>
+                      <button onClick={()=>editDefaultAsCustom(prof)} style={{...S.btnSecondary,fontSize:10,padding:"4px 10px"}} title="Abre o editor com este perfil — ao salvar, vira custom e o original some do menu">✏️ Editar</button>
+                      <button onClick={()=>hideDefault(prof.id)} style={{...S.btnSecondary,fontSize:10,padding:"4px 10px",color:"var(--text3)"}} title="Esconde do menu sem perder — pode mostrar de volta">🚫 Ocultar</button>
+                    </div>
                   </div>
                 ))}
               </div>
+
+              {/* Padrões ocultos */}
+              {hiddenDefaults.length > 0 && (
+                <>
+                  <div style={{fontSize:11,color:"var(--text3)",fontWeight:700,textTransform:"uppercase",letterSpacing:0.4,marginBottom:10}}>Padrões ocultos ({hiddenDefaults.length})</div>
+                  <div style={{display:"flex",flexDirection:"column",gap:6}}>
+                    {hiddenDefaults.map(prof => (
+                      <div key={prof.id} style={{display:"flex",alignItems:"center",gap:10,padding:"10px 12px",background:"var(--bg2)",borderRadius:10,border:"1px dashed var(--border)",opacity:0.6}}>
+                        <span style={{fontSize:18,filter:"grayscale(0.5)"}}>{prof.icon}</span>
+                        <div style={{flex:1,minWidth:0}}>
+                          <div style={{fontSize:13,fontWeight:700,color:prof.color,textDecoration:"line-through"}}>{prof.label}</div>
+                          <div style={{fontSize:10,color:"var(--text3)",marginTop:1}}>{prof.desc}</div>
+                        </div>
+                        <button onClick={()=>showDefault(prof.id)} style={{...S.btnSecondary,fontSize:10,padding:"4px 10px",color:"var(--ac)",borderColor:"var(--ac)44"}}>👁️ Mostrar</button>
+                      </div>
+                    ))}
+                  </div>
+                </>
+              )}
             </div>
           </div>
         </div>
@@ -19965,7 +20034,9 @@ function PermissoesMatrix({ restaurantId, pessoas, employees, managers, owners, 
               <button onClick={()=>{
                 if (!editingProfile.label.trim()) { alert("Nome é obrigatório"); return; }
                 if (editingProfile.keys.length === 0) { alert("Selecione pelo menos 1 permissão"); return; }
-                saveCustomProfile(editingProfile);
+                // Remove o marker antes de salvar (não vai pro Firestore)
+                const { _sourceDefaultId, ...cleanProfile } = editingProfile;
+                saveCustomProfile(cleanProfile, _sourceDefaultId);
               }} style={{...S.btnPrimary,fontSize:12,padding:"8px 18px"}}>💾 Salvar perfil</button>
             </div>
           </div>
