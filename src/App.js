@@ -18810,8 +18810,6 @@ function FreelasModule({ restaurantId, pessoas, freelaShifts, freelaPagamentos, 
   const restPessoas = (pessoas || []).filter(p => (p.restaurantIds || []).includes(restaurantId));
   const restFreelas = restPessoas.filter(p => p.isFreela === true);
   const restShifts = (freelaShifts || []).filter(s => s.restaurantId === restaurantId);
-  // (restLotes vai ser usado nas fases 5+ — mantido como referência mas comentado)
-  // const restLotes = (freelaPagamentos || []).filter(l => l.restaurantId === restaurantId);
 
   // ── Helpers ──
   // Calcula horas trabalhadas (entrada/saída em "HH:MM", intervalo em minutos)
@@ -18969,6 +18967,181 @@ function FreelasModule({ restaurantId, pessoas, freelaShifts, freelaPagamentos, 
     return id;
   }
 
+  // ── Bulk-fill de valor (aplica a vários shifts de uma vez) ──
+  function bulkFillValor({ pessoaId, valorTipo, valorUnit, escopo }) {
+    // escopo: "abertos_pessoa" | "abertos_pessoa_sem_valor" | "todos_abertos_sem_valor"
+    const updated = (freelaShifts || []).map(s => {
+      if (s.restaurantId !== restaurantId) return s;
+      if (s.status !== "aberto") return s;
+      let match = false;
+      if (escopo === "abertos_pessoa" && s.pessoaId === pessoaId) match = true;
+      if (escopo === "abertos_pessoa_sem_valor" && s.pessoaId === pessoaId && !s.valorTipo) match = true;
+      if (escopo === "todos_abertos_sem_valor" && !s.valorTipo) match = true;
+      if (!match) return s;
+      const next = { ...s, valorTipo, valorUnit: parseFloat(valorUnit) || 0 };
+      if (valorTipo === "hora") next.totalCalc = next.valorUnit * (next.horas || 0);
+      else if (valorTipo === "diaria") next.totalCalc = next.valorUnit;
+      return next;
+    });
+    onUpdate("freelaShifts", updated);
+    onUpdate("_toast", `🪄 Valor aplicado em massa`);
+  }
+
+  // ── Lotes de pagamento (Fase 5) ──
+  const restLotes = (freelaPagamentos || []).filter(l => l.restaurantId === restaurantId);
+
+  // Util: valida shift pronto pra fechar (tem valor + pessoa tem PIX)
+  function shiftPrntoPronto(s) {
+    if (s.status !== "aberto") return { ok: false, motivo: "Não está aberto" };
+    if (!s.valorTipo || s.totalCalc == null) return { ok: false, motivo: "Sem valor preenchido" };
+    if (!s.entrada || !s.saida) return { ok: false, motivo: "Sem entrada/saída" };
+    const p = restPessoas.find(x => x.id === s.pessoaId);
+    if (!p) return { ok: false, motivo: "Pessoa removida" };
+    if (!p.pix) return { ok: false, motivo: `${p.name} sem PIX` };
+    return { ok: true };
+  }
+
+  async function criarLote({ shiftIds, numero, observacao }) {
+    const sel = (freelaShifts || []).filter(s => shiftIds.includes(s.id) && s.restaurantId === restaurantId);
+    if (sel.length === 0) { alert("Selecione pelo menos 1 shift."); return null; }
+    // Valida cada um
+    for (const s of sel) {
+      const v = shiftPrntoPronto(s);
+      if (!v.ok) { alert(`Shift de ${restPessoas.find(p=>p.id===s.pessoaId)?.name || "?"} em ${fmtDate(s.date)}: ${v.motivo}`); return null; }
+    }
+    // Resumo por pessoa
+    const byPessoa = {};
+    sel.forEach(s => {
+      if (!byPessoa[s.pessoaId]) byPessoa[s.pessoaId] = { pessoaId: s.pessoaId, totalHoras: 0, totalValor: 0, qtdShifts: 0 };
+      byPessoa[s.pessoaId].totalHoras += s.horas || 0;
+      byPessoa[s.pessoaId].totalValor += s.totalCalc || 0;
+      byPessoa[s.pessoaId].qtdShifts += 1;
+    });
+    const pessoasResumo = Object.values(byPessoa);
+    const totalGeral = pessoasResumo.reduce((sum, p) => sum + p.totalValor, 0);
+    const loteId = `lot_${Date.now().toString(36)}${Math.random().toString(36).slice(2,5)}`;
+    const lote = {
+      id: loteId,
+      restaurantId,
+      numero: numero || `Lote ${fmtDate(today())}`,
+      observacao: observacao || "",
+      shiftIds: sel.map(s => s.id),
+      pessoasResumo,
+      totalGeral,
+      qtdShifts: sel.length,
+      qtdPessoas: pessoasResumo.length,
+      status: "pendente",
+      criadoEm: new Date().toISOString(),
+      criadoPor: currentUser?.name || "—",
+      criadoPorId: currentUser?.id || null,
+    };
+    // Marca shifts como "fechamento" + lotePagamentoId
+    const updatedShifts = (freelaShifts || []).map(s => {
+      if (sel.find(x => x.id === s.id)) return { ...s, status: "fechamento", lotePagamentoId: loteId };
+      return s;
+    });
+    onUpdate("freelaShifts", updatedShifts);
+    onUpdate("freelaPagamentos", [...(freelaPagamentos || []), lote]);
+    onUpdate("_toast", `📑 Lote criado com ${sel.length} shift(s) — R$ ${totalGeral.toFixed(2)}`);
+    return loteId;
+  }
+
+  async function cancelarLote(loteId) {
+    const lote = (freelaPagamentos || []).find(l => l.id === loteId);
+    if (!lote) return;
+    if (lote.status === "pago") { alert("Lote já foi pago — não dá pra cancelar."); return; }
+    if (!await appConfirm(`Cancelar o lote "${lote.numero}"? Os ${lote.qtdShifts} shifts voltam pro status "Aberto".`)) return;
+    const updatedShifts = (freelaShifts || []).map(s => {
+      if (lote.shiftIds.includes(s.id)) return { ...s, status: "aberto", lotePagamentoId: null };
+      return s;
+    });
+    onUpdate("freelaShifts", updatedShifts);
+    onUpdate("freelaPagamentos", (freelaPagamentos || []).filter(l => l.id !== loteId));
+    onUpdate("_toast", `🗑️ Lote cancelado`);
+  }
+
+  async function marcarLotePago(loteId, dataPagamento, formaPagamento) {
+    const lote = (freelaPagamentos || []).find(l => l.id === loteId);
+    if (!lote) return;
+    if (lote.status === "pago") { alert("Já está pago."); return; }
+    const updatedShifts = (freelaShifts || []).map(s => {
+      if (lote.shiftIds.includes(s.id)) return { ...s, status: "pago", pagoEm: dataPagamento };
+      return s;
+    });
+    const updatedLotes = (freelaPagamentos || []).map(l => {
+      if (l.id !== loteId) return l;
+      return { ...l, status: "pago", pagoEm: dataPagamento, formaPagamento: formaPagamento || "PIX", pagoPor: currentUser?.name || "—", pagoPorId: currentUser?.id || null };
+    });
+    onUpdate("freelaShifts", updatedShifts);
+    onUpdate("freelaPagamentos", updatedLotes);
+    onUpdate("_toast", `💸 Lote marcado como pago em ${fmtDate(dataPagamento)}`);
+  }
+
+  // ── Geração do PDF do lote (Fase 6) ──
+  async function gerarPDFLote(loteId) {
+    const lote = (freelaPagamentos || []).find(l => l.id === loteId);
+    if (!lote) return;
+    const jsPDFCtor = window.jspdf?.jsPDF || window.jsPDF;
+    if (!jsPDFCtor) { alert("Biblioteca PDF não carregada — recarregue a página."); return; }
+    const doc = new jsPDFCtor("p", "mm", "a4");
+    const pageW = doc.internal.pageSize.getWidth();
+    // Cabeçalho
+    doc.setFont("helvetica", "bold"); doc.setFontSize(15);
+    doc.text("Pagamento de Freelas", 14, 16);
+    doc.setFontSize(10); doc.setFont("helvetica", "normal");
+    doc.text(`Lote: ${lote.numero}`, 14, 23);
+    doc.text(`Criado em: ${fmtDate(lote.criadoEm.slice(0,10))} por ${lote.criadoPor}`, 14, 28);
+    doc.text(`Status: ${lote.status === "pago" ? "PAGO em " + fmtDate(lote.pagoEm) : "PENDENTE"}`, 14, 33);
+    if (lote.observacao) doc.text(`Obs: ${lote.observacao}`, 14, 38);
+    // Resumo por pessoa
+    const headPessoas = [["Pessoa", "CPF", "PIX", "Shifts", "Horas", "Total R$"]];
+    const bodyPessoas = lote.pessoasResumo.map(pr => {
+      const p = restPessoas.find(x => x.id === pr.pessoaId) || {};
+      const cpfFmt = (p.cpf || "").replace(/\D/g, "").replace(/(\d{3})(\d{3})(\d{3})(\d{2})/, "$1.$2.$3-$4");
+      return [p.name || "(removido)", cpfFmt || "—", p.pix || "—", String(pr.qtdShifts), pr.totalHoras.toFixed(2) + "h", "R$ " + pr.totalValor.toFixed(2)];
+    });
+    bodyPessoas.push(["", "", "", String(lote.qtdShifts), "", "R$ " + lote.totalGeral.toFixed(2)]);
+    doc.autoTable({
+      head: headPessoas, body: bodyPessoas, startY: lote.observacao ? 44 : 39,
+      theme: "grid", styles: { fontSize: 9 }, headStyles: { fillColor: [124, 58, 237], textColor: 255 },
+      foot: [["", "", "TOTAL", String(lote.qtdShifts), "", "R$ " + lote.totalGeral.toFixed(2)]],
+      footStyles: { fillColor: [240, 235, 250], textColor: 0, fontStyle: "bold" },
+    });
+    // Detalhe por shift
+    let cursorY = doc.lastAutoTable.finalY + 8;
+    doc.setFontSize(11); doc.setFont("helvetica", "bold");
+    doc.text("Detalhamento dos shifts", 14, cursorY); cursorY += 4;
+    const headDet = [["Pessoa", "Data", "Área", "Ent.", "Saí.", "Int.", "Horas", "Valor", "Total"]];
+    const shiftsLote = (freelaShifts || []).filter(s => lote.shiftIds.includes(s.id))
+      .sort((a,b) => (a.pessoaId).localeCompare(b.pessoaId) || (a.date || "").localeCompare(b.date || ""));
+    const bodyDet = shiftsLote.map(s => {
+      const p = restPessoas.find(x => x.id === s.pessoaId) || {};
+      return [
+        (p.name || "?").split(" ").slice(0,2).join(" "),
+        fmtDate(s.date), s.area || "—", s.entrada || "—", s.saida || "—",
+        String(s.intervalo || 0) + "min", fmtHoras(s.horas),
+        s.valorTipo === "hora" ? "R$" + (s.valorUnit||0).toFixed(2) + "/h" : "R$" + (s.valorUnit||0).toFixed(2),
+        "R$ " + (s.totalCalc || 0).toFixed(2),
+      ];
+    });
+    doc.autoTable({
+      head: headDet, body: bodyDet, startY: cursorY,
+      theme: "striped", styles: { fontSize: 8 }, headStyles: { fillColor: [124, 58, 237], textColor: 255 },
+    });
+    // Rodapé
+    const totalPages = doc.internal.getNumberOfPages();
+    for (let i = 1; i <= totalPages; i++) {
+      doc.setPage(i);
+      doc.setFontSize(8); doc.setTextColor(120);
+      doc.text(`Página ${i} de ${totalPages}`, pageW - 14, doc.internal.pageSize.getHeight() - 8, { align: "right" });
+      doc.text(`Gerado por AppTip · ${new Date().toLocaleString("pt-BR")}`, 14, doc.internal.pageSize.getHeight() - 8);
+    }
+    doc.save(`Freelas_${lote.numero.replace(/[^a-zA-Z0-9]/g, "_")}.pdf`);
+    // marca timestamp do PDF gerado
+    const updatedLotes = (freelaPagamentos || []).map(l => l.id === loteId ? { ...l, pdfGeradoEm: new Date().toISOString() } : l);
+    onUpdate("freelaPagamentos", updatedLotes);
+  }
+
   // Quem pode ver cada sub-tab
   const canFechamento = isDP || isOwner; // só DP/Owner faz fechamento e marca pago
   const canHistorico = isDP || isOwner;
@@ -19009,6 +19182,8 @@ function FreelasModule({ restaurantId, pessoas, freelaShifts, freelaPagamentos, 
           updateShift={updateShift}
           deleteShift={deleteShift}
           addFreela={addFreela}
+          bulkFillValor={bulkFillValor}
+          shiftPrntoPronto={shiftPrntoPronto}
           calcHoras={calcHoras}
           fmtHoras={fmtHoras}
           isDP={isDP}
@@ -19020,32 +19195,35 @@ function FreelasModule({ restaurantId, pessoas, freelaShifts, freelaPagamentos, 
         />
       )}
 
-      {/* Sub-tab: Fechamento (placeholder Fase 1) */}
       {subTab === "fechamento" && (
-        <div style={{padding:"40px 24px",textAlign:"center",color:"var(--text3)",fontSize:13,background:"var(--card-bg)",border:"1px dashed var(--border)",borderRadius:12}}>
-          <div style={{fontSize:40,marginBottom:12}}>📑</div>
-          <div style={{color:"var(--text)",fontWeight:600,fontSize:15,marginBottom:6}}>Fechamento e pagamento</div>
-          <p style={{lineHeight:1.6,maxWidth:420,margin:"0 auto"}}>
-            Em construção. Selecione shifts abertos pra gerar o PDF do lote, depois marque como pago com data.
-          </p>
-          <p style={{fontSize:11,color:"var(--text3)",marginTop:14,opacity:0.7}}>
-            Fase 5
-          </p>
-        </div>
+        <FreelaFechamentoTab
+          restaurantId={restaurantId}
+          restPessoas={restPessoas}
+          shifts={restShifts}
+          lotes={restLotes}
+          shiftPrntoPronto={shiftPrntoPronto}
+          fmtHoras={fmtHoras}
+          criarLote={criarLote}
+          cancelarLote={cancelarLote}
+          marcarLotePago={marcarLotePago}
+          gerarPDFLote={gerarPDFLote}
+          mobileOnly={mobileOnly}
+          ac={ac}
+        />
       )}
 
-      {/* Sub-tab: Histórico (placeholder Fase 1) */}
       {subTab === "historico" && (
-        <div style={{padding:"40px 24px",textAlign:"center",color:"var(--text3)",fontSize:13,background:"var(--card-bg)",border:"1px dashed var(--border)",borderRadius:12}}>
-          <div style={{fontSize:40,marginBottom:12}}>🗂️</div>
-          <div style={{color:"var(--text)",fontWeight:600,fontSize:15,marginBottom:6}}>Histórico de pagamentos</div>
-          <p style={{lineHeight:1.6,maxWidth:420,margin:"0 auto"}}>
-            Em construção. Lotes pagos, PDF re-baixável, dashboard de custos por freela e setor.
-          </p>
-          <p style={{fontSize:11,color:"var(--text3)",marginTop:14,opacity:0.7}}>
-            Fase 7
-          </p>
-        </div>
+        <FreelaHistoricoTab
+          restaurantId={restaurantId}
+          restPessoas={restPessoas}
+          shifts={restShifts}
+          lotes={restLotes}
+          fmtHoras={fmtHoras}
+          gerarPDFLote={gerarPDFLote}
+          cancelarLote={cancelarLote}
+          mobileOnly={mobileOnly}
+          ac={ac}
+        />
       )}
     </div>
   );
@@ -19054,12 +19232,14 @@ function FreelasModule({ restaurantId, pessoas, freelaShifts, freelaPagamentos, 
 // ═══════════════════════════════════════════════════════════════
 // ──  FREELAS — sub-componente Lançamento (tabela de shifts)     ──
 // ═══════════════════════════════════════════════════════════════
-function FreelaLancamentoTab({ restaurantId, restPessoas, restFreelas, shifts, addShift, updateShift, deleteShift, addFreela, calcHoras, fmtHoras, isDP, isOwner, isLider, currentUser, mobileOnly, ac }) {
+function FreelaLancamentoTab({ restaurantId, restPessoas, restFreelas, shifts, addShift, updateShift, deleteShift, addFreela, bulkFillValor, shiftPrntoPronto, calcHoras, fmtHoras, isDP, isOwner, isLider, currentUser, mobileOnly, ac }) {
   const [showAddForm, setShowAddForm] = useState(false);
   const [newShift, setNewShift] = useState({ pessoaId: "", date: today(), entrada: "", saida: "", intervalo: 0, area: "", observacao: "" });
   const [showFreelaForm, setShowFreelaForm] = useState(false);
   const [newFreela, setNewFreela] = useState({ name: "", whatsapp: "", pix: "", cpf: "" });
-  const [filterStatus, setFilterStatus] = useState("todos"); // todos | aberto | fechamento | pago
+  const [showBulkForm, setShowBulkForm] = useState(false);
+  const [bulkData, setBulkData] = useState({ pessoaId: "", valorTipo: "hora", valorUnit: "", escopo: "abertos_pessoa_sem_valor" });
+  const [filterStatus, setFilterStatus] = useState("todos"); // todos | aberto | pendentes | fechamento | pago
   const [filterPeriod, setFilterPeriod] = useState({ from: "", to: "" });
   const [filterPessoa, setFilterPessoa] = useState("");
 
@@ -19073,7 +19253,9 @@ function FreelaLancamentoTab({ restaurantId, restPessoas, restFreelas, shifts, a
 
   // Filtros aplicados
   const filtered = shifts.filter(s => {
-    if (filterStatus !== "todos" && s.status !== filterStatus) return false;
+    if (filterStatus === "pendentes") {
+      if (s.status !== "aberto" || s.valorTipo) return false;
+    } else if (filterStatus !== "todos" && s.status !== filterStatus) return false;
     if (filterPessoa && s.pessoaId !== filterPessoa) return false;
     if (filterPeriod.from && s.date < filterPeriod.from) return false;
     if (filterPeriod.to && s.date > filterPeriod.to) return false;
@@ -19123,12 +19305,20 @@ function FreelaLancamentoTab({ restaurantId, restPessoas, restFreelas, shifts, a
           {showFreelaForm ? "✕ Fechar" : "🎒+ Cadastrar freela"}
         </button>
         <select value={filterStatus} onChange={e=>setFilterStatus(e.target.value)}
-          style={{...S.input,maxWidth:160,fontSize:12,padding:"7px 10px",cursor:"pointer"}}>
+          style={{...S.input,maxWidth:180,fontSize:12,padding:"7px 10px",cursor:"pointer"}}>
           <option value="todos">📋 Todos status</option>
           <option value="aberto">🟢 Abertos</option>
+          <option value="pendentes">⚠️ Pendentes (sem valor)</option>
           <option value="fechamento">🔒 Em fechamento</option>
           <option value="pago">💸 Pagos</option>
         </select>
+        {(isDP || isOwner) && (
+          <button onClick={()=>setShowBulkForm(!showBulkForm)}
+            title="Aplicar mesmo valor a vários shifts de uma vez"
+            style={{background:showBulkForm?"var(--bg2)":"transparent",color:ac,border:`1px solid ${ac}`,borderRadius:8,padding:"7px 12px",fontSize:12,fontWeight:600,cursor:"pointer"}}>
+            🪄 Bulk fill
+          </button>
+        )}
         <select value={filterPessoa} onChange={e=>setFilterPessoa(e.target.value)}
           style={{...S.input,maxWidth:200,fontSize:12,padding:"7px 10px",cursor:"pointer"}}>
           <option value="">🎒 Todas as pessoas</option>
@@ -19168,6 +19358,54 @@ function FreelaLancamentoTab({ restaurantId, restPessoas, restFreelas, shifts, a
           <div style={{display:"flex",gap:8,justifyContent:"flex-end"}}>
             <button onClick={()=>{setShowFreelaForm(false); setNewFreela({name:"",whatsapp:"",pix:"",cpf:""});}} style={{...S.btnSecondary,fontSize:12,padding:"7px 14px"}}>Cancelar</button>
             <button onClick={handleAddFreelaSubmit} style={{background:ac,color:"#fff",border:"none",borderRadius:8,padding:"7px 18px",fontSize:13,fontWeight:700,cursor:"pointer"}}>🎒 Cadastrar e usar</button>
+          </div>
+        </div>
+      )}
+
+      {/* Form de bulk-fill (DP/Owner) */}
+      {showBulkForm && (isDP || isOwner) && (
+        <div style={{background:`${ac}06`,border:`1px dashed ${ac}66`,borderRadius:10,padding:14,marginBottom:14}}>
+          <div style={{fontSize:11,color:ac,fontWeight:700,textTransform:"uppercase",letterSpacing:0.4,marginBottom:4}}>🪄 Aplicar valor em massa</div>
+          <div style={{fontSize:11,color:"var(--text3)",marginBottom:10,lineHeight:1.4}}>
+            Atalho pra preencher rápido. Aplica o mesmo valor a vários shifts em status <strong>Aberto</strong> de uma vez.
+          </div>
+          <div style={{display:"grid",gridTemplateColumns:mobileOnly?"1fr":"1.6fr 1fr 1fr 1.6fr",gap:8,marginBottom:10}}>
+            <div>
+              <label style={{...S.label,fontSize:11}}>Pessoa</label>
+              <select value={bulkData.pessoaId} onChange={e=>setBulkData({...bulkData,pessoaId:e.target.value})} style={{...S.input,cursor:"pointer"}}>
+                <option value="">— Selecione —</option>
+                {restPessoas.filter(p=>p.isFreela||p.isTeam?.[restaurantId]).sort((a,b)=>a.name.localeCompare(b.name)).map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+              </select>
+            </div>
+            <div>
+              <label style={{...S.label,fontSize:11}}>Tipo</label>
+              <select value={bulkData.valorTipo} onChange={e=>setBulkData({...bulkData,valorTipo:e.target.value})} style={{...S.input,cursor:"pointer"}}>
+                <option value="hora">Hora</option>
+                <option value="diaria">Diária</option>
+              </select>
+            </div>
+            <div>
+              <label style={{...S.label,fontSize:11}}>Valor R$</label>
+              <input type="number" step="0.01" min="0" value={bulkData.valorUnit} onChange={e=>setBulkData({...bulkData,valorUnit:e.target.value})} placeholder="0,00" style={S.input}/>
+            </div>
+            <div>
+              <label style={{...S.label,fontSize:11}}>Aplicar em</label>
+              <select value={bulkData.escopo} onChange={e=>setBulkData({...bulkData,escopo:e.target.value})} style={{...S.input,cursor:"pointer"}}>
+                <option value="abertos_pessoa_sem_valor">Só shifts sem valor (da pessoa)</option>
+                <option value="abertos_pessoa">Todos abertos (da pessoa, sobrescreve)</option>
+                <option value="todos_abertos_sem_valor">Todos sem valor (qualquer pessoa)</option>
+              </select>
+            </div>
+          </div>
+          <div style={{display:"flex",gap:8,justifyContent:"flex-end"}}>
+            <button onClick={()=>setShowBulkForm(false)} style={{...S.btnSecondary,fontSize:12,padding:"7px 14px"}}>Cancelar</button>
+            <button onClick={()=>{
+              if (bulkData.escopo !== "todos_abertos_sem_valor" && !bulkData.pessoaId) { alert("Selecione a pessoa."); return; }
+              if (!bulkData.valorUnit || parseFloat(bulkData.valorUnit) <= 0) { alert("Valor inválido."); return; }
+              bulkFillValor(bulkData);
+              setBulkData({ pessoaId: "", valorTipo: "hora", valorUnit: "", escopo: "abertos_pessoa_sem_valor" });
+              setShowBulkForm(false);
+            }} style={{background:ac,color:"#fff",border:"none",borderRadius:8,padding:"7px 18px",fontSize:13,fontWeight:700,cursor:"pointer"}}>🪄 Aplicar</button>
           </div>
         </div>
       )}
@@ -19269,11 +19507,14 @@ function FreelaLancamentoTab({ restaurantId, restPessoas, restFreelas, shifts, a
               <tbody>
                 {filtered.map(s => {
                   const editable = canEditShift(s);
+                  const pronto = s.status === "aberto" ? shiftPrntoPronto(s) : { ok: false };
                   const statusBadge = s.status === "pago"
                     ? { icon: "💸", color: "#15803d", bg: "#10b98122", label: "Pago" }
                     : s.status === "fechamento"
                       ? { icon: "🔒", color: "#92400e", bg: "#fef3c7", label: "Fechamento" }
-                      : { icon: "🟢", color: ac, bg: `${ac}22`, label: "Aberto" };
+                      : pronto.ok
+                        ? { icon: "✅", color: "#15803d", bg: "#10b98122", label: "Pronto pra fechar" }
+                        : { icon: "⚠️", color: "#92400e", bg: "#fef3c7", label: "Aberto — " + (pronto.motivo || "incompleto") };
                   return (
                     <tr key={s.id} style={{borderTop:"1px solid var(--border)"}}>
                       <td style={{padding:"6px 10px",color:"var(--text)",fontWeight:600}}>{pessoaName(s.pessoaId)}</td>
@@ -19347,9 +19588,411 @@ function FreelaLancamentoTab({ restaurantId, restPessoas, restFreelas, shifts, a
               </tbody>
             </table>
           </div>
-          <div style={{padding:"8px 12px",borderTop:"1px solid var(--border)",fontSize:11,color:"var(--text3)",background:"var(--bg2)"}}>
-            {filtered.length} shift{filtered.length===1?"":"s"} · {filtered.filter(s=>s.status==="aberto").length} abertos · Total: R$ {filtered.reduce((sum, s) => sum + (s.totalCalc || 0), 0).toFixed(2)}
+          <div style={{padding:"8px 12px",borderTop:"1px solid var(--border)",fontSize:11,color:"var(--text3)",background:"var(--bg2)",display:"flex",gap:12,flexWrap:"wrap",justifyContent:"space-between"}}>
+            <div>
+              {filtered.length} shift{filtered.length===1?"":"s"} · {filtered.filter(s=>s.status==="aberto").length} abertos · {filtered.filter(s=>s.status==="aberto"&&shiftPrntoPronto(s).ok).length} prontos
+            </div>
+            <div style={{fontFamily:"'DM Mono',monospace",color:"var(--text)",fontWeight:700}}>
+              Total: R$ {filtered.reduce((sum, s) => sum + (s.totalCalc || 0), 0).toFixed(2)}
+            </div>
           </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════
+// ──  FREELAS — sub-componente Fechamento (criar lote, marcar pago) ─
+// ═══════════════════════════════════════════════════════════════
+function FreelaFechamentoTab({ restaurantId, restPessoas, shifts, lotes, shiftPrntoPronto, fmtHoras, criarLote, cancelarLote, marcarLotePago, gerarPDFLote, mobileOnly, ac }) {
+  const [selected, setSelected] = useState({}); // { shiftId: true }
+  const [showLoteForm, setShowLoteForm] = useState(false);
+  const [loteData, setLoteData] = useState({ numero: "", observacao: "" });
+  const [payingLoteId, setPayingLoteId] = useState(null);
+  const [payData, setPayData] = useState({ data: today(), forma: "PIX" });
+
+  const abertos = shifts.filter(s => s.status === "aberto");
+  const prontos = abertos.filter(s => shiftPrntoPronto(s).ok);
+  const incompletos = abertos.filter(s => !shiftPrntoPronto(s).ok);
+  const pendentesLotes = lotes.filter(l => l.status === "pendente").sort((a,b) => (b.criadoEm||"").localeCompare(a.criadoEm||""));
+
+  const selIds = Object.keys(selected).filter(id => selected[id]);
+  const selShifts = prontos.filter(s => selected[s.id]);
+  const selTotal = selShifts.reduce((sum, s) => sum + (s.totalCalc || 0), 0);
+  const selPessoas = new Set(selShifts.map(s => s.pessoaId));
+
+  function toggleAllProntos() {
+    if (selIds.length === prontos.length && prontos.length > 0) setSelected({});
+    else {
+      const all = {}; prontos.forEach(s => { all[s.id] = true; });
+      setSelected(all);
+    }
+  }
+
+  async function handleCriarLote() {
+    if (selShifts.length === 0) { alert("Selecione pelo menos 1 shift."); return; }
+    const newId = await criarLote({ shiftIds: selIds, numero: loteData.numero, observacao: loteData.observacao });
+    if (newId) {
+      setSelected({}); setLoteData({ numero: "", observacao: "" }); setShowLoteForm(false);
+    }
+  }
+
+  // agrupa prontos por pessoa pra UX melhor
+  const prontosByPessoa = {};
+  prontos.forEach(s => {
+    if (!prontosByPessoa[s.pessoaId]) prontosByPessoa[s.pessoaId] = [];
+    prontosByPessoa[s.pessoaId].push(s);
+  });
+
+  return (
+    <div style={{paddingBottom:48}}>
+      {/* Resumo + ações */}
+      <div style={{display:"flex",gap:12,flexWrap:"wrap",marginBottom:14,alignItems:"center"}}>
+        <div style={{padding:"8px 12px",background:"var(--card-bg)",border:"1px solid var(--border)",borderRadius:8,fontSize:12}}>
+          <span style={{color:"var(--text3)"}}>Prontos pra fechar:</span>{" "}
+          <strong style={{color:ac,fontFamily:"'DM Mono',monospace"}}>{prontos.length}</strong>
+        </div>
+        {incompletos.length > 0 && (
+          <div style={{padding:"8px 12px",background:"#fef3c7",border:"1px solid #fbbf24",borderRadius:8,fontSize:12,color:"#92400e"}}>
+            ⚠️ <strong>{incompletos.length}</strong> shift(s) incompleto(s) — preencha valor e PIX em <em>Lançamento</em>
+          </div>
+        )}
+        {selShifts.length > 0 && (
+          <button onClick={()=>setShowLoteForm(true)}
+            style={{background:ac,color:"#fff",border:"none",borderRadius:8,padding:"9px 18px",fontSize:13,fontWeight:700,cursor:"pointer",marginLeft:"auto"}}>
+            📑 Gerar lote ({selShifts.length} · R$ {selTotal.toFixed(2)})
+          </button>
+        )}
+      </div>
+
+      {/* Form de criar lote */}
+      {showLoteForm && (
+        <div style={{background:`${ac}08`,border:`1px solid ${ac}44`,borderRadius:10,padding:14,marginBottom:14}}>
+          <div style={{fontSize:11,color:ac,fontWeight:700,textTransform:"uppercase",letterSpacing:0.4,marginBottom:10}}>Revisar lote</div>
+          <div style={{display:"grid",gridTemplateColumns:mobileOnly?"1fr":"1fr 2fr",gap:8,marginBottom:10}}>
+            <div>
+              <label style={{...S.label,fontSize:11}}>Nome do lote</label>
+              <input value={loteData.numero} onChange={e=>setLoteData({...loteData,numero:e.target.value})} placeholder={`Lote ${fmtDate(today())}`} style={S.input}/>
+            </div>
+            <div>
+              <label style={{...S.label,fontSize:11}}>Observação (opcional)</label>
+              <input value={loteData.observacao} onChange={e=>setLoteData({...loteData,observacao:e.target.value})} placeholder="ex: pagamento da semana 2" style={S.input}/>
+            </div>
+          </div>
+          <div style={{padding:"10px 12px",background:"var(--bg2)",borderRadius:8,marginBottom:10,fontSize:12}}>
+            📊 <strong>{selShifts.length}</strong> shift(s) · <strong>{selPessoas.size}</strong> pessoa(s) · Total: <strong style={{color:ac,fontFamily:"'DM Mono',monospace"}}>R$ {selTotal.toFixed(2)}</strong>
+          </div>
+          <div style={{display:"flex",gap:8,justifyContent:"flex-end"}}>
+            <button onClick={()=>setShowLoteForm(false)} style={{...S.btnSecondary,fontSize:12,padding:"7px 14px"}}>Cancelar</button>
+            <button onClick={handleCriarLote} style={{background:ac,color:"#fff",border:"none",borderRadius:8,padding:"7px 18px",fontSize:13,fontWeight:700,cursor:"pointer"}}>📑 Criar lote</button>
+          </div>
+        </div>
+      )}
+
+      {/* Lotes pendentes (já criados, aguardando pagamento) */}
+      {pendentesLotes.length > 0 && (
+        <div style={{marginBottom:18}}>
+          <div style={{fontSize:11,color:"var(--text3)",fontWeight:700,textTransform:"uppercase",letterSpacing:0.4,marginBottom:8}}>Lotes pendentes de pagamento</div>
+          <div style={{display:"flex",flexDirection:"column",gap:8}}>
+            {pendentesLotes.map(l => (
+              <div key={l.id} style={{background:"var(--card-bg)",border:`1px solid ${ac}55`,borderRadius:10,padding:12}}>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:10,flexWrap:"wrap"}}>
+                  <div style={{flex:1,minWidth:200}}>
+                    <div style={{fontWeight:700,fontSize:14,color:"var(--text)"}}>{l.numero}</div>
+                    <div style={{fontSize:11,color:"var(--text3)",marginTop:3}}>
+                      {l.qtdShifts} shift(s) · {l.qtdPessoas} pessoa(s) · criado por {l.criadoPor} em {fmtDate(l.criadoEm.slice(0,10))}
+                    </div>
+                    {l.observacao && <div style={{fontSize:11,color:"var(--text2)",marginTop:3,fontStyle:"italic"}}>“{l.observacao}”</div>}
+                  </div>
+                  <div style={{textAlign:"right"}}>
+                    <div style={{fontFamily:"'DM Mono',monospace",fontWeight:800,fontSize:18,color:ac}}>R$ {l.totalGeral.toFixed(2)}</div>
+                  </div>
+                </div>
+                <div style={{display:"flex",gap:6,marginTop:10,flexWrap:"wrap"}}>
+                  <button onClick={()=>gerarPDFLote(l.id)} style={{background:"transparent",color:ac,border:`1px solid ${ac}`,borderRadius:6,padding:"5px 12px",fontSize:11,fontWeight:600,cursor:"pointer"}}>📄 PDF</button>
+                  <button onClick={()=>{setPayingLoteId(l.id); setPayData({data:today(),forma:"PIX"});}}
+                    style={{background:"#10b981",color:"#fff",border:"none",borderRadius:6,padding:"5px 12px",fontSize:11,fontWeight:700,cursor:"pointer"}}>💸 Marcar pago</button>
+                  <button onClick={()=>cancelarLote(l.id)} style={{background:"transparent",color:"var(--red)",border:"1px solid var(--red)",borderRadius:6,padding:"5px 12px",fontSize:11,fontWeight:600,cursor:"pointer"}}>✕ Cancelar lote</button>
+                </div>
+
+                {/* Modal inline pra marcar como pago */}
+                {payingLoteId === l.id && (
+                  <div style={{marginTop:10,padding:10,background:"#10b98115",border:"1px solid #10b98155",borderRadius:8}}>
+                    <div style={{fontSize:11,color:"#15803d",fontWeight:700,marginBottom:8}}>Marcar lote como pago</div>
+                    <div style={{display:"grid",gridTemplateColumns:mobileOnly?"1fr":"1fr 1fr auto auto",gap:6,alignItems:"end"}}>
+                      <div>
+                        <label style={{...S.label,fontSize:10}}>Data do pagamento</label>
+                        <input type="date" value={payData.data} onChange={e=>setPayData({...payData,data:e.target.value})} style={{...S.input,fontSize:12,padding:"6px 8px"}}/>
+                      </div>
+                      <div>
+                        <label style={{...S.label,fontSize:10}}>Forma</label>
+                        <select value={payData.forma} onChange={e=>setPayData({...payData,forma:e.target.value})} style={{...S.input,fontSize:12,padding:"6px 8px",cursor:"pointer"}}>
+                          <option>PIX</option><option>Dinheiro</option><option>Transferência</option><option>Outro</option>
+                        </select>
+                      </div>
+                      <button onClick={()=>setPayingLoteId(null)} style={{...S.btnSecondary,fontSize:11,padding:"6px 12px"}}>Cancelar</button>
+                      <button onClick={async()=>{await marcarLotePago(l.id, payData.data, payData.forma); setPayingLoteId(null);}}
+                        style={{background:"#10b981",color:"#fff",border:"none",borderRadius:6,padding:"6px 14px",fontSize:12,fontWeight:700,cursor:"pointer"}}>💸 Confirmar</button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Lista de prontos pra fechar — agrupados por pessoa */}
+      <div style={{fontSize:11,color:"var(--text3)",fontWeight:700,textTransform:"uppercase",letterSpacing:0.4,marginBottom:8,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+        <span>Shifts prontos pra fechar</span>
+        {prontos.length > 0 && (
+          <button onClick={toggleAllProntos} style={{background:"none",border:`1px solid ${ac}`,color:ac,borderRadius:6,padding:"4px 10px",fontSize:11,fontWeight:600,cursor:"pointer"}}>
+            {selIds.length === prontos.length ? "Desmarcar todos" : "Marcar todos"}
+          </button>
+        )}
+      </div>
+      {prontos.length === 0 ? (
+        <div style={{padding:"30px 20px",textAlign:"center",color:"var(--text3)",fontSize:13,background:"var(--card-bg)",border:"1px dashed var(--border)",borderRadius:10}}>
+          <div style={{fontSize:32,marginBottom:8}}>📭</div>
+          Nenhum shift pronto pra fechar. Vá em <strong>Lançamento</strong> pra preencher valores e cadastrar PIX das pessoas.
+        </div>
+      ) : (
+        <div style={{display:"flex",flexDirection:"column",gap:10}}>
+          {Object.entries(prontosByPessoa).map(([pessoaId, sList]) => {
+            const p = restPessoas.find(x => x.id === pessoaId) || {};
+            const subTotal = sList.reduce((s,x)=>s+(x.totalCalc||0),0);
+            const allSel = sList.every(s => selected[s.id]);
+            return (
+              <div key={pessoaId} style={{background:"var(--card-bg)",border:"1px solid var(--border)",borderRadius:10,overflow:"hidden"}}>
+                <div style={{display:"flex",alignItems:"center",gap:10,padding:"8px 12px",background:"var(--bg2)",borderBottom:"1px solid var(--border)"}}>
+                  <input type="checkbox" checked={allSel} onChange={()=>{
+                    const next = {...selected};
+                    sList.forEach(s => { next[s.id] = !allSel; });
+                    setSelected(next);
+                  }} style={{cursor:"pointer"}}/>
+                  <div style={{flex:1,fontWeight:700,fontSize:13,color:"var(--text)"}}>{p.name || "(removido)"}</div>
+                  <div style={{fontSize:11,color:"var(--text3)"}}>{sList.length} shift(s)</div>
+                  <div style={{fontFamily:"'DM Mono',monospace",fontWeight:700,color:ac,fontSize:13,minWidth:90,textAlign:"right"}}>R$ {subTotal.toFixed(2)}</div>
+                </div>
+                <table style={{width:"100%",borderCollapse:"collapse",fontSize:11}}>
+                  <tbody>
+                    {sList.sort((a,b)=>(a.date||"").localeCompare(b.date||"")).map(s => (
+                      <tr key={s.id} style={{borderTop:"1px solid var(--border)"}}>
+                        <td style={{padding:"5px 12px 5px 36px",width:30}}>
+                          <input type="checkbox" checked={!!selected[s.id]} onChange={()=>setSelected({...selected,[s.id]:!selected[s.id]})} style={{cursor:"pointer"}}/>
+                        </td>
+                        <td style={{padding:"5px 8px",color:"var(--text2)",whiteSpace:"nowrap"}}>{fmtDate(s.date)}</td>
+                        <td style={{padding:"5px 8px",color:"var(--text3)"}}>{s.area || "—"}</td>
+                        <td style={{padding:"5px 8px",fontFamily:"'DM Mono',monospace",color:"var(--text2)"}}>{s.entrada || "—"}–{s.saida || "—"}</td>
+                        <td style={{padding:"5px 8px",fontFamily:"'DM Mono',monospace",color:"var(--text)",fontWeight:600}}>{fmtHoras(s.horas)}</td>
+                        <td style={{padding:"5px 8px",fontFamily:"'DM Mono',monospace",color:"var(--text3)",fontSize:10}}>
+                          {s.valorTipo === "hora" ? `R$${(s.valorUnit||0).toFixed(2)}/h` : `R$${(s.valorUnit||0).toFixed(2)} diária`}
+                        </td>
+                        <td style={{padding:"5px 12px",textAlign:"right",fontFamily:"'DM Mono',monospace",fontWeight:700,color:"var(--text)"}}>R$ {(s.totalCalc||0).toFixed(2)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════
+// ──  FREELAS — sub-componente Histórico (lotes pagos + dashboard) ─
+// ═══════════════════════════════════════════════════════════════
+function FreelaHistoricoTab({ restaurantId, restPessoas, shifts, lotes, fmtHoras, gerarPDFLote, cancelarLote, mobileOnly, ac }) {
+  const [filterMes, setFilterMes] = useState(""); // "YYYY-MM" ou ""
+  const [filterStatus, setFilterStatus] = useState("todos"); // todos | pago | pendente
+  const [filterPessoa, setFilterPessoa] = useState("");
+
+  const filtered = lotes.filter(l => {
+    if (filterStatus !== "todos" && l.status !== filterStatus) return false;
+    if (filterMes) {
+      const lMes = (l.pagoEm || l.criadoEm || "").slice(0,7);
+      if (lMes !== filterMes) return false;
+    }
+    if (filterPessoa) {
+      if (!l.pessoasResumo.find(pr => pr.pessoaId === filterPessoa)) return false;
+    }
+    return true;
+  }).sort((a,b) => (b.pagoEm || b.criadoEm || "").localeCompare(a.pagoEm || a.criadoEm || ""));
+
+  // KPIs do mês selecionado (ou todos)
+  const totalPago = filtered.filter(l=>l.status==="pago").reduce((sum,l)=>sum+(l.totalGeral||0),0);
+  const totalPendente = filtered.filter(l=>l.status==="pendente").reduce((sum,l)=>sum+(l.totalGeral||0),0);
+  const totalShifts = filtered.reduce((sum,l)=>sum+(l.qtdShifts||0),0);
+
+  // Top 5 freelas (por valor)
+  const byPessoa = {};
+  filtered.forEach(l => {
+    l.pessoasResumo.forEach(pr => {
+      if (!byPessoa[pr.pessoaId]) byPessoa[pr.pessoaId] = { pessoaId: pr.pessoaId, total: 0, qtdShifts: 0 };
+      byPessoa[pr.pessoaId].total += pr.totalValor;
+      byPessoa[pr.pessoaId].qtdShifts += pr.qtdShifts;
+    });
+  });
+  const topFreelas = Object.values(byPessoa).sort((a,b)=>b.total-a.total).slice(0,5);
+
+  // Custo por área
+  const byArea = {};
+  filtered.forEach(l => {
+    const lShifts = shifts.filter(s => l.shiftIds.includes(s.id));
+    lShifts.forEach(s => {
+      const a = s.area || "(sem área)";
+      if (!byArea[a]) byArea[a] = { area: a, total: 0, qtdShifts: 0 };
+      byArea[a].total += s.totalCalc || 0;
+      byArea[a].qtdShifts += 1;
+    });
+  });
+  const areasArr = Object.values(byArea).sort((a,b)=>b.total-a.total);
+
+  // Meses disponíveis pra filtro
+  const mesesSet = new Set();
+  lotes.forEach(l => { mesesSet.add((l.pagoEm || l.criadoEm || "").slice(0,7)); });
+  const meses = [...mesesSet].filter(Boolean).sort().reverse();
+
+  function pessoaName(pessoaId) {
+    const p = restPessoas.find(x => x.id === pessoaId);
+    return p?.name || "(removido)";
+  }
+
+  return (
+    <div style={{paddingBottom:48}}>
+      {/* Filtros */}
+      <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:14}}>
+        <select value={filterMes} onChange={e=>setFilterMes(e.target.value)}
+          style={{...S.input,maxWidth:160,fontSize:12,padding:"7px 10px",cursor:"pointer"}}>
+          <option value="">📅 Todos meses</option>
+          {meses.map(m => {
+            const [y,mo] = m.split("-");
+            const nm = new Date(parseInt(y), parseInt(mo)-1, 1).toLocaleDateString("pt-BR", { month:"long", year:"numeric" });
+            return <option key={m} value={m}>{nm}</option>;
+          })}
+        </select>
+        <select value={filterStatus} onChange={e=>setFilterStatus(e.target.value)}
+          style={{...S.input,maxWidth:160,fontSize:12,padding:"7px 10px",cursor:"pointer"}}>
+          <option value="todos">📋 Todos status</option>
+          <option value="pago">💸 Pagos</option>
+          <option value="pendente">⏳ Pendentes</option>
+        </select>
+        <select value={filterPessoa} onChange={e=>setFilterPessoa(e.target.value)}
+          style={{...S.input,maxWidth:200,fontSize:12,padding:"7px 10px",cursor:"pointer"}}>
+          <option value="">🎒 Todas pessoas</option>
+          {restPessoas.filter(p=>p.isFreela).sort((a,b)=>a.name.localeCompare(b.name)).map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+        </select>
+      </div>
+
+      {/* KPIs */}
+      <div style={{display:"grid",gridTemplateColumns:mobileOnly?"1fr 1fr":"repeat(4, 1fr)",gap:8,marginBottom:14}}>
+        <div style={{background:"var(--card-bg)",border:"1px solid var(--border)",borderRadius:10,padding:12}}>
+          <div style={{fontSize:10,color:"var(--text3)",textTransform:"uppercase",letterSpacing:0.3,marginBottom:4}}>Pago</div>
+          <div style={{fontFamily:"'DM Mono',monospace",fontWeight:800,fontSize:18,color:"#15803d"}}>R$ {totalPago.toFixed(2)}</div>
+        </div>
+        <div style={{background:"var(--card-bg)",border:"1px solid var(--border)",borderRadius:10,padding:12}}>
+          <div style={{fontSize:10,color:"var(--text3)",textTransform:"uppercase",letterSpacing:0.3,marginBottom:4}}>Pendente</div>
+          <div style={{fontFamily:"'DM Mono',monospace",fontWeight:800,fontSize:18,color:"#92400e"}}>R$ {totalPendente.toFixed(2)}</div>
+        </div>
+        <div style={{background:"var(--card-bg)",border:"1px solid var(--border)",borderRadius:10,padding:12}}>
+          <div style={{fontSize:10,color:"var(--text3)",textTransform:"uppercase",letterSpacing:0.3,marginBottom:4}}>Lotes</div>
+          <div style={{fontFamily:"'DM Mono',monospace",fontWeight:800,fontSize:18,color:"var(--text)"}}>{filtered.length}</div>
+        </div>
+        <div style={{background:"var(--card-bg)",border:"1px solid var(--border)",borderRadius:10,padding:12}}>
+          <div style={{fontSize:10,color:"var(--text3)",textTransform:"uppercase",letterSpacing:0.3,marginBottom:4}}>Shifts</div>
+          <div style={{fontFamily:"'DM Mono',monospace",fontWeight:800,fontSize:18,color:"var(--text)"}}>{totalShifts}</div>
+        </div>
+      </div>
+
+      {/* Top freelas e custo por área */}
+      {filtered.length > 0 && (
+        <div style={{display:"grid",gridTemplateColumns:mobileOnly?"1fr":"1fr 1fr",gap:10,marginBottom:14}}>
+          <div style={{background:"var(--card-bg)",border:"1px solid var(--border)",borderRadius:10,padding:12}}>
+            <div style={{fontSize:11,color:"var(--text3)",fontWeight:700,textTransform:"uppercase",letterSpacing:0.3,marginBottom:8}}>🏆 Top 5 freelas</div>
+            {topFreelas.length === 0 ? <div style={{fontSize:12,color:"var(--text3)"}}>—</div> : (
+              <div style={{display:"flex",flexDirection:"column",gap:5}}>
+                {topFreelas.map((p,i) => (
+                  <div key={p.pessoaId} style={{display:"flex",alignItems:"center",gap:6,fontSize:12}}>
+                    <span style={{color:"var(--text3)",width:18}}>{i+1}.</span>
+                    <span style={{flex:1,color:"var(--text)",fontWeight:600}}>{pessoaName(p.pessoaId)}</span>
+                    <span style={{color:"var(--text3)",fontSize:10}}>{p.qtdShifts} shifts</span>
+                    <span style={{fontFamily:"'DM Mono',monospace",fontWeight:700,color:ac,minWidth:80,textAlign:"right"}}>R$ {p.total.toFixed(2)}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+          <div style={{background:"var(--card-bg)",border:"1px solid var(--border)",borderRadius:10,padding:12}}>
+            <div style={{fontSize:11,color:"var(--text3)",fontWeight:700,textTransform:"uppercase",letterSpacing:0.3,marginBottom:8}}>🏷️ Custo por área</div>
+            {areasArr.length === 0 ? <div style={{fontSize:12,color:"var(--text3)"}}>—</div> : (
+              <div style={{display:"flex",flexDirection:"column",gap:5}}>
+                {areasArr.map(a => (
+                  <div key={a.area} style={{display:"flex",alignItems:"center",gap:6,fontSize:12}}>
+                    <span style={{flex:1,color:"var(--text)",fontWeight:600}}>{a.area}</span>
+                    <span style={{color:"var(--text3)",fontSize:10}}>{a.qtdShifts} shifts</span>
+                    <span style={{fontFamily:"'DM Mono',monospace",fontWeight:700,color:ac,minWidth:80,textAlign:"right"}}>R$ {a.total.toFixed(2)}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Lista de lotes */}
+      <div style={{fontSize:11,color:"var(--text3)",fontWeight:700,textTransform:"uppercase",letterSpacing:0.3,marginBottom:8}}>Lotes</div>
+      {filtered.length === 0 ? (
+        <div style={{padding:"30px 20px",textAlign:"center",color:"var(--text3)",fontSize:13,background:"var(--card-bg)",border:"1px dashed var(--border)",borderRadius:10}}>
+          <div style={{fontSize:32,marginBottom:8}}>🗂️</div>
+          Nenhum lote {filterMes||filterStatus!=="todos"||filterPessoa ? "com esses filtros" : "ainda"}
+        </div>
+      ) : (
+        <div style={{display:"flex",flexDirection:"column",gap:8}}>
+          {filtered.map(l => (
+            <div key={l.id} style={{background:"var(--card-bg)",border:`1px solid ${l.status==="pago"?"#10b98155":l.status==="pendente"?ac+"55":"var(--border)"}`,borderRadius:10,padding:12}}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:10,flexWrap:"wrap"}}>
+                <div style={{flex:1,minWidth:200}}>
+                  <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:3}}>
+                    <span style={{fontWeight:700,fontSize:14,color:"var(--text)"}}>{l.numero}</span>
+                    <span style={{padding:"2px 7px",borderRadius:6,fontSize:10,fontWeight:700,background:l.status==="pago"?"#10b98122":l.status==="pendente"?`${ac}22`:"var(--bg2)",color:l.status==="pago"?"#15803d":l.status==="pendente"?ac:"var(--text3)"}}>
+                      {l.status==="pago"?"💸 PAGO":l.status==="pendente"?"⏳ PENDENTE":l.status.toUpperCase()}
+                    </span>
+                  </div>
+                  <div style={{fontSize:11,color:"var(--text3)"}}>
+                    {l.qtdShifts} shift(s) · {l.qtdPessoas} pessoa(s) · criado em {fmtDate((l.criadoEm||"").slice(0,10))}
+                    {l.status==="pago" && ` · pago ${fmtDate(l.pagoEm)}${l.formaPagamento?` via ${l.formaPagamento}`:""}`}
+                  </div>
+                  {l.observacao && <div style={{fontSize:11,color:"var(--text2)",marginTop:3,fontStyle:"italic"}}>“{l.observacao}”</div>}
+                </div>
+                <div style={{textAlign:"right"}}>
+                  <div style={{fontFamily:"'DM Mono',monospace",fontWeight:800,fontSize:18,color:l.status==="pago"?"#15803d":ac}}>R$ {l.totalGeral.toFixed(2)}</div>
+                </div>
+              </div>
+              <div style={{display:"flex",gap:6,marginTop:10,flexWrap:"wrap"}}>
+                <button onClick={()=>gerarPDFLote(l.id)} style={{background:"transparent",color:ac,border:`1px solid ${ac}`,borderRadius:6,padding:"5px 12px",fontSize:11,fontWeight:600,cursor:"pointer"}}>📄 PDF</button>
+                {l.status === "pendente" && (
+                  <button onClick={()=>cancelarLote(l.id)} style={{background:"transparent",color:"var(--red)",border:"1px solid var(--red)",borderRadius:6,padding:"5px 12px",fontSize:11,fontWeight:600,cursor:"pointer"}}>✕ Cancelar</button>
+                )}
+                {/* Detalhe expandível por pessoa */}
+                <details style={{marginLeft:"auto"}}>
+                  <summary style={{cursor:"pointer",fontSize:11,color:"var(--text3)"}}>Ver detalhes</summary>
+                  <div style={{marginTop:6,paddingTop:6,borderTop:"1px solid var(--border)"}}>
+                    {l.pessoasResumo.map(pr => (
+                      <div key={pr.pessoaId} style={{display:"flex",justifyContent:"space-between",fontSize:11,padding:"3px 0"}}>
+                        <span style={{color:"var(--text2)"}}>{pessoaName(pr.pessoaId)}</span>
+                        <span style={{color:"var(--text3)"}}>{pr.qtdShifts} shifts · {fmtHoras(pr.totalHoras)}</span>
+                        <span style={{fontFamily:"'DM Mono',monospace",fontWeight:700,color:"var(--text)",minWidth:80,textAlign:"right"}}>R$ {pr.totalValor.toFixed(2)}</span>
+                      </div>
+                    ))}
+                  </div>
+                </details>
+              </div>
+            </div>
+          ))}
         </div>
       )}
     </div>
