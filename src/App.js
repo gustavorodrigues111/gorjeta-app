@@ -19263,6 +19263,7 @@ function permSet(pessoa, restaurantId, key, value) {
 
 // Profiles pré-prontos pra aplicar conjuntos de permissões com 1 clique.
 // Cada profile define quais chaves devem virar `true` (todas as outras viram `false`).
+// Lista enxuta — perfis específicos por área ficam por conta de customs do restaurante.
 const PERM_PROFILES = [
   { id: "owner_total", label: "Owner total", icon: "👑", color: "#dc2626", desc: "Acesso total — tudo marcado",
     keys: [
@@ -19275,17 +19276,8 @@ const PERM_PROFILES = [
   { id: "gestor_pessoas", label: "Gestor de pessoas", icon: "🛂", color: "#0284c7", desc: "Gerencia equipe, cargos, comunicações",
     keys: ["admin.employees","admin.roles","admin.pessoas","admin.comunicados","admin.faq"],
   },
-  { id: "gestor_gorjetas", label: "Gestor de gorjetas", icon: "💰", color: "#0284c7", desc: "Lança gorjetas, fecha escala, VT",
-    keys: ["admin.tips","admin.schedule","admin.vt","operational.escalas","operational.gorjetas"],
-  },
   { id: "lider", label: "Líder de área", icon: "⭐", color: "#a855f7", desc: "Vê só funcionários das áreas que lidera",
     keys: ["special.isLider","operational.escalas","operational.reunioes"],
-  },
-  { id: "op_cozinha", label: "Operacional cozinha", icon: "🍳", color: "#7c9e5e", desc: "AppMise + líder em Cozinha",
-    keys: ["operational.contagens","operational.checklists","operational.fichasTecnicas","operational.temperaturas","operational.compras"],
-  },
-  { id: "op_bar", label: "Operacional bar", icon: "🍷", color: "#7c9e5e", desc: "AppMise + líder em Bar",
-    keys: ["operational.contagens","operational.checklists","operational.fichasTecnicas","operational.temperaturas","operational.compras"],
   },
   { id: "limpar", label: "Limpar tudo", icon: "🚫", color: "var(--text3)", desc: "Remove todas as permissões",
     keys: [],
