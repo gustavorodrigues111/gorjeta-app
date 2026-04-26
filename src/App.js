@@ -19222,7 +19222,7 @@ function PermissoesMatrix({ restaurantId, pessoas, employees, managers, owners, 
   const [accessFilter, setAccessFilter] = useState("todos"); // todos | apptip_admin | apptip_op | mise | sem_perm
   const [sortMode, setSortMode] = useState("az"); // az | mais_perms | menos_perms
   const [liderAreasModal, setLiderAreasModal] = useState(null); // pessoaId
-  const [profileMenuFor, setProfileMenuFor] = useState(null); // pessoaId pra dropdown de profile
+  const [profileMenuFor, setProfileMenuFor] = useState(null); // { pessoaId, top, right }
 
   function saveLiderAreas(pessoaId, newAreas) {
     const updated = (pessoas || []).map(p => {
@@ -19556,32 +19556,17 @@ function PermissoesMatrix({ restaurantId, pessoas, employees, managers, owners, 
                         <div style={{whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{p.name}</div>
                         {(!p.linkedEmployeeId && !p.linkedManagerId) && <div style={{fontSize:10,color:"var(--text3)",marginTop:2}}>não vinculada ao legado</div>}
                       </div>
-                      <div style={{position:"relative"}}>
-                        <button onClick={()=>setProfileMenuFor(profileMenuFor === p.id ? null : p.id)}
-                          title="Aplicar perfil pré-pronto"
-                          style={{background:"none",border:"1px solid var(--border)",borderRadius:6,padding:"3px 8px",cursor:"pointer",fontSize:10,color:"var(--text3)",fontWeight:600,whiteSpace:"nowrap"}}>
-                          ⚡ Perfil
-                        </button>
-                        {profileMenuFor === p.id && (
-                          <>
-                            <div onClick={()=>setProfileMenuFor(null)} style={{position:"fixed",inset:0,zIndex:50}} />
-                            <div style={{position:"absolute",top:"calc(100% + 4px)",right:0,zIndex:51,background:"var(--card-bg)",border:"1px solid var(--border)",borderRadius:10,boxShadow:"0 6px 24px rgba(0,0,0,0.18)",minWidth:230,padding:6}}>
-                              {PERM_PROFILES.map(prof => (
-                                <button key={prof.id} onClick={()=>applyProfile(p, prof.keys)}
-                                  style={{display:"flex",alignItems:"center",gap:8,padding:"7px 10px",background:"none",border:"none",borderRadius:6,cursor:"pointer",fontSize:12,color:"var(--text)",width:"100%",textAlign:"left",fontFamily:"'DM Sans',sans-serif"}}
-                                  onMouseEnter={e=>e.currentTarget.style.background="var(--bg2)"}
-                                  onMouseLeave={e=>e.currentTarget.style.background="none"}>
-                                  <span style={{fontSize:14}}>{prof.icon}</span>
-                                  <div style={{flex:1}}>
-                                    <div style={{fontWeight:600,color:prof.color,fontSize:11}}>{prof.label}</div>
-                                    <div style={{fontSize:10,color:"var(--text3)",marginTop:1,lineHeight:1.2}}>{prof.desc}</div>
-                                  </div>
-                                </button>
-                              ))}
-                            </div>
-                          </>
-                        )}
-                      </div>
+                      <button onClick={(e)=>{
+                          if (profileMenuFor?.pessoaId === p.id) { setProfileMenuFor(null); return; }
+                          // Calcula posição via getBoundingClientRect pra renderizar como `position: fixed`
+                          // (necessário porque sticky <td> cria stacking context que prende dropdown atrás)
+                          const r = e.currentTarget.getBoundingClientRect();
+                          setProfileMenuFor({ pessoaId: p.id, top: r.bottom + 4, right: window.innerWidth - r.right });
+                        }}
+                        title="Aplicar perfil pré-pronto"
+                        style={{background:"none",border:"1px solid var(--border)",borderRadius:6,padding:"3px 8px",cursor:"pointer",fontSize:10,color:"var(--text3)",fontWeight:600,whiteSpace:"nowrap"}}>
+                        ⚡ Perfil
+                      </button>
                     </div>
                   </td>
                   {PERM_GROUPS.map(g => {
@@ -19627,6 +19612,38 @@ function PermissoesMatrix({ restaurantId, pessoas, employees, managers, owners, 
       <div style={{marginTop:10,fontSize:11,color:"var(--text3)",lineHeight:1.5}}>
         💡 <strong>Atalhos:</strong> ⚡ Perfil aplica conjunto pré-pronto. Header do grupo expandido tem "marcar todos" pra grupo inteiro. Célula colapsada (com "todos"/"3/5"/"—") clicável marca/desmarca o grupo só pra aquela pessoa.
       </div>
+
+      {/* DROPDOWN de Profile — renderizado fora da tabela com position:fixed
+          pra escapar dos stacking contexts criados pelas <td> sticky.        */}
+      {profileMenuFor && (() => {
+        const targetPessoa = restPessoas.find(x => x.id === profileMenuFor.pessoaId);
+        if (!targetPessoa) { setTimeout(()=>setProfileMenuFor(null),0); return null; }
+        return (
+          <>
+            {/* Backdrop pra fechar ao clicar fora */}
+            <div onClick={()=>setProfileMenuFor(null)} style={{position:"fixed",inset:0,zIndex:9000,background:"transparent"}} />
+            {/* Menu */}
+            <div style={{position:"fixed",top:profileMenuFor.top,right:profileMenuFor.right,zIndex:9001,background:"var(--card-bg)",border:"1px solid var(--border)",borderRadius:10,boxShadow:"0 8px 28px rgba(0,0,0,0.22)",minWidth:240,padding:6,fontFamily:"'DM Sans',sans-serif"}}>
+              <div style={{padding:"6px 10px 8px",borderBottom:"1px solid var(--border)",marginBottom:4}}>
+                <div style={{fontSize:10,color:"var(--text3)",fontWeight:700,textTransform:"uppercase",letterSpacing:0.4}}>Aplicar perfil em</div>
+                <div style={{fontSize:13,color:"var(--text)",fontWeight:700,marginTop:1}}>{targetPessoa.name}</div>
+              </div>
+              {PERM_PROFILES.map(prof => (
+                <button key={prof.id} onClick={()=>applyProfile(targetPessoa, prof.keys)}
+                  style={{display:"flex",alignItems:"center",gap:8,padding:"7px 10px",background:"none",border:"none",borderRadius:6,cursor:"pointer",fontSize:12,color:"var(--text)",width:"100%",textAlign:"left",fontFamily:"'DM Sans',sans-serif"}}
+                  onMouseEnter={e=>e.currentTarget.style.background="var(--bg2)"}
+                  onMouseLeave={e=>e.currentTarget.style.background="none"}>
+                  <span style={{fontSize:14}}>{prof.icon}</span>
+                  <div style={{flex:1}}>
+                    <div style={{fontWeight:600,color:prof.color,fontSize:11}}>{prof.label}</div>
+                    <div style={{fontSize:10,color:"var(--text3)",marginTop:1,lineHeight:1.2}}>{prof.desc}</div>
+                  </div>
+                </button>
+              ))}
+            </div>
+          </>
+        );
+      })()}
 
       {/* MODAL: editor de áreas do Líder */}
       {liderAreasModal && (() => {
