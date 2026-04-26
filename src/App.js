@@ -4079,9 +4079,12 @@ function EmployeePortal({ employees, roles, tips, schedules, splits, restaurants
         {tab === "extrato" && (
           <div>
             <div style={{ marginBottom: 20 }}><MonthNav year={year} month={month} onChange={(y, m) => { setYear(y); setMonth(m); }} /></div>
-            {/* Legal disclaimer */}
-            <div style={{ background: "var(--bg1)", border: "1px solid var(--border)", borderRadius: 10, padding: "10px 14px", marginBottom: 16, fontSize: 11, color: "var(--text3)", lineHeight: 1.5 }}>
-              ⚠️ <strong style={{ color: "var(--text2)" }}>Aviso:</strong> Os valores exibidos são aproximados, apurados até o momento atual e sujeitos a alterações. Esta tela tem caráter informativo e de transparência, podendo conter imprecisões. Os valores definitivos serão apurados pela empresa e comunicados pelos canais oficiais.
+            {/* Aviso permanente de transparência — valores podem ser recalculados até o fechamento do mês */}
+            <div style={{ background: "#f59e0b15", border: "1px solid #f59e0b44", borderRadius: 10, padding: "10px 14px", marginBottom: 16, fontSize: 12, color: "var(--text2)", lineHeight: 1.55, display:"flex", gap:10, alignItems:"flex-start" }}>
+              <span style={{fontSize:18,lineHeight:1,marginTop:1}}>⚠️</span>
+              <div>
+                <strong style={{ color: "#b45309" }}>Valores em fase aberta —</strong> Os números mostrados aqui são <strong>para transparência</strong> e <strong>podem ser recalculados a qualquer momento</strong> até o fechamento do mês. O documento oficial e definitivo é o <strong>recibo de pagamento gerado no quinto dia útil</strong>.
+              </div>
             </div>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10, marginBottom: 20 }}>
               {[["Bruto", grossTotal, "var(--text)"], ["Imposto", taxTotal, "var(--red)"], ["Líquido", netTotal, ac]].map(([lbl, val, col]) => (
@@ -4817,7 +4820,7 @@ Inclua apenas as ações solicitadas. Arrays vazios se não houver ação daquel
 
 
 
-function EmployeeSpreadsheet({ restEmps, restRoles, rid, employees, onUpdate, restCode: restCode_, isOwner, restaurant, notifications, privacyMask, onGenerateDismissalReport, incidents, feedbacks, devChecklists, schedules, currentUser, isLider, mobileOnly: mobileOnlyProp, roles, vtPayments, vtConfig, scheduleStatus, employeeGoals, delays, meetingPlans, meetingOccurrences, resetSignal }) {
+function EmployeeSpreadsheet({ restEmps, restRoles, rid, employees, pessoas, onUpdate, restCode: restCode_, isOwner, restaurant, notifications, privacyMask, onGenerateDismissalReport, incidents, feedbacks, devChecklists, schedules, currentUser, isLider, mobileOnly: mobileOnlyProp, roles, vtPayments, vtConfig, scheduleStatus, employeeGoals, delays, meetingPlans, meetingOccurrences, resetSignal }) {
   const mobileOnly = mobileOnlyProp ?? false; // eslint-disable-line no-unused-vars
   const PLANOS = [
     { id:"pIsento", empMax:999 },
@@ -4829,15 +4832,11 @@ function EmployeeSpreadsheet({ restEmps, restRoles, rid, employees, onUpdate, re
   ];
   const plano = PLANOS.find(p=>p.id===(restaurant?.planoId??"p10")) ?? PLANOS[0];
   const activeCount = restEmps.filter(e=>!e.inactive).length;
-  const blank = () => ({ name:"", cpf:"", admission:"", pin:"", roleId:"", restaurantId:rid });
-  const [newRow, setNewRow] = useState(blank());
+  // (blank/newRow removidos — criação direta descontinuada)
   const [editRows, setEditRows] = useState({});
   const [saved, setSaved] = useState({});
   const [showInactive, setShowInactive] = useState(false);
-  const [showAiEmp, setShowAiEmp] = useState(false);
-  const [aiEmpInput, setAiEmpInput] = useState("");
-  const { generate: aiEmpGenerate, aiLoading: aiEmpLoading, aiError: aiEmpError, setAiError: setAiEmpError } = useAiGenerate();
-  const [aiEmpPreview, setAiEmpPreview] = useState(null);
+  // (IA "Gerenciar empregados" removida — adição em lote agora vive em Pessoas via IA)
   const [previewDoc, setPreviewDoc] = useState(null);
   const [previewFileName, setPreviewFileName] = useState("");
   const [showDismissalChecklist, setShowDismissalChecklist] = useState(false);
@@ -4849,130 +4848,43 @@ function EmployeeSpreadsheet({ restEmps, restRoles, rid, employees, onUpdate, re
   // showIncForm removido — ocorrências cadastradas pela aba Reuniões
   // showFbForm removed — meetings now created only in Reuniões tab
   const [expandedJornada, setExpandedJornada] = useState(null); // id of expanded event
-  const [showNewForm, setShowNewForm] = useState(false);
+  // ── Vincular pessoa como empregado (refactor "Pessoas é fonte única") ──
+  const [vincularPessoaOpen, setVincularPessoaOpen] = useState(false);
+  const [vincularPessoaSelected, setVincularPessoaSelected] = useState(null); // pessoa
+  const [vincularPessoaRole, setVincularPessoaRole] = useState("");
+  const [vincularPessoaAdmission, setVincularPessoaAdmission] = useState("");
+  const [vincularPessoaFilter, setVincularPessoaFilter] = useState("");
 
-  async function handleAiEmpregados() {
-    if (!aiEmpInput.trim()) return;
-    setAiEmpPreview(null);
-    const cargosDisponiveis = restRoles.filter(r=>!r.inactive).map(r=>`- cargo:"${r.name}" area:"${r.area}" id:"${r.id}"`).join("\n");
-    const empregadosExistentes = restEmps.map(e => {
-      const r = restRoles.find(r=>r.id===e.roleId);
-      return `- id:"${e.id}" nome:"${e.name}" cargo:"${r?.name??"(sem cargo)"}" cpf:"${e.cpf||""}" producao:${!!e.isProducao} inativo:${!!e.inactive}`;
-    }).join("\n");
-    const result = await aiEmpGenerate(
-        `Você é um assistente de gestão de restaurantes. O usuário pode pedir para CRIAR novos empregados, MODIFICAR empregados existentes (trocar cargo, CPF, admissão, produção) ou INATIVAR empregados.
+  // Pessoas do restaurante atual que AINDA não estão marcadas como equipe
+  const pessoasNaoEquipe = (pessoas || []).filter(p =>
+    (p.restaurantIds || []).includes(rid) && !p.isTeam?.[rid]
+  );
 
-Cargos disponíveis:
-${cargosDisponiveis || "(nenhum)"}
-
-Empregados existentes:
-${empregadosExistentes || "(nenhum)"}
-
-Regras:
-- Para CRIAR: "nome" obrigatório (nome completo). "cargo" = nome do cargo (deve ser um da lista acima). "admissao" no formato YYYY-MM-DD, se não informado use ${today()}. "cpf" apenas se explicitamente mencionado. "producao" = true/false (se o empregado é da produção).
-- Para MODIFICAR: use o "id" do empregado existente, inclua APENAS os campos que mudam. "cargo" = nome do novo cargo.
-- Para INATIVAR: use o "id" do empregado existente.
-- Deduza o cargo pelo nome/função quando possível (garçom→Garçom, barman→Barman, cozinheiro→Cozinheiro, etc.)
-- Se o usuário mencionar "produção" para um empregado, marque producao:true
-
-Responda com JSON:
-{
-  "criar": [{"nome":"...", "cargo":"nome do cargo", "admissao":"YYYY-MM-DD", "cpf":null, "producao":false}],
-  "modificar": [{"id":"...", "cargo":"novo cargo", "cpf":"...", "producao":true}],
-  "inativar": ["id1", "id2"]
-}
-Inclua apenas as ações solicitadas. Arrays vazios se não houver ação daquele tipo.`,
-      aiEmpInput.trim()
-    );
-    if (!result) return;
-
-    // Build preview
-      const restCode = restCode_ || "XXX";
-      let seq = nextEmpSeq(employees, restCode);
-      const matchCargo = (nomeCargo) => {
-        if (!nomeCargo) return null;
-        const lower = nomeCargo.toLowerCase().trim();
-        return restRoles.find(r => !r.inactive && r.name.toLowerCase() === lower)
-          ?? restRoles.find(r => !r.inactive && r.name.toLowerCase().includes(lower))
-          ?? restRoles.find(r => !r.inactive && lower.includes(r.name.toLowerCase()))
-          ?? null;
-      };
-
-      const preview = {
-        criar: (result.criar ?? []).map(e => {
-          const role = matchCargo(e.cargo);
-          const empCode = makeEmpCode(restCode, seq);
-          const pin = String(seq).padStart(4,"0");
-          seq++;
-          return {
-            id: Date.now().toString() + Math.random().toString(36).slice(2,6),
-            empCode, pin,
-            name: e.nome,
-            cpf: e.cpf || "",
-            admission: e.admissao || DEFAULT_ADMISSION(),
-            roleId: role?.id || "",
-            roleName: role?.name || e.cargo || "(não encontrado)",
-            roleMatched: !!role,
-            isProducao: !!e.producao,
-            restaurantId: rid,
-            mustChangePin: true,
-          };
-        }),
-        modificar: (result.modificar ?? []).map(m => {
-          const existing = restEmps.find(e => e.id === m.id);
-          if (!existing) return null;
-          const existingRole = restRoles.find(r => r.id === existing.roleId);
-          const newRole = m.cargo ? matchCargo(m.cargo) : null;
-          return {
-            id: m.id,
-            name: existing.name,
-            oldRoleName: existingRole?.name ?? "(sem cargo)",
-            newRoleName: newRole?.name ?? m.cargo ?? null,
-            newRoleId: newRole?.id ?? null,
-            roleMatched: m.cargo ? !!newRole : true,
-            cpf: m.cpf !== undefined ? m.cpf : null,
-            producao: m.producao !== undefined ? m.producao : null,
-          };
-        }).filter(Boolean),
-        inativar: (result.inativar ?? []).map(id => restEmps.find(e => e.id === id)).filter(Boolean),
-      };
-
-    if (!preview.criar.length && !preview.modificar.length && !preview.inativar.length) {
-      setAiEmpError("A IA não identificou nenhuma ação. Tente reformular.");
-    } else if (activeCount + preview.criar.length > plano.empMax) {
-      setAiEmpError(`Limite do plano: ${plano.empMax} empregados. Você tem ${activeCount} ativos e está tentando adicionar ${preview.criar.length}.`);
-    } else {
-      setAiEmpPreview(preview);
-    }
+  function vincularPessoaComoEmpregado() {
+    if (!vincularPessoaSelected) return;
+    const p = vincularPessoaSelected;
+    const next = (pessoas || []).map(x => x.id === p.id ? {
+      ...x,
+      isTeam: { ...(x.isTeam || {}), [rid]: true },
+      teamData: {
+        ...(x.teamData || {}),
+        [rid]: {
+          ...(x.teamData?.[rid] || {}),
+          roleId: vincularPessoaRole || null,
+          admission: vincularPessoaAdmission || today(),
+        },
+      },
+    } : x);
+    onUpdate("pessoas", next);
+    onUpdate("_toast", `✅ ${p.name} vinculada como empregado`);
+    setVincularPessoaOpen(false);
+    setVincularPessoaSelected(null);
+    setVincularPessoaRole("");
+    setVincularPessoaAdmission("");
+    setVincularPessoaFilter("");
   }
 
-  function confirmAiEmpChanges() {
-    if (!aiEmpPreview) return;
-    let updated = [...employees];
-    // Criar
-    aiEmpPreview.criar.forEach(e => {
-      updated.push({ id: e.id, restaurantId: e.restaurantId, empCode: e.empCode, name: e.name, cpf: e.cpf, admission: e.admission, pin: e.pin, roleId: e.roleId, mustChangePin: true, isProducao: e.isProducao || undefined });
-    });
-    // Modificar
-    aiEmpPreview.modificar.forEach(m => {
-      updated = updated.map(e => {
-        if (e.id !== m.id) return e;
-        const changes = {};
-        if (m.newRoleId) changes.roleId = m.newRoleId;
-        if (m.cpf !== null) changes.cpf = m.cpf;
-        if (m.producao !== null) changes.isProducao = m.producao;
-        return { ...e, ...changes };
-      });
-    });
-    // Inativar
-    aiEmpPreview.inativar.forEach(e => {
-      updated = updated.map(x => x.id === e.id ? { ...x, inactive: true, inactiveFrom: today() } : x);
-    });
-    onUpdate("employees", updated);
-    const total = aiEmpPreview.criar.length + aiEmpPreview.modificar.length + aiEmpPreview.inativar.length;
-    onUpdate("_toast", `✨ ${total} ação(ões) aplicada(s) pela IA!`);
-    setAiEmpPreview(null); setAiEmpInput(""); setShowAiEmp(false);
-  }
+  // (handleAiEmpregados + confirmAiEmpChanges removidos — adição em lote agora vive em Pessoas via IA)
 
   const sorted = [...restEmps].sort((a,b) => {
     const rA = restRoles.find(r=>r.id===a.roleId);
@@ -5002,19 +4914,7 @@ Inclua apenas as ações solicitadas. Arrays vazios se não houver ação daquel
     });
   }
 
-  function saveNew() {
-    if (!newRow.name.trim()) return;
-    if (activeCount >= plano.empMax) {
-      alert(`⚠️ Limite do plano atingido (${plano.empMax} empregados).\n\nPara adicionar mais empregados, faça upgrade do plano com seu administrador.`);
-      return;
-    }
-    const restCode = restCode_ || "XXX";
-    const seq = nextEmpSeq(employees, restCode);
-    const empCode = makeEmpCode(restCode, seq);
-    const pin = newRow.pin || String(seq).padStart(4,"0");
-    onUpdate("employees", [...employees, { ...newRow, admission: newRow.admission || DEFAULT_ADMISSION(), id:Date.now().toString(), empCode, pin, restaurantId:rid }]);
-    setNewRow(blank());
-  }
+  // (saveNew removido — empregados agora são criados em Pessoas e vinculados aqui via "🔗 Vincular pessoa")
 
   function toggleInactive(emp) {
     const row = getRow(emp);
@@ -5967,7 +5867,7 @@ Inclua apenas as ações solicitadas. Arrays vazios se não houver ação daquel
       {/* ═══════════════════════ LIST VIEW ═══════════════════════ */}
       {!detailEmp && <>
 
-      {/* Toggle Ativos / Inativos + Novo */}
+      {/* Toggle Ativos / Inativos + Vincular pessoa */}
       <div style={{display:"flex",gap:8,marginBottom:12,alignItems:"center",flexWrap:"wrap"}}>
         <button onClick={()=>setShowInactive(false)} style={{flex:1,padding:"8px",borderRadius:10,border:`1px solid ${!showInactive?"var(--green)":"var(--border)"}`,background:!showInactive?"#10b98122":"transparent",color:!showInactive?"var(--green)":"var(--text3)",cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:13}}>
           Ativos ({activeEmps.length})
@@ -5976,82 +5876,112 @@ Inclua apenas as ações solicitadas. Arrays vazios se não houver ação daquel
           Inativos ({inactiveEmps.length})
         </button>
         {!showInactive && (
-          <button onClick={()=>setShowNewForm(!showNewForm)} style={{padding:"8px 14px",borderRadius:10,border:`1px solid ${showNewForm?"var(--accent)":"var(--green)"}`,background:showNewForm?"var(--accent)11":"#10b98122",color:showNewForm?"var(--accent)":"var(--green)",cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:13,fontWeight:700,whiteSpace:"nowrap"}}>
-            {showNewForm ? "✕ Fechar" : "+ Novo"}
+          <button onClick={()=>setVincularPessoaOpen(true)}
+            title="Cadastros novos vão na aba Pessoas. Aqui você marca uma pessoa existente como membro da equipe."
+            style={{padding:"8px 14px",borderRadius:10,border:"1px solid var(--ac)44",background:"var(--ac)11",color:"var(--ac)",cursor:"pointer",fontFamily:"'DM Sans',sans-serif",fontSize:13,fontWeight:700,whiteSpace:"nowrap"}}>
+            🔗 Vincular pessoa {pessoasNaoEquipe.length > 0 && <span style={{opacity:0.6,fontWeight:400}}>({pessoasNaoEquipe.length})</span>}
           </button>
         )}
       </div>
 
-      {/* ── New employee form ── */}
-      {showNewForm && !showInactive && (
-        <div style={{background:"var(--card-bg)",border:"1px solid var(--green)33",borderRadius:12,padding:16,marginBottom:14}}>
-          <div style={{fontSize:13,fontWeight:700,color:"var(--green)",marginBottom:10}}>Novo empregado</div>
-          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
-            <div>
-              <label style={{fontSize:10,color:"var(--text3)",fontWeight:700,display:"block",marginBottom:3}}>Nome</label>
-              <input value={newRow.name||""} onChange={ev=>setNewRow(p=>({...p,name:ev.target.value}))} placeholder="Nome completo" style={{...S.input,fontSize:13}}/>
-            </div>
-            <div>
-              <label style={{fontSize:10,color:"var(--text3)",fontWeight:700,display:"block",marginBottom:3}}>CPF</label>
-              <input value={newRow.cpf||""} onChange={ev=>setNewRow(p=>({...p,cpf:maskCpf(ev.target.value)}))} placeholder="000.000.000-00" style={{...S.input,fontSize:13}} inputMode="numeric"/>
-            </div>
-            <div>
-              <label style={{fontSize:10,color:"var(--text3)",fontWeight:700,display:"block",marginBottom:3}}>Admissão</label>
-              <input type="date" value={newRow.admission||""} onChange={ev=>setNewRow(p=>({...p,admission:ev.target.value}))} style={{...S.input,fontSize:13}}/>
-            </div>
-            <div>
-              <label style={{fontSize:10,color:"var(--text3)",fontWeight:700,display:"block",marginBottom:3}}>Cargo</label>
-              <select value={newRow.roleId||""} onChange={ev=>setNewRow(p=>({...p,roleId:ev.target.value}))} style={{...S.input,fontSize:13,cursor:"pointer"}}>
-                <option value="">Selecionar…</option>
-                {AREAS.map(a=>(<optgroup key={a} label={a}>{restRoles.filter(r=>r.area===a&&!r.inactive).map(r=><option key={r.id} value={r.id}>{r.name} ({r.points}pt)</option>)}</optgroup>))}
-              </select>
-            </div>
-            <div>
-              <label style={{fontSize:10,color:"var(--text3)",fontWeight:700,display:"block",marginBottom:3}}>Telefone</label>
-              <input value={newRow.phone||""} onChange={ev=>setNewRow(p=>({...p,phone:ev.target.value}))} placeholder="(00) 00000-0000" style={{...S.input,fontSize:13}} inputMode="tel"/>
-            </div>
-            <div>
-              <label style={{fontSize:10,color:"var(--text3)",fontWeight:700,display:"block",marginBottom:3}}>E-mail</label>
-              <input value={newRow.email||""} onChange={ev=>setNewRow(p=>({...p,email:ev.target.value}))} placeholder="email@exemplo.com" style={{...S.input,fontSize:13}} type="email"/>
-            </div>
-          </div>
-          <div style={{display:"flex",gap:8,marginTop:12}}>
-            <button onClick={()=>{saveNew();setShowNewForm(false);}} disabled={!newRow.name.trim()} style={{...S.btnPrimary,fontSize:13,opacity:newRow.name.trim()?1:0.5}}>Adicionar</button>
-            <button onClick={()=>{setShowNewForm(false);setNewRow(blank());}} style={S.btnSecondary}>Cancelar</button>
-          </div>
-        </div>
-      )}
+      {/* MODAL: Vincular pessoa como empregado */}
+      {vincularPessoaOpen && (() => {
+        const q = vincularPessoaFilter.trim().toLowerCase();
+        const filtered = q
+          ? pessoasNaoEquipe.filter(p => p.name.toLowerCase().includes(q) || (p.cpf || "").includes(q))
+          : pessoasNaoEquipe;
+        const sortedList = [...filtered].sort((a,b) => a.name.localeCompare(b.name));
+        return (
+          <div onClick={()=>{setVincularPessoaOpen(false);setVincularPessoaSelected(null);setVincularPessoaFilter("");}} style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.5)",zIndex:9500,display:"flex",alignItems:"center",justifyContent:"center",padding:20}}>
+            <div onClick={e=>e.stopPropagation()} style={{background:"var(--card-bg)",borderRadius:14,maxWidth:600,width:"100%",maxHeight:"85vh",display:"flex",flexDirection:"column",boxShadow:"0 10px 40px rgba(0,0,0,0.3)"}}>
+              <div style={{padding:"16px 20px",borderBottom:"1px solid var(--border)",display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+                <div>
+                  <div style={{fontSize:11,color:"var(--text3)",fontWeight:700,textTransform:"uppercase",letterSpacing:0.4}}>Equipe</div>
+                  <div style={{fontSize:16,color:"var(--text)",fontWeight:700,marginTop:2}}>🔗 Vincular pessoa como empregado</div>
+                </div>
+                <button onClick={()=>{setVincularPessoaOpen(false);setVincularPessoaSelected(null);setVincularPessoaFilter("");}} style={{background:"none",border:"none",fontSize:22,color:"var(--text3)",cursor:"pointer",padding:"0 4px"}}>×</button>
+              </div>
 
-      {/* IA assistant */}
-      {!showInactive && (
-        <div style={{marginBottom:14}}>
-          <button onClick={()=>{setShowAiEmp(!showAiEmp);setAiEmpError("");setAiEmpPreview(null);}}
-            style={{...S.btnSecondary,fontSize:12,display:"inline-flex",alignItems:"center",gap:6,padding:"7px 14px",
-              background:showAiEmp?"var(--ac-bg)":undefined,borderColor:showAiEmp?"var(--ac)":undefined,color:showAiEmp?"var(--ac-text)":undefined}}>
-            ✨ Gerenciar com IA
-          </button>
-          {showAiEmp && (
-            <div style={{marginTop:10,padding:"14px",borderRadius:12,background:"var(--ac-bg)",border:"1px solid var(--ac)33"}}>
-              <p style={{color:"var(--text2)",fontSize:13,margin:"0 0 6px",fontWeight:600}}>✨ Assistente de empregados</p>
-              <p style={{color:"var(--text3)",fontSize:12,margin:"0 0 6px",lineHeight:1.5}}>Crie, modifique ou inative empregados com linguagem natural.</p>
-              <p style={{color:"var(--text3)",fontSize:11,margin:"0 0 10px",fontStyle:"italic"}}>Ex: "Adicionar João Silva como garçom; trocar Maria para barman; inativar Pedro Lima"</p>
-              <textarea value={aiEmpInput} onChange={e=>setAiEmpInput(e.target.value)} placeholder="Descreva as alterações aqui..." rows={4} style={{...S.input,resize:"vertical",marginBottom:8,fontSize:13}}/>
-              {aiEmpError && <p style={{color:"var(--red)",fontSize:12,margin:"0 0 8px"}}>{aiEmpError}</p>}
-              {aiEmpPreview && (
-                <div style={{marginBottom:10,padding:"12px",borderRadius:10,background:"var(--card-bg)",border:"1px solid var(--border)"}}>
-                  <p style={{color:"var(--text)",fontSize:13,fontWeight:700,margin:"0 0 8px"}}>Pré-visualização:</p>
-                  {aiEmpPreview.criar.length > 0 && (<div style={{marginBottom:8}}><span style={{color:"var(--green)",fontSize:11,fontWeight:700}}>+ CRIAR ({aiEmpPreview.criar.length})</span>{aiEmpPreview.criar.map(e=>(<div key={e.id} style={{padding:"6px 8px",marginTop:4,borderRadius:6,background:"#10b98111",fontSize:12,color:"var(--text2)",display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:4}}><div><strong>{e.name}</strong><span style={{color:"var(--text3)",marginLeft:6}}>→ {e.roleMatched?<span style={{color:"var(--green)"}}>{e.roleName}</span>:<span style={{color:"var(--red)"}}>{e.roleName} ⚠️</span>}</span>{e.cpf&&<span style={{color:"var(--text3)",marginLeft:6,fontSize:11}}>CPF: {e.cpf}</span>}{e.isProducao&&<span style={{color:"#ec4899",marginLeft:6,fontSize:11}}>🏭</span>}</div><span style={{color:"var(--text3)",fontSize:10,fontFamily:"'DM Mono',monospace"}}>{e.empCode}·PIN:{e.pin}</span></div>))}</div>)}
-                  {aiEmpPreview.modificar.length > 0 && (<div style={{marginBottom:8}}><span style={{color:"#3b82f6",fontSize:11,fontWeight:700}}>✏️ MODIFICAR ({aiEmpPreview.modificar.length})</span>{aiEmpPreview.modificar.map(m=>(<div key={m.id} style={{padding:"6px 8px",marginTop:4,borderRadius:6,background:"#3b82f611",fontSize:12,color:"var(--text2)"}}><strong>{m.name}</strong>{m.newRoleName&&<span style={{marginLeft:6}}>{m.oldRoleName}→{m.roleMatched?<span style={{color:"#3b82f6"}}>{m.newRoleName}</span>:<span style={{color:"var(--red)"}}>{m.newRoleName}⚠️</span>}</span>}{m.cpf!==null&&<span style={{color:"var(--text3)",marginLeft:6,fontSize:11}}>CPF:{m.cpf}</span>}{m.producao!==null&&<span style={{color:"#ec4899",marginLeft:6,fontSize:11}}>{m.producao?"🏭+":"🏭−"}</span>}</div>))}</div>)}
-                  {aiEmpPreview.inativar.length > 0 && (<div style={{marginBottom:8}}><span style={{color:"#f59e0b",fontSize:11,fontWeight:700}}>⏸ INATIVAR ({aiEmpPreview.inativar.length})</span>{aiEmpPreview.inativar.map(e=>(<div key={e.id} style={{padding:"4px 8px",marginTop:4,borderRadius:6,background:"#f59e0b11",fontSize:12,color:"var(--text2)"}}>{e.name} {e.empCode&&<span style={{color:"var(--text3)",fontSize:10}}>({e.empCode})</span>}</div>))}</div>)}
-                  {(aiEmpPreview.criar.some(e=>!e.roleMatched)||aiEmpPreview.modificar.some(m=>!m.roleMatched)) && <p style={{color:"var(--red)",fontSize:11,margin:"0 0 8px"}}>⚠️ Itens com cargo não encontrado ficarão sem cargo.</p>}
-                  <div style={{display:"flex",gap:8,marginTop:10}}><button onClick={confirmAiEmpChanges} style={{...S.btnPrimary,flex:1,fontSize:13}}>✅ Confirmar</button><button onClick={()=>setAiEmpPreview(null)} style={S.btnSecondary}>Cancelar</button></div>
+              {!vincularPessoaSelected ? (
+                <>
+                  <div style={{padding:"12px 20px",borderBottom:"1px solid var(--border)"}}>
+                    <p style={{color:"var(--text3)",fontSize:12,margin:"0 0 10px",lineHeight:1.5}}>
+                      Selecione uma pessoa cadastrada deste restaurante pra marcar como equipe (entra na escala e gorjeta). Se a pessoa ainda não existe, cadastre primeiro na aba <strong>Pessoas</strong>.
+                    </p>
+                    <input value={vincularPessoaFilter} onChange={e=>setVincularPessoaFilter(e.target.value)} placeholder="🔍 Buscar por nome ou CPF..." style={S.input} autoFocus/>
+                  </div>
+                  <div style={{padding:"10px 16px",overflowY:"auto",flex:1}}>
+                    {sortedList.length === 0 ? (
+                      <div style={{padding:"30px 16px",textAlign:"center",color:"var(--text3)",fontSize:13}}>
+                        {pessoasNaoEquipe.length === 0
+                          ? "Todas as pessoas deste restaurante já estão marcadas como equipe. Cadastre uma nova em Pessoas."
+                          : "Nenhuma pessoa encontrada."}
+                      </div>
+                    ) : (
+                      <div style={{display:"flex",flexDirection:"column",gap:6}}>
+                        {sortedList.map(p => {
+                          const cpfMasked = p.cpf ? p.cpf.replace(/(\d{3})(\d{3})(\d{3})(\d{2})/, "$1.$2.$3-$4") : "—";
+                          const initial = (p.name || "?").trim().charAt(0).toUpperCase();
+                          return (
+                            <div key={p.id} onClick={()=>{setVincularPessoaSelected(p);setVincularPessoaAdmission(today());}}
+                              style={{display:"flex",alignItems:"center",gap:12,padding:"10px 14px",background:"var(--card-bg)",borderRadius:10,border:"1px solid var(--border)",cursor:"pointer",transition:"background 0.12s"}}
+                              onMouseEnter={e=>e.currentTarget.style.background="var(--bg2)"}
+                              onMouseLeave={e=>e.currentTarget.style.background="var(--card-bg)"}>
+                              <div style={{flexShrink:0,width:36,height:36,borderRadius:18,background:"var(--ac)22",color:"var(--ac)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:14,fontWeight:700}}>{initial}</div>
+                              <div style={{flex:1,minWidth:0}}>
+                                <div style={{fontSize:13,fontWeight:600,color:"var(--text)"}}>{p.name}</div>
+                                <div style={{fontSize:11,color:"var(--text3)",fontFamily:"'DM Mono',monospace"}}>{cpfMasked}</div>
+                              </div>
+                              <span style={{color:"var(--ac)",fontSize:14}}>›</span>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                </>
+              ) : (
+                <div style={{padding:"16px 20px",overflowY:"auto",flex:1}}>
+                  <div style={{display:"flex",alignItems:"center",gap:12,padding:"12px 14px",background:"var(--ac)11",border:"1px solid var(--ac)44",borderRadius:10,marginBottom:14}}>
+                    <div style={{flexShrink:0,width:36,height:36,borderRadius:18,background:"var(--ac)22",color:"var(--ac)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:14,fontWeight:700}}>{(vincularPessoaSelected.name||"?").trim().charAt(0).toUpperCase()}</div>
+                    <div style={{flex:1,minWidth:0}}>
+                      <div style={{fontSize:14,fontWeight:700,color:"var(--text)"}}>{vincularPessoaSelected.name}</div>
+                      <div style={{fontSize:11,color:"var(--text3)",fontFamily:"'DM Mono',monospace"}}>{vincularPessoaSelected.cpf ? vincularPessoaSelected.cpf.replace(/(\d{3})(\d{3})(\d{3})(\d{2})/, "$1.$2.$3-$4") : "—"}</div>
+                    </div>
+                    <button onClick={()=>setVincularPessoaSelected(null)} style={{...S.btnSecondary,fontSize:11,padding:"4px 10px"}}>← Trocar</button>
+                  </div>
+                  <p style={{color:"var(--text3)",fontSize:12,lineHeight:1.5,marginBottom:14}}>
+                    Defina cargo e data de admissão no <strong>{restaurant?.name || "restaurante"}</strong>. Esses dados ficam por restaurante — a pessoa pode ter cargos diferentes em outros.
+                  </p>
+                  <div style={{display:"grid",gridTemplateColumns:"1.5fr 1fr",gap:10,marginBottom:10}}>
+                    <div>
+                      <label style={{...S.label,fontSize:11}}>Cargo</label>
+                      <select value={vincularPessoaRole} onChange={e=>setVincularPessoaRole(e.target.value)} style={{...S.input,cursor:"pointer"}}>
+                        <option value="">— Selecione (pode definir depois) —</option>
+                        {AREAS.map(a=>(<optgroup key={a} label={a}>{restRoles.filter(r=>r.area===a&&!r.inactive).map(r=><option key={r.id} value={r.id}>{r.name}{r.points?` (${r.points}pt)`:""}</option>)}</optgroup>))}
+                      </select>
+                    </div>
+                    <div>
+                      <label style={{...S.label,fontSize:11}}>Data de admissão</label>
+                      <input type="date" value={vincularPessoaAdmission} onChange={e=>setVincularPessoaAdmission(e.target.value)} style={S.input}/>
+                    </div>
+                  </div>
                 </div>
               )}
-              {!aiEmpPreview && (<div style={{display:"flex",gap:8}}><button onClick={handleAiEmpregados} disabled={!aiEmpInput.trim()||aiEmpLoading} style={{...S.btnPrimary,flex:1,fontSize:13,opacity:(!aiEmpInput.trim()||aiEmpLoading)?0.6:1}}>{aiEmpLoading?"✨ Processando...":"✨ Processar"}</button><button onClick={()=>{setShowAiEmp(false);setAiEmpInput("");setAiEmpError("");setAiEmpPreview(null);}} style={S.btnSecondary}>Cancelar</button></div>)}
+
+              <div style={{padding:"12px 20px",borderTop:"1px solid var(--border)",display:"flex",gap:8,justifyContent:"flex-end",background:"var(--bg2)"}}>
+                <button onClick={()=>{setVincularPessoaOpen(false);setVincularPessoaSelected(null);setVincularPessoaFilter("");}} style={{...S.btnSecondary,fontSize:12,padding:"8px 16px"}}>Cancelar</button>
+                {vincularPessoaSelected && (
+                  <button onClick={vincularPessoaComoEmpregado}
+                    style={{background:"var(--ac)",color:"#fff",border:"none",borderRadius:8,padding:"8px 18px",fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:"'DM Sans',sans-serif"}}>
+                    🔗 Vincular como empregado
+                  </button>
+                )}
+              </div>
             </div>
-          )}
-        </div>
-      )}
+          </div>
+        );
+      })()}
 
       {/* Plan limits */}
       {activeCount >= plano.empMax && (
@@ -10941,7 +10871,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
             <EmployeeSpreadsheet
               restEmps={employees.filter(e => e.restaurantId === rid)}
               restRoles={restRoles} rid={rid}
-              employees={employees} onUpdate={onUpdate} restCode={restaurant.shortCode}
+              employees={employees} pessoas={data?.pessoas ?? []} onUpdate={onUpdate} restCode={restaurant.shortCode}
               isOwner={isOwner} restaurant={restaurant}
               resetSignal={empResetSignal}
               notifications={data?.notifications??[]}
@@ -11419,7 +11349,6 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
               miseStocks={data?.miseStocks ?? []}
               miseAssignments={data?.miseAssignments ?? []}
               miseItems={data?.miseItems ?? []}
-              miseCycles={data?.miseCycles ?? []}
               miseCounts={data?.miseCounts ?? []}
               miseSuppliers={data?.miseSuppliers ?? []}
               miseProductSuppliers={data?.miseProductSuppliers ?? []}
@@ -16621,7 +16550,6 @@ function OperationalPortal({ employee, data, onUpdate, onBack, toggleTheme, them
             miseStocks={data?.miseStocks ?? []}
             miseAssignments={data?.miseAssignments ?? []}
             miseItems={data?.miseItems ?? []}
-            miseCycles={data?.miseCycles ?? []}
             miseCounts={data?.miseCounts ?? []}
             onUpdate={onUpdate}
           />
@@ -16677,7 +16605,7 @@ function OperationalPortal({ employee, data, onUpdate, onBack, toggleTheme, them
 // ═══════════════════════════════════════════════════════════════
 // ──  MISE CONTAGENS — ADMIN (Gestor Administrativo)            ──
 // ═══════════════════════════════════════════════════════════════
-function MiseContagensAdmin({ restaurantId, employees, miseCategories, miseStocks, miseAssignments, miseItems, miseCycles, miseCounts, miseSuppliers, miseProductSuppliers, onUpdate, mobileOnly }) {
+function MiseContagensAdmin({ restaurantId, employees, miseCategories, miseStocks, miseAssignments, miseItems, miseCounts, miseSuppliers, miseProductSuppliers, onUpdate, mobileOnly }) {
   const [subTab, setSubTab] = useState("atribuicoes");
   const restCategories = miseCategories.filter(c => c.restaurantId === restaurantId);
   const restStocks = miseStocks.filter(s => s.restaurantId === restaurantId);
@@ -16685,7 +16613,6 @@ function MiseContagensAdmin({ restaurantId, employees, miseCategories, miseStock
   const restItems = miseItems.filter(i => i.restaurantId === restaurantId);
   const restSuppliers = (miseSuppliers || []).filter(s => s.restaurantId === restaurantId);
   const restProductSuppliers = (miseProductSuppliers || []).filter(ps => ps.restaurantId === restaurantId);
-  const restCycles = miseCycles.filter(c => c.restaurantId === restaurantId).sort((a,b) => (b.startDate||"").localeCompare(a.startDate||""));
   const restEmps = employees.filter(e => e.restaurantId === restaurantId && !(e.inactive && e.inactiveFrom && e.inactiveFrom <= today()));
   // Só empregados que têm a área "contagens" concedida aparecem como responsáveis
   const eligibleEmps = restEmps.filter(e => e.operationalAreas?.contagens === true);
@@ -16704,7 +16631,6 @@ function MiseContagensAdmin({ restaurantId, employees, miseCategories, miseStock
   const [newItemUnit, setNewItemUnit] = useState("un");
   const [newItemMinStock, setNewItemMinStock] = useState("");
   const [itemFilter, setItemFilter] = useState("");
-  const [newCycleName, setNewCycleName] = useState("");
   const [assignMatrixCat, setAssignMatrixCat] = useState(null); // categoria selecionada na matriz
   // Fornecedores
   const [newSupName, setNewSupName] = useState("");
@@ -16723,7 +16649,6 @@ function MiseContagensAdmin({ restaurantId, employees, miseCategories, miseStock
   const [catStocksModalId, setCatStocksModalId] = useState(null);
 
   const mkId = () => Date.now().toString() + "_" + Math.random().toString(36).slice(2, 8);
-  const openCycle = restCycles.find(c => c.status === "open");
   const miseAc = "#7c9e5e";
 
   // Actions — Categorias
@@ -16950,33 +16875,7 @@ function MiseContagensAdmin({ restaurantId, employees, miseCategories, miseStock
     setBulkSelected(next);
   }
 
-  // Actions — Ciclos
-  async function openNewCycle() {
-    const nm = newCycleName.trim() || `Contagem ${new Date().toLocaleDateString("pt-BR")}`;
-    const hasOpen = restCycles.find(c => c.status === "open");
-    if (hasOpen && !await appConfirm(`Já existe ciclo aberto: "${hasOpen.name}".\nFechar e abrir um novo?`)) return;
-    let next = [...miseCycles];
-    if (hasOpen) next = next.map(c => c.id === hasOpen.id ? { ...c, status: "closed", endDate: today(), closedAt: new Date().toISOString() } : c);
-    next.push({ id: mkId(), restaurantId, name: nm, startDate: today(), status: "open" });
-    onUpdate("miseCycles", next);
-    setNewCycleName("");
-  }
-  async function closeCycle(id) {
-    const c = restCycles.find(x => x.id === id);
-    if (!await appConfirm(`Fechar o ciclo "${c?.name}"? Depois de fechado, não pode receber novas contagens.`)) return;
-    onUpdate("miseCycles", miseCycles.map(x => x.id === id ? { ...x, status: "closed", endDate: today(), closedAt: new Date().toISOString() } : x));
-  }
-  async function reopenCycle(id) {
-    if (!await appConfirm("Reabrir este ciclo? Ele volta a aceitar contagens.")) return;
-    onUpdate("miseCycles", miseCycles.map(x => x.id === id ? { ...x, status: "open", endDate: null, closedAt: null } : x));
-  }
-  async function delCycle(id) {
-    const c = restCycles.find(x => x.id === id);
-    const linked = miseCounts.filter(cnt => cnt.cycleId === id).length;
-    if (!await appConfirm(`Apagar ciclo "${c?.name}" e ${linked} contagem(ns) vinculadas?`)) return;
-    onUpdate("miseCycles", miseCycles.filter(x => x.id !== id));
-    onUpdate("miseCounts", miseCounts.filter(cnt => cnt.cycleId !== id));
-  }
+  // (Funções de ciclos removidas — modelo sem ciclos.)
 
   const SUB_TABS = [
     { id: "atribuicoes",  label: "Atribuições" },
@@ -16984,7 +16883,8 @@ function MiseContagensAdmin({ restaurantId, employees, miseCategories, miseStock
     { id: "estoques",     label: "Estoques"    },
     { id: "itens",        label: "Itens"       },
     { id: "fornecedores", label: "Fornecedores"},
-    { id: "ciclos",       label: "Ciclos"      },
+    // Aba "Ciclos" removida — modelo sem ciclos. Cada contagem é solta e Compras
+    // consome diretamente as não-arquivadas. Histórico fica disponível em Compras.
   ];
 
   // Para matriz de atribuições
@@ -17487,61 +17387,7 @@ function MiseContagensAdmin({ restaurantId, employees, miseCategories, miseStock
         </div>
       )}
 
-      {/* CICLOS */}
-      {subTab === "ciclos" && (
-        <div>
-          <h3 style={{color:"var(--text)",margin:"0 0 4px",fontSize:mobileOnly?16:18}}>🔄 Ciclos de contagem</h3>
-          <p style={{color:"var(--text3)",fontSize:13,lineHeight:1.5,margin:"0 0 16px"}}>
-            Um ciclo agrupa as contagens feitas num período (ex: inventário semanal). Apenas um ciclo pode estar aberto por vez.
-          </p>
-          {openCycle ? (
-            <div style={{padding:"14px 16px",background:"#f0fdf4",border:"1px solid #10b98144",borderRadius:10,marginBottom:16,display:"flex",alignItems:"center",justifyContent:"space-between",gap:12,flexWrap:"wrap"}}>
-              <div>
-                <div style={{fontSize:11,color:"#15803d",fontWeight:700,textTransform:"uppercase",letterSpacing:0.4}}>Ciclo aberto</div>
-                <div style={{fontSize:15,color:"var(--text)",fontWeight:700,marginTop:2}}>{openCycle.name}</div>
-                <div style={{fontSize:12,color:"var(--text3)",marginTop:2}}>Iniciado em {fmtDate(openCycle.startDate)} • {miseCounts.filter(c=>c.cycleId===openCycle.id).length} contagem(ns) registradas</div>
-              </div>
-              <button onClick={()=>closeCycle(openCycle.id)} style={{...S.btnSecondary,fontSize:12,padding:"8px 14px"}}>Fechar ciclo</button>
-            </div>
-          ) : (
-            <div style={{padding:"14px 16px",background:"var(--card-bg)",border:"1px solid var(--border)",borderRadius:10,marginBottom:16}}>
-              <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
-                <input value={newCycleName} onChange={e=>setNewCycleName(e.target.value)} placeholder="Nome do ciclo (ex: Inventário abril)" style={{...S.input,maxWidth:320,flex:"1 1 200px"}} onKeyDown={e=>e.key==="Enter"&&openNewCycle()} />
-                <button onClick={openNewCycle} style={{...S.btnPrimary,fontSize:13,padding:"8px 16px"}}>▶ Abrir ciclo</button>
-              </div>
-            </div>
-          )}
-          {restCycles.length === 0 ? (
-            <div style={{padding:"32px 16px",textAlign:"center",color:"var(--text3)",fontSize:14,background:"var(--card-bg)",borderRadius:12,border:"1px solid var(--border)"}}>Nenhum ciclo criado ainda</div>
-          ) : (
-            <div style={{display:"flex",flexDirection:"column",gap:8}}>
-              {restCycles.map(c => {
-                const nCounts = miseCounts.filter(cnt => cnt.cycleId === c.id).length;
-                return (
-                  <div key={c.id} style={{display:"flex",alignItems:"center",gap:10,padding:"10px 14px",background:"var(--card-bg)",border:"1px solid var(--border)",borderRadius:10,flexWrap:"wrap"}}>
-                    <div style={{flex:1,minWidth:180}}>
-                      <div style={{display:"flex",alignItems:"center",gap:8}}>
-                        <span style={{color:"var(--text)",fontWeight:600}}>{c.name}</span>
-                        {c.status === "open"
-                          ? <span style={{fontSize:10,padding:"2px 8px",borderRadius:10,background:"#10b98122",color:"#15803d",fontWeight:700}}>ABERTO</span>
-                          : <span style={{fontSize:10,padding:"2px 8px",borderRadius:10,background:"var(--border)",color:"var(--text3)",fontWeight:700}}>FECHADO</span>}
-                      </div>
-                      <div style={{fontSize:12,color:"var(--text3)",marginTop:2}}>
-                        {fmtDate(c.startDate)}{c.endDate ? ` — ${fmtDate(c.endDate)}` : ""} • {nCounts} contagem(ns)
-                      </div>
-                    </div>
-                    {c.status === "open"
-                      ? <button onClick={()=>closeCycle(c.id)} style={{...S.btnSecondary,fontSize:12,padding:"6px 12px"}}>Fechar</button>
-                      : <button onClick={()=>reopenCycle(c.id)} style={{...S.btnSecondary,fontSize:12,padding:"6px 12px"}}>Reabrir</button>
-                    }
-                    <button onClick={()=>delCycle(c.id)} style={{...S.btnSecondary,fontSize:12,padding:"6px 12px",color:"var(--red)",borderColor:"var(--red)44"}}>Apagar</button>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </div>
-      )}
+      {/* (Aba de ciclos removida — modelo sem ciclos) */}
 
       {/* MODAL: Vínculos Produto → Fornecedores */}
       {linkModalProductId && (() => {
@@ -17805,9 +17651,10 @@ function MiseContagensAdmin({ restaurantId, employees, miseCategories, miseStock
 // ═══════════════════════════════════════════════════════════════
 // ──  MISE CONTAGENS — USER (Gestor Operacional)                ──
 // ═══════════════════════════════════════════════════════════════
-function OperationalContagens({ employee, miseCategories, miseStocks, miseAssignments, miseItems, miseCycles, miseCounts, onUpdate }) {
+function OperationalContagens({ employee, miseCategories, miseStocks, miseAssignments, miseItems, miseCounts, onUpdate }) {
+  // Modelo simplificado (sem ciclo): cada submissão cria nova linha.
+  // miseCycles ignorado — Compras consome contagens não-arquivadas direto.
   const restaurantId = employee.restaurantId;
-  const openCycle = miseCycles.find(c => c.restaurantId === restaurantId && c.status === "open");
   const myAssignments = miseAssignments.filter(a => a.restaurantId === restaurantId && a.userId === employee.id);
   const [drafts, setDrafts] = useState({});
   const [justSavedKey, setJustSavedKey] = useState(null);
@@ -17855,9 +17702,8 @@ function OperationalContagens({ employee, miseCategories, miseStocks, miseAssign
     );
   }
 
-  // Contagem não precisa mais de ciclo aberto.
-  // Se não tem ciclo → contagem fica SOLTA (cycleId: null), disponível pra Compras puxar depois.
-  // Cada save = uma nova linha (não sobrescreve) — preserva histórico/auditoria.
+  // Cada submissão de contagem é uma nova linha (cycleId: null sempre).
+  // Compras consome todas as não-arquivadas e marca como `archivedAt` ao gerar pedido.
 
   const saveGroup = (categoryId, stockId) => {
     // stockId pode ser null (pedido-direto) ou uma string válida (contagem por estoque)
@@ -17873,24 +17719,10 @@ function OperationalContagens({ employee, miseCategories, miseStocks, miseAssign
       if (draft === undefined || draft === "") return;
       const qty = parseFloat(String(draft).replace(",","."));
       if (isNaN(qty)) return;
-      if (openCycle) {
-        // Dentro de ciclo aberto: comportamento legado (substitui contagem do mesmo user/item/stock)
-        const existingIdx = newCounts.findIndex(c => c.cycleId === openCycle.id && c.itemId === it.id && c.stockId === stockId && c.userId === employee.id);
-        if (existingIdx >= 0) {
-          newCounts[existingIdx] = { ...newCounts[existingIdx], qty, countedAt: now };
-        } else {
-          newCounts.push({
-            id: Date.now().toString() + "_" + Math.random().toString(36).slice(2,8) + "_" + idx,
-            restaurantId, cycleId: openCycle.id, itemId: it.id, stockId: stockId ?? null, userId: employee.id, qty, countedAt: now
-          });
-        }
-      } else {
-        // Solta (cycleId=null): sempre adiciona nova linha — cada contagem preservada
-        newCounts.push({
-          id: Date.now().toString() + "_" + Math.random().toString(36).slice(2,8) + "_" + idx,
-          restaurantId, cycleId: null, itemId: it.id, stockId: stockId ?? null, userId: employee.id, qty, countedAt: now
-        });
-      }
+      newCounts.push({
+        id: Date.now().toString() + "_" + Math.random().toString(36).slice(2,8) + "_" + idx,
+        restaurantId, cycleId: null, itemId: it.id, stockId: stockId ?? null, userId: employee.id, qty, countedAt: now
+      });
       changed++;
     });
     if (changed > 0) {
@@ -17905,14 +17737,21 @@ function OperationalContagens({ employee, miseCategories, miseStocks, miseAssign
     }
   };
 
+  // Helper: pega a última contagem do user pra (item, stock) — usada como "Última sua" na coluna
+  const lastCountFor = (itemId, stockId) => {
+    const matches = miseCounts.filter(c =>
+      c.restaurantId === restaurantId &&
+      c.itemId === itemId &&
+      c.stockId === stockId &&
+      c.userId === employee.id &&
+      !c.archivedAt
+    );
+    if (matches.length === 0) return null;
+    return matches.sort((a,b) => (b.countedAt||"").localeCompare(a.countedAt||""))[0];
+  };
+
   return (
     <div style={{display:"flex",flexDirection:"column",gap:20}}>
-      <div style={{padding:"14px 16px",background:"#f0fdf4",border:"1px solid #10b98144",borderRadius:10}}>
-        <div style={{fontSize:11,color:"#15803d",fontWeight:700,textTransform:"uppercase",letterSpacing:0.4}}>Ciclo em andamento</div>
-        <div style={{fontSize:15,color:"var(--text)",fontWeight:700,marginTop:2}}>{openCycle.name}</div>
-        <div style={{fontSize:12,color:"var(--text3)",marginTop:2}}>Aberto em {fmtDate(openCycle.startDate)}</div>
-      </div>
-
       {groups.map(g => {
         const cat = g.cat;
         const isPedidoOnly = g.isPedidoOnly;
@@ -17959,7 +17798,8 @@ function OperationalContagens({ employee, miseCategories, miseStocks, miseAssign
                     </thead>
                     <tbody>
                       {[...items].sort((a,b)=>a.name.localeCompare(b.name)).map(it => {
-                        const existing = miseCounts.find(c => c.cycleId === openCycle.id && c.itemId === it.id && c.stockId === (isPedidoOnly ? null : stock.id) && c.userId === employee.id);
+                        // "Última sua" agora é a contagem mais recente do user (não-arquivada) pra esse item/stock
+                        const existing = lastCountFor(it.id, isPedidoOnly ? null : stock.id);
                         const draftKey = `${it.id}_${stockKeyId}`;
                         const draftVal = drafts[draftKey];
                         return (
@@ -18389,10 +18229,6 @@ function AppShell({ pessoa, data, activeRestaurantId, setActiveRestaurantId, use
     !MISE_ORDER_STATUS[o.status]?.terminal
   );
   if (activeOrders.length > 0) badges.mod_mise_compras = activeOrders.length;
-  // Badge de Checklists removido (era "pendentes" mas confundia com "novos preenchimentos").
-  // Badge de Contagens removido (era ciclo aberto "•", desnecessário agora que Compras é dona do ciclo).
-  // Mantemos cálculo de openCycle pra outras badges que dependem dele.
-  const openCycleForBadge = (data?.miseCycles || []).find(c => c.restaurantId === activeRestaurantId && c.status === "open");
   // Temperaturas: alertas ativos (abertos e não reconhecidos)
   const openTempAlerts = (data?.tempAlerts || []).filter(a =>
     a.restaurantId === activeRestaurantId && !a.closedAt && !a.acknowledgedAt
@@ -18424,24 +18260,28 @@ function AppShell({ pessoa, data, activeRestaurantId, setActiveRestaurantId, use
     const totalInbox = notifsUnread + inboxMsgsUnread;
     if (totalInbox > 0) badges.mod_inbox = totalInbox;
   }
-  // Sugestões de compra (calculadas live — só se tem pedidos a aprovar)
-  if (openCycleForBadge && pessoa) {
+  // Sugestões de compra — calculadas a partir de TODAS as contagens não arquivadas (sem ciclo)
+  if (pessoa) {
     try {
-      const sugg = miseComputeSuggestedOrders({
-        cycle: openCycleForBadge,
-        restaurantId: activeRestaurantId,
-        items: data?.miseItems || [],
-        counts: data?.miseCounts || [],
-        categories: data?.miseCategories || [],
-        productSuppliers: data?.miseProductSuppliers || [],
-        suppliers: (data?.miseSuppliers || []).filter(s => s.restaurantId === activeRestaurantId),
-        overrides: {},
-      });
-      const suggestedItemsCount = sugg.reduce((s, g) => s + g.items.length, 0);
-      if (suggestedItemsCount > 0 && badges.mod_mise_compras) {
-        badges.mod_mise_compras = `${badges.mod_mise_compras}+${suggestedItemsCount}`;
-      } else if (suggestedItemsCount > 0) {
-        badges.mod_mise_compras = `+${suggestedItemsCount}`;
+      const counts = data?.miseCounts || [];
+      const looseCountsForBadge = counts.filter(c => c.restaurantId === activeRestaurantId && !c.archivedAt);
+      if (looseCountsForBadge.length > 0) {
+        const sugg = miseComputeSuggestedOrders({
+          countsToUse: looseCountsForBadge,
+          restaurantId: activeRestaurantId,
+          items: data?.miseItems || [],
+          counts,
+          categories: data?.miseCategories || [],
+          productSuppliers: data?.miseProductSuppliers || [],
+          suppliers: (data?.miseSuppliers || []).filter(s => s.restaurantId === activeRestaurantId),
+          overrides: {},
+        });
+        const suggestedItemsCount = sugg.reduce((s, g) => s + g.items.length, 0);
+        if (suggestedItemsCount > 0 && badges.mod_mise_compras) {
+          badges.mod_mise_compras = `${badges.mod_mise_compras}+${suggestedItemsCount}`;
+        } else if (suggestedItemsCount > 0) {
+          badges.mod_mise_compras = `+${suggestedItemsCount}`;
+        }
       }
     } catch (e) { /* ignore */ }
   }
@@ -18475,7 +18315,6 @@ function AppShell({ pessoa, data, activeRestaurantId, setActiveRestaurantId, use
           miseStocks={data?.miseStocks ?? []}
           miseAssignments={data?.miseAssignments ?? []}
           miseItems={data?.miseItems ?? []}
-          miseCycles={data?.miseCycles ?? []}
           miseCounts={data?.miseCounts ?? []}
           onUpdate={onUpdate}
         />
@@ -18859,11 +18698,27 @@ function PessoasAdmin({ restaurantId, pessoas, roles, owners, onUpdate, mobileOn
     return true;
   });
   const [filter, setFilter] = useState("");
-  const [form, setForm] = useState({ name: "", cpf: "", email: "", whatsapp: "", pin: "" });
+  // Form expandido: globais (nome/CPF/email/wa/emergência) + por-rest (cargo/admissão se for equipe)
+  const [form, setForm] = useState({
+    name: "", cpf: "", email: "", whatsapp: "", pin: "",
+    emergencyName: "", emergencyPhone: "",
+    isTeam: false, roleId: "", admission: "",
+  });
   const [editingId, setEditingId] = useState(null);
-  const [editForm, setEditForm] = useState({ name: "", cpf: "", email: "", whatsapp: "", pin: "", isTeam: false, roleId: "", admission: "" });
+  const [editForm, setEditForm] = useState({
+    name: "", cpf: "", email: "", whatsapp: "", pin: "",
+    emergencyName: "", emergencyPhone: "",
+    isTeam: false, roleId: "", admission: "",
+  });
   const [vincularOpen, setVincularOpen] = useState(false);
   const [vincularFilter, setVincularFilter] = useState("");
+  // Bulk add via IA — só pra Gestor AppTip (realIsOwner)
+  const [bulkAiOpen, setBulkAiOpen] = useState(false);
+  const [bulkAiText, setBulkAiText] = useState("");
+  const [bulkAiLoading, setBulkAiLoading] = useState(false);
+  const [bulkAiError, setBulkAiError] = useState("");
+  const [bulkAiResult, setBulkAiResult] = useState(null); // { pessoas: [{name, cpf, email, whatsapp, role, notes}] }
+  const [bulkAiSelected, setBulkAiSelected] = useState({}); // { idx: true }
   const miseAc = "#7c9e5e";
 
   // Pessoas que existem em OUTROS restaurantes mas não neste — candidatas pra vincular
@@ -18886,6 +18741,138 @@ function PessoasAdmin({ restaurantId, pessoas, roles, owners, onUpdate, mobileOn
     onUpdate("_toast", `✅ ${p.name} vinculada a este restaurante`);
     setVincularOpen(false);
     setVincularFilter("");
+  }
+
+  // ── Bulk add via IA ──
+  // Manda texto livre pro Groq, recebe lista estruturada de pessoas.
+  async function bulkAiSubmit() {
+    const text = bulkAiText.trim();
+    if (!text) return;
+    setBulkAiLoading(true);
+    setBulkAiError("");
+    setBulkAiResult(null);
+    try {
+      const systemPrompt = `Você extrai dados de pessoas de um texto livre em português e devolve JSON estruturado.
+
+Cada pessoa pode ter: nome completo (obrigatório), CPF (11 dígitos), telefone/WhatsApp (com ou sem DDD), email, cargo (ex: garçom, cozinheiro, bartender, gerente, recepcionista, auxiliar de limpeza). O texto pode usar separadores variados (vírgulas, traços, quebras de linha, parênteses).
+
+Devolva APENAS um JSON neste formato exato:
+{
+  "pessoas": [
+    {
+      "name": "Nome Completo",
+      "cpf": "12345678901",            // 11 dígitos só, sem pontuação. Vazio se não souber.
+      "whatsapp": "5531999887766",     // só dígitos com DDI 55. Vazio se não souber.
+      "email": "fulano@dominio.com",   // vazio se não souber
+      "role": "Cozinheiro"             // cargo identificado, vazio se não souber
+    }
+  ]
+}
+
+Regras:
+- Nunca invente CPF, telefone ou email — só use o que estiver explícito no texto.
+- Capitalize nome corretamente (Janynna Silva, não JANYNNA SILVA ou janynna silva).
+- Limpe CPF e telefone (só dígitos).
+- Se uma linha não parece pessoa (ex: header, texto solto), ignore.
+- Se nada parecer pessoa, retorne { "pessoas": [] }.`;
+      const result = await groqGenerate(systemPrompt, text);
+      if (!result || !Array.isArray(result.pessoas)) {
+        throw new Error("IA retornou formato inesperado.");
+      }
+      // Marca todas como selecionadas por default
+      const sel = {};
+      result.pessoas.forEach((_, i) => { sel[i] = true; });
+      setBulkAiSelected(sel);
+      setBulkAiResult(result);
+    } catch (err) {
+      setBulkAiError(err.message || "Erro ao chamar IA");
+    } finally {
+      setBulkAiLoading(false);
+    }
+  }
+
+  function bulkAiClose() {
+    setBulkAiOpen(false);
+    setBulkAiText("");
+    setBulkAiResult(null);
+    setBulkAiSelected({});
+    setBulkAiError("");
+    setBulkAiLoading(false);
+  }
+
+  function updateBulkAiPessoa(idx, field, value) {
+    setBulkAiResult(prev => {
+      if (!prev) return prev;
+      const next = { ...prev, pessoas: [...prev.pessoas] };
+      next.pessoas[idx] = { ...next.pessoas[idx], [field]: value };
+      return next;
+    });
+  }
+
+  async function bulkAiAccept() {
+    if (!bulkAiResult) return;
+    const toAccept = bulkAiResult.pessoas
+      .map((p, i) => ({ p, i }))
+      .filter(({ i }) => bulkAiSelected[i]);
+    if (toAccept.length === 0) { alert("Selecione pelo menos uma pessoa."); return; }
+
+    let nextPessoas = [...(pessoas || [])];
+    let createdN = 0, linkedN = 0, skippedN = 0;
+
+    for (const { p } of toAccept) {
+      const nm = (p.name || "").trim();
+      const cpfRaw = (p.cpf || "").replace(/\D/g, "");
+      if (!nm) { skippedN++; continue; }
+      if (cpfRaw && cpfRaw.length !== 11) { skippedN++; continue; }
+
+      // Já existe globalmente? (mesmo CPF em qualquer restaurante)
+      const globalExisting = cpfRaw ? nextPessoas.find(x => (x.cpf || "").replace(/\D/g, "") === cpfRaw) : null;
+
+      if (globalExisting) {
+        if ((globalExisting.restaurantIds || []).includes(restaurantId)) {
+          // Já está neste rest — pula
+          skippedN++;
+          continue;
+        }
+        // Vincula ao rest atual
+        nextPessoas = nextPessoas.map(x => x.id === globalExisting.id ? {
+          ...x,
+          restaurantIds: [...(x.restaurantIds || []), restaurantId],
+          permissions: { ...(x.permissions || {}), [restaurantId]: { operational: {}, admin: {}, special: {} } },
+          // Preserva info adicional se a IA trouxe e a pessoa não tinha
+          email: x.email || (p.email || "").trim() || null,
+          whatsapp: x.whatsapp || (p.whatsapp || "").replace(/\D/g, "") || null,
+        } : x);
+        linkedN++;
+      } else {
+        // Cria nova
+        const id = `pes_${Date.now().toString(36)}${Math.random().toString(36).slice(2,6)}_${createdN}`;
+        nextPessoas.push({
+          id,
+          restaurantIds: [restaurantId],
+          name: nm,
+          cpf: cpfRaw,
+          pin: cpfRaw ? pinFromCpf(cpfRaw) : "0000",
+          mustChangePin: true,
+          email: (p.email || "").trim() || null,
+          whatsapp: (p.whatsapp || "").replace(/\D/g, "") || null,
+          isTeam: {},
+          teamData: {},
+          permissions: { [restaurantId]: { operational: {}, admin: {}, special: {} } },
+          createdAt: new Date().toISOString(),
+          createdViaBulkAi: true,
+        });
+        createdN++;
+      }
+    }
+
+    onUpdate("pessoas", nextPessoas);
+    const parts = [];
+    if (createdN > 0) parts.push(`${createdN} criada${createdN===1?"":"s"}`);
+    if (linkedN > 0) parts.push(`${linkedN} vinculada${linkedN===1?"":"s"}`);
+    if (skippedN > 0) parts.push(`${skippedN} pulada${skippedN===1?"":"s"} (já no rest. ou sem dados)`);
+    onUpdate("_toast", `✅ ${parts.join(" · ")}`);
+    bulkAiClose();
   }
 
   function pinFromCpf(cpf) {
@@ -18922,13 +18909,23 @@ function PessoasAdmin({ restaurantId, pessoas, roles, owners, onUpdate, mobileOn
       mustChangePin: true,
       email: form.email.trim() || null,
       whatsapp: form.whatsapp.trim() || null,
-      isTeam: {},
-      teamData: {},
+      emergencyName: form.emergencyName.trim() || null,
+      emergencyPhone: form.emergencyPhone.trim() || null,
+      isTeam: form.isTeam ? { [restaurantId]: true } : {},
+      teamData: form.isTeam ? {
+        [restaurantId]: {
+          roleId: form.roleId || null,
+          admission: form.admission || null,
+        }
+      } : {},
       permissions: { [restaurantId]: { operational: {}, admin: {}, special: {} } },
       createdAt: new Date().toISOString(),
     };
     onUpdate("pessoas", [...(pessoas || []), newP]);
-    setForm({ name: "", cpf: "", email: "", whatsapp: "", pin: "" });
+    setForm({ name: "", cpf: "", email: "", whatsapp: "", pin: "", emergencyName: "", emergencyPhone: "", isTeam: false, roleId: "", admission: "" });
+    onUpdate("_toast", form.isTeam
+      ? `✅ ${nm} cadastrada e marcada como equipe`
+      : `✅ ${nm} cadastrada (sem vínculo de equipe)`);
   }
 
   function startEdit(p) {
@@ -18940,6 +18937,8 @@ function PessoasAdmin({ restaurantId, pessoas, roles, owners, onUpdate, mobileOn
       email: p.email ?? "",
       whatsapp: p.whatsapp ?? "",
       pin: p.pin ?? "",
+      emergencyName: p.emergencyName ?? "",
+      emergencyPhone: p.emergencyPhone ?? "",
       isTeam: !!p.isTeam?.[restaurantId],
       roleId: td.roleId ?? "",
       admission: td.admission ?? "",
@@ -18958,6 +18957,8 @@ function PessoasAdmin({ restaurantId, pessoas, roles, owners, onUpdate, mobileOn
         cpf: cpfRaw,
         email: editForm.email.trim() || null,
         whatsapp: editForm.whatsapp.trim() || null,
+        emergencyName: editForm.emergencyName.trim() || null,
+        emergencyPhone: editForm.emergencyPhone.trim() || null,
         pin: editForm.pin.trim() || p.pin,
         isTeam: { ...(p.isTeam || {}), [restaurantId]: !!editForm.isTeam },
         teamData: {
@@ -19001,40 +19002,103 @@ function PessoasAdmin({ restaurantId, pessoas, roles, owners, onUpdate, mobileOn
     <div>
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:8,marginBottom:12}}>
         <h3 style={{color:"var(--text)",margin:0,fontSize:mobileOnly?16:18}}>👤 Pessoas do restaurante</h3>
-        {realIsOwner && candidatasVincular.length > 0 && (
-          <button onClick={()=>setVincularOpen(true)} style={{...S.btnSecondary,fontSize:12,padding:"6px 12px",color:"var(--ac)",borderColor:"var(--ac)44"}}
-            title="Visível só pra Gestor AppTip — vincula pessoa que já existe em outro restaurante">
-            🔗 Vincular pessoa existente <span style={{opacity:0.6,fontWeight:400}}>({candidatasVincular.length})</span>
-          </button>
-        )}
+        <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+          {realIsOwner && (
+            <button onClick={()=>setBulkAiOpen(true)} style={{...S.btnSecondary,fontSize:12,padding:"6px 12px",color:"#8b5cf6",borderColor:"#8b5cf644"}}
+              title="Cole uma lista de pessoas em texto livre — a IA estrutura e cria todas de uma vez">
+              🤖 Adicionar em lote
+            </button>
+          )}
+          {realIsOwner && candidatasVincular.length > 0 && (
+            <button onClick={()=>setVincularOpen(true)} style={{...S.btnSecondary,fontSize:12,padding:"6px 12px",color:"var(--ac)",borderColor:"var(--ac)44"}}
+              title="Visível só pra Gestor AppTip — vincula pessoa que já existe em outro restaurante">
+              🔗 Vincular existente <span style={{opacity:0.6,fontWeight:400}}>({candidatasVincular.length})</span>
+            </button>
+          )}
+        </div>
       </div>
-      {/* Form adicionar */}
-      <div style={{padding:"12px",background:"var(--card-bg)",border:"1px solid var(--border)",borderRadius:10,marginBottom:16}}>
-        <div style={{display:"grid",gridTemplateColumns:mobileOnly?"1fr":"2fr 1.5fr 1fr 1.5fr 1.5fr auto",gap:8,alignItems:"end"}}>
+      {/* Form adicionar — todos os campos da pessoa, com toggle "É equipe" liberando cargo + admissão */}
+      <div style={{padding:"14px 16px",background:"var(--card-bg)",border:"1px solid var(--border)",borderRadius:10,marginBottom:16}}>
+        {/* SEÇÃO: Dados pessoais (globais) */}
+        <div style={{fontSize:10,color:"var(--text3)",fontWeight:700,textTransform:"uppercase",letterSpacing:0.4,marginBottom:8}}>Dados pessoais</div>
+        <div style={{display:"grid",gridTemplateColumns:mobileOnly?"1fr":"2fr 1.4fr 0.8fr",gap:8,marginBottom:10}}>
           <div>
-            <label style={{...S.label,fontSize:11}}>Nome completo</label>
+            <label style={{...S.label,fontSize:11}}>Nome completo *</label>
             <input value={form.name} onChange={e=>setForm({...form,name:e.target.value})} placeholder="ex: João Silva" style={S.input} />
           </div>
           <div>
-            <label style={{...S.label,fontSize:11}}>CPF</label>
+            <label style={{...S.label,fontSize:11}}>CPF *</label>
             <input value={form.cpf} onChange={e=>setForm({...form,cpf:maskCpf(e.target.value),pin: form.pin || pinFromCpf(e.target.value)})} placeholder="000.000.000-00" style={{...S.input,fontFamily:"'DM Mono',monospace"}} />
           </div>
           <div>
             <label style={{...S.label,fontSize:11}}>PIN <span style={{color:"var(--text3)",fontWeight:400,fontSize:10}}>(auto)</span></label>
             <input maxLength={4} value={form.pin} onChange={e=>setForm({...form,pin:e.target.value.replace(/\D/g,"").slice(0,4)})} placeholder="0000" style={{...S.input,fontFamily:"'DM Mono',monospace",textAlign:"center",letterSpacing:4}} />
           </div>
+        </div>
+
+        {/* SEÇÃO: Contato */}
+        <div style={{fontSize:10,color:"var(--text3)",fontWeight:700,textTransform:"uppercase",letterSpacing:0.4,marginBottom:8,marginTop:6}}>Contato</div>
+        <div style={{display:"grid",gridTemplateColumns:mobileOnly?"1fr":"1fr 1fr",gap:8,marginBottom:10}}>
           <div>
             <label style={{...S.label,fontSize:11}}>Email</label>
-            <input value={form.email} onChange={e=>setForm({...form,email:e.target.value})} placeholder="opc." style={S.input} />
+            <input value={form.email} onChange={e=>setForm({...form,email:e.target.value})} placeholder="opcional" style={S.input} />
           </div>
           <div>
             <label style={{...S.label,fontSize:11}}>WhatsApp</label>
-            <input value={form.whatsapp} onChange={e=>setForm({...form,whatsapp:e.target.value})} placeholder="opc." style={S.input} />
+            <input value={form.whatsapp} onChange={e=>setForm({...form,whatsapp:e.target.value})} placeholder="opcional" style={S.input} />
           </div>
-          <button onClick={addPessoa} disabled={!form.name.trim()} style={{...S.btnPrimary,fontSize:13,padding:"8px 16px",opacity:!form.name.trim()?0.5:1}}>+ Adicionar</button>
         </div>
-        <div style={{marginTop:8,fontSize:11,color:"var(--text3)",lineHeight:1.5}}>
-          💡 Uma pessoa é qualquer indivíduo com acesso ao sistema neste restaurante — membro da equipe, gestor, contador externo, consultor, etc. Marcar "é equipe" em Editar para dados operacionais (cargo, admissão). Permissões na aba ao lado.
+
+        {/* SEÇÃO: Contato de emergência */}
+        <div style={{fontSize:10,color:"var(--text3)",fontWeight:700,textTransform:"uppercase",letterSpacing:0.4,marginBottom:8,marginTop:6}}>Contato de emergência</div>
+        <div style={{display:"grid",gridTemplateColumns:mobileOnly?"1fr":"1fr 1fr",gap:8,marginBottom:10}}>
+          <div>
+            <label style={{...S.label,fontSize:11}}>Nome</label>
+            <input value={form.emergencyName} onChange={e=>setForm({...form,emergencyName:e.target.value})} placeholder="opcional" style={S.input} />
+          </div>
+          <div>
+            <label style={{...S.label,fontSize:11}}>Telefone</label>
+            <input value={form.emergencyPhone} onChange={e=>setForm({...form,emergencyPhone:e.target.value})} placeholder="opcional" style={S.input} />
+          </div>
+        </div>
+
+        {/* SEÇÃO: Equipe deste restaurante (toggle libera cargo + admissão) */}
+        <div style={{marginTop:6,padding:"10px 12px",background: form.isTeam?"var(--ac)11":"var(--bg2)",border:`1px solid ${form.isTeam?"var(--ac)44":"var(--border)"}`,borderRadius:10}}>
+          <label style={{display:"flex",alignItems:"center",gap:10,cursor:"pointer",userSelect:"none"}}>
+            <input type="checkbox" checked={form.isTeam} onChange={e=>setForm({...form,isTeam:e.target.checked})}
+              style={{cursor:"pointer",width:18,height:18,accentColor:"var(--ac)"}}/>
+            <div style={{flex:1}}>
+              <div style={{fontSize:13,fontWeight:700,color:form.isTeam?"var(--ac-text,var(--ac))":"var(--text)"}}>É equipe deste restaurante</div>
+              <div style={{fontSize:11,color:"var(--text3)",marginTop:2,lineHeight:1.45}}>
+                Quando marcado, entra na <strong>escala</strong> e no <strong>cálculo de gorjetas</strong> de acordo com o cargo.
+              </div>
+            </div>
+          </label>
+          {form.isTeam && (
+            <div style={{display:"grid",gridTemplateColumns:mobileOnly?"1fr":"1.5fr 1fr",gap:8,marginTop:10,paddingTop:10,borderTop:"1px solid var(--ac)22"}}>
+              <div>
+                <label style={{...S.label,fontSize:11}}>Cargo</label>
+                <select value={form.roleId} onChange={e=>setForm({...form,roleId:e.target.value})} style={{...S.input,cursor:"pointer"}}>
+                  <option value="">— Selecione —</option>
+                  {restRoles.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
+                </select>
+              </div>
+              <div>
+                <label style={{...S.label,fontSize:11}}>Data de admissão</label>
+                <input type="date" value={form.admission} onChange={e=>setForm({...form,admission:e.target.value})} style={S.input}/>
+              </div>
+            </div>
+          )}
+        </div>
+
+        <div style={{display:"flex",justifyContent:"flex-end",marginTop:12}}>
+          <button onClick={addPessoa} disabled={!form.name.trim()} style={{background:"var(--ac)",color:"#fff",border:"none",borderRadius:8,padding:"10px 24px",fontSize:13,fontWeight:700,cursor:!form.name.trim()?"not-allowed":"pointer",fontFamily:"'DM Sans',sans-serif",opacity:!form.name.trim()?0.5:1}}>
+            + Adicionar pessoa
+          </button>
+        </div>
+
+        <div style={{marginTop:10,fontSize:11,color:"var(--text3)",lineHeight:1.5,paddingTop:10,borderTop:"1px solid var(--border)"}}>
+          💡 Toda pessoa que tem acesso ao sistema (membro da equipe, contador, consultor, fornecedor) é cadastrada aqui. Marcar "É equipe" cria o vínculo trabalhista neste restaurante. Permissões são definidas na aba ao lado.
         </div>
       </div>
 
@@ -19140,6 +19204,130 @@ function PessoasAdmin({ restaurantId, pessoas, roles, owners, onUpdate, mobileOn
         </div>
       )}
 
+      {/* MODAL: adicionar pessoas em lote via IA (somente Gestor AppTip) */}
+      {bulkAiOpen && (
+        <div onClick={bulkAiClose} style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.5)",zIndex:9500,display:"flex",alignItems:"center",justifyContent:"center",padding:20}}>
+          <div onClick={e=>e.stopPropagation()} style={{background:"var(--card-bg)",borderRadius:14,maxWidth:740,width:"100%",maxHeight:"90vh",display:"flex",flexDirection:"column",boxShadow:"0 10px 40px rgba(0,0,0,0.3)"}}>
+            <div style={{padding:"16px 20px",borderBottom:"1px solid var(--border)",display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+              <div>
+                <div style={{fontSize:11,color:"#8b5cf6",fontWeight:700,textTransform:"uppercase",letterSpacing:0.4}}>Pessoas · Assistente</div>
+                <div style={{fontSize:16,color:"var(--text)",fontWeight:700,marginTop:2}}>🤖 Adicionar em lote via IA</div>
+              </div>
+              <button onClick={bulkAiClose} style={{background:"none",border:"none",fontSize:22,color:"var(--text3)",cursor:"pointer",padding:"0 4px"}}>×</button>
+            </div>
+
+            <div style={{padding:"14px 20px",overflowY:"auto",flex:1}}>
+              {!bulkAiResult ? (
+                <>
+                  <p style={{color:"var(--text2)",fontSize:13,lineHeight:1.55,margin:"0 0 12px"}}>
+                    Cole uma lista de pessoas em <strong>texto livre</strong> — pode vir de WhatsApp, email, planilha, qualquer formato. A IA extrai nome, CPF, contato e cargo. Depois você revisa e confirma.
+                  </p>
+                  <div style={{padding:"10px 12px",background:"#8b5cf608",border:"1px solid #8b5cf622",borderRadius:8,marginBottom:12,fontSize:11,color:"var(--text3)",lineHeight:1.6,fontFamily:"'DM Mono',monospace"}}>
+                    <div style={{color:"#8b5cf6",fontWeight:700,marginBottom:4,fontFamily:"'DM Sans',sans-serif"}}>Exemplos que funcionam:</div>
+                    Janynna Silva 11122233344 garçonete (31) 99988-7766<br/>
+                    João Pedro - cozinheiro - cpf 222.333.444-55<br/>
+                    Maria Souza, bartender, maria@bar.com, 31988776655
+                  </div>
+                  <textarea
+                    value={bulkAiText}
+                    onChange={e=>setBulkAiText(e.target.value)}
+                    placeholder="Cole a lista aqui..."
+                    style={{...S.input,width:"100%",minHeight:200,resize:"vertical",fontFamily:"'DM Mono',monospace",fontSize:13,lineHeight:1.5,boxSizing:"border-box"}}
+                    autoFocus
+                  />
+                  {bulkAiError && (
+                    <div style={{marginTop:10,padding:"10px 12px",background:"var(--red-bg)",border:"1px solid var(--red)33",borderRadius:8,color:"var(--red)",fontSize:12}}>
+                      ⚠️ {bulkAiError}
+                    </div>
+                  )}
+                </>
+              ) : (
+                <>
+                  <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:10,flexWrap:"wrap",gap:8}}>
+                    <div style={{fontSize:13,color:"var(--text2)"}}>
+                      ✨ A IA encontrou <strong>{bulkAiResult.pessoas.length}</strong> pessoa{bulkAiResult.pessoas.length===1?"":"s"}.
+                      Revise e desmarque o que não quiser criar.
+                    </div>
+                    <div style={{display:"flex",gap:6}}>
+                      <button onClick={()=>{
+                        const all = {}; bulkAiResult.pessoas.forEach((_, i) => { all[i] = true; });
+                        setBulkAiSelected(all);
+                      }} style={{...S.btnSecondary,fontSize:10,padding:"4px 10px"}}>✓ Todas</button>
+                      <button onClick={()=>setBulkAiSelected({})} style={{...S.btnSecondary,fontSize:10,padding:"4px 10px"}}>Nenhuma</button>
+                    </div>
+                  </div>
+                  {bulkAiResult.pessoas.length === 0 ? (
+                    <div style={{padding:"30px 20px",textAlign:"center",color:"var(--text3)",fontSize:13,background:"var(--bg2)",borderRadius:10}}>
+                      A IA não conseguiu identificar nenhuma pessoa no texto. Volte e ajuste.
+                    </div>
+                  ) : (
+                    <div style={{display:"flex",flexDirection:"column",gap:6}}>
+                      {bulkAiResult.pessoas.map((p, i) => {
+                        const checked = !!bulkAiSelected[i];
+                        const cpfRaw = (p.cpf || "").replace(/\D/g, "");
+                        const cpfValid = cpfRaw.length === 11 || cpfRaw.length === 0;
+                        const cpfDup = cpfRaw && (pessoas || []).some(x => (x.cpf || "").replace(/\D/g, "") === cpfRaw && (x.restaurantIds || []).includes(restaurantId));
+                        const cpfElsewhere = cpfRaw && !cpfDup && (pessoas || []).some(x => (x.cpf || "").replace(/\D/g, "") === cpfRaw);
+                        return (
+                          <div key={i} style={{display:"flex",alignItems:"flex-start",gap:10,padding:"10px 12px",background: checked ? "#8b5cf608" : "var(--bg2)",borderRadius:10,border:`1px solid ${checked ? "#8b5cf644" : "var(--border)"}`,transition:"all 0.12s"}}>
+                            <input type="checkbox" checked={checked}
+                              onChange={()=>setBulkAiSelected(prev => ({ ...prev, [i]: !prev[i] }))}
+                              style={{cursor:"pointer",marginTop:6,accentColor:"#8b5cf6",width:16,height:16,flexShrink:0}}/>
+                            <div style={{flex:1,minWidth:0,display:"grid",gridTemplateColumns:"1fr 1fr",gap:6}}>
+                              <input value={p.name||""} onChange={e=>updateBulkAiPessoa(i,"name",e.target.value)}
+                                placeholder="Nome completo"
+                                style={{...S.input,fontSize:12,padding:"6px 8px",fontWeight:600}}/>
+                              <input value={p.cpf||""} onChange={e=>updateBulkAiPessoa(i,"cpf",e.target.value)}
+                                placeholder="CPF (11 dígitos)"
+                                style={{...S.input,fontSize:12,padding:"6px 8px",fontFamily:"'DM Mono',monospace",
+                                  borderColor: cpfValid ? "var(--border)" : "var(--red)",
+                                  background: cpfDup ? "#fef9e7" : (cpfElsewhere ? "#dbeafe" : undefined)}}
+                                title={cpfDup ? "⚠️ Já existe nesse restaurante — vai pular" : cpfElsewhere ? "ℹ️ Existe em outro rest. — vai vincular ao atual" : ""}/>
+                              <input value={p.whatsapp||""} onChange={e=>updateBulkAiPessoa(i,"whatsapp",e.target.value)}
+                                placeholder="WhatsApp (opcional)"
+                                style={{...S.input,fontSize:12,padding:"6px 8px",fontFamily:"'DM Mono',monospace"}}/>
+                              <input value={p.email||""} onChange={e=>updateBulkAiPessoa(i,"email",e.target.value)}
+                                placeholder="Email (opcional)"
+                                style={{...S.input,fontSize:12,padding:"6px 8px"}}/>
+                              {(cpfDup || cpfElsewhere) && (
+                                <div style={{gridColumn:"1 / -1",fontSize:10,color:cpfDup?"#92400e":"#1e40af",marginTop:-2}}>
+                                  {cpfDup ? "⚠️ CPF já cadastrado neste restaurante — será pulado" : "ℹ️ CPF existe em outro restaurante — será vinculado em vez de duplicar"}
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+
+            <div style={{padding:"12px 20px",borderTop:"1px solid var(--border)",display:"flex",gap:8,justifyContent:"space-between",background:"var(--bg2)",flexWrap:"wrap"}}>
+              {!bulkAiResult ? (
+                <>
+                  <button onClick={bulkAiClose} style={{...S.btnSecondary,fontSize:12,padding:"8px 16px"}}>Cancelar</button>
+                  <button onClick={bulkAiSubmit} disabled={bulkAiLoading || !bulkAiText.trim()}
+                    style={{background:bulkAiLoading||!bulkAiText.trim()?"var(--border)":"#8b5cf6",color:"#fff",border:"none",borderRadius:8,padding:"8px 18px",fontSize:13,fontWeight:700,cursor:bulkAiLoading||!bulkAiText.trim()?"not-allowed":"pointer",fontFamily:"'DM Sans',sans-serif"}}>
+                    {bulkAiLoading ? "Processando..." : "✨ Estruturar com IA"}
+                  </button>
+                </>
+              ) : (
+                <>
+                  <button onClick={()=>setBulkAiResult(null)} style={{...S.btnSecondary,fontSize:12,padding:"8px 16px"}}>← Voltar</button>
+                  <button onClick={bulkAiAccept}
+                    disabled={Object.values(bulkAiSelected).filter(Boolean).length === 0}
+                    style={{background:"#8b5cf6",color:"#fff",border:"none",borderRadius:8,padding:"8px 18px",fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:"'DM Sans',sans-serif",opacity:Object.values(bulkAiSelected).filter(Boolean).length === 0 ? 0.5 : 1}}>
+                    + Adicionar {Object.values(bulkAiSelected).filter(Boolean).length} pessoa{Object.values(bulkAiSelected).filter(Boolean).length===1?"":"s"}
+                  </button>
+                </>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* MODAL: vincular pessoa existente (de outros restaurantes) */}
       {vincularOpen && (() => {
         const q = vincularFilter.trim().toLowerCase();
@@ -19173,18 +19361,32 @@ function PessoasAdmin({ restaurantId, pessoas, roles, owners, onUpdate, mobileOn
                     {sortedCandidatas.map(p => {
                       const ridCount = (p.restaurantIds || []).length;
                       const cpfMasked = p.cpf ? p.cpf.replace(/(\d{3})(\d{3})(\d{3})(\d{2})/, "$1.$2.$3-$4") : "—";
+                      const initial = (p.name || "?").trim().charAt(0).toUpperCase();
                       return (
-                        <div key={p.id} style={{display:"flex",alignItems:"center",gap:10,padding:"10px 12px",background:"var(--bg2)",borderRadius:10,border:"1px solid var(--border)"}}>
+                        <div key={p.id} style={{display:"flex",alignItems:"center",gap:12,padding:"10px 14px",background:"var(--card-bg)",borderRadius:10,border:"1px solid var(--border)",transition:"background 0.12s"}}
+                          onMouseEnter={e=>e.currentTarget.style.background="var(--bg2)"}
+                          onMouseLeave={e=>e.currentTarget.style.background="var(--card-bg)"}>
+                          {/* Avatar com iniciais */}
+                          <div style={{flexShrink:0,width:36,height:36,borderRadius:18,background:"var(--ac)22",color:"var(--ac)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:14,fontWeight:700}}>
+                            {initial}
+                          </div>
+                          {/* Info da pessoa */}
                           <div style={{flex:1,minWidth:0}}>
-                            <div style={{fontSize:13,fontWeight:600,color:"var(--text)"}}>{p.name}</div>
-                            <div style={{fontSize:11,color:"var(--text3)",marginTop:2,fontFamily:"'DM Mono',monospace"}}>{cpfMasked}</div>
-                            <div style={{fontSize:10,color:"var(--text3)",marginTop:2}}>
-                              📍 {ridCount} restaurante{ridCount===1?"":"s"} já vinculado{ridCount===1?"":"s"}
-                              {p.email && <span> · 📧 {p.email}</span>}
+                            <div style={{fontSize:13,fontWeight:600,color:"var(--text)",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{p.name}</div>
+                            <div style={{display:"flex",alignItems:"center",gap:8,marginTop:2,fontSize:11,color:"var(--text3)",flexWrap:"wrap"}}>
+                              <span style={{fontFamily:"'DM Mono',monospace"}}>{cpfMasked}</span>
+                              <span style={{opacity:0.4}}>·</span>
+                              <span title={`Em ${ridCount} restaurante${ridCount===1?"":"s"}`}>📍 {ridCount}</span>
+                              {p.email && (<>
+                                <span style={{opacity:0.4}}>·</span>
+                                <span style={{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",maxWidth:180}}>📧 {p.email}</span>
+                              </>)}
                             </div>
                           </div>
-                          <button onClick={()=>vincularPessoa(p)} style={{...S.btnPrimary,fontSize:12,padding:"6px 14px"}}>
-                            🔗 Vincular
+                          {/* Botão (largura auto, não estica) */}
+                          <button onClick={()=>vincularPessoa(p)}
+                            style={{flexShrink:0,width:"auto",background:"var(--ac)",color:"#fff",border:"none",borderRadius:8,padding:"7px 14px",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"'DM Sans',sans-serif",whiteSpace:"nowrap"}}>
+                            Vincular →
                           </button>
                         </div>
                       );
@@ -24954,96 +25156,7 @@ function OperationalFichasTecnicas({ employee, miseFtInsumos, miseFtDishes }) {
 // ═══════════════════════════════════════════════════════════════
 // ──  MISE COMPRAS — USER (Gestor Operacional)                   ──
 // ═══════════════════════════════════════════════════════════════
-// Card exibido quando há contagens soltas e nenhum ciclo aberto — mostra o que foi contado
-// e oferece criar um ciclo de compras puxando tudo
-function LooseCountsCard({ looseCounts, items, miseStocks, employees, onCreateCycle, miseAc }) {
-  // Agrupa por item pra facilitar leitura
-  const byItem = {};
-  looseCounts.forEach(c => {
-    if (!byItem[c.itemId]) byItem[c.itemId] = [];
-    byItem[c.itemId].push(c);
-  });
-  const today_ = today();
-  const oldestOver30 = looseCounts.filter(c => {
-    const days = (new Date(today_) - new Date(c.countedAt.split("T")[0])) / (1000*60*60*24);
-    return days > 30;
-  }).length;
-
-  return (
-    <div>
-      <div style={{padding:"16px 20px",background:"var(--card-bg)",border:`1px solid ${miseAc}66`,borderRadius:12,marginBottom:16}}>
-        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:10,flexWrap:"wrap",gap:10}}>
-          <div>
-            <div style={{fontSize:11,color:miseAc,fontWeight:700,textTransform:"uppercase",letterSpacing:0.4}}>Contagens disponíveis</div>
-            <div style={{fontSize:14,color:"var(--text)",fontWeight:700,marginTop:2}}>
-              {looseCounts.length} lançamento(s) · {Object.keys(byItem).length} produto(s)
-            </div>
-            {oldestOver30 > 0 && (
-              <div style={{fontSize:11,color:"#b45309",marginTop:4}}>
-                ⚠️ {oldestOver30} contagem(ns) com mais de 30 dias — considere refazer antes de criar o ciclo
-              </div>
-            )}
-          </div>
-          <button onClick={onCreateCycle}
-            style={{background:miseAc,color:"#fff",border:"none",borderRadius:8,padding:"10px 18px",fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:"'DM Sans',sans-serif",minHeight:44}}>
-            🛒 Criar ciclo de compras
-          </button>
-        </div>
-        <div style={{fontSize:11,color:"var(--text3)",lineHeight:1.5}}>
-          Ao criar o ciclo, todas estas contagens entram e o fluxo de sugestão/aprovação/envio de pedidos é ativado.
-        </div>
-      </div>
-
-      {/* Lista das contagens agrupadas por item */}
-      <div style={{background:"var(--card-bg)",border:"1px solid var(--border)",borderRadius:12,overflow:"hidden"}}>
-        <div style={{overflowX:"auto"}}>
-          <table style={{width:"100%",borderCollapse:"collapse",fontSize:13}}>
-            <thead>
-              <tr style={{borderBottom:"1px solid var(--border)",background:"var(--bg2)"}}>
-                <th style={{padding:"10px 14px",textAlign:"left",fontSize:10,color:"var(--text3)",fontWeight:700,textTransform:"uppercase",letterSpacing:0.4}}>Produto</th>
-                <th style={{padding:"10px 12px",textAlign:"right",fontSize:10,color:"var(--text3)",fontWeight:700,textTransform:"uppercase",letterSpacing:0.4}}>Qtd</th>
-                <th style={{padding:"10px 12px",textAlign:"left",fontSize:10,color:"var(--text3)",fontWeight:700,textTransform:"uppercase",letterSpacing:0.4}}>Estoque</th>
-                <th style={{padding:"10px 12px",textAlign:"left",fontSize:10,color:"var(--text3)",fontWeight:700,textTransform:"uppercase",letterSpacing:0.4}}>Contado por</th>
-                <th style={{padding:"10px 12px",textAlign:"right",fontSize:10,color:"var(--text3)",fontWeight:700,textTransform:"uppercase",letterSpacing:0.4}}>Quando</th>
-              </tr>
-            </thead>
-            <tbody>
-              {Object.entries(byItem).map(([itemId, countsArr]) => {
-                const item = items.find(i => i.id === itemId);
-                return countsArr
-                  .sort((a,b) => new Date(b.countedAt) - new Date(a.countedAt))
-                  .map((c, idx) => {
-                    const stock = (miseStocks || []).find(s => s.id === c.stockId);
-                    const who = (employees || []).find(e => e.id === c.userId);
-                    const ageDays = Math.floor((Date.now() - new Date(c.countedAt).getTime()) / (1000*60*60*24));
-                    const ageLabel = ageDays === 0 ? "hoje" : ageDays === 1 ? "ontem" : `há ${ageDays} dias`;
-                    const old = ageDays > 30;
-                    return (
-                      <tr key={c.id} style={{borderTop:"1px solid var(--border)",background: old ? "#fff7ed" : "transparent"}}>
-                        <td style={{padding:"8px 14px",color:"var(--text)",fontWeight: idx===0 ? 600 : 400}}>
-                          {idx===0 ? (item?.name || "(removido)") : ""}
-                        </td>
-                        <td style={{padding:"8px 12px",textAlign:"right",color:"var(--text)",fontFamily:"'DM Mono',monospace",fontWeight:600}}>
-                          {c.qty} {item?.unit || ""}
-                        </td>
-                        <td style={{padding:"8px 12px",color:"var(--text2)",fontSize:12}}>{stock?.name || "—"}</td>
-                        <td style={{padding:"8px 12px",color:"var(--text2)",fontSize:12}}>{who?.name || "—"}</td>
-                        <td style={{padding:"8px 12px",textAlign:"right",color: old ? "#b45309" : "var(--text3)",fontSize:11}}>
-                          {ageLabel}
-                          {old && " ⚠️"}
-                        </td>
-                      </tr>
-                    );
-                  });
-              })}
-            </tbody>
-          </table>
-        </div>
-      </div>
-    </div>
-  );
-}
-
+// (LooseCountsCard removido — modelo sem ciclos consome contagens diretamente)
 function OperationalCompras({ employee, data, onUpdate }) {
   const restaurantId = employee.restaurantId;
   const [view, setView] = useState("sugestoes");
@@ -25056,8 +25169,8 @@ function OperationalCompras({ employee, data, onUpdate }) {
 
   const miseAc = "#7c9e5e";
 
-  const cycles = (data.miseCycles || []).filter(c => c.restaurantId === restaurantId);
-  const openCycle = cycles.find(c => c.status === "open");
+  // MODELO SEM CICLOS: sugestões vêm de TODAS as contagens não-arquivadas.
+  // Aprovar pedido marca contagens dos produtos aprovados como `archivedAt` (saem da pool).
   const items = data.miseItems || [];
   const counts = data.miseCounts || [];
   const categories = data.miseCategories || [];
@@ -25066,71 +25179,36 @@ function OperationalCompras({ employee, data, onUpdate }) {
   const orders = (data.miseSupplierOrders || []).filter(o => o.restaurantId === restaurantId);
   const restaurantName = (data.restaurants || []).find(r => r.id === restaurantId)?.name || "Restaurante";
 
-  // Contagens soltas (sem ciclo) — disponíveis pra serem puxadas pra um ciclo novo
-  const looseCounts = counts.filter(c => c.restaurantId === restaurantId && !c.cycleId && !c.archivedAt);
-  const hasLooseCounts = looseCounts.length > 0;
+  // Contagens disponíveis (não-arquivadas) — alimentam a sugestão
+  const looseCounts = counts.filter(c => c.restaurantId === restaurantId && !c.archivedAt);
 
-  // Cria um ciclo novo e puxa todas as contagens soltas pra dentro dele
-  function createCycleFromLoose() {
-    const mesNome = new Date().toLocaleString("pt-BR", { day:"2-digit", month:"long" });
-    const defaultName = `Ciclo ${mesNome}`;
-    const name = window.prompt("Nome do novo ciclo de compras:", defaultName);
-    if (!name || !name.trim()) return;
-    const newCycle = {
-      id: `cyc_${Date.now().toString(36)}${Math.random().toString(36).slice(2,5)}`,
-      restaurantId,
-      name: name.trim(),
-      startDate: today(),
-      status: "open",
-    };
-    onUpdate("miseCycles", [...(data.miseCycles || []), newCycle]);
-    // Puxa todas as contagens soltas pra esse ciclo
-    const looseIds = new Set(looseCounts.map(c => c.id));
-    const updatedCounts = (data.miseCounts || []).map(c =>
-      looseIds.has(c.id) ? { ...c, cycleId: newCycle.id } : c
-    );
-    onUpdate("miseCounts", updatedCounts);
-    onUpdate("_toast", `✓ Ciclo "${name.trim()}" criado com ${looseCounts.length} contagem(ns)`);
-  }
+  // Pedidos pendentes (não-terminais) e fechados (terminais) — flat, sem ciclo
+  const activeOrders = orders.filter(o => !MISE_ORDER_STATUS[o.status]?.terminal);
+  const terminalOrders = orders.filter(o => MISE_ORDER_STATUS[o.status]?.terminal);
 
-  // Ciclo não aberto: só mostra o card de contagens soltas (se houver) + um call-to-action
-  if (!openCycle) {
-    return (
-      <div>
-        {hasLooseCounts ? (
-          <LooseCountsCard
-            looseCounts={looseCounts}
-            items={items}
-            miseStocks={data.miseStocks || []}
-            employees={data.employees || []}
-            onCreateCycle={createCycleFromLoose}
-            miseAc={miseAc}
-          />
-        ) : (
-          <div style={{padding:"60px 24px",textAlign:"center",color:"var(--text3)"}}>
-            <div style={{fontSize:48,marginBottom:16}}>🛒</div>
-            <h3 style={{color:"var(--text)",fontSize:18,fontWeight:700,margin:"0 0 8px"}}>Nenhuma contagem pra comprar</h3>
-            <p style={{fontSize:14,lineHeight:1.6,maxWidth:460,margin:"0 auto"}}>
-              Quando alguém fizer contagens na área <b>Contagens</b>, elas aparecem aqui pra você puxar pra um ciclo de compras.
-            </p>
-          </div>
-        )}
-      </div>
-    );
-  }
-
-  const cycleOrders = orders.filter(o => o.cycleId === openCycle.id);
-  const activeOrders = cycleOrders.filter(o => !MISE_ORDER_STATUS[o.status]?.terminal);
-  const terminalOrders = cycleOrders.filter(o => MISE_ORDER_STATUS[o.status]?.terminal);
+  // Produtos que já estão em pedidos ATIVOS (pra não duplicar sugestão até receber)
   const productsAlreadyOrdered = new Set(
-    cycleOrders.flatMap(o => (o.items || []).map(it => it.productId))
+    activeOrders.flatMap(o => (o.items || []).map(it => it.productId))
   );
 
   const suggested = miseComputeSuggestedOrders({
-    cycle: openCycle, restaurantId, items, counts, categories,
+    countsToUse: looseCounts, restaurantId, items, counts, categories,
     productSuppliers, suppliers, overrides
   }).map(g => ({ ...g, items: g.items.filter(it => !productsAlreadyOrdered.has(it.productId)) }))
     .filter(g => g.items.length > 0);
+
+  // Ao aprovar pedido(s), marca as contagens dos produtos aprovados como `archivedAt`
+  // (saem da pool de "contagens disponíveis")
+  function archiveCountsForProducts(productIds) {
+    if (!productIds.length) return;
+    const productSet = new Set(productIds);
+    const now = new Date().toISOString();
+    const updated = (data.miseCounts || []).map(c => {
+      if (c.restaurantId !== restaurantId || c.archivedAt || !productSet.has(c.itemId)) return c;
+      return { ...c, archivedAt: now };
+    });
+    onUpdate("miseCounts", updated);
+  }
 
   const totalSuggestedItems = suggested.reduce((s, g) => s + g.items.length, 0);
 
@@ -25147,7 +25225,7 @@ function OperationalCompras({ employee, data, onUpdate }) {
     const order = {
       id: `ord_${Date.now()}_${Math.random().toString(36).slice(2,7)}`,
       restaurantId,
-      cycleId: openCycle.id,
+      cycleId: null, // sem ciclo
       supplierId: group.supplierId,
       status: "approved",
       items: group.items.map(it => ({
@@ -25167,6 +25245,8 @@ function OperationalCompras({ employee, data, onUpdate }) {
       history: [{ status: "approved", ts: new Date().toISOString(), by: employee.name }],
     };
     onUpdate("miseSupplierOrders", [...(data.miseSupplierOrders || []), order]);
+    // Arquiva contagens dos produtos aprovados (saem da pool de sugestões)
+    archiveCountsForProducts(group.items.map(it => it.productId));
     // Limpa overrides e qty edits dos produtos aprovados
     const clearedOverrides = { ...overrides };
     const clearedQtys = { ...qtyEdits };
@@ -25182,7 +25262,7 @@ function OperationalCompras({ employee, data, onUpdate }) {
     const newOrders = suggested.map(group => ({
       id: `ord_${Date.now()}_${Math.random().toString(36).slice(2,7)}_${group.supplierId.slice(0,5)}`,
       restaurantId,
-      cycleId: openCycle.id,
+      cycleId: null, // sem ciclo
       supplierId: group.supplierId,
       status: "approved",
       items: group.items.map(it => ({
@@ -25202,6 +25282,9 @@ function OperationalCompras({ employee, data, onUpdate }) {
       history: [{ status: "approved", ts: now, by: employee.name }],
     }));
     onUpdate("miseSupplierOrders", [...(data.miseSupplierOrders || []), ...newOrders]);
+    // Arquiva contagens de TODOS os produtos aprovados em batch
+    const allProductIds = suggested.flatMap(g => g.items.map(it => it.productId));
+    archiveCountsForProducts(allProductIds);
     setOverrides({});
     setQtyEdits({});
   }
@@ -25215,7 +25298,7 @@ function OperationalCompras({ employee, data, onUpdate }) {
       const msg = miseBuildWhatsMessage({
         order, supplier, items: order.items,
         restaurantName,
-        cycleDate: openCycle.startDate,
+        cycleDate: today(),
       });
       const link = miseWhatsLink(supplier.whatsapp, msg);
       if (link) window.open(link, "_blank", "noopener");
@@ -25261,12 +25344,7 @@ function OperationalCompras({ employee, data, onUpdate }) {
     } : o);
     onUpdate("miseSupplierOrders", nextOrders);
 
-    // Encerramento automático do ciclo com base no próximo estado
-    const ordersOfCycle = nextOrders.filter(o => o.cycleId === openCycle.id);
-    const allTerminal = ordersOfCycle.length > 0 && ordersOfCycle.every(o => MISE_ORDER_STATUS[o.status]?.terminal);
-    if (allTerminal && openCycle.status === "open") {
-      onUpdate("miseCycles", (data.miseCycles || []).map(c => c.id === openCycle.id ? { ...c, status: "closed", endDate: today(), closedAt: now, closedBy: "auto" } : c));
-    }
+    // (Encerramento automático de ciclo removido — modelo sem ciclos)
 
     setReceiveFormOrder(null);
     setReceiveDrafts({});
@@ -25279,43 +25357,18 @@ function OperationalCompras({ employee, data, onUpdate }) {
     { id: "historico",    label: `Histórico${terminalOrders.length?` (${terminalOrders.length})`:""}` },
   ];
 
-  // Com ciclo aberto + contagens soltas: oferece puxar contagens pro ciclo atual
-  async function pullLooseToOpenCycle() {
-    if (!openCycle || !hasLooseCounts) return;
-    if (!await appConfirm(`Puxar ${looseCounts.length} contagem(ns) solta(s) pra dentro do ciclo "${openCycle.name}"?`)) return;
-    const looseIds = new Set(looseCounts.map(c => c.id));
-    const updatedCounts = (data.miseCounts || []).map(c =>
-      looseIds.has(c.id) ? { ...c, cycleId: openCycle.id } : c
-    );
-    onUpdate("miseCounts", updatedCounts);
-    onUpdate("_toast", `✓ ${looseCounts.length} contagem(ns) adicionada(s) ao ciclo`);
-  }
-
   return (
     <div>
-      {/* Banner do ciclo */}
-      <div style={{padding:"12px 16px",background:"#f0fdf4",border:"1px solid #10b98144",borderRadius:10,marginBottom:16,display:"flex",alignItems:"center",justifyContent:"space-between",flexWrap:"wrap",gap:8}}>
+      {/* Banner informativo: contagens disponíveis */}
+      <div style={{padding:"12px 16px",background:"var(--bg2)",border:"1px solid var(--border)",borderRadius:10,marginBottom:16,display:"flex",alignItems:"center",justifyContent:"space-between",flexWrap:"wrap",gap:8}}>
         <div>
-          <div style={{fontSize:11,color:"#15803d",fontWeight:700,textTransform:"uppercase",letterSpacing:0.4}}>Ciclo em andamento</div>
-          <div style={{fontSize:14,color:"var(--text)",fontWeight:700,marginTop:2}}>{openCycle.name}</div>
+          <div style={{fontSize:11,color:"var(--text3)",fontWeight:700,textTransform:"uppercase",letterSpacing:0.4}}>📦 Pool de contagens</div>
+          <div style={{fontSize:14,color:"var(--text)",fontWeight:700,marginTop:2}}>{looseCounts.length} contagem{looseCounts.length===1?"":"ns"} disponíve{looseCounts.length===1?"l":"is"} pra gerar pedidos</div>
         </div>
         <div style={{fontSize:12,color:"var(--text3)"}}>
-          Aberto em {fmtDate(openCycle.startDate)} · {activeOrders.length} ativo(s) · {terminalOrders.length} fechado(s)
+          {activeOrders.length} pedido{activeOrders.length===1?"":"s"} ativo{activeOrders.length===1?"":"s"} · {terminalOrders.length} no histórico
         </div>
       </div>
-
-      {/* Se tem contagens soltas, oferece puxá-las pro ciclo atual */}
-      {hasLooseCounts && (
-        <div style={{padding:"10px 14px",background:"#fef3c7",border:"1px solid #f59e0b66",borderRadius:10,marginBottom:14,display:"flex",alignItems:"center",justifyContent:"space-between",flexWrap:"wrap",gap:8}}>
-          <div style={{fontSize:12,color:"#92400e"}}>
-            <b>{looseCounts.length}</b> contagem(ns) solta(s) não vinculada(s) a este ciclo.
-          </div>
-          <button onClick={pullLooseToOpenCycle}
-            style={{background:"#f59e0b",color:"#fff",border:"none",borderRadius:6,padding:"6px 14px",fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"'DM Sans',sans-serif"}}>
-            Puxar pro ciclo
-          </button>
-        </div>
-      )}
 
       {/* Sub-views */}
       <div style={{display:"flex",gap:4,marginBottom:16,borderBottom:"1px solid var(--border)",overflowX:"auto"}}>
