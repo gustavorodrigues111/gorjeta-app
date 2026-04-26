@@ -18862,7 +18862,31 @@ function PessoasAdmin({ restaurantId, pessoas, roles, owners, onUpdate, mobileOn
   const [form, setForm] = useState({ name: "", cpf: "", email: "", whatsapp: "", pin: "" });
   const [editingId, setEditingId] = useState(null);
   const [editForm, setEditForm] = useState({ name: "", cpf: "", email: "", whatsapp: "", pin: "", isTeam: false, roleId: "", admission: "" });
+  const [vincularOpen, setVincularOpen] = useState(false);
+  const [vincularFilter, setVincularFilter] = useState("");
   const miseAc = "#7c9e5e";
+
+  // Pessoas que existem em OUTROS restaurantes mas não neste — candidatas pra vincular
+  const candidatasVincular = (pessoas || []).filter(p => {
+    const ridList = p.restaurantIds || [];
+    if (ridList.includes(restaurantId)) return false; // já neste
+    if (ridList.length === 0) return false; // pessoa órfã, não considera
+    const cpfD = (p.cpf || "").replace(/\D/g, "");
+    if (cpfD && ownerCpfSet.has(cpfD)) return false; // owners têm acesso implícito
+    return true;
+  });
+
+  function vincularPessoa(p) {
+    const next = (pessoas || []).map(x => x.id === p.id ? {
+      ...x,
+      restaurantIds: [...(x.restaurantIds || []), restaurantId],
+      permissions: { ...(x.permissions || {}), [restaurantId]: { operational: {}, admin: {}, special: {} } },
+    } : x);
+    onUpdate("pessoas", next);
+    onUpdate("_toast", `✅ ${p.name} vinculada a este restaurante`);
+    setVincularOpen(false);
+    setVincularFilter("");
+  }
 
   function pinFromCpf(cpf) {
     const d = (cpf || "").replace(/\D/g, "").slice(0, 4);
@@ -18975,7 +18999,15 @@ function PessoasAdmin({ restaurantId, pessoas, roles, owners, onUpdate, mobileOn
 
   return (
     <div>
-      <h3 style={{color:"var(--text)",margin:"0 0 12px",fontSize:mobileOnly?16:18}}>👤 Pessoas do restaurante</h3>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:8,marginBottom:12}}>
+        <h3 style={{color:"var(--text)",margin:0,fontSize:mobileOnly?16:18}}>👤 Pessoas do restaurante</h3>
+        {realIsOwner && candidatasVincular.length > 0 && (
+          <button onClick={()=>setVincularOpen(true)} style={{...S.btnSecondary,fontSize:12,padding:"6px 12px",color:"var(--ac)",borderColor:"var(--ac)44"}}
+            title="Visível só pra Gestor AppTip — vincula pessoa que já existe em outro restaurante">
+            🔗 Vincular pessoa existente <span style={{opacity:0.6,fontWeight:400}}>({candidatasVincular.length})</span>
+          </button>
+        )}
+      </div>
       {/* Form adicionar */}
       <div style={{padding:"12px",background:"var(--card-bg)",border:"1px solid var(--border)",borderRadius:10,marginBottom:16}}>
         <div style={{display:"grid",gridTemplateColumns:mobileOnly?"1fr":"2fr 1.5fr 1fr 1.5fr 1.5fr auto",gap:8,alignItems:"end"}}>
@@ -19107,6 +19139,63 @@ function PessoasAdmin({ restaurantId, pessoas, roles, owners, onUpdate, mobileOn
           })}
         </div>
       )}
+
+      {/* MODAL: vincular pessoa existente (de outros restaurantes) */}
+      {vincularOpen && (() => {
+        const q = vincularFilter.trim().toLowerCase();
+        const filteredCandidatas = q
+          ? candidatasVincular.filter(p => p.name.toLowerCase().includes(q) || (p.cpf || "").includes(q))
+          : candidatasVincular;
+        const sortedCandidatas = [...filteredCandidatas].sort((a,b)=>a.name.localeCompare(b.name));
+        return (
+          <div onClick={()=>setVincularOpen(false)} style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.5)",zIndex:9500,display:"flex",alignItems:"center",justifyContent:"center",padding:20}}>
+            <div onClick={e=>e.stopPropagation()} style={{background:"var(--card-bg)",borderRadius:14,maxWidth:560,width:"100%",maxHeight:"85vh",display:"flex",flexDirection:"column",boxShadow:"0 10px 40px rgba(0,0,0,0.3)"}}>
+              <div style={{padding:"16px 20px",borderBottom:"1px solid var(--border)",display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+                <div>
+                  <div style={{fontSize:11,color:"var(--text3)",fontWeight:700,textTransform:"uppercase",letterSpacing:0.4}}>Pessoas</div>
+                  <div style={{fontSize:16,color:"var(--text)",fontWeight:700,marginTop:2}}>🔗 Vincular pessoa existente</div>
+                </div>
+                <button onClick={()=>setVincularOpen(false)} style={{background:"none",border:"none",fontSize:22,color:"var(--text3)",cursor:"pointer",padding:"0 4px"}}>×</button>
+              </div>
+              <div style={{padding:"12px 20px",borderBottom:"1px solid var(--border)"}}>
+                <p style={{color:"var(--text3)",fontSize:12,margin:"0 0 10px",lineHeight:1.5}}>
+                  Pessoas que já existem em outros restaurantes (do AppTip). Vincular adiciona acesso a este restaurante sem criar cadastro novo — mantém o mesmo CPF, PIN e ID.
+                </p>
+                <input value={vincularFilter} onChange={e=>setVincularFilter(e.target.value)} placeholder="🔍 Buscar por nome ou CPF..." style={{...S.input}} autoFocus />
+              </div>
+              <div style={{padding:"10px 16px",overflowY:"auto",flex:1}}>
+                {sortedCandidatas.length === 0 ? (
+                  <div style={{padding:"24px 16px",textAlign:"center",color:"var(--text3)",fontSize:13}}>
+                    {q ? "Nenhuma pessoa encontrada com esse termo." : "Nenhuma pessoa em outros restaurantes ainda."}
+                  </div>
+                ) : (
+                  <div style={{display:"flex",flexDirection:"column",gap:6}}>
+                    {sortedCandidatas.map(p => {
+                      const ridCount = (p.restaurantIds || []).length;
+                      const cpfMasked = p.cpf ? p.cpf.replace(/(\d{3})(\d{3})(\d{3})(\d{2})/, "$1.$2.$3-$4") : "—";
+                      return (
+                        <div key={p.id} style={{display:"flex",alignItems:"center",gap:10,padding:"10px 12px",background:"var(--bg2)",borderRadius:10,border:"1px solid var(--border)"}}>
+                          <div style={{flex:1,minWidth:0}}>
+                            <div style={{fontSize:13,fontWeight:600,color:"var(--text)"}}>{p.name}</div>
+                            <div style={{fontSize:11,color:"var(--text3)",marginTop:2,fontFamily:"'DM Mono',monospace"}}>{cpfMasked}</div>
+                            <div style={{fontSize:10,color:"var(--text3)",marginTop:2}}>
+                              📍 {ridCount} restaurante{ridCount===1?"":"s"} já vinculado{ridCount===1?"":"s"}
+                              {p.email && <span> · 📧 {p.email}</span>}
+                            </div>
+                          </div>
+                          <button onClick={()=>vincularPessoa(p)} style={{...S.btnPrimary,fontSize:12,padding:"6px 14px"}}>
+                            🔗 Vincular
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 }
