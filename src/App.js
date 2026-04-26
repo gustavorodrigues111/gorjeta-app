@@ -18851,8 +18851,8 @@ function FreelasModule({ restaurantId, pessoas, freelaShifts, freelaPagamentos, 
   async function addShift(shiftData) {
     const pessoa = restPessoas.find(p => p.id === shiftData.pessoaId);
     if (!pessoa) return;
-    // Aviso se for CLT
-    if (pessoa.isTeam?.[restaurantId]) {
+    // Aviso só pra CLT PURO pegando freela ad-hoc (se já é freela cadastrado, não avisa)
+    if (pessoa.isTeam?.[restaurantId] && !pessoa.isFreela) {
       if (!await appConfirm(`${pessoa.name} é da equipe (CLT). Lançar shift de freela vai marcar ${fmtDate(shiftData.date)} como folga-freela na escala dela e excluir esse dia da gorjeta. Confirmar?`)) return;
       autoMarcaEscalaFreela(shiftData.pessoaId, shiftData.date);
     }
