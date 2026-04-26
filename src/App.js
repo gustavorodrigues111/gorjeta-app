@@ -18152,6 +18152,10 @@ function buildShellSections({ pessoa, restaurantId, isOwner }) {
   if (equipeSubs.length > 0) {
     peopleItems.push({ id: "mod_equipe", label: "Equipe", icon: "👥", subtabs: equipeSubs });
   }
+  // Freelas — visível pra Owner (qualquer rest), DP (gestão completa) e Líder (lança shifts)
+  if (isOwner || sp.isDP || sp.isLider) {
+    peopleItems.push({ id: "mod_freelas", label: "Freelas", icon: "🎒", kind: "manager", tab: "freelas" });
+  }
   if (op.escalas || ad.schedule) {
     peopleItems.push({
       id: "mod_escalas", label: "Escalas", icon: "📅",
