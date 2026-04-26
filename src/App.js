@@ -18744,6 +18744,19 @@ function PessoasAdmin({ restaurantId, pessoas, roles, owners, onUpdate, mobileOn
   }
 
   // ── Bulk add via IA ──
+  // Cargos disponíveis no rest atual — passados pra IA pra ela tentar bater nome → cargo válido
+  const restRolesActive = (roles || []).filter(r => r.restaurantId === restaurantId && !r.inactive);
+
+  // Match nome de cargo (string da IA) → roleId (case-insensitive, fuzzy)
+  function matchRoleByName(nameStr) {
+    if (!nameStr) return null;
+    const s = nameStr.toLowerCase().trim();
+    return restRolesActive.find(r => r.name.toLowerCase() === s)
+        || restRolesActive.find(r => r.name.toLowerCase().includes(s))
+        || restRolesActive.find(r => s.includes(r.name.toLowerCase()))
+        || null;
+  }
+
   // Manda texto livre pro Groq, recebe lista estruturada de pessoas.
   async function bulkAiSubmit() {
     const text = bulkAiText.trim();
@@ -18752,9 +18765,12 @@ function PessoasAdmin({ restaurantId, pessoas, roles, owners, onUpdate, mobileOn
     setBulkAiError("");
     setBulkAiResult(null);
     try {
+      const cargosLista = restRolesActive.length > 0
+        ? `Cargos VÁLIDOS deste restaurante (use exatamente esses nomes quando reconhecer):\n${restRolesActive.map(r => `- ${r.name} (${r.area})`).join("\n")}\n\n`
+        : "";
       const systemPrompt = `Você extrai dados de pessoas de um texto livre em português e devolve JSON estruturado.
 
-Cada pessoa pode ter: nome completo (obrigatório), CPF (11 dígitos), telefone/WhatsApp (com ou sem DDD), email, cargo (ex: garçom, cozinheiro, bartender, gerente, recepcionista, auxiliar de limpeza). O texto pode usar separadores variados (vírgulas, traços, quebras de linha, parênteses).
+${cargosLista}Cada pessoa pode ter: nome completo (obrigatório), CPF (11 dígitos), telefone/WhatsApp, email, cargo, data de admissão, contato de emergência (nome + telefone). O texto pode usar separadores variados (vírgulas, traços, quebras de linha, parênteses).
 
 Devolva APENAS um JSON neste formato exato:
 {
@@ -18762,17 +18778,21 @@ Devolva APENAS um JSON neste formato exato:
     {
       "name": "Nome Completo",
       "cpf": "12345678901",            // 11 dígitos só, sem pontuação. Vazio se não souber.
-      "whatsapp": "5531999887766",     // só dígitos com DDI 55. Vazio se não souber.
+      "whatsapp": "5531999887766",     // só dígitos com DDI 55 quando possível. Vazio se não souber.
       "email": "fulano@dominio.com",   // vazio se não souber
-      "role": "Cozinheiro"             // cargo identificado, vazio se não souber
+      "role": "Cozinheiro",            // nome do cargo identificado (de preferência da lista acima). Vazio se não houver.
+      "admission": "2024-03-15",       // data de admissão YYYY-MM-DD. Aceite formatos como "15/03/2024", "março/2024", "desde abril de 2023" — converta. Vazio se não souber.
+      "emergencyName": "Maria Silva",  // contato de emergência: nome. Vazio se não souber.
+      "emergencyPhone": "5531977665544"// contato de emergência: telefone (só dígitos). Vazio se não souber.
     }
   ]
 }
 
 Regras:
-- Nunca invente CPF, telefone ou email — só use o que estiver explícito no texto.
+- Nunca invente CPF, telefone, email ou data — só use o que estiver explícito no texto.
 - Capitalize nome corretamente (Janynna Silva, não JANYNNA SILVA ou janynna silva).
 - Limpe CPF e telefone (só dígitos).
+- Pessoas com cargo OU data de admissão são EMPREGADOS — extraia esses campos com prioridade.
 - Se uma linha não parece pessoa (ex: header, texto solto), ignore.
 - Se nada parecer pessoa, retorne { "pessoas": [] }.`;
       const result = await groqGenerate(systemPrompt, text);
@@ -18817,13 +18837,26 @@ Regras:
     if (toAccept.length === 0) { alert("Selecione pelo menos uma pessoa."); return; }
 
     let nextPessoas = [...(pessoas || [])];
-    let createdN = 0, linkedN = 0, skippedN = 0;
+    let createdN = 0, linkedN = 0, skippedN = 0, asTeamN = 0;
 
     for (const { p } of toAccept) {
       const nm = (p.name || "").trim();
       const cpfRaw = (p.cpf || "").replace(/\D/g, "");
       if (!nm) { skippedN++; continue; }
       if (cpfRaw && cpfRaw.length !== 11) { skippedN++; continue; }
+
+      // Resolve cargo via match (se a IA trouxe nome de cargo)
+      const matchedRole = matchRoleByName(p.role);
+      const admission = (p.admission || "").trim();
+      // Marca como equipe automaticamente se IA identificou cargo OU admissão
+      const shouldBeTeam = !!(matchedRole || admission);
+      const teamDataEntry = shouldBeTeam ? {
+        roleId: matchedRole?.id || null,
+        admission: admission || today(),
+      } : null;
+
+      const emergencyName = (p.emergencyName || "").trim() || null;
+      const emergencyPhone = (p.emergencyPhone || "").replace(/\D/g, "") || null;
 
       // Já existe globalmente? (mesmo CPF em qualquer restaurante)
       const globalExisting = cpfRaw ? nextPessoas.find(x => (x.cpf || "").replace(/\D/g, "") === cpfRaw) : null;
@@ -18834,7 +18867,7 @@ Regras:
           skippedN++;
           continue;
         }
-        // Vincula ao rest atual
+        // Vincula ao rest atual + adiciona dados de equipe se aplicável
         nextPessoas = nextPessoas.map(x => x.id === globalExisting.id ? {
           ...x,
           restaurantIds: [...(x.restaurantIds || []), restaurantId],
@@ -18842,7 +18875,12 @@ Regras:
           // Preserva info adicional se a IA trouxe e a pessoa não tinha
           email: x.email || (p.email || "").trim() || null,
           whatsapp: x.whatsapp || (p.whatsapp || "").replace(/\D/g, "") || null,
+          emergencyName: x.emergencyName || emergencyName,
+          emergencyPhone: x.emergencyPhone || emergencyPhone,
+          isTeam: { ...(x.isTeam || {}), ...(shouldBeTeam ? { [restaurantId]: true } : {}) },
+          teamData: { ...(x.teamData || {}), ...(teamDataEntry ? { [restaurantId]: teamDataEntry } : {}) },
         } : x);
+        if (shouldBeTeam) asTeamN++;
         linkedN++;
       } else {
         // Cria nova
@@ -18856,12 +18894,15 @@ Regras:
           mustChangePin: true,
           email: (p.email || "").trim() || null,
           whatsapp: (p.whatsapp || "").replace(/\D/g, "") || null,
-          isTeam: {},
-          teamData: {},
+          emergencyName,
+          emergencyPhone,
+          isTeam: shouldBeTeam ? { [restaurantId]: true } : {},
+          teamData: teamDataEntry ? { [restaurantId]: teamDataEntry } : {},
           permissions: { [restaurantId]: { operational: {}, admin: {}, special: {} } },
           createdAt: new Date().toISOString(),
           createdViaBulkAi: true,
         });
+        if (shouldBeTeam) asTeamN++;
         createdN++;
       }
     }
@@ -18870,6 +18911,7 @@ Regras:
     const parts = [];
     if (createdN > 0) parts.push(`${createdN} criada${createdN===1?"":"s"}`);
     if (linkedN > 0) parts.push(`${linkedN} vinculada${linkedN===1?"":"s"}`);
+    if (asTeamN > 0) parts.push(`${asTeamN} marcada${asTeamN===1?"":"s"} como equipe`);
     if (skippedN > 0) parts.push(`${skippedN} pulada${skippedN===1?"":"s"} (já no rest. ou sem dados)`);
     onUpdate("_toast", `✅ ${parts.join(" · ")}`);
     bulkAiClose();
@@ -19261,39 +19303,97 @@ Regras:
                       A IA não conseguiu identificar nenhuma pessoa no texto. Volte e ajuste.
                     </div>
                   ) : (
-                    <div style={{display:"flex",flexDirection:"column",gap:6}}>
+                    <div style={{display:"flex",flexDirection:"column",gap:8}}>
                       {bulkAiResult.pessoas.map((p, i) => {
                         const checked = !!bulkAiSelected[i];
                         const cpfRaw = (p.cpf || "").replace(/\D/g, "");
                         const cpfValid = cpfRaw.length === 11 || cpfRaw.length === 0;
                         const cpfDup = cpfRaw && (pessoas || []).some(x => (x.cpf || "").replace(/\D/g, "") === cpfRaw && (x.restaurantIds || []).includes(restaurantId));
                         const cpfElsewhere = cpfRaw && !cpfDup && (pessoas || []).some(x => (x.cpf || "").replace(/\D/g, "") === cpfRaw);
+                        const matchedRole = matchRoleByName(p.role);
+                        const willBeTeam = !!(matchedRole || (p.admission || "").trim());
                         return (
-                          <div key={i} style={{display:"flex",alignItems:"flex-start",gap:10,padding:"10px 12px",background: checked ? "#8b5cf608" : "var(--bg2)",borderRadius:10,border:`1px solid ${checked ? "#8b5cf644" : "var(--border)"}`,transition:"all 0.12s"}}>
+                          <div key={i} style={{display:"flex",alignItems:"flex-start",gap:10,padding:"12px 14px",background: checked ? "#8b5cf608" : "var(--bg2)",borderRadius:10,border:`1px solid ${checked ? "#8b5cf644" : "var(--border)"}`,transition:"all 0.12s"}}>
                             <input type="checkbox" checked={checked}
                               onChange={()=>setBulkAiSelected(prev => ({ ...prev, [i]: !prev[i] }))}
                               style={{cursor:"pointer",marginTop:6,accentColor:"#8b5cf6",width:16,height:16,flexShrink:0}}/>
-                            <div style={{flex:1,minWidth:0,display:"grid",gridTemplateColumns:"1fr 1fr",gap:6}}>
-                              <input value={p.name||""} onChange={e=>updateBulkAiPessoa(i,"name",e.target.value)}
-                                placeholder="Nome completo"
-                                style={{...S.input,fontSize:12,padding:"6px 8px",fontWeight:600}}/>
-                              <input value={p.cpf||""} onChange={e=>updateBulkAiPessoa(i,"cpf",e.target.value)}
-                                placeholder="CPF (11 dígitos)"
-                                style={{...S.input,fontSize:12,padding:"6px 8px",fontFamily:"'DM Mono',monospace",
-                                  borderColor: cpfValid ? "var(--border)" : "var(--red)",
-                                  background: cpfDup ? "#fef9e7" : (cpfElsewhere ? "#dbeafe" : undefined)}}
-                                title={cpfDup ? "⚠️ Já existe nesse restaurante — vai pular" : cpfElsewhere ? "ℹ️ Existe em outro rest. — vai vincular ao atual" : ""}/>
-                              <input value={p.whatsapp||""} onChange={e=>updateBulkAiPessoa(i,"whatsapp",e.target.value)}
-                                placeholder="WhatsApp (opcional)"
-                                style={{...S.input,fontSize:12,padding:"6px 8px",fontFamily:"'DM Mono',monospace"}}/>
-                              <input value={p.email||""} onChange={e=>updateBulkAiPessoa(i,"email",e.target.value)}
-                                placeholder="Email (opcional)"
-                                style={{...S.input,fontSize:12,padding:"6px 8px"}}/>
-                              {(cpfDup || cpfElsewhere) && (
-                                <div style={{gridColumn:"1 / -1",fontSize:10,color:cpfDup?"#92400e":"#1e40af",marginTop:-2}}>
-                                  {cpfDup ? "⚠️ CPF já cadastrado neste restaurante — será pulado" : "ℹ️ CPF existe em outro restaurante — será vinculado em vez de duplicar"}
-                                </div>
-                              )}
+                            <div style={{flex:1,minWidth:0,display:"flex",flexDirection:"column",gap:6}}>
+                              {/* Linha 1: nome + CPF */}
+                              <div style={{display:"grid",gridTemplateColumns:"2fr 1.3fr",gap:6}}>
+                                <input value={p.name||""} onChange={e=>updateBulkAiPessoa(i,"name",e.target.value)}
+                                  placeholder="Nome completo"
+                                  style={{...S.input,fontSize:12,padding:"6px 8px",fontWeight:600}}/>
+                                <input value={p.cpf||""} onChange={e=>updateBulkAiPessoa(i,"cpf",e.target.value)}
+                                  placeholder="CPF (11 dígitos)"
+                                  style={{...S.input,fontSize:12,padding:"6px 8px",fontFamily:"'DM Mono',monospace",
+                                    borderColor: cpfValid ? "var(--border)" : "var(--red)",
+                                    background: cpfDup ? "#fef9e7" : (cpfElsewhere ? "#dbeafe" : undefined)}}
+                                  title={cpfDup ? "⚠️ Já existe nesse restaurante — vai pular" : cpfElsewhere ? "ℹ️ Existe em outro rest. — vai vincular ao atual" : ""}/>
+                              </div>
+                              {/* Linha 2: WhatsApp + Email */}
+                              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:6}}>
+                                <input value={p.whatsapp||""} onChange={e=>updateBulkAiPessoa(i,"whatsapp",e.target.value)}
+                                  placeholder="WhatsApp"
+                                  style={{...S.input,fontSize:12,padding:"6px 8px",fontFamily:"'DM Mono',monospace"}}/>
+                                <input value={p.email||""} onChange={e=>updateBulkAiPessoa(i,"email",e.target.value)}
+                                  placeholder="Email"
+                                  style={{...S.input,fontSize:12,padding:"6px 8px"}}/>
+                              </div>
+                              {/* Linha 3: Cargo (select) + Data de admissão */}
+                              <div style={{display:"grid",gridTemplateColumns:"1.5fr 1fr",gap:6}}>
+                                <select value={matchedRole?.id || ""}
+                                  onChange={e=>{
+                                    const r = restRolesActive.find(x => x.id === e.target.value);
+                                    updateBulkAiPessoa(i, "role", r?.name || "");
+                                  }}
+                                  style={{...S.input,fontSize:12,padding:"6px 8px",cursor:"pointer",
+                                    borderColor: p.role && !matchedRole ? "var(--red)" : "var(--border)"}}
+                                  title={p.role && !matchedRole ? `Cargo "${p.role}" não bate com cargos do restaurante` : ""}>
+                                  <option value="">— Cargo —</option>
+                                  {AREAS.map(a => (
+                                    <optgroup key={a} label={a}>
+                                      {restRolesActive.filter(r => r.area === a).map(r => (
+                                        <option key={r.id} value={r.id}>{r.name}{r.points?` (${r.points}pt)`:""}</option>
+                                      ))}
+                                    </optgroup>
+                                  ))}
+                                </select>
+                                <input type="date" value={p.admission||""} onChange={e=>updateBulkAiPessoa(i,"admission",e.target.value)}
+                                  style={{...S.input,fontSize:12,padding:"6px 8px"}}
+                                  title="Data de admissão"/>
+                              </div>
+                              {/* Linha 4: Emergência */}
+                              <div style={{display:"grid",gridTemplateColumns:"1.3fr 1fr",gap:6}}>
+                                <input value={p.emergencyName||""} onChange={e=>updateBulkAiPessoa(i,"emergencyName",e.target.value)}
+                                  placeholder="Contato de emergência (nome)"
+                                  style={{...S.input,fontSize:12,padding:"6px 8px"}}/>
+                                <input value={p.emergencyPhone||""} onChange={e=>updateBulkAiPessoa(i,"emergencyPhone",e.target.value)}
+                                  placeholder="Tel. emergência"
+                                  style={{...S.input,fontSize:12,padding:"6px 8px",fontFamily:"'DM Mono',monospace"}}/>
+                              </div>
+                              {/* Avisos */}
+                              <div style={{display:"flex",gap:8,flexWrap:"wrap",marginTop:2,fontSize:10}}>
+                                {willBeTeam && (
+                                  <span style={{color:"var(--green)",background:"#10b98115",padding:"2px 8px",borderRadius:6,fontWeight:600}}>
+                                    ✓ Será marcada como equipe
+                                  </span>
+                                )}
+                                {p.role && !matchedRole && (
+                                  <span style={{color:"#92400e",background:"#fef3c7",padding:"2px 8px",borderRadius:6,fontWeight:600}}>
+                                    ⚠️ Cargo "{p.role}" não bate — escolha um da lista
+                                  </span>
+                                )}
+                                {cpfDup && (
+                                  <span style={{color:"#92400e",background:"#fef9e7",padding:"2px 8px",borderRadius:6,fontWeight:600}}>
+                                    ⚠️ CPF já no rest — será pulada
+                                  </span>
+                                )}
+                                {cpfElsewhere && (
+                                  <span style={{color:"#1e40af",background:"#dbeafe",padding:"2px 8px",borderRadius:6,fontWeight:600}}>
+                                    ℹ️ CPF em outro rest — será vinculada
+                                  </span>
+                                )}
+                              </div>
                             </div>
                           </div>
                         );
