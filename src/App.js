@@ -18909,6 +18909,66 @@ function FreelasModule({ restaurantId, pessoas, freelaShifts, freelaPagamentos, 
     onUpdate("freelaShifts", (freelaShifts || []).filter(x => x.id !== shiftId));
   }
 
+  // ── Cadastrar freela rápido (líder/DP/owner cria sem ir pra aba Pessoas) ──
+  async function addFreela(data) {
+    const nm = (data.name || "").trim();
+    if (!nm) { alert("Nome é obrigatório."); return false; }
+    if (!(data.whatsapp || "").trim()) { alert("WhatsApp é obrigatório pra freela."); return false; }
+    if (!(data.pix || "").trim()) { alert("Chave PIX é obrigatória pra freela."); return false; }
+    const cpfRaw = (data.cpf || "").replace(/\D/g, "");
+    // Se CPF preenchido, checa duplicata global
+    if (cpfRaw) {
+      const exists = (pessoas || []).find(p => (p.cpf || "").replace(/\D/g, "") === cpfRaw);
+      if (exists) {
+        if (!(exists.restaurantIds || []).includes(restaurantId)) {
+          if (!await appConfirm(`Já existe ${exists.name} cadastrado em outro restaurante. Vincular esse restaurante e marcar como freela aqui?`)) return false;
+          const next = (pessoas || []).map(p => p.id === exists.id ? {
+            ...p,
+            restaurantIds: [...(p.restaurantIds || []), restaurantId],
+            isFreela: true,
+            whatsapp: p.whatsapp || data.whatsapp.trim(),
+            pix: p.pix || data.pix.trim(),
+            permissions: { ...(p.permissions || {}), [restaurantId]: { operational: {}, admin: {}, special: {} } },
+          } : p);
+          onUpdate("pessoas", next);
+          onUpdate("_toast", `✅ ${exists.name} vinculado e marcado como freela`);
+          return exists.id;
+        } else {
+          if (!await appConfirm(`${exists.name} já está cadastrado neste restaurante. Marcar como freela?`)) return false;
+          const next = (pessoas || []).map(p => p.id === exists.id ? {
+            ...p, isFreela: true,
+            whatsapp: p.whatsapp || data.whatsapp.trim(),
+            pix: p.pix || data.pix.trim(),
+          } : p);
+          onUpdate("pessoas", next);
+          onUpdate("_toast", `✅ ${exists.name} marcado como freela`);
+          return exists.id;
+        }
+      }
+    }
+    const id = `pes_${Date.now().toString(36)}${Math.random().toString(36).slice(2,6)}`;
+    const newP = {
+      id,
+      restaurantIds: [restaurantId],
+      name: nm,
+      cpf: cpfRaw || "",
+      pin: cpfRaw ? cpfRaw.slice(-4) : "0000",
+      mustChangePin: true,
+      email: null,
+      whatsapp: data.whatsapp.trim(),
+      pix: data.pix.trim(),
+      isFreela: true,
+      isTeam: {},
+      teamData: {},
+      permissions: { [restaurantId]: { operational: {}, admin: {}, special: {} } },
+      createdAt: new Date().toISOString(),
+      cadastradoVia: "freela_rapido",
+    };
+    onUpdate("pessoas", [...(pessoas || []), newP]);
+    onUpdate("_toast", `✅ ${nm} cadastrado como freela`);
+    return id;
+  }
+
   // Quem pode ver cada sub-tab
   const canFechamento = isDP || isOwner; // só DP/Owner faz fechamento e marca pago
   const canHistorico = isDP || isOwner;
@@ -18941,16 +19001,19 @@ function FreelasModule({ restaurantId, pessoas, freelaShifts, freelaPagamentos, 
       {/* Sub-tab: Lançamento — tabela de shifts em status Aberto */}
       {subTab === "lancamento" && (
         <FreelaLancamentoTab
+          restaurantId={restaurantId}
           restPessoas={restPessoas}
           restFreelas={restFreelas}
           shifts={restShifts}
           addShift={addShift}
           updateShift={updateShift}
           deleteShift={deleteShift}
+          addFreela={addFreela}
           calcHoras={calcHoras}
           fmtHoras={fmtHoras}
           isDP={isDP}
           isOwner={isOwner}
+          isLider={isLider}
           currentUser={currentUser}
           mobileOnly={mobileOnly}
           ac={ac}
@@ -18991,9 +19054,11 @@ function FreelasModule({ restaurantId, pessoas, freelaShifts, freelaPagamentos, 
 // ═══════════════════════════════════════════════════════════════
 // ──  FREELAS — sub-componente Lançamento (tabela de shifts)     ──
 // ═══════════════════════════════════════════════════════════════
-function FreelaLancamentoTab({ restPessoas, restFreelas, shifts, addShift, updateShift, deleteShift, calcHoras, fmtHoras, isDP, isOwner, currentUser, mobileOnly, ac }) {
+function FreelaLancamentoTab({ restaurantId, restPessoas, restFreelas, shifts, addShift, updateShift, deleteShift, addFreela, calcHoras, fmtHoras, isDP, isOwner, isLider, currentUser, mobileOnly, ac }) {
   const [showAddForm, setShowAddForm] = useState(false);
   const [newShift, setNewShift] = useState({ pessoaId: "", date: today(), entrada: "", saida: "", intervalo: 0, area: "", observacao: "" });
+  const [showFreelaForm, setShowFreelaForm] = useState(false);
+  const [newFreela, setNewFreela] = useState({ name: "", whatsapp: "", pix: "", cpf: "" });
   const [filterStatus, setFilterStatus] = useState("todos"); // todos | aberto | fechamento | pago
   const [filterPeriod, setFilterPeriod] = useState({ from: "", to: "" });
   const [filterPessoa, setFilterPessoa] = useState("");
@@ -19029,16 +19094,33 @@ function FreelaLancamentoTab({ restPessoas, restFreelas, shifts, addShift, updat
     setShowAddForm(false);
   }
 
-  // Pessoas disponíveis pra escolher: freelas + CLTs (líder pode pegar freela ad-hoc)
-  const elegiveis = restPessoas.filter(p => p.isFreela || p.isTeam).sort((a,b) => a.name.localeCompare(b.name));
+  // Pessoas disponíveis pra escolher: freelas deste rest + EQUIPE deste rest (líder pode pegar freela ad-hoc)
+  // Importante: isTeam[restaurantId] (per-rest), não p.isTeam (objeto truthy mesmo vazio)
+  const elegiveis = restPessoas.filter(p => p.isFreela || p.isTeam?.[restaurantId]).sort((a,b) => a.name.localeCompare(b.name));
+
+  async function handleAddFreelaSubmit() {
+    const newId = await addFreela(newFreela);
+    if (newId) {
+      setNewShift(s => ({ ...s, pessoaId: newId }));
+      setNewFreela({ name: "", whatsapp: "", pix: "", cpf: "" });
+      setShowFreelaForm(false);
+      // se o form de shift não estava aberto, abre — pra fluxo natural cadastro→lança
+      if (!showAddForm) setShowAddForm(true);
+    }
+  }
 
   return (
-    <div>
+    <div style={{paddingBottom:48}}>
       {/* Toolbar: botão + filtros */}
       <div style={{display:"flex",gap:8,marginBottom:12,flexWrap:"wrap",alignItems:"center"}}>
         <button onClick={()=>setShowAddForm(!showAddForm)}
           style={{background:showAddForm?"var(--bg2)":ac,color:showAddForm?"var(--text)":"#fff",border:`1px solid ${ac}`,borderRadius:8,padding:"7px 16px",fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:"'DM Sans',sans-serif"}}>
           {showAddForm ? "✕ Fechar" : "+ Novo shift"}
+        </button>
+        <button onClick={()=>setShowFreelaForm(!showFreelaForm)}
+          title="Cadastrar um freela rapidinho — sem precisar ir na aba Pessoas"
+          style={{background:showFreelaForm?"var(--bg2)":"transparent",color:ac,border:`1px solid ${ac}`,borderRadius:8,padding:"7px 14px",fontSize:13,fontWeight:600,cursor:"pointer",fontFamily:"'DM Sans',sans-serif"}}>
+          {showFreelaForm ? "✕ Fechar" : "🎒+ Cadastrar freela"}
         </button>
         <select value={filterStatus} onChange={e=>setFilterStatus(e.target.value)}
           style={{...S.input,maxWidth:160,fontSize:12,padding:"7px 10px",cursor:"pointer"}}>
@@ -19058,6 +19140,38 @@ function FreelaLancamentoTab({ restPessoas, restFreelas, shifts, addShift, updat
           title="Até" style={{...S.input,maxWidth:140,fontSize:12,padding:"7px 10px"}}/>
       </div>
 
+      {/* Form de cadastro rápido de freela (líder/DP/owner) */}
+      {showFreelaForm && (
+        <div style={{background:`${ac}06`,border:`1px dashed ${ac}66`,borderRadius:10,padding:14,marginBottom:14}}>
+          <div style={{fontSize:11,color:ac,fontWeight:700,textTransform:"uppercase",letterSpacing:0.4,marginBottom:4}}>🎒 Cadastrar freela</div>
+          <div style={{fontSize:11,color:"var(--text3)",marginBottom:10,lineHeight:1.4}}>
+            Cadastro rápido — só nome, WhatsApp e PIX. CPF é opcional aqui (DP completa depois antes de pagar).
+          </div>
+          <div style={{display:"grid",gridTemplateColumns:mobileOnly?"1fr":"2fr 1.3fr 1.3fr 1.2fr",gap:8,marginBottom:10}}>
+            <div>
+              <label style={{...S.label,fontSize:11}}>Nome *</label>
+              <input value={newFreela.name} onChange={e=>setNewFreela({...newFreela,name:e.target.value})} placeholder="Nome completo" style={S.input}/>
+            </div>
+            <div>
+              <label style={{...S.label,fontSize:11}}>WhatsApp *</label>
+              <input value={newFreela.whatsapp} onChange={e=>setNewFreela({...newFreela,whatsapp:e.target.value})} placeholder="(11) 9..." style={S.input}/>
+            </div>
+            <div>
+              <label style={{...S.label,fontSize:11}}>PIX *</label>
+              <input value={newFreela.pix} onChange={e=>setNewFreela({...newFreela,pix:e.target.value})} placeholder="CPF, e-mail, tel ou aleatória" style={S.input}/>
+            </div>
+            <div>
+              <label style={{...S.label,fontSize:11}}>CPF (opcional)</label>
+              <input value={newFreela.cpf} onChange={e=>setNewFreela({...newFreela,cpf:e.target.value})} placeholder="só números" style={S.input}/>
+            </div>
+          </div>
+          <div style={{display:"flex",gap:8,justifyContent:"flex-end"}}>
+            <button onClick={()=>{setShowFreelaForm(false); setNewFreela({name:"",whatsapp:"",pix:"",cpf:""});}} style={{...S.btnSecondary,fontSize:12,padding:"7px 14px"}}>Cancelar</button>
+            <button onClick={handleAddFreelaSubmit} style={{background:ac,color:"#fff",border:"none",borderRadius:8,padding:"7px 18px",fontSize:13,fontWeight:700,cursor:"pointer"}}>🎒 Cadastrar e usar</button>
+          </div>
+        </div>
+      )}
+
       {/* Form de adicionar shift */}
       {showAddForm && (
         <div style={{background:`${ac}08`,border:`1px solid ${ac}44`,borderRadius:10,padding:14,marginBottom:14}}>
@@ -19072,9 +19186,11 @@ function FreelaLancamentoTab({ restPessoas, restFreelas, shifts, addShift, updat
                     {restFreelas.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
                   </optgroup>
                 )}
-                <optgroup label="👥 Equipe (CLT pegando freela)">
-                  {restPessoas.filter(p => p.isTeam && !p.isFreela).map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
-                </optgroup>
+                {restPessoas.filter(p => p.isTeam?.[restaurantId] && !p.isFreela).length > 0 && (
+                  <optgroup label="👥 Equipe (CLT pegando freela)">
+                    {restPessoas.filter(p => p.isTeam?.[restaurantId] && !p.isFreela).map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                  </optgroup>
+                )}
               </select>
             </div>
             <div>
@@ -19127,7 +19243,7 @@ function FreelaLancamentoTab({ restPessoas, restFreelas, shifts, addShift, updat
           <div style={{color:"var(--text)",fontWeight:600,fontSize:14,marginBottom:6}}>Nenhum shift {filterStatus!=="todos"||filterPessoa||filterPeriod.from||filterPeriod.to ? "com esses filtros" : "lançado ainda"}</div>
           {restFreelas.length === 0 && (
             <p style={{fontSize:12,marginTop:8}}>
-              Cadastre primeiro um freelancer em <strong>Pessoas → marcar "É freela"</strong>.
+              Use o botão <strong>🎒+ Cadastrar freela</strong> aí em cima pra começar.
             </p>
           )}
         </div>
