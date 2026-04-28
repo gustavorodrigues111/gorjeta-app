@@ -29375,46 +29375,81 @@ export default function App() {
         if (purged) { setInbox(purged); save(K.inbox, purged); }
       }
 
-      // Auto-cleanup de workSchedules: remove entries fantasma (sem dias com in/out preenchidos).
-      // Saves antigos com bug de race condition deixaram entries vazios que faziam o badge ⏰
-      // aparecer indevidamente. Limpa silenciosamente e re-grava o objeto saneado.
+      // Auto-cleanup de workSchedules: remove entries fantasma + dedupe (mesmo `days`, mantém o mais recente).
+      // Saves antigos com bug de race condition deixaram entries vazios e duplicados.
+      // Limpa silenciosamente e re-grava o objeto saneado.
       if (loaded_data.workSchedules && typeof loaded_data.workSchedules === "object") {
         const ws = loaded_data.workSchedules;
         let dirty = false;
-        let removedCount = 0;
+        let removedFantasma = 0;
+        let removedDuplicados = 0;
         const cleaned = {};
         const summary = []; // diagnóstico: o que sobrou
+
+        // Helper: gera fingerprint do conteúdo dos days (ignora id/createdAt — só importa o "horário em si")
+        function fingerprintDays(s) {
+          if (!s || !s.days) return "__empty__";
+          const keys = Object.keys(s.days).sort();
+          return keys.map(k => {
+            const d = s.days[k];
+            if (!d) return `${k}=null`;
+            return `${k}=${d.in||""}|${d.out||""}|${d.break||0}|${d.active?1:0}`;
+          }).join("&") + `|hc=${s.hoursComplete!==false?1:0}|f=${s.freela?1:0}`;
+        }
+
+        // Helper: timestamp pra ordenação (mais recente primeiro)
+        function entryTime(s) {
+          return new Date(s.createdAt || s.validFrom || 0).getTime() || 0;
+        }
+
         for (const [restId, byEmp] of Object.entries(ws)) {
-          if (!byEmp || typeof byEmp !== "object") { dirty = true; removedCount++; continue; }
+          if (!byEmp || typeof byEmp !== "object") { dirty = true; removedFantasma++; continue; }
           const cleanedEmp = {};
           for (const [empId, scheds] of Object.entries(byEmp)) {
-            if (!Array.isArray(scheds)) { dirty = true; removedCount++; continue; }
+            if (!Array.isArray(scheds)) { dirty = true; removedFantasma++; continue; }
+            // 1) Remove fantasmas (sem dia válido)
             const validos = scheds.filter(s =>
               s && s.days && typeof s.days === "object" &&
               Object.values(s.days).some(d => d && d.in && d.out)
             );
-            const removedHere = scheds.length - validos.length;
-            if (removedHere > 0) { dirty = true; removedCount += removedHere; }
-            if (validos.length > 0) {
-              cleanedEmp[empId] = validos;
-              // Log detalhado: o que sobrou pra cada empregado
-              const diasResumo = validos.map(s => {
+            const fantasmasAqui = scheds.length - validos.length;
+            if (fantasmasAqui > 0) { dirty = true; removedFantasma += fantasmasAqui; }
+
+            // 2) Dedupe — agrupa por fingerprint, mantém o mais recente
+            const byFp = new Map();
+            for (const s of validos) {
+              const fp = fingerprintDays(s);
+              const existing = byFp.get(fp);
+              if (!existing || entryTime(s) > entryTime(existing)) {
+                byFp.set(fp, s);
+              }
+            }
+            const dedupados = [...byFp.values()].sort((a, b) => entryTime(a) - entryTime(b));
+            const duplicadosAqui = validos.length - dedupados.length;
+            if (duplicadosAqui > 0) { dirty = true; removedDuplicados += duplicadosAqui; }
+
+            if (dedupados.length > 0) {
+              cleanedEmp[empId] = dedupados;
+              const diasResumo = dedupados.map(s => {
                 const days = s.days || {};
                 const ativos = Object.entries(days)
                   .filter(([,d]) => d && d.in && d.out)
                   .map(([i,d]) => `D${i}:${d.in}-${d.out}`).join(",");
                 return `[${s.id?.slice(-6) || "?"}: ${ativos || "vazio"}]`;
               }).join(" ");
-              summary.push(`rest=${restId.slice(-6)} emp=${empId.slice(-6)} → ${validos.length} entry(ies): ${diasResumo}`);
+              summary.push(`rest=${restId.slice(-6)} emp=${empId.slice(-6)} → ${dedupados.length} entry(ies): ${diasResumo}`);
             } else if (scheds.length > 0) {
-              dirty = true; // tinha lixo, agora vazio
+              dirty = true; // tinha conteúdo, agora vazio
             }
           }
           if (Object.keys(cleanedEmp).length > 0) cleaned[restId] = cleanedEmp;
           else if (Object.keys(byEmp).length > 0) dirty = true;
         }
         if (dirty) {
-          console.log(`[cleanup] workSchedules: ${removedCount} entry(ies) fantasma removido(s)`);
+          const partes = [];
+          if (removedFantasma > 0) partes.push(`${removedFantasma} fantasma(s)`);
+          if (removedDuplicados > 0) partes.push(`${removedDuplicados} duplicado(s)`);
+          console.log(`[cleanup] workSchedules: ${partes.join(" + ")} removido(s)`);
           setWorkSchedules(cleaned);
           save(K.workSchedules, cleaned);
         }
