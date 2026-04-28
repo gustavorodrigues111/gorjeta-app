@@ -19267,6 +19267,7 @@ function FreelasModule({ restaurantId, pessoas, freelaShifts, freelaPagamentos, 
       {subTab === "lancamento" && (
         <FreelaLancamentoTab
           restaurantId={restaurantId}
+          allPessoas={pessoas}
           restPessoas={restPessoas}
           restFreelas={restFreelas}
           shifts={restShifts}
@@ -19324,7 +19325,7 @@ function FreelasModule({ restaurantId, pessoas, freelaShifts, freelaPagamentos, 
 // ═══════════════════════════════════════════════════════════════
 // ──  FREELAS — sub-componente Lançamento (tabela de shifts)     ──
 // ═══════════════════════════════════════════════════════════════
-function FreelaLancamentoTab({ restaurantId, restPessoas, restFreelas, shifts, addShift, updateShift, deleteShift, addFreela, bulkFillValor, shiftPrntoPronto, calcHoras, fmtHoras, isDP, isOwner, isLider, currentUser, mobileOnly, ac }) {
+function FreelaLancamentoTab({ restaurantId, allPessoas, restPessoas, restFreelas, shifts, addShift, updateShift, deleteShift, addFreela, bulkFillValor, shiftPrntoPronto, calcHoras, fmtHoras, isDP, isOwner, isLider, currentUser, mobileOnly, ac }) {
   const [showAddForm, setShowAddForm] = useState(false);
   const [newShift, setNewShift] = useState({ pessoaId: "", date: today(), entrada: "", saida: "", intervalo: 0, area: "", observacao: "" });
   const [showFreelaForm, setShowFreelaForm] = useState(false);
@@ -19372,8 +19373,9 @@ function FreelaLancamentoTab({ restaurantId, restPessoas, restFreelas, shifts, a
   // Importante: isTeam[restaurantId] (per-rest), não p.isTeam (objeto truthy mesmo vazio)
   const elegiveis = restPessoas.filter(p => p.isFreela || p.isTeam?.[restaurantId]).sort((a,b) => a.name.localeCompare(b.name));
 
-  async function handleAddFreelaSubmit() {
-    const newId = await addFreela(newFreela);
+  async function handleAddFreelaSubmit(payload) {
+    // payload é opcional — se não vier, usa o state newFreela
+    const newId = await addFreela(payload || newFreela);
     if (newId) {
       setNewShift(s => ({ ...s, pessoaId: newId }));
       setNewFreela({ name: "", whatsapp: "", pix: "", cpf: "" });
@@ -19422,37 +19424,163 @@ function FreelaLancamentoTab({ restaurantId, restPessoas, restFreelas, shifts, a
           title="Até" style={{...S.input,maxWidth:140,fontSize:12,padding:"7px 10px"}}/>
       </div>
 
-      {/* Form de cadastro rápido de freela (líder/DP/owner) */}
-      {showFreelaForm && (
+      {/* Form de cadastro rápido de freela — fluxo CPF-first */}
+      {showFreelaForm && (() => {
+        // Lookup do CPF na base global de pessoas
+        const cpfRaw = (newFreela.cpf || "").replace(/\D/g, "");
+        const cpfValido = cpfRaw.length === 11;
+        const existing = cpfValido ? (allPessoas || []).find(p => (p.cpf || "").replace(/\D/g, "") === cpfRaw) : null;
+        const jaNesteRest = existing ? (existing.restaurantIds || []).includes(restaurantId) : false;
+        const jaFreelaAqui = existing ? !!existing.isFreela : false;
+        // Dados efetivos (preenchidos vs. existentes)
+        const effName = newFreela.name || existing?.name || "";
+        const effWA = newFreela.whatsapp || existing?.whatsapp || "";
+        const effPIX = newFreela.pix || existing?.pix || "";
+        const faltaWA = !effWA.trim();
+        const faltaPIX = !effPIX.trim();
+        const faltaNome = !effName.trim();
+        // Status pra UI
+        let statusBox = null;
+        if (cpfRaw.length > 0 && cpfRaw.length < 11) {
+          statusBox = { kind: "info", icon: "⌨️", text: `Continue digitando — faltam ${11 - cpfRaw.length} dígito(s)` };
+        } else if (cpfValido && existing) {
+          if (jaFreelaAqui && jaNesteRest) {
+            statusBox = { kind: "ok", icon: "✅", text: `${existing.name} já é freela aqui — selecione no campo Pessoa pra lançar shift` };
+          } else if (jaNesteRest) {
+            statusBox = { kind: "warn", icon: "🔄", text: `${existing.name} já está aqui (equipe) — vamos marcar também como freela` };
+          } else {
+            statusBox = { kind: "info", icon: "🔗", text: `${existing.name} já cadastrado em outro restaurante — vamos vincular aqui como freela` };
+          }
+        } else if (cpfValido && !existing) {
+          statusBox = { kind: "info", icon: "🆕", text: `CPF novo — preenche os dados abaixo` };
+        }
+
+        const colorByKind = { ok: "#15803d", warn: "#92400e", info: ac };
+        const bgByKind = { ok: "#10b98115", warn: "#fef3c7", info: `${ac}10` };
+
+        return (
         <div style={{background:`${ac}06`,border:`1px dashed ${ac}66`,borderRadius:10,padding:14,marginBottom:14}}>
           <div style={{fontSize:11,color:ac,fontWeight:700,textTransform:"uppercase",letterSpacing:0.4,marginBottom:4}}>🎒 Cadastrar freela</div>
           <div style={{fontSize:11,color:"var(--text3)",marginBottom:10,lineHeight:1.4}}>
-            Cadastro rápido — só nome, WhatsApp e PIX. CPF é opcional aqui (DP completa depois antes de pagar).
+            Comece pelo <strong>CPF</strong> — se a pessoa já tiver cadastro em outro restaurante, puxamos os dados automaticamente.
           </div>
-          <div style={{display:"grid",gridTemplateColumns:mobileOnly?"1fr":"2fr 1.3fr 1.3fr 1.2fr",gap:8,marginBottom:10}}>
-            <div>
-              <label style={{...S.label,fontSize:11}}>Nome *</label>
-              <input value={newFreela.name} onChange={e=>setNewFreela({...newFreela,name:e.target.value})} placeholder="Nome completo" style={S.input}/>
-            </div>
-            <div>
-              <label style={{...S.label,fontSize:11}}>WhatsApp *</label>
-              <input value={newFreela.whatsapp} onChange={e=>setNewFreela({...newFreela,whatsapp:e.target.value})} placeholder="(11) 9..." style={S.input}/>
-            </div>
-            <div>
-              <label style={{...S.label,fontSize:11}}>PIX *</label>
-              <input value={newFreela.pix} onChange={e=>setNewFreela({...newFreela,pix:e.target.value})} placeholder="CPF, e-mail, tel ou aleatória" style={S.input}/>
-            </div>
-            <div>
-              <label style={{...S.label,fontSize:11}}>CPF (opcional)</label>
-              <input value={newFreela.cpf} onChange={e=>setNewFreela({...newFreela,cpf:e.target.value})} placeholder="só números" style={S.input}/>
-            </div>
+
+          {/* CPF — destaque, primeiro */}
+          <div style={{marginBottom:10}}>
+            <label style={{...S.label,fontSize:11}}>CPF *</label>
+            <input
+              value={newFreela.cpf}
+              onChange={e=>{
+                // mantém só dígitos enquanto digita, mas formata na tela
+                const digits = e.target.value.replace(/\D/g, "").slice(0, 11);
+                let formatted = digits;
+                if (digits.length > 9) formatted = digits.replace(/(\d{3})(\d{3})(\d{3})(\d{0,2}).*/, "$1.$2.$3-$4");
+                else if (digits.length > 6) formatted = digits.replace(/(\d{3})(\d{3})(\d{0,3}).*/, "$1.$2.$3");
+                else if (digits.length > 3) formatted = digits.replace(/(\d{3})(\d{0,3}).*/, "$1.$2");
+                setNewFreela({...newFreela, cpf: formatted});
+              }}
+              placeholder="000.000.000-00"
+              inputMode="numeric"
+              autoFocus
+              style={{...S.input,fontFamily:"'DM Mono',monospace",fontSize:14,letterSpacing:0.5}}
+            />
           </div>
-          <div style={{display:"flex",gap:8,justifyContent:"flex-end"}}>
-            <button onClick={()=>{setShowFreelaForm(false); setNewFreela({name:"",whatsapp:"",pix:"",cpf:""});}} style={{...S.btnSecondary,fontSize:12,padding:"7px 14px"}}>Cancelar</button>
-            <button onClick={handleAddFreelaSubmit} style={{background:ac,color:"#fff",border:"none",borderRadius:8,padding:"7px 18px",fontSize:13,fontWeight:700,cursor:"pointer"}}>🎒 Cadastrar e usar</button>
+
+          {/* Box de status do lookup */}
+          {statusBox && (
+            <div style={{
+              padding:"8px 12px",borderRadius:8,marginBottom:10,fontSize:12,
+              background:bgByKind[statusBox.kind],color:colorByKind[statusBox.kind],
+              border:`1px solid ${colorByKind[statusBox.kind]}33`,fontWeight:600,
+            }}>
+              {statusBox.icon} {statusBox.text}
+            </div>
+          )}
+
+          {/* Campos restantes — só aparecem depois do CPF válido */}
+          {cpfValido && !(jaFreelaAqui && jaNesteRest) && (
+            <>
+              <div style={{display:"grid",gridTemplateColumns:mobileOnly?"1fr":"2fr 1.3fr 1.5fr",gap:8,marginBottom:10}}>
+                <div>
+                  <label style={{...S.label,fontSize:11}}>
+                    Nome {faltaNome && <span style={{color:"var(--red)"}}>*</span>}
+                    {existing?.name && newFreela.name === "" && <span style={{color:colorByKind.ok,marginLeft:4,fontSize:10}}>(do cadastro)</span>}
+                  </label>
+                  <input
+                    value={newFreela.name || existing?.name || ""}
+                    onChange={e=>setNewFreela({...newFreela,name:e.target.value})}
+                    placeholder="Nome completo"
+                    disabled={!!existing?.name}
+                    style={{...S.input,opacity:existing?.name?0.7:1,cursor:existing?.name?"not-allowed":"text"}}
+                  />
+                </div>
+                <div>
+                  <label style={{...S.label,fontSize:11}}>
+                    WhatsApp {faltaWA && <span style={{color:"var(--red)"}}>*</span>}
+                    {existing?.whatsapp && newFreela.whatsapp === "" && <span style={{color:colorByKind.ok,marginLeft:4,fontSize:10}}>(do cadastro)</span>}
+                  </label>
+                  <input
+                    value={newFreela.whatsapp || existing?.whatsapp || ""}
+                    onChange={e=>setNewFreela({...newFreela,whatsapp:e.target.value})}
+                    placeholder="(11) 9..."
+                    style={{...S.input,...(faltaWA?{borderColor:"var(--red)"}:null)}}
+                  />
+                </div>
+                <div>
+                  <label style={{...S.label,fontSize:11}}>
+                    PIX {faltaPIX && <span style={{color:"var(--red)"}}>*</span>}
+                    {existing?.pix && newFreela.pix === "" && <span style={{color:colorByKind.ok,marginLeft:4,fontSize:10}}>(do cadastro)</span>}
+                  </label>
+                  <input
+                    value={newFreela.pix || existing?.pix || ""}
+                    onChange={e=>setNewFreela({...newFreela,pix:e.target.value})}
+                    placeholder="CPF, e-mail, tel ou aleatória"
+                    style={{...S.input,...(faltaPIX?{borderColor:"var(--red)"}:null)}}
+                  />
+                </div>
+              </div>
+
+              {/* Aviso destacado se faltar dado essencial */}
+              {existing && (faltaWA || faltaPIX) && (
+                <div style={{padding:"8px 12px",background:"#fef3c7",border:"1px solid #fbbf24",borderRadius:8,fontSize:12,color:"#92400e",marginBottom:10}}>
+                  ⚠️ <strong>{existing.name}</strong> já está cadastrado, mas falta:
+                  {faltaWA && " WhatsApp"}{faltaWA && faltaPIX && " e"}{faltaPIX && " PIX"}.
+                  Preencha aí em cima — vamos completar o cadastro existente.
+                </div>
+              )}
+            </>
+          )}
+
+          <div style={{display:"flex",gap:8,justifyContent:"flex-end",marginTop:10}}>
+            <button onClick={()=>{setShowFreelaForm(false); setNewFreela({name:"",whatsapp:"",pix:"",cpf:""});}}
+              style={{...S.btnSecondary,fontSize:12,padding:"7px 14px"}}>Cancelar</button>
+            <button
+              onClick={async()=>{
+                // se já é freela aqui, só fecha (não precisa cadastrar de novo)
+                if (jaFreelaAqui && jaNesteRest) {
+                  setShowFreelaForm(false);
+                  setNewShift(s=>({...s,pessoaId:existing.id}));
+                  if (!showAddForm) setShowAddForm(true);
+                  return;
+                }
+                // Submit usando os dados efetivos (preenchidos OU vindos do existing)
+                await handleAddFreelaSubmit({ name: effName, whatsapp: effWA, pix: effPIX, cpf: cpfRaw });
+              }}
+              disabled={!cpfValido || (cpfValido && !(jaFreelaAqui && jaNesteRest) && (faltaNome || faltaWA || faltaPIX))}
+              style={{
+                background:ac,color:"#fff",border:"none",borderRadius:8,padding:"7px 18px",fontSize:13,fontWeight:700,
+                cursor:(!cpfValido || (faltaNome||faltaWA||faltaPIX)) && !(jaFreelaAqui&&jaNesteRest) ? "not-allowed":"pointer",
+                opacity:(!cpfValido || (cpfValido && !(jaFreelaAqui && jaNesteRest) && (faltaNome || faltaWA || faltaPIX))) ? 0.5 : 1,
+              }}>
+              {jaFreelaAqui && jaNesteRest ? "✓ Já cadastrado — usar" :
+               existing && jaNesteRest ? "🎒 Marcar como freela" :
+               existing ? "🔗 Vincular e usar" :
+               "🎒 Cadastrar e usar"}
+            </button>
           </div>
         </div>
-      )}
+        );
+      })()}
 
       {/* Form de bulk-fill (DP/Owner) */}
       {showBulkForm && (isDP || isOwner) && (
