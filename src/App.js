@@ -126,11 +126,29 @@ async function load(key, retries = 3) {
   console.warn(`load FAILED after ${retries} retries — usando cache local:`, key);
   return cacheGet(key);
 }
+// Remove campos `undefined` recursivamente — Firestore rejeita undefined em qualquer nível
+// e quebra o save inteiro. Bugs de dados (workSchedules, etc.) costumam introduzir undefined
+// silenciosamente; sanitizar aqui é a defesa mais robusta sem caçar cada origem.
+function sanitizeForFirestore(v) {
+  if (v === undefined || v === null) return v;
+  if (Array.isArray(v)) return v.map(sanitizeForFirestore);
+  if (typeof v === "object") {
+    const out = {};
+    for (const [k, val] of Object.entries(v)) {
+      if (val === undefined) continue; // pula a chave inteira
+      out[k] = sanitizeForFirestore(val);
+    }
+    return out;
+  }
+  return v;
+}
+
 async function save(key, value, retries = 3) {
+  const cleanValue = sanitizeForFirestore(value);
   for (let i = 0; i < retries; i++) {
     try {
-      await setDoc(doc(db, "appdata", key), { value });
-      cacheSet(key, value);
+      await setDoc(doc(db, "appdata", key), { value: cleanValue });
+      cacheSet(key, cleanValue);
       return true;
     } catch (e) {
       console.error(`save error (tentativa ${i+1}/${retries}):`, key, e);
@@ -5205,10 +5223,13 @@ function EmployeeSpreadsheet({ restEmps, restRoles, rid, employees, pessoas, onU
                   <div>
                     <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
                       {(() => {
-                        const qtd = workSchedules?.[rid]?.[emp.id]?.length ?? 0;
-                        if (qtd === 0) return null;
+                        const scheds = workSchedules?.[rid]?.[emp.id] || [];
+                        const validos = scheds.filter(s =>
+                          s && s.days && Object.values(s.days).some(d => d && d.in && d.out)
+                        );
+                        if (validos.length === 0) return null;
                         return (
-                          <span title={`${qtd} horário${qtd>1?"s":""} cadastrado${qtd>1?"s":""}`}
+                          <span title={`${validos.length} horário${validos.length>1?"s":""} cadastrado${validos.length>1?"s":""}`}
                             style={{fontSize:13,lineHeight:1,color:"#0284c7"}}>⏰</span>
                         );
                       })()}
@@ -6136,10 +6157,14 @@ function EmployeeSpreadsheet({ restEmps, restRoles, rid, employees, pessoas, onU
                   <div style={{flex:1,minWidth:0}}>
                     <div style={{display:"flex",alignItems:"center",gap:6,flexWrap:"wrap"}}>
                       {(() => {
-                        const qtd = workSchedules?.[rid]?.[emp.id]?.length ?? 0;
-                        if (qtd === 0) return null;
+                        // Só exibe se há pelo menos UM schedule completo (com algum dia ativo + in/out preenchidos)
+                        const scheds = workSchedules?.[rid]?.[emp.id] || [];
+                        const validos = scheds.filter(s =>
+                          s && s.days && Object.values(s.days).some(d => d && d.in && d.out)
+                        );
+                        if (validos.length === 0) return null;
                         return (
-                          <span title={`${qtd} horário${qtd>1?"s":""} cadastrado${qtd>1?"s":""}`}
+                          <span title={`${validos.length} horário${validos.length>1?"s":""} cadastrado${validos.length>1?"s":""}`}
                             style={{fontSize:11,lineHeight:1,color:"#0284c7",flexShrink:0}}>⏰</span>
                         );
                       })()}
