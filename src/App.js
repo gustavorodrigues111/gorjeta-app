@@ -29381,27 +29381,46 @@ export default function App() {
       if (loaded_data.workSchedules && typeof loaded_data.workSchedules === "object") {
         const ws = loaded_data.workSchedules;
         let dirty = false;
+        let removedCount = 0;
         const cleaned = {};
+        const summary = []; // diagnóstico: o que sobrou
         for (const [restId, byEmp] of Object.entries(ws)) {
-          if (!byEmp || typeof byEmp !== "object") { dirty = true; continue; }
+          if (!byEmp || typeof byEmp !== "object") { dirty = true; removedCount++; continue; }
           const cleanedEmp = {};
           for (const [empId, scheds] of Object.entries(byEmp)) {
-            if (!Array.isArray(scheds)) { dirty = true; continue; }
+            if (!Array.isArray(scheds)) { dirty = true; removedCount++; continue; }
             const validos = scheds.filter(s =>
               s && s.days && typeof s.days === "object" &&
               Object.values(s.days).some(d => d && d.in && d.out)
             );
-            if (validos.length !== scheds.length) dirty = true;
-            if (validos.length > 0) cleanedEmp[empId] = validos;
-            else if (scheds.length > 0) dirty = true; // tinha lixo, agora vazio
+            const removedHere = scheds.length - validos.length;
+            if (removedHere > 0) { dirty = true; removedCount += removedHere; }
+            if (validos.length > 0) {
+              cleanedEmp[empId] = validos;
+              // Log detalhado: o que sobrou pra cada empregado
+              const diasResumo = validos.map(s => {
+                const days = s.days || {};
+                const ativos = Object.entries(days)
+                  .filter(([,d]) => d && d.in && d.out)
+                  .map(([i,d]) => `D${i}:${d.in}-${d.out}`).join(",");
+                return `[${s.id?.slice(-6) || "?"}: ${ativos || "vazio"}]`;
+              }).join(" ");
+              summary.push(`rest=${restId.slice(-6)} emp=${empId.slice(-6)} → ${validos.length} entry(ies): ${diasResumo}`);
+            } else if (scheds.length > 0) {
+              dirty = true; // tinha lixo, agora vazio
+            }
           }
           if (Object.keys(cleanedEmp).length > 0) cleaned[restId] = cleanedEmp;
           else if (Object.keys(byEmp).length > 0) dirty = true;
         }
         if (dirty) {
-          console.log("[cleanup] workSchedules: removidos entries fantasma");
+          console.log(`[cleanup] workSchedules: ${removedCount} entry(ies) fantasma removido(s)`);
           setWorkSchedules(cleaned);
           save(K.workSchedules, cleaned);
+        }
+        if (summary.length > 0) {
+          console.log("[diagnóstico] workSchedules — entries que SOBRARAM (geram badge ⏰):");
+          summary.forEach(s => console.log("   " + s));
         }
       }
 
