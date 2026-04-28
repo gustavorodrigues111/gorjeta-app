@@ -471,6 +471,7 @@ const K = {
   tempSensors:         "v4:tempSensors",          // [{id, restaurantId, tuyaDeviceId, name, equipmentId?, location?, minTemp, maxTemp, alertMinutes, alertWhatsapp?, alertPessoaId?, createdAt, active}]
   tempReadings:        "v4:tempReadings",         // [{id, sensorId, restaurantId, timestamp, temp, battery?, online:bool}]   // histórico — pode ser truncado/arquivado
   tempAlerts:          "v4:tempAlerts",           // [{id, sensorId, restaurantId, openedAt, closedAt?, firstTemp, peakTemp, notifiedAt?, acknowledgedBy?, acknowledgedAt?, note?}]
+  tempBackfillState:   "v4:tempBackfillState",    // {[restaurantId]: { lastBackfillAt: ISO, lastBackfillBy?: name }} — auto-backfill a cada 3 dias
   // ═══ Permissões — perfis customizados por restaurante ═══
   permProfiles:        "v4:permProfiles",          // {[restaurantId]: [{id, label, icon, color, desc, keys:["operational.contagens", ...]}]}
   // ═══ Freelas ═══
@@ -18426,6 +18427,7 @@ function AppShell({ pessoa, data, activeRestaurantId, setActiveRestaurantId, use
           tempSensors={(data?.tempSensors ?? []).filter(s => s.restaurantId === activeRestaurantId)}
           tempReadings={(data?.tempReadings ?? []).filter(r => r.restaurantId === activeRestaurantId)}
           tempAlerts={(data?.tempAlerts ?? []).filter(a => a.restaurantId === activeRestaurantId)}
+          tempBackfillState={data?.tempBackfillState ?? {}}
           tuyaLink={data?.tuyaLinks?.[activeRestaurantId]}
           onUpdate={onUpdate}
           pessoa={pessoa}
@@ -25258,8 +25260,65 @@ function fmtRelMin(iso) {
   return `há ${Math.floor(diff/1440)}d`;
 }
 
+// ─── HELPERS GLOBAIS DE TEMPERATURAS ──
+// Retenção total: 6 meses (atende ANVISA com folga; SP/RJ pedem 6-12)
+const TEMP_RETENTION_MS = 6 * 30 * 24 * 60 * 60 * 1000;
+// Janela "alta resolução": últimas 24h (mantém 1 leitura por hora)
+const TEMP_HIRES_WINDOW_MS = 24 * 60 * 60 * 1000;
+// Âncoras de amostragem pra leituras antigas (4 por dia: 00h, 06h, 12h, 18h)
+const TEMP_ANCHOR_HOURS = [0, 6, 12, 18];
+
+// Compacta leituras pra caber em 1 doc Firestore (~1 MB):
+//   • <24h: mantém 1 leitura por hora (24/dia/sensor)
+//   • >24h e <6 meses: mantém 1 leitura próxima a cada âncora (4/dia/sensor)
+//   • >6 meses: descarta
+// Cálculo final (8 sensores): 24h×24/h×8 + 4/d×178d×8 = 192 + 5696 = ~5900 leituras (~880 KB)
+function compactTempReadings(readings) {
+  if (!readings || readings.length === 0) return [];
+  const now = Date.now();
+  const cutoffOld = now - TEMP_RETENTION_MS;
+  const cutoffHires = now - TEMP_HIRES_WINDOW_MS;
+  // Buckets: chave por (sensor, granularidade)
+  const buckets = new Map();
+  for (const r of readings) {
+    const ts = new Date(r.timestamp).getTime();
+    if (isNaN(ts) || ts < cutoffOld) continue; // descarta inválidas e velhas
+    let bucketKey;
+    if (ts >= cutoffHires) {
+      // Alta resolução: 1 por hora cheia
+      bucketKey = `${r.sensorId}|H|${Math.floor(ts / (60 * 60 * 1000))}`;
+    } else {
+      // Baixa resolução: âncora mais próxima do dia
+      const d = new Date(ts);
+      const dayKey = `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
+      const hour = d.getHours();
+      const anchor = TEMP_ANCHOR_HOURS.reduce((best, a) =>
+        Math.abs(hour - a) < Math.abs(hour - best) ? a : best, TEMP_ANCHOR_HOURS[0]);
+      bucketKey = `${r.sensorId}|A|${dayKey}|${anchor}`;
+    }
+    const existing = buckets.get(bucketKey);
+    if (!existing) {
+      buckets.set(bucketKey, r);
+    } else {
+      // Mantém a leitura mais próxima do alvo (hora cheia ou âncora)
+      const tsExisting = new Date(existing.timestamp).getTime();
+      // Pra alta-res: mantém a primeira da hora (já está). Pra baixa-res: mais próxima do anchor.
+      if (ts < cutoffHires) {
+        const d = new Date(ts);
+        const hour = d.getHours();
+        const anchor = parseInt(bucketKey.split('|').pop(), 10);
+        const dExisting = new Date(tsExisting);
+        const distNew = Math.abs(hour - anchor) * 60 + Math.abs(d.getMinutes());
+        const distOld = Math.abs(dExisting.getHours() - anchor) * 60 + Math.abs(dExisting.getMinutes());
+        if (distNew < distOld) buckets.set(bucketKey, r);
+      }
+    }
+  }
+  return [...buckets.values()].sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+}
+
 // Dashboard operacional: ver sensores + histórico + alertas (dados reais Tuya)
-function OperationalTemperaturas({ restaurantId, restaurantName, tempSensors, tempReadings, tempAlerts, tuyaLink, onUpdate, pessoa }) {
+function OperationalTemperaturas({ restaurantId, restaurantName, tempSensors, tempReadings, tempAlerts, tempBackfillState, tuyaLink, onUpdate, pessoa }) {
   const isMobile = useMobile();
   const ac = "#7c9e5e";
   const activeSensors = (tempSensors || []).filter(s => s.active !== false);
@@ -25334,10 +25393,9 @@ function OperationalTemperaturas({ restaurantId, restaurantName, tempSensors, te
     }));
 
     if (newReadings.length > 0) {
-      // Trunca histórico: mantém últimos 7 dias pra não estourar doc de 1MB
-      const cutoff = Date.now() - 7 * 24 * 60 * 60 * 1000;
-      const keptOld = (tempReadings || []).filter(r => new Date(r.timestamp).getTime() >= cutoff);
-      onUpdate("tempReadings", [...keptOld, ...newReadings]);
+      // Junta + compacta (alta-res 24h, baixa-res 4/dia até 6 meses)
+      const merged = compactTempReadings([...(tempReadings || []), ...newReadings]);
+      onUpdate("tempReadings", merged);
 
       // Detecta 4 tipos de alerta. Email só pra over_max, low_battery e offline.
       const BATTERY_THRESHOLD = 20; // %
@@ -25349,8 +25407,8 @@ function OperationalTemperaturas({ restaurantId, restaurantName, tempSensors, te
       const alertsToEmail = [];
 
       activeSensors.forEach(s => {
-        // Última leitura deste sensor (merge entre histórico kept + novas)
-        const allRs = [...keptOld, ...newReadings].filter(r => r.sensorId === s.id);
+        // Última leitura deste sensor (merge entre histórico já compactado + novas)
+        const allRs = [...merged, ...newReadings].filter(r => r.sensorId === s.id);
         const lastR = allRs.sort((a,b) => new Date(b.timestamp) - new Date(a.timestamp))[0];
         if (!lastR) return;
 
@@ -25558,12 +25616,9 @@ function OperationalTemperaturas({ restaurantId, restaurantName, tempSensors, te
       const toAdd = allNew.filter(r => !existingKeys.has(`${r.sensorId}|${r.timestamp}`));
       console.log(`[backfill] 🧹 após dedupe:`, toAdd.length, "novas (de", allNew.length, "totais)");
       if (toAdd.length > 0) {
-        // Mantém só últimos 7 dias (mesmo cutoff usado no fetchReadings)
-        const cutoff = Date.now() - 7 * 24 * 60 * 60 * 1000;
-        const keptOld = (tempReadings || []).filter(r => new Date(r.timestamp).getTime() >= cutoff);
-        // Junta + ordena por timestamp
-        const merged = [...keptOld, ...toAdd].sort((a,b) => new Date(a.timestamp) - new Date(b.timestamp));
-        console.log(`[backfill] 💾 salvando — total final no banco:`, merged.length);
+        // Junta tudo e compacta (alta-res 24h, baixa-res 4/dia, retenção 6 meses)
+        const merged = compactTempReadings([...(tempReadings || []), ...toAdd]);
+        console.log(`[backfill] 💾 salvando — total final no banco (após compactar):`, merged.length);
         onUpdate("tempReadings", merged);
         onUpdate("_toast", `📥 ${toAdd.length} leitura(s) histórica(s) recuperada(s) do Tuya`);
       } else {
@@ -25575,17 +25630,37 @@ function OperationalTemperaturas({ restaurantId, restaurantName, tempSensors, te
     if (errors.length > 0) console.warn("[backfill] erros:", errors);
     console.log(`[backfill] ✅ fim`);
     setLastBackfillAt(new Date().toISOString());
+    // Persiste timestamp do último backfill no banco — usado pra agendamento de 3 em 3 dias
+    onUpdate("tempBackfillState", (prev) => ({
+      ...(prev || {}),
+      [restaurantId]: {
+        lastBackfillAt: new Date().toISOString(),
+        lastBackfillBy: pessoa?.name || null,
+        readingsAdded: allNew.length,
+      },
+    }));
     setBackfilling(false);
   }
 
-  // Auto-polling a cada 5 minutos enquanto a tela está montada + backfill no mount
+  // Auto-polling a cada 5 minutos enquanto a tela está montada + backfill agendado
   useEffect(() => {
     if (activeSensors.length === 0) return;
 
-    // BACKFILL: roda 1x por mount, recupera leituras históricas do Tuya
+    // BACKFILL AGENDADO: roda 1x por mount SE faz mais de 3 dias desde o último.
+    // Persiste timestamp em tempBackfillState pra qualquer user que abrir a tela
+    // dispare o próximo só quando vencer (evita Tuya quota burning toda hora).
     if (!backfillRanRef.current) {
       backfillRanRef.current = true;
-      backfillHistory();
+      const lastIso = tempBackfillState?.[restaurantId]?.lastBackfillAt;
+      const lastMs = lastIso ? new Date(lastIso).getTime() : 0;
+      const daysSince = (Date.now() - lastMs) / (24 * 60 * 60 * 1000);
+      const SCHEDULE_INTERVAL_DAYS = 3;
+      if (!lastIso || daysSince >= SCHEDULE_INTERVAL_DAYS) {
+        console.log(`[backfill agendado] disparando — última: ${lastIso || "nunca"} (${daysSince.toFixed(1)}d atrás)`);
+        backfillHistory();
+      } else {
+        console.log(`[backfill agendado] pulando — última há ${daysSince.toFixed(1)}d (próxima em ${(SCHEDULE_INTERVAL_DAYS - daysSince).toFixed(1)}d)`);
+      }
     }
 
     // Primeira leitura "agora" (em paralelo com backfill): se não tem dos últimos 5min, busca
@@ -25893,9 +25968,7 @@ function SensorHistoryModal({ sensor, allReadings, onClose, onUpdate, restaurant
           const existingKeys = new Set((allReadings || []).map(r => `${r.sensorId}|${r.timestamp}`));
           const toAdd = newOnes.filter(r => !existingKeys.has(`${r.sensorId}|${r.timestamp}`));
           if (toAdd.length > 0) {
-            const cutoff = Date.now() - 7 * 24 * 60 * 60 * 1000;
-            const keptOld = (allReadings || []).filter(r => new Date(r.timestamp).getTime() >= cutoff);
-            const merged = [...keptOld, ...toAdd].sort((a,b) => new Date(a.timestamp) - new Date(b.timestamp));
+            const merged = compactTempReadings([...(allReadings || []), ...toAdd]);
             onUpdate("tempReadings", merged);
           }
         }
@@ -26322,77 +26395,116 @@ function TemperaturasExportModal({ sensors, readings, alerts, restaurantId, onCl
 
       footer(2);
 
-      // ═══ PÁGINAS 3+: PIVOT POR DIA — 1 dia por página ═══
-      // Layout: linhas = sensores, colunas = slots de 3h (como a tela de escalas).
-      // 15 sensores × 8 slots cabem confortavelmente em 1 página paisagem.
+      // ═══ PÁGINAS 3+: 1 PÁGINA POR EQUIPAMENTO (até 30 dias × 8 slots de 3h por página) ═══
+      // Layout: linhas = dias, colunas = 8 slots de 3h. Cabe em A4 paisagem com fonte 8pt.
+      // Cabeçalho da página = nome do sensor + faixa + KPIs do período (mín/méd/máx/alertas).
 
       let pageCount = 2;
-      days.forEach(day => {
-        doc.addPage();
-        pageCount++;
-        header(`${fmtDate(day)}`, `Leituras a cada ${SLOT_HOURS}h · ${selectedSensors.length} sensor${selectedSensors.length>1?'es':''}`);
+      const slotLabels = [];
+      for (let slot = 0; slot < SLOTS_PER_DAY; slot++) {
+        const startHH = String(slot * SLOT_HOURS).padStart(2, "0");
+        const endHH = String(((slot + 1) * SLOT_HOURS) % 24).padStart(2, "0");
+        slotLabels.push(`${startHH}—${endHH}h`);
+      }
+      // Quebra "days" em chunks de 30 (caso o período seja maior que 30 dias)
+      function chunk(arr, size) {
+        const out = [];
+        for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size));
+        return out;
+      }
+      const dayChunks = chunk(days, 30);
 
-        // Cabeçalho das colunas: Sensor + Faixa + 8 slots
-        const slotLabels = [];
-        for (let slot = 0; slot < SLOTS_PER_DAY; slot++) {
-          const startHH = String(slot * SLOT_HOURS).padStart(2, "0");
-          const endHH = String(((slot + 1) * SLOT_HOURS) % 24).padStart(2, "0");
-          slotLabels.push(`${startHH}—${endHH}h`);
-        }
-        const head = [["Sensor", "Faixa (°C)", ...slotLabels]];
+      selectedSensors.forEach(sensor => {
+        const sensorSummary = summary.find(s => s.sensor.id === sensor.id);
+        dayChunks.forEach((chunkDays, chunkIdx) => {
+          doc.addPage();
+          pageCount++;
+          const subtitle = dayChunks.length > 1
+            ? `${chunkIdx === 0 ? 'parte 1' : `parte ${chunkIdx+1}`} · ${chunkDays.length} dia${chunkDays.length>1?'s':''} · faixa ${sensor.minTemp}° a ${sensor.maxTemp}°`
+            : `${fmtDate(chunkDays[0])} a ${fmtDate(chunkDays[chunkDays.length-1])} · faixa ${sensor.minTemp}° a ${sensor.maxTemp}°`;
+          header(sensor.name + (sensor.location ? ` — ${sensor.location}` : ''), subtitle);
 
-        // Body: 1 linha por sensor
-        const body = selectedSensors.map(s => {
-          const row = [s.name, `${s.minTemp} a ${s.maxTemp}`];
-          for (let slot = 0; slot < SLOTS_PER_DAY; slot++) {
-            const startHH = String(slot * SLOT_HOURS).padStart(2, "0");
-            const temps = buckets[`${s.id}|${day} ${startHH}`];
-            if (!temps || temps.length === 0) {
-              row.push("—");
-            } else {
-              const avg = temps.reduce((a, v) => a + v, 0) / temps.length;
-              row.push(`${avg.toFixed(1)}`);
-            }
+          // KPI box no topo da página (4 caixinhas)
+          if (chunkIdx === 0 && sensorSummary) {
+            const kpiY = 38;
+            const kpis = [
+              { lbl: "Leituras", val: String(sensorSummary.readings) },
+              { lbl: "Mínima", val: sensorSummary.tempMin != null ? `${sensorSummary.tempMin.toFixed(1)}°` : "—" },
+              { lbl: "Média", val: sensorSummary.tempAvg != null ? `${sensorSummary.tempAvg.toFixed(1)}°` : "—" },
+              { lbl: "Máxima", val: sensorSummary.tempMax != null ? `${sensorSummary.tempMax.toFixed(1)}°` : "—" },
+              { lbl: "Alertas", val: String(sensorSummary.alerts) },
+              { lbl: "Tempo alerta", val: `${sensorSummary.alertHours.toFixed(1)}h` },
+            ];
+            const kpiW = (pageW - 40) / kpis.length;
+            kpis.forEach((k, i) => {
+              const x = 20 + i * kpiW;
+              doc.setFillColor(250, 248, 244);
+              doc.rect(x, kpiY, kpiW - 2, 12, "F");
+              doc.setFontSize(7); doc.setTextColor(...TEXT3_RGB);
+              doc.text(k.lbl, x + 3, kpiY + 4);
+              doc.setFontSize(11); doc.setTextColor(...TEXT_RGB); doc.setFont(undefined, 'bold');
+              doc.text(k.val, x + 3, kpiY + 10);
+              doc.setFont(undefined, 'normal');
+            });
           }
-          return row;
-        });
+          const tableStartY = (chunkIdx === 0 && sensorSummary) ? 54 : 38;
 
-        doc.autoTable({
-          startY: 38,
-          head,
-          body,
-          theme: 'grid',
-          styles: { fontSize: 9, cellPadding: 2.5, textColor: TEXT_RGB, lineColor: BORDER_RGB, lineWidth: 0.15, halign: 'center' },
-          headStyles: { fillColor: ACCENT_RGB, textColor: [255,255,255], fontStyle: 'bold', fontSize: 9, halign: 'center' },
-          alternateRowStyles: { fillColor: [250, 248, 244] },
-          columnStyles: {
-            0: { fontStyle: 'bold', cellWidth: 50, halign: 'left', fillColor: [242, 239, 232] },
-            1: { cellWidth: 24, fillColor: [242, 239, 232], textColor: TEXT3_RGB },
-          },
-          didParseCell: function(data) {
-            // Colore células de temperatura fora da faixa (só cols >= 2)
-            if (data.section === 'body' && data.column.index >= 2) {
-              const sensor = selectedSensors[data.row.index];
-              const value = data.cell.raw;
-              if (value !== "—") {
-                const t = parseFloat(value);
-                if (!isNaN(t)) {
-                  if (t > sensor.maxTemp) {
-                    data.cell.styles.fillColor = [252, 232, 230];
-                    data.cell.styles.textColor = RED_RGB;
-                    data.cell.styles.fontStyle = 'bold';
-                  } else if (t < sensor.minTemp) {
-                    data.cell.styles.fillColor = [230, 238, 252];
-                    data.cell.styles.textColor = [30, 64, 175]; // azul
-                    data.cell.styles.fontStyle = 'bold';
+          // Tabela: linhas = dias, colunas = slots de 3h
+          const head = [["Dia", ...slotLabels, "Méd."]];
+          const body = chunkDays.map(day => {
+            const row = [fmtDate(day)];
+            const dayTemps = [];
+            for (let slot = 0; slot < SLOTS_PER_DAY; slot++) {
+              const startHH = String(slot * SLOT_HOURS).padStart(2, "0");
+              const temps = buckets[`${sensor.id}|${day} ${startHH}`];
+              if (!temps || temps.length === 0) {
+                row.push("—");
+              } else {
+                const avg = temps.reduce((a, v) => a + v, 0) / temps.length;
+                row.push(`${avg.toFixed(1)}`);
+                dayTemps.push(avg);
+              }
+            }
+            // Coluna "Méd." do dia
+            row.push(dayTemps.length ? `${(dayTemps.reduce((a,v)=>a+v,0)/dayTemps.length).toFixed(1)}` : "—");
+            return row;
+          });
+
+          doc.autoTable({
+            startY: tableStartY,
+            head, body,
+            theme: 'grid',
+            styles: { fontSize: 8, cellPadding: 1.8, textColor: TEXT_RGB, lineColor: BORDER_RGB, lineWidth: 0.12, halign: 'center' },
+            headStyles: { fillColor: ACCENT_RGB, textColor: [255,255,255], fontStyle: 'bold', fontSize: 8, halign: 'center' },
+            alternateRowStyles: { fillColor: [250, 248, 244] },
+            columnStyles: {
+              0: { fontStyle: 'bold', halign: 'left', cellWidth: 26, fillColor: [242, 239, 232] },
+              [SLOTS_PER_DAY + 1]: { fontStyle: 'bold', fillColor: [242, 239, 232] }, // Méd.
+            },
+            didParseCell: function(data) {
+              // Colore células de temperatura fora da faixa (cols 1..SLOTS_PER_DAY são slots; última é média)
+              if (data.section === 'body' && data.column.index >= 1 && data.column.index <= SLOTS_PER_DAY + 1) {
+                const value = data.cell.raw;
+                if (value !== "—") {
+                  const t = parseFloat(value);
+                  if (!isNaN(t)) {
+                    if (t > sensor.maxTemp) {
+                      data.cell.styles.fillColor = [252, 232, 230];
+                      data.cell.styles.textColor = RED_RGB;
+                      data.cell.styles.fontStyle = 'bold';
+                    } else if (t < sensor.minTemp) {
+                      data.cell.styles.fillColor = [230, 238, 252];
+                      data.cell.styles.textColor = [30, 64, 175];
+                      data.cell.styles.fontStyle = 'bold';
+                    }
                   }
                 }
               }
-            }
-          },
-        });
+            },
+          });
 
-        footer(pageCount);
+          footer(pageCount);
+        });
       });
 
       // ═══ ÚLTIMAS PÁGINAS: ALERTAS DETALHADOS ═══
@@ -29662,6 +29774,7 @@ export default function App() {
   const [tempSensors,        setTempSensors]        = useState([]);
   const [tempReadings,       setTempReadings]       = useState([]);
   const [tempAlerts,         setTempAlerts]         = useState([]);
+  const [tempBackfillState,  setTempBackfillState]  = useState({});
   const [permProfiles,       setPermProfiles]       = useState({});
   const [freelaShifts,       setFreelaShifts]       = useState([]);
   const [freelaPagamentos,   setFreelaPagamentos]   = useState([]);
@@ -29692,7 +29805,7 @@ export default function App() {
       setLoadProgress("Preparando o sistema...");
 
       const keys = keyNames;
-      const map = { owners:setOwners, managers:setManagers, restaurants:setRestaurants, employees:setEmployees, roles:setRoles, tips:setTips, splits:setSplits, schedules:setSchedules, communications:setCommunications, commAcks:setCommAcks, faq:setFaq, dpMessages:setDpMessages, workSchedules:setWorkSchedules, notifications:setNotifications, noTipDays:setNoTipDays, trash:setTrash, schedTemplates:setSchedTemplates, schedDrafts:setSchedDrafts, scheduleVersions:setScheduleVersions, tipVersions:setTipVersions, vtConfig:setVtConfig, vtMonthly:setVtMonthly, vtPayments:setVtPayments, incidents:setIncidents, feedbacks:setFeedbacks, devChecklists:setDevChecklists, scheduleAdjustments:setScheduleAdjustments, scheduleStatus:setScheduleStatus, schedulePrevista:setSchedulePrevista, employeeGoals:setEmployeeGoals, delays:setDelays, tipApprovals:setTipApprovals, meetingPlans:setMeetingPlans, meetingIdeas:setMeetingIdeas, meetingAgendas:setMeetingAgendas, meetingActions:setMeetingActions, meetingOccurrences:setMeetingOccurrences, meetingPendencias:setMeetingPendencias, inbox:setInbox, inboxFolders:setInboxFolders, miseCategories:setMiseCategories, miseStocks:setMiseStocks, miseAssignments:setMiseAssignments, miseItems:setMiseItems, miseCycles:setMiseCycles, miseCounts:setMiseCounts, miseSuppliers:setMiseSuppliers, miseProductSuppliers:setMiseProductSuppliers, miseSupplierOrders:setMiseSupplierOrders, miseChecklistTemplates:setMiseChecklistTemplates, miseChecklistRuns:setMiseChecklistRuns, miseFtInsumos:setMiseFtInsumos, miseFtEquipamentos:setMiseFtEquipamentos, miseFtDishes:setMiseFtDishes, pessoas:setPessoas, pessoasMigratedAt:setPessoasMigratedAt, tuyaLinks:setTuyaLinks, tempSensors:setTempSensors, tempReadings:setTempReadings, tempAlerts:setTempAlerts, permProfiles:setPermProfiles, freelaShifts:setFreelaShifts, freelaPagamentos:setFreelaPagamentos };
+      const map = { owners:setOwners, managers:setManagers, restaurants:setRestaurants, employees:setEmployees, roles:setRoles, tips:setTips, splits:setSplits, schedules:setSchedules, communications:setCommunications, commAcks:setCommAcks, faq:setFaq, dpMessages:setDpMessages, workSchedules:setWorkSchedules, notifications:setNotifications, noTipDays:setNoTipDays, trash:setTrash, schedTemplates:setSchedTemplates, schedDrafts:setSchedDrafts, scheduleVersions:setScheduleVersions, tipVersions:setTipVersions, vtConfig:setVtConfig, vtMonthly:setVtMonthly, vtPayments:setVtPayments, incidents:setIncidents, feedbacks:setFeedbacks, devChecklists:setDevChecklists, scheduleAdjustments:setScheduleAdjustments, scheduleStatus:setScheduleStatus, schedulePrevista:setSchedulePrevista, employeeGoals:setEmployeeGoals, delays:setDelays, tipApprovals:setTipApprovals, meetingPlans:setMeetingPlans, meetingIdeas:setMeetingIdeas, meetingAgendas:setMeetingAgendas, meetingActions:setMeetingActions, meetingOccurrences:setMeetingOccurrences, meetingPendencias:setMeetingPendencias, inbox:setInbox, inboxFolders:setInboxFolders, miseCategories:setMiseCategories, miseStocks:setMiseStocks, miseAssignments:setMiseAssignments, miseItems:setMiseItems, miseCycles:setMiseCycles, miseCounts:setMiseCounts, miseSuppliers:setMiseSuppliers, miseProductSuppliers:setMiseProductSuppliers, miseSupplierOrders:setMiseSupplierOrders, miseChecklistTemplates:setMiseChecklistTemplates, miseChecklistRuns:setMiseChecklistRuns, miseFtInsumos:setMiseFtInsumos, miseFtEquipamentos:setMiseFtEquipamentos, miseFtDishes:setMiseFtDishes, pessoas:setPessoas, pessoasMigratedAt:setPessoasMigratedAt, tuyaLinks:setTuyaLinks, tempSensors:setTempSensors, tempReadings:setTempReadings, tempAlerts:setTempAlerts, tempBackfillState:setTempBackfillState, permProfiles:setPermProfiles, freelaShifts:setFreelaShifts, freelaPagamentos:setFreelaPagamentos };
       const loaded_data = {};
       let successCount = 0;
       keys.forEach((k, i) => {
@@ -29952,7 +30065,7 @@ export default function App() {
     }
   }, [loaded, employees.length, managers.length]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const data = { owners, managers, restaurants, employees, roles, tips, splits, schedules, communications, commAcks, faq, dpMessages, workSchedules, notifications, noTipDays, trash, schedTemplates, schedDrafts, scheduleVersions, tipVersions, vtConfig, vtMonthly, vtPayments, incidents, feedbacks, devChecklists, scheduleAdjustments, scheduleStatus, schedulePrevista, employeeGoals, delays, tipApprovals, meetingPlans, meetingIdeas, meetingAgendas, meetingActions, meetingOccurrences, meetingPendencias, inbox, inboxFolders, miseCategories, miseStocks, miseAssignments, miseItems, miseCycles, miseCounts, miseSuppliers, miseProductSuppliers, miseSupplierOrders, miseChecklistTemplates, miseChecklistRuns, miseFtInsumos, miseFtEquipamentos, miseFtDishes, pessoas, pessoasMigratedAt, tuyaLinks, tempSensors, tempReadings, tempAlerts, permProfiles, freelaShifts, freelaPagamentos };
+  const data = { owners, managers, restaurants, employees, roles, tips, splits, schedules, communications, commAcks, faq, dpMessages, workSchedules, notifications, noTipDays, trash, schedTemplates, schedDrafts, scheduleVersions, tipVersions, vtConfig, vtMonthly, vtPayments, incidents, feedbacks, devChecklists, scheduleAdjustments, scheduleStatus, schedulePrevista, employeeGoals, delays, tipApprovals, meetingPlans, meetingIdeas, meetingAgendas, meetingActions, meetingOccurrences, meetingPendencias, inbox, inboxFolders, miseCategories, miseStocks, miseAssignments, miseItems, miseCycles, miseCounts, miseSuppliers, miseProductSuppliers, miseSupplierOrders, miseChecklistTemplates, miseChecklistRuns, miseFtInsumos, miseFtEquipamentos, miseFtDishes, pessoas, pessoasMigratedAt, tuyaLinks, tempSensors, tempReadings, tempAlerts, tempBackfillState, permProfiles, freelaShifts, freelaPagamentos };
 
   async function handleUpdate(field, value) {
     if (field === "_toast") { setToast(value); return; }
@@ -29961,8 +30074,8 @@ export default function App() {
       setToast("⚠️ Você está offline — conecte à internet para salvar alterações");
       return;
     }
-    const setters = { owners:setOwners, managers:setManagers, restaurants:setRestaurants, employees:setEmployees, roles:setRoles, tips:setTips, splits:setSplits, schedules:setSchedules, communications:setCommunications, commAcks:setCommAcks, faq:setFaq, dpMessages:setDpMessages, workSchedules:setWorkSchedules, notifications:setNotifications, noTipDays:setNoTipDays, trash:setTrash, schedTemplates:setSchedTemplates, schedDrafts:setSchedDrafts, scheduleVersions:setScheduleVersions, tipVersions:setTipVersions, vtConfig:setVtConfig, vtMonthly:setVtMonthly, vtPayments:setVtPayments, incidents:setIncidents, feedbacks:setFeedbacks, devChecklists:setDevChecklists, scheduleAdjustments:setScheduleAdjustments, scheduleStatus:setScheduleStatus, schedulePrevista:setSchedulePrevista, employeeGoals:setEmployeeGoals, delays:setDelays, tipApprovals:setTipApprovals, meetingPlans:setMeetingPlans, meetingIdeas:setMeetingIdeas, meetingAgendas:setMeetingAgendas, meetingActions:setMeetingActions, meetingOccurrences:setMeetingOccurrences, meetingPendencias:setMeetingPendencias, inbox:setInbox, inboxFolders:setInboxFolders, miseCategories:setMiseCategories, miseStocks:setMiseStocks, miseAssignments:setMiseAssignments, miseItems:setMiseItems, miseCycles:setMiseCycles, miseCounts:setMiseCounts, miseSuppliers:setMiseSuppliers, miseProductSuppliers:setMiseProductSuppliers, miseSupplierOrders:setMiseSupplierOrders, miseChecklistTemplates:setMiseChecklistTemplates, miseChecklistRuns:setMiseChecklistRuns, miseFtInsumos:setMiseFtInsumos, miseFtEquipamentos:setMiseFtEquipamentos, miseFtDishes:setMiseFtDishes, pessoas:setPessoas, pessoasMigratedAt:setPessoasMigratedAt, tuyaLinks:setTuyaLinks, tempSensors:setTempSensors, tempReadings:setTempReadings, tempAlerts:setTempAlerts, permProfiles:setPermProfiles, freelaShifts:setFreelaShifts, freelaPagamentos:setFreelaPagamentos };
-    const keys    = { owners:K.owners, managers:K.managers, restaurants:K.restaurants, employees:K.employees, roles:K.roles, tips:K.tips, splits:K.splits, schedules:K.schedules, communications:K.communications, commAcks:K.commAcks, faq:K.faq, dpMessages:K.dpMessages, workSchedules:K.workSchedules, notifications:K.notifications, noTipDays:K.noTipDays, trash:K.trash, schedTemplates:K.schedTemplates, schedDrafts:K.schedDrafts, scheduleVersions:K.scheduleVersions, tipVersions:K.tipVersions, vtConfig:K.vtConfig, vtMonthly:K.vtMonthly, vtPayments:K.vtPayments, incidents:K.incidents, feedbacks:K.feedbacks, devChecklists:K.devChecklists, scheduleAdjustments:K.scheduleAdjustments, scheduleStatus:K.scheduleStatus, schedulePrevista:K.schedulePrevista, employeeGoals:K.employeeGoals, delays:K.delays, tipApprovals:K.tipApprovals, meetingPlans:K.meetingPlans, meetingIdeas:K.meetingIdeas, meetingAgendas:K.meetingAgendas, meetingActions:K.meetingActions, inbox:K.inbox, inboxFolders:K.inboxFolders, miseCategories:K.miseCategories, miseStocks:K.miseStocks, miseAssignments:K.miseAssignments, miseItems:K.miseItems, miseCycles:K.miseCycles, miseCounts:K.miseCounts, miseSuppliers:K.miseSuppliers, miseProductSuppliers:K.miseProductSuppliers, miseSupplierOrders:K.miseSupplierOrders, miseChecklistTemplates:K.miseChecklistTemplates, miseChecklistRuns:K.miseChecklistRuns, miseFtInsumos:K.miseFtInsumos, miseFtEquipamentos:K.miseFtEquipamentos, miseFtDishes:K.miseFtDishes, pessoas:K.pessoas, pessoasMigratedAt:K.pessoasMigratedAt, tuyaLinks:K.tuyaLinks, tempSensors:K.tempSensors, tempReadings:K.tempReadings, tempAlerts:K.tempAlerts, permProfiles:K.permProfiles, freelaShifts:K.freelaShifts, freelaPagamentos:K.freelaPagamentos };
+    const setters = { owners:setOwners, managers:setManagers, restaurants:setRestaurants, employees:setEmployees, roles:setRoles, tips:setTips, splits:setSplits, schedules:setSchedules, communications:setCommunications, commAcks:setCommAcks, faq:setFaq, dpMessages:setDpMessages, workSchedules:setWorkSchedules, notifications:setNotifications, noTipDays:setNoTipDays, trash:setTrash, schedTemplates:setSchedTemplates, schedDrafts:setSchedDrafts, scheduleVersions:setScheduleVersions, tipVersions:setTipVersions, vtConfig:setVtConfig, vtMonthly:setVtMonthly, vtPayments:setVtPayments, incidents:setIncidents, feedbacks:setFeedbacks, devChecklists:setDevChecklists, scheduleAdjustments:setScheduleAdjustments, scheduleStatus:setScheduleStatus, schedulePrevista:setSchedulePrevista, employeeGoals:setEmployeeGoals, delays:setDelays, tipApprovals:setTipApprovals, meetingPlans:setMeetingPlans, meetingIdeas:setMeetingIdeas, meetingAgendas:setMeetingAgendas, meetingActions:setMeetingActions, meetingOccurrences:setMeetingOccurrences, meetingPendencias:setMeetingPendencias, inbox:setInbox, inboxFolders:setInboxFolders, miseCategories:setMiseCategories, miseStocks:setMiseStocks, miseAssignments:setMiseAssignments, miseItems:setMiseItems, miseCycles:setMiseCycles, miseCounts:setMiseCounts, miseSuppliers:setMiseSuppliers, miseProductSuppliers:setMiseProductSuppliers, miseSupplierOrders:setMiseSupplierOrders, miseChecklistTemplates:setMiseChecklistTemplates, miseChecklistRuns:setMiseChecklistRuns, miseFtInsumos:setMiseFtInsumos, miseFtEquipamentos:setMiseFtEquipamentos, miseFtDishes:setMiseFtDishes, pessoas:setPessoas, pessoasMigratedAt:setPessoasMigratedAt, tuyaLinks:setTuyaLinks, tempSensors:setTempSensors, tempReadings:setTempReadings, tempAlerts:setTempAlerts, tempBackfillState:setTempBackfillState, permProfiles:setPermProfiles, freelaShifts:setFreelaShifts, freelaPagamentos:setFreelaPagamentos };
+    const keys    = { owners:K.owners, managers:K.managers, restaurants:K.restaurants, employees:K.employees, roles:K.roles, tips:K.tips, splits:K.splits, schedules:K.schedules, communications:K.communications, commAcks:K.commAcks, faq:K.faq, dpMessages:K.dpMessages, workSchedules:K.workSchedules, notifications:K.notifications, noTipDays:K.noTipDays, trash:K.trash, schedTemplates:K.schedTemplates, schedDrafts:K.schedDrafts, scheduleVersions:K.scheduleVersions, tipVersions:K.tipVersions, vtConfig:K.vtConfig, vtMonthly:K.vtMonthly, vtPayments:K.vtPayments, incidents:K.incidents, feedbacks:K.feedbacks, devChecklists:K.devChecklists, scheduleAdjustments:K.scheduleAdjustments, scheduleStatus:K.scheduleStatus, schedulePrevista:K.schedulePrevista, employeeGoals:K.employeeGoals, delays:K.delays, tipApprovals:K.tipApprovals, meetingPlans:K.meetingPlans, meetingIdeas:K.meetingIdeas, meetingAgendas:K.meetingAgendas, meetingActions:K.meetingActions, inbox:K.inbox, inboxFolders:K.inboxFolders, miseCategories:K.miseCategories, miseStocks:K.miseStocks, miseAssignments:K.miseAssignments, miseItems:K.miseItems, miseCycles:K.miseCycles, miseCounts:K.miseCounts, miseSuppliers:K.miseSuppliers, miseProductSuppliers:K.miseProductSuppliers, miseSupplierOrders:K.miseSupplierOrders, miseChecklistTemplates:K.miseChecklistTemplates, miseChecklistRuns:K.miseChecklistRuns, miseFtInsumos:K.miseFtInsumos, miseFtEquipamentos:K.miseFtEquipamentos, miseFtDishes:K.miseFtDishes, pessoas:K.pessoas, pessoasMigratedAt:K.pessoasMigratedAt, tuyaLinks:K.tuyaLinks, tempSensors:K.tempSensors, tempReadings:K.tempReadings, tempAlerts:K.tempAlerts, tempBackfillState:K.tempBackfillState, permProfiles:K.permProfiles, freelaShifts:K.freelaShifts, freelaPagamentos:K.freelaPagamentos };
     // Support functional updates to prevent stale-state race conditions:
     // When value is a function, it receives the latest state (like setState(prev => ...))
     // IMPORTANTE: o callback do setState pode rodar de forma assíncrona em React 18,
