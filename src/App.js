@@ -26449,24 +26449,44 @@ function TemperaturasExportModal({ sensors, readings, alerts, restaurantId, onCl
           }
           const tableStartY = (chunkIdx === 0 && sensorSummary) ? 54 : 38;
 
-          // Tabela: linhas = dias, colunas = slots de 3h
+          // Tabela: linhas = dias, colunas = slots de 3h.
+          // Aplica CARRY-FORWARD: quando uma janela de 3h não tem leitura do sensor,
+          // assume o último valor reportado (sensor T&H Tuya só envia quando há variação
+          // além da sensibilidade — estabilidade = sem reporte). ANVISA aceita esse princípio.
+          // Marcamos com asterisco (*) e cor cinza pra distinguir de leitura real.
           const head = [["Dia", ...slotLabels, "Méd."]];
+          let lastKnownTemp = null; // valor mais recente conhecido (carry-forward através de dias/slots)
+          const carryFlags = []; // mesma estrutura do body — true = carry-forward, false = leitura real
           const body = chunkDays.map(day => {
             const row = [fmtDate(day)];
+            const flagRow = [false]; // primeira col (data) nunca é carry
             const dayTemps = [];
             for (let slot = 0; slot < SLOTS_PER_DAY; slot++) {
               const startHH = String(slot * SLOT_HOURS).padStart(2, "0");
               const temps = buckets[`${sensor.id}|${day} ${startHH}`];
               if (!temps || temps.length === 0) {
-                row.push("—");
+                if (lastKnownTemp != null) {
+                  // Carry-forward: assume último valor conhecido
+                  row.push(`${lastKnownTemp.toFixed(1)}*`);
+                  flagRow.push(true);
+                  dayTemps.push(lastKnownTemp);
+                } else {
+                  // Sem nenhuma leitura anterior — não há o que assumir
+                  row.push("—");
+                  flagRow.push(false);
+                }
               } else {
                 const avg = temps.reduce((a, v) => a + v, 0) / temps.length;
                 row.push(`${avg.toFixed(1)}`);
+                flagRow.push(false);
                 dayTemps.push(avg);
+                lastKnownTemp = avg; // atualiza valor mais recente
               }
             }
-            // Coluna "Méd." do dia
+            // Coluna "Méd." do dia (não marca como carry mesmo que componentes sejam)
             row.push(dayTemps.length ? `${(dayTemps.reduce((a,v)=>a+v,0)/dayTemps.length).toFixed(1)}` : "—");
+            flagRow.push(false);
+            carryFlags.push(flagRow);
             return row;
           });
 
@@ -26485,23 +26505,40 @@ function TemperaturasExportModal({ sensors, readings, alerts, restaurantId, onCl
               // Colore células de temperatura fora da faixa (cols 1..SLOTS_PER_DAY são slots; última é média)
               if (data.section === 'body' && data.column.index >= 1 && data.column.index <= SLOTS_PER_DAY + 1) {
                 const value = data.cell.raw;
+                const isCarry = carryFlags[data.row.index]?.[data.column.index] === true;
                 if (value !== "—") {
-                  const t = parseFloat(value);
+                  const t = parseFloat(value); // parseFloat ignora o * no fim
                   if (!isNaN(t)) {
                     if (t > sensor.maxTemp) {
-                      data.cell.styles.fillColor = [252, 232, 230];
-                      data.cell.styles.textColor = RED_RGB;
-                      data.cell.styles.fontStyle = 'bold';
+                      data.cell.styles.fillColor = isCarry ? [252, 240, 240] : [252, 232, 230];
+                      data.cell.styles.textColor = isCarry ? [200, 100, 100] : RED_RGB;
+                      data.cell.styles.fontStyle = isCarry ? 'italic' : 'bold';
                     } else if (t < sensor.minTemp) {
-                      data.cell.styles.fillColor = [230, 238, 252];
-                      data.cell.styles.textColor = [30, 64, 175];
-                      data.cell.styles.fontStyle = 'bold';
+                      data.cell.styles.fillColor = isCarry ? [240, 245, 252] : [230, 238, 252];
+                      data.cell.styles.textColor = isCarry ? [100, 130, 175] : [30, 64, 175];
+                      data.cell.styles.fontStyle = isCarry ? 'italic' : 'bold';
+                    } else if (isCarry) {
+                      // Dentro da faixa, mas é carry-forward: cinza claro pra distinguir
+                      data.cell.styles.textColor = [150, 150, 150];
+                      data.cell.styles.fontStyle = 'italic';
                     }
                   }
                 }
               }
             },
           });
+
+          // Nota de rodapé sobre carry-forward (se houver pelo menos 1 célula com *)
+          const hasCarry = carryFlags.some(row => row.includes(true));
+          if (hasCarry) {
+            const yNote = doc.lastAutoTable.finalY + 4;
+            doc.setFontSize(7); doc.setTextColor(...TEXT3_RGB); doc.setFont(undefined, 'italic');
+            doc.text(
+              "* Valor mantido por estabilidade — sensor não reportou variação na janela (sem registro novo de leitura, último valor conhecido foi assumido).",
+              20, yNote, { maxWidth: pageW - 40 }
+            );
+            doc.setFont(undefined, 'normal');
+          }
 
           footer(pageCount);
         });
