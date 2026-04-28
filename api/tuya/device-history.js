@@ -19,8 +19,10 @@
 
 const { tuyaRequest } = require('../_lib/tuya');
 
-// Códigos Tuya usados pelos sensores wsdcg/T1U
-const DEFAULT_CODES = ['temp_current', 'va_temperature', 'temp_current_external', 'va_humidity', 'humidity_value', 'battery_percentage', 'va_battery'];
+// Códigos Tuya usados pelos sensores T&H (categoria wsdcg).
+// IMPORTANTE: incluir codes que NÃO existem no modelo gera "Parameter error 40000303"
+// e quebra a request inteira. Mantido só os que aparecem em sensores T&H comuns.
+const DEFAULT_CODES = ['va_temperature', 'va_humidity', 'battery_percentage'];
 
 module.exports = async function handler(req, res) {
   const deviceId = req.query && req.query.device;

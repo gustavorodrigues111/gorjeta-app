@@ -24,6 +24,10 @@ function hmac256Upper(key, str) {
 // Ordena query params lexicograficamente — Tuya exige isso na assinatura
 // pra endpoints com múltiplos params (ex: /v2.0/cloud/thing/.../report-logs).
 // Sem isso, retorna `sign invalid (code 1004)`.
+//
+// IMPORTANTE: Tuya espera vírgula LITERAL (sem URL-encoding) em valores CSV
+// — ex: `?codes=temp1,temp2`. Se mandar `%2C`, a assinatura HMAC não bate.
+// A função encodeURIComponent encoda `,` como `%2C`; substituímos pra vírgula literal.
 function sortQueryParams(path) {
   const qIdx = path.indexOf('?');
   if (qIdx < 0) return path;
@@ -31,7 +35,11 @@ function sortQueryParams(path) {
   const query = path.slice(qIdx + 1);
   const params = new URLSearchParams(query);
   const sorted = [...params.entries()].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
-  const newQuery = sorted.map(([k, v]) => `${k}=${encodeURIComponent(v)}`).join('&');
+  const newQuery = sorted.map(([k, v]) => {
+    // Tuya quer vírgula literal (não %2C) e dois-pontos literal em alguns campos
+    const encoded = encodeURIComponent(v).replace(/%2C/g, ',');
+    return `${k}=${encoded}`;
+  }).join('&');
   return base + (newQuery ? '?' + newQuery : '');
 }
 
