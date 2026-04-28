@@ -25270,6 +25270,29 @@ function OperationalTemperaturas({ restaurantId, restaurantName, tempSensors, te
   // eslint-disable-next-line no-unused-vars
   const [lastBackfillAt, setLastBackfillAt] = useState(null); // pra exibir status no futuro
   const [selectedSensorId, setSelectedSensorId] = useState(null); // modal de histórico 72h
+  const [diagOpen, setDiagOpen] = useState(false);
+  const [diagLoading, setDiagLoading] = useState(false);
+  const [diagData, setDiagData] = useState(null);
+  const [diagError, setDiagError] = useState(null);
+
+  async function runDiagnostico() {
+    if (activeSensors.length === 0) { alert("Sem sensores ativos pra testar."); return; }
+    setDiagOpen(true);
+    setDiagLoading(true);
+    setDiagError(null);
+    setDiagData(null);
+    try {
+      const sensor = activeSensors[0];
+      const res = await fetch(`/api/tuya/test-history?device=${encodeURIComponent(sensor.tuyaDeviceId)}&hours=72`);
+      const text = await res.text();
+      let json;
+      try { json = JSON.parse(text); } catch { json = { _rawText: text, _status: res.status }; }
+      setDiagData({ sensor, status: res.status, body: json });
+    } catch (e) {
+      setDiagError(e.message);
+    }
+    setDiagLoading(false);
+  }
   const backfillRanRef = React.useRef(false); // flag pra rodar 1x por mount
 
   // Última leitura de cada sensor
@@ -25626,6 +25649,11 @@ function OperationalTemperaturas({ restaurantId, restaurantName, tempSensors, te
             style={{background:backfilling?"var(--bg3)":"transparent",border:"1px solid #6366f166",borderRadius:8,padding:"8px 14px",fontSize:12,fontWeight:700,color:backfilling?"var(--text3)":"#6366f1",cursor:backfilling?"wait":"pointer",fontFamily:"'DM Sans',sans-serif",minHeight:isMobile?44:"auto"}}>
             {backfilling ? "📥 Buscando…" : "📥 Histórico Tuya"}
           </button>
+          <button onClick={runDiagnostico}
+            title="Testa o que o Tuya está retornando — útil pra debug quando histórico vem vazio"
+            style={{background:"transparent",border:"1px dashed #f59e0b66",borderRadius:8,padding:"8px 14px",fontSize:12,fontWeight:700,color:"#f59e0b",cursor:"pointer",fontFamily:"'DM Sans',sans-serif",minHeight:isMobile?44:"auto"}}>
+            🔧 Diagnosticar Tuya
+          </button>
           <button onClick={()=>setShowExport(true)}
             style={{background:"transparent",border:"1px solid var(--border)",borderRadius:8,padding:"8px 14px",fontSize:12,fontWeight:700,color:"var(--text2)",cursor:"pointer",fontFamily:"'DM Sans',sans-serif",minHeight:isMobile?44:"auto"}}>
             📤 Exportar
@@ -25689,6 +25717,78 @@ function OperationalTemperaturas({ restaurantId, restaurantName, tempSensors, te
           );
         })}
       </div>
+
+      {/* Modal de DIAGNÓSTICO do Tuya — debug pra ver por que histórico vem vazio */}
+      {diagOpen && (
+        <div onClick={()=>setDiagOpen(false)} style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.5)",zIndex:9999,display:"flex",alignItems:"center",justifyContent:"center",padding:isMobile?12:24}}>
+          <div onClick={e=>e.stopPropagation()} style={{background:"var(--card-bg)",borderRadius:12,padding:isMobile?"16px":"20px 24px",maxWidth:820,width:"100%",maxHeight:"92vh",overflowY:"auto",border:"1px solid var(--border)"}}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12,gap:8}}>
+              <div>
+                <div style={{fontSize:16,fontWeight:700,color:"var(--text)"}}>🔧 Diagnóstico Tuya</div>
+                <div style={{fontSize:11,color:"var(--text3)",marginTop:2}}>
+                  Resposta crua do Tuya pro sensor "{diagData?.sensor?.name || activeSensors[0]?.name}" — últimas 72h
+                </div>
+              </div>
+              <button onClick={()=>setDiagOpen(false)} style={{background:"none",border:"none",fontSize:20,cursor:"pointer",color:"var(--text3)",padding:0}}>✕</button>
+            </div>
+            {diagLoading && <div style={{padding:"30px",textAlign:"center",color:"var(--text3)"}}>📡 Consultando Tuya…</div>}
+            {diagError && <div style={{padding:14,background:"#ef444415",border:"1px solid #ef444444",borderRadius:8,color:"var(--red)",fontSize:13}}>❌ Erro: {diagError}</div>}
+            {diagData && (
+              <>
+                <div style={{display:"flex",gap:8,marginBottom:10,flexWrap:"wrap"}}>
+                  <button onClick={async()=>{
+                    try {
+                      const s = JSON.stringify(diagData.body, null, 2);
+                      await navigator.clipboard.writeText(s);
+                      onUpdate("_toast", "📋 JSON copiado pra área de transferência");
+                    } catch (e) {
+                      onUpdate("_toast", "⚠️ Não foi possível copiar — selecione o texto manualmente");
+                    }
+                  }} style={{background:"var(--ac)",color:"#fff",border:"none",borderRadius:6,padding:"6px 12px",fontSize:11,fontWeight:700,cursor:"pointer"}}>
+                    📋 Copiar JSON
+                  </button>
+                  <span style={{fontSize:11,color:"var(--text3)",alignSelf:"center"}}>
+                    Status HTTP: <strong style={{color:diagData.status===200?"var(--green)":"var(--red)"}}>{diagData.status}</strong>
+                  </span>
+                </div>
+                {/* Resumo legível */}
+                {diagData.body?.statusCodes && (
+                  <div style={{marginBottom:12,padding:10,background:"var(--bg1)",borderRadius:8,fontSize:11}}>
+                    <div style={{fontWeight:700,marginBottom:4,color:"var(--text2)"}}>📊 Codes que o sensor reporta agora:</div>
+                    <div style={{fontFamily:"'DM Mono',monospace",color:"var(--text)"}}>
+                      {diagData.body.statusCodes.map(c => `${c.code} = ${JSON.stringify(c.value)}`).join(" · ")}
+                    </div>
+                  </div>
+                )}
+                {diagData.body?.historyAttempts && (
+                  <div style={{marginBottom:12,padding:10,background:"var(--bg1)",borderRadius:8,fontSize:11}}>
+                    <div style={{fontWeight:700,marginBottom:6,color:"var(--text2)"}}>📜 Tentativas de buscar histórico (4 listas de codes):</div>
+                    {diagData.body.historyAttempts.map((a, i) => (
+                      <div key={i} style={{padding:"4px 0",borderTop:i?"1px solid var(--border)":"none"}}>
+                        <div style={{fontFamily:"'DM Mono',monospace",fontSize:10,color:"var(--text3)",wordBreak:"break-all"}}>{a.codes_query}</div>
+                        <div style={{marginTop:2}}>
+                          {a.error ? (
+                            <span style={{color:"var(--red)"}}>❌ {a.error}</span>
+                          ) : a.total_logs === 0 ? (
+                            <span style={{color:"#f59e0b"}}>⚠️ retornou 0 leituras</span>
+                          ) : (
+                            <span style={{color:"var(--green)"}}>✅ {a.total_logs} leituras · codes: {a.unique_codes_in_response?.join(", ")}</span>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                {/* JSON cru */}
+                <details>
+                  <summary style={{cursor:"pointer",fontSize:11,color:"var(--text3)",padding:"6px 0"}}>📄 Ver JSON completo</summary>
+                  <pre style={{background:"var(--bg2)",padding:12,borderRadius:8,fontSize:10,overflow:"auto",maxHeight:400,lineHeight:1.4,fontFamily:"'DM Mono',monospace"}}>{JSON.stringify(diagData.body, null, 2)}</pre>
+                </details>
+              </>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Modal de histórico 72h por sensor */}
       {selectedSensorId && (
