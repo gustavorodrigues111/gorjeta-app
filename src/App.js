@@ -9945,7 +9945,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
 
   const defaultGroup = isLider ? "equipe" : "operacao";
   const [tabGroup, setTabGroup] = useState(defaultGroup);
-  const [tab, setTab] = useState(forceTab || (isLider ? "employees" : "dashboard"));
+  const [tab, setTab] = useState(forceTab || (isLider ? "employees" : "inicio"));
   // Se o shell forçar um tab específico, sincroniza
   useEffect(() => {
     if (forceTab && forceTab !== tab) setTab(forceTab);
@@ -11409,6 +11409,19 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
             mobileOnly={mobileOnly}
             realIsOwner={realIsOwner || isOwner}
             onStartImpersonate={onStartImpersonate}
+          />
+        )}
+
+        {/* INÍCIO — saudação e dashboard geral (em construção) */}
+        {tab === "inicio" && (
+          <InicioModule
+            currentUser={currentUser}
+            restaurant={restaurant}
+            isOwner={isOwner}
+            isDP={isDP}
+            isLider={isLider}
+            mobileOnly={mobileOnly}
+            setTab={setTab}
           />
         )}
 
@@ -18117,6 +18130,15 @@ function buildShellSections({ pessoa, restaurantId, isOwner }) {
 
   const sections = [];
 
+  // 0) INÍCIO — saudação + dashboard geral (futuro)
+  sections.push({
+    group: "",
+    color: "#7c3aed",
+    items: [
+      { id: "mod_inicio", label: "Início", icon: "🏠", kind: "manager", tab: "inicio" },
+    ],
+  });
+
   // 1) MEU DIA — área pessoal do membro da equipe
   if (isTeam) {
     sections.push({
@@ -18689,9 +18711,9 @@ function AppShell({ pessoa, data, activeRestaurantId, setActiveRestaurantId, use
                 <div style={{padding:"16px",fontSize:12,color:"var(--text3)",textAlign:"center"}}>Selecione um restaurante no topo pra ver as áreas disponíveis.</div>
               ) : sections.length === 0 ? (
                 <div style={{padding:"16px",fontSize:12,color:"var(--text3)",textAlign:"center"}}>Nenhuma área disponível.</div>
-              ) : sections.map(sec => (
-                <div key={sec.group} style={{marginBottom:14}}>
-                  <div style={{padding:"4px 16px",fontSize:10,color:sec.color,fontWeight:700,textTransform:"uppercase",letterSpacing:0.5}}>{sec.group}</div>
+              ) : sections.map((sec, secIdx) => (
+                <div key={sec.group || `__sec_${secIdx}`} style={{marginBottom:14}}>
+                  {sec.group && <div style={{padding:"4px 16px",fontSize:10,color:sec.color,fontWeight:700,textTransform:"uppercase",letterSpacing:0.5}}>{sec.group}</div>}
                   {sec.items.map(it => {
                     const active = it.id === activeSectionId;
                     const badge = badges[it.id];
@@ -18804,6 +18826,76 @@ function buildVirtualEmpForPessoa(pessoa, restaurantId) {
 // ═══════════════════════════════════════════════════════════════
 // ──  FREELAS — módulo dedicado (Fase 1: fundação + 3 sub-tabs)  ──
 // ═══════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════
+// ──  INÍCIO — saudação amigável (V0, dashboard chega depois)    ──
+// ═══════════════════════════════════════════════════════════════
+function InicioModule({ currentUser, restaurant, isOwner, isDP, isLider, mobileOnly, setTab }) {
+  const ac = "#7c3aed";
+  const now = new Date();
+  const hora = now.getHours();
+  const saudacao = hora < 5 ? "Boa madrugada" : hora < 12 ? "Bom dia" : hora < 18 ? "Boa tarde" : "Boa noite";
+  const emoji = hora < 5 ? "🌙" : hora < 12 ? "☀️" : hora < 18 ? "🌤️" : "🌆";
+  const primeiroNome = (currentUser?.name || "").split(" ")[0] || "";
+  const diaSemana = now.toLocaleDateString("pt-BR", { weekday: "long" });
+  const dataExt = now.toLocaleDateString("pt-BR", { day: "numeric", month: "long", year: "numeric" });
+  // Capitaliza primeira letra (pt-BR vem minúsculo)
+  const cap = (s) => s ? s.charAt(0).toUpperCase() + s.slice(1) : s;
+  const papel = isOwner ? "Gestor AppTip" : isDP ? "Departamento Pessoal" : isLider ? "Líder de Área" : "Gestor";
+
+  return (
+    <div style={{maxWidth:760,margin:"0 auto",padding:mobileOnly?"8px 4px":"16px 8px"}}>
+      {/* Card principal de boas-vindas */}
+      <div style={{
+        background:`linear-gradient(135deg, ${ac}15, ${ac}05)`,
+        border:`1px solid ${ac}33`,
+        borderRadius:16,
+        padding:mobileOnly?"22px 20px":"32px 30px",
+        marginBottom:18,
+      }}>
+        <div style={{fontSize:mobileOnly?42:54,marginBottom:10,lineHeight:1}}>{emoji}</div>
+        <div style={{fontSize:mobileOnly?22:28,fontWeight:800,color:"var(--text)",lineHeight:1.2,marginBottom:6}}>
+          {saudacao}{primeiroNome ? `, ${primeiroNome}` : ""} 👋
+        </div>
+        <div style={{fontSize:mobileOnly?13:14,color:"var(--text2)",lineHeight:1.5}}>
+          {cap(diaSemana)}, {dataExt}
+        </div>
+        {restaurant?.name && (
+          <div style={{marginTop:14,paddingTop:14,borderTop:`1px dashed ${ac}33`,fontSize:13,color:"var(--text3)"}}>
+            <span style={{color:"var(--text2)"}}>{restaurant.name}</span>
+            <span style={{margin:"0 6px",opacity:0.5}}>·</span>
+            <span style={{color:ac,fontWeight:600}}>{papel}</span>
+          </div>
+        )}
+      </div>
+
+      {/* Placeholder amigável do dashboard futuro */}
+      <div style={{
+        background:"var(--card-bg)",
+        border:"1px dashed var(--border)",
+        borderRadius:12,
+        padding:mobileOnly?"22px 18px":"28px 24px",
+        textAlign:"center",
+      }}>
+        <div style={{fontSize:36,marginBottom:10,opacity:0.6}}>📊</div>
+        <div style={{fontWeight:600,color:"var(--text)",fontSize:14,marginBottom:6}}>Seu painel está chegando</div>
+        <p style={{fontSize:12,color:"var(--text3)",lineHeight:1.6,maxWidth:440,margin:"0 auto"}}>
+          Em breve você vai ver aqui os números do dia, pendências, atalhos e um feed das últimas atividades do restaurante.
+        </p>
+        {!mobileOnly && (
+          <div style={{marginTop:16,display:"flex",gap:8,justifyContent:"center",flexWrap:"wrap"}}>
+            <button onClick={()=>setTab && setTab("freelas")}
+              style={{background:"transparent",color:ac,border:`1px solid ${ac}55`,borderRadius:8,padding:"6px 14px",fontSize:12,fontWeight:600,cursor:"pointer"}}>🎒 Ir pra Freelas</button>
+            <button onClick={()=>setTab && setTab("schedule")}
+              style={{background:"transparent",color:"var(--text2)",border:"1px solid var(--border)",borderRadius:8,padding:"6px 14px",fontSize:12,fontWeight:600,cursor:"pointer"}}>📅 Ver Escala</button>
+            <button onClick={()=>setTab && setTab("dashboard")}
+              style={{background:"transparent",color:"var(--text2)",border:"1px solid var(--border)",borderRadius:8,padding:"6px 14px",fontSize:12,fontWeight:600,cursor:"pointer"}}>💰 Ver Gorjetas</button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function FreelasModule({ restaurantId, pessoas, freelaShifts, freelaPagamentos, employees, roles, schedules, currentUser, isDP, isLider, isOwner, onUpdate, mobileOnly }) {
   const [subTab, setSubTab] = useState("lancamento");
   const ac = "#7c3aed"; // roxo Freelas — distingue dos outros módulos
