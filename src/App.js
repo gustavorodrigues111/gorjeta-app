@@ -18109,13 +18109,9 @@ function buildShellSections({ pessoa, restaurantId, isOwner }) {
     peopleItems.push({ id: "mod_freelas", label: "Freelas", icon: "🎒", kind: "manager", tab: "freelas" });
   }
   if (op.escalas || ad.schedule) {
-    peopleItems.push({
-      id: "mod_escalas", label: "Escalas", icon: "📅",
-      subtabs: st(
-        op.escalas  && { id: "ver",    label: "Ver",    kind: "manager", tab: "schedule" },
-        ad.schedule && { id: "fechar", label: "Fechar", kind: "manager", tab: "schedule" },
-      ),
-    });
+    // Entrada única — sem subtabs "Ver"/"Fechar" (eram redundantes, apontavam pra mesma tela).
+    // Os botões internos (salvar, fechar mês, etc) já se autoajustam pela permissão.
+    peopleItems.push({ id: "mod_escalas", label: "Escalas", icon: "📅", kind: "manager", tab: "schedule" });
   }
   if (op.reunioes) {
     peopleItems.push({ id: "mod_reunioes", label: "Reuniões", icon: "🗣️", kind: "manager", tab: "reunioes" });
