@@ -18366,8 +18366,17 @@ function AppShell({ pessoa, data, activeRestaurantId, setActiveRestaurantId, use
   const effectiveKind = activeSubtab?.kind || activeItem?.kind;
   const effectiveTab  = activeSubtab?.tab  || activeItem?.tab;
 
+  // Counter pra "voltar pro topo" — incrementa quando user clica num item/subtab que já está ativo,
+  // forçando o RestaurantPanel/EmployeePortal a re-montar (zera detailEmp, scroll, etc).
+  const [resetCounter, setResetCounter] = useState(0);
+
   function handleSubtabClick(subtabId) {
     if (!activeItem) return;
+    // Se a subtab clicada já está ativa, dispara reset (volta pra lista, fecha detalhes)
+    if (activeSubtab?.id === subtabId) {
+      setResetCounter(c => c + 1);
+      return;
+    }
     setActiveSubtabByItem(prev => ({ ...prev, [activeItem.id]: subtabId }));
   }
 
@@ -18532,7 +18541,7 @@ function AppShell({ pessoa, data, activeRestaurantId, setActiveRestaurantId, use
         : (isOwner ? { id: "owner_virt", name: currentUser?.name || "Owner", cpf: currentUser?.cpf, restaurantIds: [activeRestaurantId], perms: {tips:true,schedule:true}, isMaster: true } : null);
       return (
         <RestaurantPanel
-          key={`rp-${activeRestaurantId}-${effectiveTab}`}
+          key={`rp-${activeRestaurantId}-${effectiveTab}-${resetCounter}`}
           restaurant={activeRest}
           restaurants={data?.restaurants || []}
           employees={data?.employees || []}
@@ -18580,7 +18589,7 @@ function AppShell({ pessoa, data, activeRestaurantId, setActiveRestaurantId, use
       }
       return (
         <EmployeePortal
-          key={`ep-${activeRestaurantId}-${effectiveTab}`}
+          key={`ep-${activeRestaurantId}-${effectiveTab}-${resetCounter}`}
           employees={data?.employees || []}
           roles={data?.roles || []}
           tips={data?.tips || []}
@@ -18647,6 +18656,12 @@ function AppShell({ pessoa, data, activeRestaurantId, setActiveRestaurantId, use
   }
 
   function handleSectionClick(id) {
+    // Se o item clicado já é o ativo, dispara reset (volta pra lista, fecha detalhes)
+    if (id === activeSectionId) {
+      setResetCounter(c => c + 1);
+      if (isMobile) setSidebarOpen(false);
+      return;
+    }
     setActiveSectionId(id);
     // Reset subtab pra default (primeira) ao clicar na sidebar
     // UX: cada clique na sidebar = "fresh start", abre sempre na visão principal (Executar/Contar/Dashboard/etc)
