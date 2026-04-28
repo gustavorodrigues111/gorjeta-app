@@ -21,10 +21,25 @@ function hmac256Upper(key, str) {
   return crypto.createHmac('sha256', key).update(str, 'utf8').digest('hex').toUpperCase();
 }
 
+// Ordena query params lexicograficamente — Tuya exige isso na assinatura
+// pra endpoints com múltiplos params (ex: /v2.0/cloud/thing/.../report-logs).
+// Sem isso, retorna `sign invalid (code 1004)`.
+function sortQueryParams(path) {
+  const qIdx = path.indexOf('?');
+  if (qIdx < 0) return path;
+  const base = path.slice(0, qIdx);
+  const query = path.slice(qIdx + 1);
+  const params = new URLSearchParams(query);
+  const sorted = [...params.entries()].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
+  const newQuery = sorted.map(([k, v]) => `${k}=${encodeURIComponent(v)}`).join('&');
+  return base + (newQuery ? '?' + newQuery : '');
+}
+
 function buildStringToSign(method, urlPathWithQuery, bodyStr = '') {
+  const sortedPath = sortQueryParams(urlPathWithQuery);
   const contentHash = sha256Hex(bodyStr);
   const signedHeadersStr = ''; // sem headers opcionais na assinatura
-  return `${method.toUpperCase()}\n${contentHash}\n${signedHeadersStr}\n${urlPathWithQuery}`;
+  return `${method.toUpperCase()}\n${contentHash}\n${signedHeadersStr}\n${sortedPath}`;
 }
 
 // Cache do access_token em memória. Persiste enquanto o container serverless estiver "hot".
@@ -74,7 +89,9 @@ async function tuyaRequest(method, path, body = null) {
   const t = Date.now().toString();
   const nonce = crypto.randomUUID();
   const bodyStr = body ? JSON.stringify(body) : '';
-  const stringToSign = buildStringToSign(method, path, bodyStr);
+  // IMPORTANTE: precisa ser o path ordenado, idêntico ao usado na assinatura
+  const sortedPath = sortQueryParams(path);
+  const stringToSign = buildStringToSign(method, sortedPath, bodyStr);
   // Requests autenticadas incluem access_token na string assinada
   const str = ACCESS_ID + accessToken + t + nonce + stringToSign;
   const sign = hmac256Upper(ACCESS_KEY, str);
@@ -93,7 +110,7 @@ async function tuyaRequest(method, path, body = null) {
   };
   if (body) fetchOpts.body = bodyStr;
 
-  const res = await fetch(ENDPOINT + path, fetchOpts);
+  const res = await fetch(ENDPOINT + sortedPath, fetchOpts);
   const data = await res.json();
   if (!data.success) {
     const err = new Error(`Tuya API error (${method} ${path}): ${data.msg || 'unknown'} (code ${data.code})`);
