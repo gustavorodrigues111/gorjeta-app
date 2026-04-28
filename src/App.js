@@ -451,10 +451,15 @@ const K = {
   miseCategories:      "v4:miseCategories",       // [{id, restaurantId, name}]   ex: Vinhos, Bar, Cozinha
   miseStocks:          "v4:miseStocks",           // [{id, restaurantId, name, location?}]   ex: Estoque 1, Adega
   miseAssignments:     "v4:miseAssignments",      // [{id, restaurantId, categoryId, stockId, userId}]  unicidade por tripla
-  miseItems:           "v4:miseItems",            // [{id, restaurantId, categoryId, name, unit, expectedQty?}]
+  miseItems:           "v4:miseItems",            // [{id, restaurantId, categoryId?, name, unit, expectedQty?, idealQtys?:{0..6:number}, pkgSize?:number, stockIds?:[stockId], suppliers?:[{supplierId,preferred:bool}]}]
+  // idealQtys: estoque ideal por dia da semana (índice 0=Dom..6=Sáb).
+  //   Pedido sugerido = ceil((idealQtys[diaSeguinte] - contagem) / pkgSize) * pkgSize
+  // stockIds: produto pode existir em múltiplos estoques físicos — contagem por estoque, soma vai pro pedido.
+  // suppliers: atalho com fornecedor preferencial + alternativos (até 3). Tabela miseProductSuppliers continua válida pra dados extras (conversionFactor/price).
   miseCycles:          "v4:miseCycles",           // [{id, restaurantId, name, startDate, endDate?, status:"open"|"closed", closedAt?, closedBy?}]
   miseCounts:          "v4:miseCounts",           // [{id, restaurantId, cycleId, itemId, stockId, userId, qty, countedAt, note?}]
-  miseSuppliers:       "v4:miseSuppliers",        // [{id, restaurantId, name, whatsapp, notes}]
+  miseSuppliers:       "v4:miseSuppliers",        // [{id, restaurantId, name, nomeContato?, whatsapp, notes}]
+  // nomeContato: usado na mensagem WhatsApp ("Olá [nomeContato]..."). Junto com whatsapp são obrigatórios pra gerar pedido.
   miseProductSuppliers:"v4:miseProductSuppliers", // [{id, restaurantId, productId, supplierId, conversionFactor, price?, preferred}]
   miseSupplierOrders:  "v4:miseSupplierOrders",   // [{id, restaurantId, cycleId, supplierId, status, items:[{productId,qtySuggested,qtyApproved?,qtyReceived?,notes?}], createdAt, approvedAt?, sentAt?, receivedAt?, receivedBy?, receivedByName?, messageText?, history:[{status,ts,by,note}]}]
   miseChecklistTemplates: "v4:miseChecklistTemplates", // [{id, restaurantId, name, description?, items:[{id,text,order}], active}]
@@ -11829,6 +11834,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
             </div>
             <MiseContagensAdmin
               restaurantId={rid}
+              restaurantName={restaurants.find(r => r.id === rid)?.name || ""}
               employees={employees}
               miseCategories={data?.miseCategories ?? []}
               miseStocks={data?.miseStocks ?? []}
@@ -16654,9 +16660,482 @@ function OperationalPortal({ employee, data, onUpdate, onBack, toggleTheme, them
 }
 
 // ═══════════════════════════════════════════════════════════════
+// ──  MISE — Helpers de importação/exportação XLSX (Produtos)   ──
+// ═══════════════════════════════════════════════════════════════
+// Modelo de planilha: 5 abas (Produtos, Fornecedores, Estoques, Categorias, Instruções).
+// Importação faz merge por nome (case-insensitive) com normalização ftNrm.
+// Índice dia da semana: 0=Dom, 1=Seg, 2=Ter, 3=Qua, 4=Qui, 5=Sex, 6=Sáb (compatível com new Date().getDay()).
+
+const MISE_DAYS = [
+  { idx: 1, label: "Seg" },
+  { idx: 2, label: "Ter" },
+  { idx: 3, label: "Qua" },
+  { idx: 4, label: "Qui" },
+  { idx: 5, label: "Sex" },
+  { idx: 6, label: "Sáb" },
+  { idx: 0, label: "Dom" },
+];
+
+function miseBuildModeloXLSX({ items = [], suppliers = [], stocks = [], categories = [], productSuppliers = [] }) {
+  const XLSX = window.XLSX;
+  if (!XLSX) throw new Error("Biblioteca XLSX ainda não foi carregada.");
+  const wb = XLSX.utils.book_new();
+
+  const catById   = Object.fromEntries(categories.map(c => [c.id, c.name]));
+  const stockById = Object.fromEntries(stocks.map(s => [s.id, s.name]));
+  const supById   = Object.fromEntries(suppliers.map(s => [s.id, s.name]));
+
+  // ── Aba 1: Produtos ──
+  const headerProd = [
+    "Produto", "Categoria", "Estoques físicos",
+    "Fornec. preferencial", "Fornec. alternativos",
+    "Unidade", "Pacote",
+    ...MISE_DAYS.map(d => `Ideal ${d.label}`),
+  ];
+  const prodRows = [headerProd];
+  items.forEach(it => {
+    const catName = it.categoryId ? (catById[it.categoryId] || "") : "";
+    const stockNames = (it.stockIds || []).map(sid => stockById[sid]).filter(Boolean).join("; ");
+    let prefName = "", altsName = "";
+    if (Array.isArray(it.suppliers) && it.suppliers.length) {
+      const pref = it.suppliers.find(s => s.preferred);
+      const alts = it.suppliers.filter(s => !s.preferred);
+      prefName = pref ? (supById[pref.supplierId] || "") : "";
+      altsName = alts.map(s => supById[s.supplierId]).filter(Boolean).join("; ");
+    } else {
+      const ps = productSuppliers.filter(p => p.productId === it.id);
+      const pref = ps.find(p => p.preferred);
+      const alts = ps.filter(p => !p.preferred);
+      prefName = pref ? (supById[pref.supplierId] || "") : "";
+      altsName = alts.map(p => supById[p.supplierId]).filter(Boolean).join("; ");
+    }
+    const ideal = it.idealQtys || {};
+    prodRows.push([
+      it.name || "",
+      catName,
+      stockNames,
+      prefName,
+      altsName,
+      it.unit || "un",
+      (it.pkgSize ?? "") === null ? "" : (it.pkgSize ?? ""),
+      ...MISE_DAYS.map(d => (ideal[d.idx] ?? "")),
+    ]);
+  });
+  if (items.length === 0) {
+    // Linha exemplo só pra ilustrar
+    prodRows.push([
+      "Cerveja Heineken 600ml", "Bebidas", "Bar; Adega",
+      "Distribuidora ABC", "Distribuidora XYZ",
+      "un", 12,
+      24, 24, 24, 36, 48, 60, 36,
+    ]);
+  }
+  const wsProd = XLSX.utils.aoa_to_sheet(prodRows);
+  wsProd['!cols'] = [
+    { wch: 32 }, { wch: 18 }, { wch: 22 },
+    { wch: 24 }, { wch: 30 },
+    { wch: 10 }, { wch: 8 },
+    { wch: 8 }, { wch: 8 }, { wch: 8 }, { wch: 8 }, { wch: 8 }, { wch: 8 }, { wch: 8 },
+  ];
+  XLSX.utils.book_append_sheet(wb, wsProd, "Produtos");
+
+  // ── Aba 2: Fornecedores ──
+  const supRows = [["Nome", "Contato", "WhatsApp", "Observações"]];
+  suppliers.forEach(s => supRows.push([
+    s.name || "",
+    s.nomeContato || "",
+    s.whatsapp || "",
+    s.notes || s.observacoes || "",
+  ]));
+  if (suppliers.length === 0) {
+    supRows.push(["Distribuidora ABC", "João da Silva", "11912345678", "Entrega às terças e sextas"]);
+  }
+  const wsSup = XLSX.utils.aoa_to_sheet(supRows);
+  wsSup['!cols'] = [{ wch: 28 }, { wch: 22 }, { wch: 18 }, { wch: 38 }];
+  XLSX.utils.book_append_sheet(wb, wsSup, "Fornecedores");
+
+  // ── Aba 3: Estoques ──
+  const stockRows = [["Nome"]];
+  stocks.forEach(s => stockRows.push([s.name || ""]));
+  if (stocks.length === 0) stockRows.push(["Bar"], ["Cozinha"], ["Adega"]);
+  const wsStock = XLSX.utils.aoa_to_sheet(stockRows);
+  wsStock['!cols'] = [{ wch: 24 }];
+  XLSX.utils.book_append_sheet(wb, wsStock, "Estoques");
+
+  // ── Aba 4: Categorias ──
+  const catRows = [["Nome"]];
+  categories.forEach(c => catRows.push([c.name || ""]));
+  if (categories.length === 0) catRows.push(["Bebidas"], ["Cozinha"], ["Limpeza"]);
+  const wsCat = XLSX.utils.aoa_to_sheet(catRows);
+  wsCat['!cols'] = [{ wch: 24 }];
+  XLSX.utils.book_append_sheet(wb, wsCat, "Categorias");
+
+  // ── Aba 5: Instruções ──
+  const instRows = [
+    ["AppTip — Modelo de Importação de Produtos"],
+    [""],
+    ["Como usar:"],
+    ["1. Preencha a aba Fornecedores PRIMEIRO (nome obrigatório). Os fornecedores precisam existir antes dos produtos referenciá-los."],
+    ["2. Preencha a aba Estoques (nomes dos estoques físicos: Bar, Cozinha, Adega, etc.)."],
+    ["3. Preencha a aba Categorias (Bebidas, Cozinha, Limpeza...). Categoria é opcional na aba Produtos — pode categorizar depois em massa."],
+    ["4. Preencha a aba Produtos."],
+    [""],
+    ["Coluna a coluna (Produtos):"],
+    ["• Produto: nome único do item (ex: Cerveja Heineken 600ml)"],
+    ["• Categoria: nome de uma categoria já criada na aba Categorias. Pode deixar em branco e categorizar depois."],
+    ["• Estoques físicos: nome(s) dos estoques onde o produto pode estar. Use ; (ponto-e-vírgula) pra múltiplos. Ex: Bar; Adega"],
+    ["• Fornec. preferencial: nome de um fornecedor da aba Fornecedores. É de quem você compra normalmente."],
+    ["• Fornec. alternativos: até 3 nomes separados por ; (caso o preferencial fique sem)."],
+    ["• Unidade: un, kg, l, cx, fardo... como você conta o produto."],
+    ["• Pacote: tamanho do pacote/caixa fechado(a) (ex: 12 se a caixa tem 12 unidades). O sistema arredonda o pedido pra cima em múltiplos do pacote. Deixe em branco se compra por unidade avulsa."],
+    ["• Ideal Seg-Dom: quantidade que você quer ter em estoque ANTES daquele dia. Se na noite de domingo a contagem é 5 e o ideal de segunda é 12, o sistema sugere comprar 7 (arredondado pelo pacote)."],
+    [""],
+    ["Coluna a coluna (Fornecedores):"],
+    ["• Nome: nome da empresa/distribuidora."],
+    ["• Contato: nome da pessoa que atende. Usado na mensagem WhatsApp (\"Olá [contato]...\")."],
+    ["• WhatsApp: só números, com DDD. Ex: 11912345678."],
+    ["• Observações: texto livre (dias de entrega, mínimo do pedido, etc.)."],
+    [""],
+    ["Importante:"],
+    ["• Importação faz merge: itens com o mesmo nome são ATUALIZADOS, novos são criados."],
+    ["• Não apague abas. Não renomeie cabeçalhos."],
+    ["• Você pode importar a planilha quantas vezes quiser — sempre faz merge inteligente."],
+  ];
+  const wsInst = XLSX.utils.aoa_to_sheet(instRows);
+  wsInst['!cols'] = [{ wch: 100 }];
+  XLSX.utils.book_append_sheet(wb, wsInst, "Instruções");
+
+  return wb;
+}
+
+function miseDownloadModeloXLSX(ctx) {
+  const XLSX = window.XLSX;
+  if (!XLSX) { alert("Biblioteca XLSX ainda não foi carregada. Aguarde ou recarregue a página."); return; }
+  const wb = miseBuildModeloXLSX(ctx);
+  const safeName = ftSlugify(ctx.restaurantName || "restaurante");
+  const today = new Date().toISOString().slice(0, 10);
+  XLSX.writeFile(wb, `apptip-produtos-${safeName}-${today}.xlsx`);
+}
+
+// Lê o XLSX e devolve o conteúdo bruto (linhas). Não faz commit ainda — o caller mostra preview.
+// Retorna Promise<{ produtos:[], fornecedores:[], estoques:[], categorias:[], errors:[] }>.
+function miseParsePlanilhaXLSX(file) {
+  return new Promise((resolve, reject) => {
+    const XLSX = window.XLSX;
+    if (!XLSX) { reject(new Error("Biblioteca XLSX ainda não foi carregada.")); return; }
+    const reader = new FileReader();
+    reader.onload = e => {
+      try {
+        const wb = XLSX.read(e.target.result, { type: "binary" });
+        const errors = [];
+        // Helpers
+        const readSheet = (name) => {
+          const ws = wb.Sheets[name];
+          if (!ws) return null;
+          const rows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: "" });
+          return rows;
+        };
+        const norm = s => (s == null ? "" : String(s)).trim();
+        const lower = s => norm(s).toLowerCase();
+        const splitMulti = s => norm(s).split(/[;|]/).map(x => x.trim()).filter(Boolean);
+
+        // ── Fornecedores ──
+        const fornecedores = [];
+        const supRows = readSheet("Fornecedores");
+        if (supRows && supRows.length >= 2) {
+          const header = (supRows[0] || []).map(lower);
+          const idxName = header.findIndex(h => h.includes("nome"));
+          const idxContato = header.findIndex(h => h.includes("contato"));
+          const idxWhats = header.findIndex(h => h.includes("whats") || h.includes("telefone"));
+          const idxObs = header.findIndex(h => h.includes("obs") || h.includes("nota"));
+          if (idxName < 0) errors.push("Aba Fornecedores: coluna 'Nome' não encontrada.");
+          else {
+            for (let i = 1; i < supRows.length; i++) {
+              const r = supRows[i] || [];
+              const name = norm(r[idxName]);
+              if (!name) continue;
+              fornecedores.push({
+                name,
+                nomeContato: idxContato >= 0 ? norm(r[idxContato]) : "",
+                whatsapp: idxWhats >= 0 ? norm(r[idxWhats]).replace(/\D/g, "") : "",
+                notes: idxObs >= 0 ? norm(r[idxObs]) : "",
+              });
+            }
+          }
+        }
+
+        // ── Estoques ──
+        const estoques = [];
+        const stockRows = readSheet("Estoques");
+        if (stockRows && stockRows.length >= 2) {
+          const header = (stockRows[0] || []).map(lower);
+          const idxName = header.findIndex(h => h.includes("nome")) >= 0
+            ? header.findIndex(h => h.includes("nome"))
+            : 0;
+          for (let i = 1; i < stockRows.length; i++) {
+            const r = stockRows[i] || [];
+            const name = norm(r[idxName]);
+            if (name) estoques.push({ name });
+          }
+        }
+
+        // ── Categorias ──
+        const categorias = [];
+        const catRows = readSheet("Categorias");
+        if (catRows && catRows.length >= 2) {
+          const header = (catRows[0] || []).map(lower);
+          const idxName = header.findIndex(h => h.includes("nome")) >= 0
+            ? header.findIndex(h => h.includes("nome"))
+            : 0;
+          for (let i = 1; i < catRows.length; i++) {
+            const r = catRows[i] || [];
+            const name = norm(r[idxName]);
+            if (name) categorias.push({ name });
+          }
+        }
+
+        // ── Produtos ──
+        const produtos = [];
+        const prodRows = readSheet("Produtos");
+        if (prodRows && prodRows.length >= 2) {
+          const header = (prodRows[0] || []).map(lower);
+          const idx = (...keys) => header.findIndex(h => keys.some(k => h.includes(k)));
+          const idxNome = idx("produto", "nome");
+          const idxCat = idx("categoria");
+          const idxStock = idx("estoque");
+          const idxPref = idx("prefer");
+          const idxAlt = idx("altern");
+          const idxUnit = idx("unidade", "unid");
+          const idxPkg = idx("pacote", "pkg");
+          // Ideais — ordem MISE_DAYS (Seg..Sáb,Dom)
+          const dayIdxMap = {};
+          MISE_DAYS.forEach(d => {
+            const lbl = d.label.toLowerCase();
+            const found = header.findIndex(h =>
+              h.startsWith("ideal") && (h.includes(lbl) || h.includes(lbl.replace("á","a")))
+            );
+            if (found >= 0) dayIdxMap[d.idx] = found;
+          });
+          if (idxNome < 0) errors.push("Aba Produtos: coluna 'Produto' não encontrada.");
+          else {
+            for (let i = 1; i < prodRows.length; i++) {
+              const r = prodRows[i] || [];
+              const name = norm(r[idxNome]);
+              if (!name) continue;
+              const idealQtys = {};
+              for (const [d, ci] of Object.entries(dayIdxMap)) {
+                const v = r[ci];
+                if (v === "" || v == null) continue;
+                const n = typeof v === "number" ? v : parseFloat(String(v).replace(",","."));
+                if (!isNaN(n)) idealQtys[d] = n;
+              }
+              const pkgRaw = idxPkg >= 0 ? r[idxPkg] : "";
+              const pkgNum = pkgRaw === "" || pkgRaw == null ? null
+                : (typeof pkgRaw === "number" ? pkgRaw : parseFloat(String(pkgRaw).replace(",",".")));
+              produtos.push({
+                name,
+                categoria: idxCat >= 0 ? norm(r[idxCat]) : "",
+                estoques: idxStock >= 0 ? splitMulti(r[idxStock]) : [],
+                fornecedorPreferencial: idxPref >= 0 ? norm(r[idxPref]) : "",
+                fornecedoresAlternativos: idxAlt >= 0 ? splitMulti(r[idxAlt]) : [],
+                unit: idxUnit >= 0 ? (norm(r[idxUnit]) || "un") : "un",
+                pkgSize: pkgNum != null && !isNaN(pkgNum) ? pkgNum : null,
+                idealQtys,
+              });
+            }
+          }
+        }
+
+        resolve({ produtos, fornecedores, estoques, categorias, errors });
+      } catch (err) {
+        reject(err);
+      }
+    };
+    reader.onerror = () => reject(new Error("Falha ao ler o arquivo."));
+    reader.readAsBinaryString(file);
+  });
+}
+
+// Aplica os dados parseados: merge por nome (ftNrm). Retorna estatísticas pra exibir no preview.
+// Não chama onUpdate — só monta os next-states e retorna pro caller.
+function miseBuildImportPlan(parsed, ctx) {
+  const { restaurantId, miseSuppliers, miseStocks, miseCategories, miseItems } = ctx;
+  const restSup = (miseSuppliers || []).filter(s => s.restaurantId === restaurantId);
+  const restStock = (miseStocks || []).filter(s => s.restaurantId === restaurantId);
+  const restCat = (miseCategories || []).filter(c => c.restaurantId === restaurantId);
+  const restItems = (miseItems || []).filter(i => i.restaurantId === restaurantId);
+
+  // 1. Suppliers — merge por nome
+  const suppliersNext = [...miseSuppliers];
+  let supAdded = 0, supUpdated = 0;
+  const supByName = {}; // nrm(name) → supplier in next
+  restSup.forEach(s => { supByName[ftNrm(s.name)] = s; });
+  parsed.fornecedores.forEach(p => {
+    const key = ftNrm(p.name);
+    const existing = supByName[key];
+    if (existing) {
+      const idx = suppliersNext.indexOf(existing);
+      const merged = {
+        ...existing,
+        nomeContato: p.nomeContato || existing.nomeContato || "",
+        whatsapp: p.whatsapp || existing.whatsapp || "",
+        notes: p.notes || existing.notes || "",
+      };
+      suppliersNext[idx] = merged;
+      supByName[key] = merged;
+      // Conta como atualizado só se mudou alguma coisa
+      if (
+        merged.nomeContato !== existing.nomeContato ||
+        merged.whatsapp !== existing.whatsapp ||
+        merged.notes !== existing.notes
+      ) supUpdated++;
+    } else {
+      const ns = {
+        id: ftUid(),
+        restaurantId,
+        name: p.name,
+        nomeContato: p.nomeContato || "",
+        whatsapp: p.whatsapp || "",
+        notes: p.notes || "",
+      };
+      suppliersNext.push(ns);
+      supByName[key] = ns;
+      supAdded++;
+    }
+  });
+
+  // 2. Stocks — merge por nome
+  const stocksNext = [...miseStocks];
+  let stockAdded = 0;
+  const stockByName = {};
+  restStock.forEach(s => { stockByName[ftNrm(s.name)] = s; });
+  parsed.estoques.forEach(p => {
+    const key = ftNrm(p.name);
+    if (!stockByName[key]) {
+      const ns = { id: ftUid(), restaurantId, name: p.name, location: null };
+      stocksNext.push(ns);
+      stockByName[key] = ns;
+      stockAdded++;
+    }
+  });
+
+  // 3. Categorias — merge por nome
+  const categoriesNext = [...miseCategories];
+  let catAdded = 0;
+  const catByName = {};
+  restCat.forEach(c => { catByName[ftNrm(c.name)] = c; });
+  parsed.categorias.forEach(p => {
+    const key = ftNrm(p.name);
+    if (!catByName[key]) {
+      const nc = { id: ftUid(), restaurantId, name: p.name };
+      categoriesNext.push(nc);
+      catByName[key] = nc;
+      catAdded++;
+    }
+  });
+  // Auto-criar categorias mencionadas em Produtos mas ausentes na aba Categorias
+  parsed.produtos.forEach(p => {
+    if (!p.categoria) return;
+    const key = ftNrm(p.categoria);
+    if (!catByName[key]) {
+      const nc = { id: ftUid(), restaurantId, name: p.categoria };
+      categoriesNext.push(nc);
+      catByName[key] = nc;
+      catAdded++;
+    }
+  });
+  // Auto-criar estoques mencionados em Produtos mas ausentes na aba Estoques
+  parsed.produtos.forEach(p => {
+    (p.estoques || []).forEach(stName => {
+      const key = ftNrm(stName);
+      if (!stockByName[key]) {
+        const ns = { id: ftUid(), restaurantId, name: stName, location: null };
+        stocksNext.push(ns);
+        stockByName[key] = ns;
+        stockAdded++;
+      }
+    });
+  });
+
+  // 4. Produtos — merge por nome (case-insensitive)
+  const itemsNext = [...miseItems];
+  let itemAdded = 0, itemUpdated = 0;
+  const itemByName = {}; // só do restaurante atual
+  restItems.forEach(i => { itemByName[ftNrm(i.name)] = i; });
+  const warnings = [];
+  parsed.produtos.forEach(p => {
+    const key = ftNrm(p.name);
+    const existing = itemByName[key];
+    const catId = p.categoria ? (catByName[ftNrm(p.categoria)]?.id || null) : null;
+    const stockIds = (p.estoques || [])
+      .map(stName => stockByName[ftNrm(stName)]?.id)
+      .filter(Boolean);
+    // Suppliers do produto: preferencial + alternativos
+    const supRefs = [];
+    if (p.fornecedorPreferencial) {
+      const sid = supByName[ftNrm(p.fornecedorPreferencial)]?.id;
+      if (sid) supRefs.push({ supplierId: sid, preferred: true });
+      else warnings.push(`Produto "${p.name}": fornecedor preferencial "${p.fornecedorPreferencial}" não encontrado.`);
+    }
+    (p.fornecedoresAlternativos || []).slice(0, 3).forEach(altName => {
+      const sid = supByName[ftNrm(altName)]?.id;
+      if (sid && !supRefs.some(r => r.supplierId === sid)) {
+        supRefs.push({ supplierId: sid, preferred: false });
+      } else if (!sid) {
+        warnings.push(`Produto "${p.name}": fornecedor alternativo "${altName}" não encontrado.`);
+      }
+    });
+
+    if (existing) {
+      const idx = itemsNext.indexOf(existing);
+      const merged = {
+        ...existing,
+        unit: p.unit || existing.unit || "un",
+      };
+      if (catId) merged.categoryId = catId;
+      if (stockIds.length) merged.stockIds = Array.from(new Set([...(existing.stockIds || []), ...stockIds]));
+      if (Object.keys(p.idealQtys).length) merged.idealQtys = { ...(existing.idealQtys || {}), ...p.idealQtys };
+      if (p.pkgSize != null) merged.pkgSize = p.pkgSize;
+      if (supRefs.length) merged.suppliers = supRefs;
+      itemsNext[idx] = merged;
+      itemByName[key] = merged;
+      itemUpdated++;
+    } else {
+      const ni = {
+        id: ftUid(),
+        restaurantId,
+        name: p.name,
+        unit: p.unit || "un",
+        categoryId: catId,
+        stockIds,
+        idealQtys: p.idealQtys,
+        suppliers: supRefs,
+      };
+      if (p.pkgSize != null) ni.pkgSize = p.pkgSize;
+      itemsNext.push(ni);
+      itemByName[key] = ni;
+      itemAdded++;
+    }
+  });
+
+  return {
+    suppliersNext, stocksNext, categoriesNext, itemsNext,
+    stats: {
+      supAdded, supUpdated,
+      stockAdded,
+      catAdded,
+      itemAdded, itemUpdated,
+      totalProdutos: parsed.produtos.length,
+      totalFornecedores: parsed.fornecedores.length,
+    },
+    warnings,
+  };
+}
+
+// ═══════════════════════════════════════════════════════════════
 // ──  MISE CONTAGENS — ADMIN (Gestor Administrativo)            ──
 // ═══════════════════════════════════════════════════════════════
-function MiseContagensAdmin({ restaurantId, employees, miseCategories, miseStocks, miseAssignments, miseItems, miseCounts, miseSuppliers, miseProductSuppliers, onUpdate, mobileOnly }) {
+function MiseContagensAdmin({ restaurantId, restaurantName = "", employees, miseCategories, miseStocks, miseAssignments, miseItems, miseCounts, miseSuppliers, miseProductSuppliers, onUpdate, mobileOnly }) {
   const [subTab, setSubTab] = useState("atribuicoes");
   const restCategories = miseCategories.filter(c => c.restaurantId === restaurantId);
   const restStocks = miseStocks.filter(s => s.restaurantId === restaurantId);
@@ -16698,6 +17177,9 @@ function MiseContagensAdmin({ restaurantId, employees, miseCategories, miseStock
   const [bulkDefaults, setBulkDefaults] = useState({ factor: "1", price: "", markPreferred: false });
   // Modal de vínculo categoria ↔ estoques
   const [catStocksModalId, setCatStocksModalId] = useState(null);
+  // Import XLSX — preview antes do commit
+  const [importPreview, setImportPreview] = useState(null); // { plan, fileName } ou null
+  const [importing, setImporting] = useState(false);
 
   const mkId = () => Date.now().toString() + "_" + Math.random().toString(36).slice(2, 8);
   const miseAc = "#7c9e5e";
@@ -16941,118 +17423,76 @@ function MiseContagensAdmin({ restaurantId, employees, miseCategories, miseStock
   // Para matriz de atribuições
   const selectedCat = assignMatrixCat ? restCategories.find(c => c.id === assignMatrixCat) : null;
 
-  // Import template JSON (ex: extraído do JotForm Sororoca)
-  function handleImportTemplate(e) {
+  // ── Import/Export XLSX (modelo de produtos) ──────────────────────────────
+  // Fluxo: user baixa modelo (com dados atuais pré-preenchidos), edita no Excel,
+  // re-importa. Importação faz merge por nome com normalização ftNrm.
+
+  function handleDownloadModelo() {
+    try {
+      miseDownloadModeloXLSX({
+        restaurantName,
+        items: restItems,
+        suppliers: restSuppliers,
+        stocks: restStocks,
+        categories: restCategories,
+        productSuppliers: restProductSuppliers,
+      });
+    } catch (err) {
+      alert("Erro ao gerar modelo: " + (err.message || err));
+    }
+  }
+
+  async function handleImportXLSX(e) {
     const file = e.target.files[0];
     e.target.value = "";
     if (!file) return;
-    const reader = new FileReader();
-    reader.onload = async ev => {
-      try {
-        const data = JSON.parse(ev.target.result);
-        const srcStocks = Array.isArray(data.stocks) ? data.stocks : [];
-        const srcCategories = Array.isArray(data.categories) ? data.categories : [];
-        if (!srcStocks.length && !srcCategories.length) {
-          alert("Arquivo sem stocks ou categories. Verifique o formato do template.");
-          return;
-        }
-        const totalItems = srcCategories.reduce((s, c) => s + (c.items?.length || 0), 0);
-        const msg =
-          `Importar template de contagem:\n\n` +
-          `  • ${srcStocks.length} estoque(s)\n` +
-          `  • ${srcCategories.length} categoria(s)\n` +
-          `  • ${totalItems} item(ns)\n\n` +
-          (restCategories.length || restStocks.length || restItems.length
-            ? `⚠ O restaurante já tem ${restCategories.length} categoria(s), ${restStocks.length} estoque(s), ${restItems.length} item(ns). Duplicatas por nome serão detectadas; novos serão adicionados.\n\n`
-            : ``) +
-          `Continuar?`;
-        if (!await appConfirm(msg)) return;
-
-        // 1. Stocks — merge por nome (case-insensitive)
-        const stocksNext = [...miseStocks];
-        let stocksAdded = 0;
-        srcStocks.forEach(name => {
-          const nm = String(name).trim();
-          if (!nm) return;
-          const existing = stocksNext.find(s => s.restaurantId === restaurantId && ftNrm(s.name) === ftNrm(nm));
-          if (!existing) {
-            stocksNext.push({ id: ftUid(), restaurantId, name: nm, location: null });
-            stocksAdded++;
-          }
-        });
-
-        // 2. Categorias — merge por nome + vincula estoques
-        const categoriesNext = [...miseCategories];
-        const catIdMap = {}; // srcId/srcName → AppTip category id
-        let catsAdded = 0;
-        // Helper: mapeia nome de estoque (do JSON) → id do stock correspondente em stocksNext
-        function stockNameToId(name) {
-          const match = stocksNext.find(s => s.restaurantId === restaurantId && ftNrm(s.name) === ftNrm(name));
-          return match?.id;
-        }
-        srcCategories.forEach(src => {
-          const nm = (src.name || "").trim();
-          if (!nm) return;
-          const srcStockNames = Array.isArray(src.stocks) ? src.stocks : [];
-          const srcStockIds = srcStockNames.map(stockNameToId).filter(Boolean);
-          const existing = categoriesNext.find(c => c.restaurantId === restaurantId && ftNrm(c.name) === ftNrm(nm));
-          if (existing) {
-            catIdMap[src.id || nm] = existing.id;
-            // Merge de stockIds
-            if (srcStockIds.length > 0) {
-              const merged = Array.from(new Set([...(existing.stockIds || []), ...srcStockIds]));
-              const idx = categoriesNext.indexOf(existing);
-              categoriesNext[idx] = { ...existing, stockIds: merged };
-            }
-          } else {
-            const newId = ftUid();
-            const next = { id: newId, restaurantId, name: nm, stockIds: srcStockIds };
-            if (src.group) next.group = src.group;
-            if (src.team) next.team = src.team;
-            categoriesNext.push(next);
-            catIdMap[src.id || nm] = newId;
-            catsAdded++;
-          }
-        });
-
-        // 3. Itens — merge por (categoria, nome)
-        const itemsNext = [...miseItems];
-        let itemsAdded = 0;
-        srcCategories.forEach(src => {
-          const catId = catIdMap[src.id || src.name];
-          if (!catId) return;
-          (src.items || []).forEach(it => {
-            const nm = (it.name || "").trim();
-            if (!nm) return;
-            const existing = itemsNext.find(x => x.restaurantId === restaurantId && x.categoryId === catId && ftNrm(x.name) === ftNrm(nm));
-            if (!existing) {
-              itemsNext.push({
-                id: ftUid(), restaurantId, categoryId: catId,
-                name: nm,
-                unit: it.unit || "un",
-                expectedQty: typeof it.expectedQty === "number" ? it.expectedQty : null,
-              });
-              itemsAdded++;
-            }
-          });
-        });
-
-        if (stocksAdded) onUpdate("miseStocks", stocksNext);
-        if (catsAdded) onUpdate("miseCategories", categoriesNext);
-        if (itemsAdded) onUpdate("miseItems", itemsNext);
-
-        alert(
-          `Template importado:\n\n` +
-          `  • Estoques: +${stocksAdded} novo(s)\n` +
-          `  • Categorias: +${catsAdded} nova(s)\n` +
-          `  • Itens: +${itemsAdded} novo(s)\n\n` +
-          `Próximo: atribuir funcionários por (categoria × estoque) na aba Atribuições.`
-        );
-      } catch (err) {
-        alert("Erro ao processar arquivo: " + err.message);
+    setImporting(true);
+    try {
+      const parsed = await miseParsePlanilhaXLSX(file);
+      if (parsed.errors && parsed.errors.length) {
+        alert("Erros no arquivo:\n\n" + parsed.errors.join("\n"));
+        setImporting(false);
+        return;
       }
-    };
-    reader.readAsText(file);
+      const total = parsed.produtos.length + parsed.fornecedores.length + parsed.estoques.length + parsed.categorias.length;
+      if (total === 0) {
+        alert("Planilha vazia ou sem dados reconhecíveis. Verifique se as abas Produtos / Fornecedores / Estoques / Categorias têm conteúdo.");
+        setImporting(false);
+        return;
+      }
+      const plan = miseBuildImportPlan(parsed, {
+        restaurantId,
+        miseSuppliers, miseStocks, miseCategories, miseItems,
+      });
+      setImportPreview({ plan, fileName: file.name });
+    } catch (err) {
+      alert("Erro ao ler planilha: " + (err.message || err));
+    } finally {
+      setImporting(false);
+    }
+  }
+
+  function commitImport() {
+    if (!importPreview) return;
+    const { plan } = importPreview;
+    onUpdate("miseSuppliers", plan.suppliersNext);
+    onUpdate("miseStocks", plan.stocksNext);
+    onUpdate("miseCategories", plan.categoriesNext);
+    onUpdate("miseItems", plan.itemsNext);
+    setImportPreview(null);
+    const s = plan.stats;
+    alert(
+      `Importação concluída:\n\n` +
+      `  • Fornecedores: +${s.supAdded} novos · ${s.supUpdated} atualizado(s)\n` +
+      `  • Estoques: +${s.stockAdded} novo(s)\n` +
+      `  • Categorias: +${s.catAdded} nova(s)\n` +
+      `  • Produtos: +${s.itemAdded} novo(s) · ${s.itemUpdated} atualizado(s)\n\n` +
+      (plan.warnings.length ? `⚠ ${plan.warnings.length} aviso(s):\n${plan.warnings.slice(0,5).join("\n")}` : `Tudo certo.`)
+    );
+  }
+
+  function cancelImport() {
+    setImportPreview(null);
   }
 
   return (
@@ -17067,11 +17507,73 @@ function MiseContagensAdmin({ restaurantId, employees, miseCategories, miseStock
             </button>
           ))}
         </div>
-        <label style={{...S.btnSecondary,fontSize:11,padding:"6px 12px",cursor:"pointer",display:"inline-flex",alignItems:"center",color:miseAc,borderColor:miseAc+"66"}}>
-          ⬆ Importar template (JSON)
-          <input type="file" accept=".json,application/json" onChange={handleImportTemplate} style={{display:"none"}} />
-        </label>
+        <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+          <button
+            type="button"
+            onClick={handleDownloadModelo}
+            title="Baixa um arquivo Excel com os produtos atuais. Edite no Excel e re-importe."
+            style={{...S.btnSecondary,fontSize:11,padding:"6px 12px",cursor:"pointer",display:"inline-flex",alignItems:"center",color:miseAc,borderColor:miseAc+"66"}}
+          >
+            📥 Baixar modelo
+          </button>
+          <label style={{...S.btnSecondary,fontSize:11,padding:"6px 12px",cursor:importing?"wait":"pointer",display:"inline-flex",alignItems:"center",color:miseAc,borderColor:miseAc+"66",opacity:importing?0.6:1}}>
+            {importing ? "⏳ Lendo..." : "📤 Importar planilha"}
+            <input type="file" accept=".xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" onChange={handleImportXLSX} style={{display:"none"}} disabled={importing} />
+          </label>
+        </div>
       </div>
+
+      {/* Preview de importação */}
+      {importPreview && (
+        <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.45)",zIndex:1000,display:"flex",alignItems:"center",justifyContent:"center",padding:16}} onClick={cancelImport}>
+          <div onClick={e=>e.stopPropagation()} style={{background:"var(--card-bg)",border:"1px solid var(--border)",borderRadius:14,maxWidth:560,width:"100%",maxHeight:"86vh",overflow:"auto",padding:24,boxShadow:"0 20px 50px rgba(0,0,0,0.3)"}}>
+            <h3 style={{margin:"0 0 4px",color:"var(--text)",fontSize:18,fontWeight:700}}>Confirmar importação</h3>
+            <div style={{color:"var(--text3)",fontSize:12,marginBottom:14}}>{importPreview.fileName}</div>
+            {(() => {
+              const s = importPreview.plan.stats;
+              const blocks = [
+                { label: "Fornecedores", add: s.supAdded, upd: s.supUpdated },
+                { label: "Estoques",     add: s.stockAdded, upd: 0 },
+                { label: "Categorias",   add: s.catAdded, upd: 0 },
+                { label: "Produtos",     add: s.itemAdded, upd: s.itemUpdated },
+              ];
+              return (
+                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:14}}>
+                  {blocks.map(b => (
+                    <div key={b.label} style={{padding:"10px 12px",background:"var(--bg2,#f8f8f6)",border:"1px solid var(--border)",borderRadius:10}}>
+                      <div style={{fontSize:12,color:"var(--text3)",marginBottom:4}}>{b.label}</div>
+                      <div style={{display:"flex",alignItems:"baseline",gap:8}}>
+                        <span style={{fontSize:18,fontWeight:700,color:b.add>0?miseAc:"var(--text2)"}}>+{b.add}</span>
+                        <span style={{fontSize:11,color:"var(--text3)"}}>novo(s)</span>
+                        {b.upd > 0 && (
+                          <>
+                            <span style={{fontSize:18,fontWeight:700,color:"#f59e0b",marginLeft:4}}>~{b.upd}</span>
+                            <span style={{fontSize:11,color:"var(--text3)"}}>atualizad{b.upd===1?"o":"os"}</span>
+                          </>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              );
+            })()}
+            {importPreview.plan.warnings.length > 0 && (
+              <div style={{padding:"10px 12px",background:"#fffbeb",border:"1px solid #f59e0b44",borderRadius:10,marginBottom:14,fontSize:12,color:"#92400e",lineHeight:1.5,maxHeight:140,overflow:"auto"}}>
+                <div style={{fontWeight:700,marginBottom:4}}>⚠ {importPreview.plan.warnings.length} aviso(s):</div>
+                {importPreview.plan.warnings.slice(0, 8).map((w, i) => <div key={i}>• {w}</div>)}
+                {importPreview.plan.warnings.length > 8 && <div>... e mais {importPreview.plan.warnings.length - 8}</div>}
+              </div>
+            )}
+            <div style={{padding:"10px 12px",background:"var(--bg2,#f8f8f6)",border:"1px solid var(--border)",borderRadius:10,fontSize:12,color:"var(--text3)",lineHeight:1.5,marginBottom:16}}>
+              📌 Confirme pra aplicar no banco. Itens com nome igual aos existentes serão atualizados (não duplicados).
+            </div>
+            <div style={{display:"flex",gap:8,justifyContent:"flex-end"}}>
+              <button type="button" onClick={cancelImport} style={{...S.btnSecondary,padding:"8px 14px",fontSize:13}}>Cancelar</button>
+              <button type="button" onClick={commitImport} style={{...S.btn,padding:"8px 14px",fontSize:13,background:miseAc,color:"#fff",border:"none"}}>Aplicar importação</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ATRIBUIÇÕES */}
       {subTab === "atribuicoes" && (
