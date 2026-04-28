@@ -16603,6 +16603,7 @@ function OperationalPortal({ employee, data, onUpdate, onBack, toggleTheme, them
         {tab === "contagens" ? (
           <OperationalContagens
             employee={employee}
+            pessoas={data?.pessoas ?? []}
             miseCategories={data?.miseCategories ?? []}
             miseStocks={data?.miseStocks ?? []}
             miseAssignments={data?.miseAssignments ?? []}
@@ -17159,15 +17160,15 @@ function MiseContagensAdmin({ restaurantId, restaurantName = "", employees, mise
   const [newItemCat, setNewItemCat] = useState("");
   const [newItemName, setNewItemName] = useState("");
   const [newItemUnit, setNewItemUnit] = useState("un");
-  const [newItemMinStock, setNewItemMinStock] = useState("");
   const [itemFilter, setItemFilter] = useState("");
-  const [assignMatrixCat, setAssignMatrixCat] = useState(null); // categoria selecionada na matriz
+  const [assignMatrixStock, setAssignMatrixStock] = useState(null); // estoque selecionado na matriz (modelo novo: estoque × categoria × pessoa)
   // Fornecedores
   const [newSupName, setNewSupName] = useState("");
+  const [newSupContato, setNewSupContato] = useState("");
   const [newSupWhats, setNewSupWhats] = useState("");
   const [newSupNotes, setNewSupNotes] = useState("");
   const [editingSupId, setEditingSupId] = useState(null);
-  const [editingSupForm, setEditingSupForm] = useState({ name: "", whatsapp: "", notes: "" });
+  const [editingSupForm, setEditingSupForm] = useState({ name: "", nomeContato: "", whatsapp: "", notes: "" });
   // Modal de vínculos Produto → Fornecedores
   const [linkModalProductId, setLinkModalProductId] = useState(null);
   // Modal de vínculos em lote: um fornecedor × muitos produtos
@@ -17180,6 +17181,17 @@ function MiseContagensAdmin({ restaurantId, restaurantName = "", employees, mise
   // Import XLSX — preview antes do commit
   const [importPreview, setImportPreview] = useState(null); // { plan, fileName } ou null
   const [importing, setImporting] = useState(false);
+  // Cadastro produto novo: campos extras
+  const [newItemPkg, setNewItemPkg] = useState("");
+  const [newItemStockIds, setNewItemStockIds] = useState([]);
+  const [newItemSupplierPref, setNewItemSupplierPref] = useState("");
+  // Modal "Editar produto" — form completo
+  const [editItemId, setEditItemId] = useState(null);
+  const [editItemForm, setEditItemForm] = useState(null);
+  // Filtros + bulk-assign na tabela de itens (Fase 1.7)
+  const [itemBulkFilter, setItemBulkFilter] = useState({ categoryId: "__all", stockId: "__all", supplierId: "__all", missing: "__all" });
+  const [itemBulkSelected, setItemBulkSelected] = useState({}); // {itemId: true}
+  const [itemBulkAction, setItemBulkAction] = useState({ open: false, type: "", value: "" });
 
   const mkId = () => Date.now().toString() + "_" + Math.random().toString(36).slice(2, 8);
   const miseAc = "#7c9e5e";
@@ -17252,19 +17264,158 @@ function MiseContagensAdmin({ restaurantId, restaurantName = "", employees, mise
   // Actions — Itens
   function addItem() {
     const nm = newItemName.trim();
-    if (!nm || !newItemCat) return;
-    const minStock = newItemMinStock === "" ? null : parseFloat(String(newItemMinStock).replace(",","."));
-    onUpdate("miseItems", [...miseItems, { id: mkId(), restaurantId, categoryId: newItemCat, name: nm, unit: newItemUnit.trim() || "un", minStock: isNaN(minStock) ? null : minStock }]);
-    setNewItemName(""); setNewItemMinStock("");
+    if (!nm) return;
+    if (restItems.some(i => ftNrm(i.name) === ftNrm(nm))) {
+      alert("Já existe item com esse nome.");
+      return;
+    }
+    const pkgNum = newItemPkg === "" ? null : parseFloat(String(newItemPkg).replace(",","."));
+    const next = {
+      id: mkId(),
+      restaurantId,
+      categoryId: newItemCat || null,
+      name: nm,
+      unit: newItemUnit.trim() || "un",
+      stockIds: [...newItemStockIds],
+      idealQtys: {},
+      suppliers: newItemSupplierPref ? [{ supplierId: newItemSupplierPref, preferred: true }] : [],
+    };
+    if (pkgNum != null && !isNaN(pkgNum) && pkgNum > 0) next.pkgSize = pkgNum;
+    onUpdate("miseItems", [...miseItems, next]);
+    setNewItemName(""); setNewItemPkg(""); setNewItemStockIds([]); setNewItemSupplierPref("");
   }
   async function delItem(id) {
     if (!await appConfirm("Remover este item? Vínculos com fornecedores também serão removidos.")) return;
     onUpdate("miseItems", miseItems.filter(i => i.id !== id));
     onUpdate("miseProductSuppliers", (miseProductSuppliers || []).filter(ps => ps.productId !== id));
   }
-  function updateItemMinStock(id, v) {
-    const minStock = v === "" ? null : parseFloat(String(v).replace(",","."));
-    onUpdate("miseItems", miseItems.map(i => i.id === id ? { ...i, minStock: isNaN(minStock) ? null : minStock } : i));
+  // Abre o modal de edição completa
+  function openEditItem(item) {
+    setEditItemId(item.id);
+    setEditItemForm({
+      name: item.name || "",
+      categoryId: item.categoryId || "",
+      unit: item.unit || "un",
+      pkgSize: item.pkgSize ?? "",
+      stockIds: [...(item.stockIds || [])],
+      idealQtys: { ...(item.idealQtys || {}) },
+      suppliers: [...(item.suppliers || [])], // [{supplierId, preferred}]
+    });
+  }
+  function saveEditItem() {
+    if (!editItemId || !editItemForm) return;
+    const nm = editItemForm.name.trim();
+    if (!nm) { alert("Nome é obrigatório."); return; }
+    const dup = restItems.find(i => i.id !== editItemId && ftNrm(i.name) === ftNrm(nm));
+    if (dup) { alert("Já existe outro item com esse nome."); return; }
+    const pkgNum = editItemForm.pkgSize === "" ? null
+      : (typeof editItemForm.pkgSize === "number" ? editItemForm.pkgSize : parseFloat(String(editItemForm.pkgSize).replace(",",".")));
+    const cleanIdeal = {};
+    Object.entries(editItemForm.idealQtys || {}).forEach(([d, v]) => {
+      if (v === "" || v == null) return;
+      const n = typeof v === "number" ? v : parseFloat(String(v).replace(",","."));
+      if (!isNaN(n) && n >= 0) cleanIdeal[d] = n;
+    });
+    const next = miseItems.map(i => {
+      if (i.id !== editItemId) return i;
+      const merged = {
+        ...i,
+        name: nm,
+        categoryId: editItemForm.categoryId || null,
+        unit: editItemForm.unit.trim() || "un",
+        stockIds: [...editItemForm.stockIds],
+        idealQtys: cleanIdeal,
+        suppliers: editItemForm.suppliers,
+      };
+      if (pkgNum != null && !isNaN(pkgNum) && pkgNum > 0) merged.pkgSize = pkgNum;
+      else delete merged.pkgSize;
+      return merged;
+    });
+    onUpdate("miseItems", next);
+    setEditItemId(null); setEditItemForm(null);
+  }
+  function cancelEditItem() {
+    setEditItemId(null); setEditItemForm(null);
+  }
+  // Edição inline — form (helpers do modal)
+  function toggleEditFormStock(stockId) {
+    setEditItemForm(f => {
+      const has = f.stockIds.includes(stockId);
+      return { ...f, stockIds: has ? f.stockIds.filter(x => x !== stockId) : [...f.stockIds, stockId] };
+    });
+  }
+  function setEditFormSupplierPreferred(supplierId) {
+    setEditItemForm(f => {
+      const others = f.suppliers.filter(s => s.supplierId !== supplierId);
+      return { ...f, suppliers: [{ supplierId, preferred: true }, ...others.map(s => ({ ...s, preferred: false }))] };
+    });
+  }
+  function toggleEditFormSupplierAlt(supplierId) {
+    setEditItemForm(f => {
+      const has = f.suppliers.find(s => s.supplierId === supplierId);
+      if (has) {
+        // Não pode tirar o preferencial assim — só desmarcando alternativos
+        if (has.preferred) return f;
+        return { ...f, suppliers: f.suppliers.filter(s => s.supplierId !== supplierId) };
+      }
+      // Limite de 3 alternativos
+      const alts = f.suppliers.filter(s => !s.preferred);
+      if (alts.length >= 3) {
+        alert("Máximo 3 fornecedores alternativos.");
+        return f;
+      }
+      return { ...f, suppliers: [...f.suppliers, { supplierId, preferred: false }] };
+    });
+  }
+  function clearEditFormSupplierPreferred() {
+    setEditItemForm(f => ({ ...f, suppliers: f.suppliers.filter(s => !s.preferred) }));
+  }
+  function setEditFormIdealQty(dayIdx, value) {
+    setEditItemForm(f => ({ ...f, idealQtys: { ...f.idealQtys, [dayIdx]: value } }));
+  }
+
+  // Bulk-assign (Fase 1.7) — aplica em lote nos items selecionados
+  function applyBulkAction() {
+    const ids = Object.keys(itemBulkSelected).filter(id => itemBulkSelected[id]);
+    if (!ids.length) { alert("Nenhum item selecionado."); return; }
+    const { type, value } = itemBulkAction;
+    if (!type) { alert("Selecione uma ação."); return; }
+    const next = miseItems.map(i => {
+      if (!ids.includes(i.id)) return i;
+      if (type === "category") return { ...i, categoryId: value || null };
+      if (type === "unit") return { ...i, unit: value || "un" };
+      if (type === "addStock") {
+        const cur = i.stockIds || [];
+        return { ...i, stockIds: cur.includes(value) ? cur : [...cur, value] };
+      }
+      if (type === "removeStock") {
+        return { ...i, stockIds: (i.stockIds || []).filter(s => s !== value) };
+      }
+      if (type === "preferredSupplier") {
+        const others = (i.suppliers || []).filter(s => s.supplierId !== value).map(s => ({ ...s, preferred: false }));
+        return { ...i, suppliers: [{ supplierId: value, preferred: true }, ...others] };
+      }
+      if (type === "pkgSize") {
+        const n = parseFloat(String(value).replace(",","."));
+        if (isNaN(n) || n <= 0) return i;
+        return { ...i, pkgSize: n };
+      }
+      return i;
+    });
+    onUpdate("miseItems", next);
+    setItemBulkAction({ open: false, type: "", value: "" });
+    setItemBulkSelected({});
+  }
+  function toggleItemSelect(id) {
+    setItemBulkSelected(s => ({ ...s, [id]: !s[id] }));
+  }
+  function selectAllVisibleItems(visibleIds) {
+    const next = {};
+    visibleIds.forEach(id => { next[id] = true; });
+    setItemBulkSelected(next);
+  }
+  function clearItemSelection() {
+    setItemBulkSelected({});
   }
 
   // Actions — Fornecedores
@@ -17272,17 +17423,34 @@ function MiseContagensAdmin({ restaurantId, restaurantName = "", employees, mise
     const nm = newSupName.trim();
     if (!nm) return;
     if (restSuppliers.some(s => ftNrm(s.name) === ftNrm(nm))) { alert("Já existe fornecedor com esse nome."); return; }
-    onUpdate("miseSuppliers", [...(miseSuppliers || []), { id: mkId(), restaurantId, name: nm, whatsapp: newSupWhats.trim() || null, notes: newSupNotes.trim() || null }]);
-    setNewSupName(""); setNewSupWhats(""); setNewSupNotes("");
+    onUpdate("miseSuppliers", [...(miseSuppliers || []), {
+      id: mkId(), restaurantId,
+      name: nm,
+      nomeContato: newSupContato.trim() || "",
+      whatsapp: newSupWhats.trim().replace(/\D/g, "") || "",
+      notes: newSupNotes.trim() || "",
+    }]);
+    setNewSupName(""); setNewSupContato(""); setNewSupWhats(""); setNewSupNotes("");
   }
   function startEditSup(s) {
     setEditingSupId(s.id);
-    setEditingSupForm({ name: s.name, whatsapp: s.whatsapp ?? "", notes: s.notes ?? "" });
+    setEditingSupForm({
+      name: s.name,
+      nomeContato: s.nomeContato ?? "",
+      whatsapp: s.whatsapp ?? "",
+      notes: s.notes ?? "",
+    });
   }
   function saveSupEdit() {
     const nm = editingSupForm.name.trim();
     if (!nm || !editingSupId) return;
-    onUpdate("miseSuppliers", (miseSuppliers || []).map(s => s.id === editingSupId ? { ...s, name: nm, whatsapp: editingSupForm.whatsapp.trim() || null, notes: editingSupForm.notes.trim() || null } : s));
+    onUpdate("miseSuppliers", (miseSuppliers || []).map(s => s.id === editingSupId ? {
+      ...s,
+      name: nm,
+      nomeContato: editingSupForm.nomeContato.trim() || "",
+      whatsapp: editingSupForm.whatsapp.trim().replace(/\D/g, "") || "",
+      notes: editingSupForm.notes.trim() || "",
+    } : s));
     setEditingSupId(null);
   }
   async function delSupplier(id) {
@@ -17293,19 +17461,61 @@ function MiseContagensAdmin({ restaurantId, restaurantName = "", employees, mise
     onUpdate("miseProductSuppliers", (miseProductSuppliers || []).filter(ps => ps.supplierId !== id));
   }
 
-  // Actions — Atribuições (por categoria × pessoa; estoques vêm da categoria)
-  function isAssignedToCategory(categoryId, userId) {
-    return restAssignments.some(a => a.categoryId === categoryId && a.userId === userId);
+  // Actions — Atribuições (modelo novo: estoque × categoria × pessoa)
+  // A mesma pessoa pode contar diferentes categorias dentro do mesmo estoque, ou
+  // dividir uma categoria entre estoques diferentes.
+  function isAssigned(stockId, categoryId, userId) {
+    return restAssignments.some(a => a.stockId === stockId && a.categoryId === categoryId && a.userId === userId);
   }
-  function toggleCategoryAssignment(categoryId, userId) {
-    const existing = restAssignments.filter(a => a.categoryId === categoryId && a.userId === userId);
-    if (existing.length > 0) {
-      // Remove TODAS as atribuições daquela (cat, user), independente de stockId antigo
-      const idsToRemove = new Set(existing.map(a => a.id));
-      onUpdate("miseAssignments", miseAssignments.filter(a => !idsToRemove.has(a.id)));
+  function toggleAssignment(stockId, categoryId, userId) {
+    const existing = restAssignments.find(a => a.stockId === stockId && a.categoryId === categoryId && a.userId === userId);
+    if (existing) {
+      onUpdate("miseAssignments", miseAssignments.filter(a => a.id !== existing.id));
     } else {
-      onUpdate("miseAssignments", [...miseAssignments, { id: mkId(), restaurantId, categoryId, userId }]);
+      onUpdate("miseAssignments", [...miseAssignments, { id: mkId(), restaurantId, stockId, categoryId, userId }]);
     }
+  }
+  // Categorias presentes em um estoque — deduzidas dos produtos cujo stockIds inclui o estoque
+  function categoriesInStock(stockId) {
+    const catIds = new Set();
+    restItems.forEach(i => {
+      if ((i.stockIds || []).includes(stockId) && i.categoryId) catIds.add(i.categoryId);
+    });
+    return [...restCategories].filter(c => catIds.has(c.id)).sort((a,b)=>a.name.localeCompare(b.name));
+  }
+  // Conta de produtos numa (estoque, categoria) — só pra UI mostrar volume
+  function countItemsInStockCategory(stockId, categoryId) {
+    return restItems.filter(i => (i.stockIds || []).includes(stockId) && i.categoryId === categoryId).length;
+  }
+  // Detecta atribuições antigas (modelo categoria × pessoa, sem stockId) — pra exibir banner
+  const legacyAssignments = restAssignments.filter(a => !a.stockId && a.categoryId);
+  function migrateLegacyAssignments() {
+    if (legacyAssignments.length === 0) return;
+    const expanded = [];
+    legacyAssignments.forEach(a => {
+      const cat = restCategories.find(c => c.id === a.categoryId);
+      if (!cat) return;
+      // Pega estoques onde a categoria aparece (via produtos OU via cat.stockIds antigo)
+      const fromProducts = new Set();
+      restItems.forEach(i => { if (i.categoryId === a.categoryId) (i.stockIds || []).forEach(sid => fromProducts.add(sid)); });
+      const fromCat = new Set(cat.stockIds || []);
+      const allStocks = new Set([...fromProducts, ...fromCat]);
+      allStocks.forEach(sid => {
+        // Evita duplicar se já existe atribuição com stockId igual
+        const dup = restAssignments.some(b => b.stockId === sid && b.categoryId === a.categoryId && b.userId === a.userId);
+        if (!dup && !expanded.some(b => b.stockId === sid && b.categoryId === a.categoryId && b.userId === a.userId)) {
+          expanded.push({ id: mkId(), restaurantId, stockId: sid, categoryId: a.categoryId, userId: a.userId });
+        }
+      });
+    });
+    const legacyIds = new Set(legacyAssignments.map(a => a.id));
+    const next = miseAssignments.filter(a => !legacyIds.has(a.id)).concat(expanded);
+    onUpdate("miseAssignments", next);
+    alert(`Migração concluída:\n\n  • ${legacyAssignments.length} atribuição(ões) antiga(s) convertida(s)\n  • ${expanded.length} atribuição(ões) (estoque × categoria × pessoa) criada(s)`);
+  }
+  // Resumo: conta atribuições por estoque (pra mostrar badges no dropdown)
+  function assignmentCountByStock(stockId) {
+    return restAssignments.filter(a => a.stockId === stockId).length;
   }
 
   // Actions — Vínculos Produto-Fornecedor
@@ -17420,8 +17630,7 @@ function MiseContagensAdmin({ restaurantId, restaurantName = "", employees, mise
     // consome diretamente as não-arquivadas. Histórico fica disponível em Compras.
   ];
 
-  // Para matriz de atribuições
-  const selectedCat = assignMatrixCat ? restCategories.find(c => c.id === assignMatrixCat) : null;
+  // (Matriz de atribuições agora é por estoque — ver assignMatrixStock)
 
   // ── Import/Export XLSX (modelo de produtos) ──────────────────────────────
   // Fluxo: user baixa modelo (com dados atuais pré-preenchidos), edita no Excel,
@@ -17578,88 +17787,115 @@ function MiseContagensAdmin({ restaurantId, restaurantName = "", employees, mise
       {/* ATRIBUIÇÕES */}
       {subTab === "atribuicoes" && (
         <div>
-          <p style={{color:"var(--text3)",fontSize:13,lineHeight:1.5,margin:"0 0 16px",maxWidth:720}}>
-            Defina quem conta cada categoria em cada estoque. Uma mesma categoria pode ter responsáveis diferentes em estoques diferentes (ex: Vinhos no estoque 1 com João; Vinhos no estoque 2 com Maria).
+          <p style={{color:"var(--text3)",fontSize:13,lineHeight:1.5,margin:"0 0 16px",maxWidth:760}}>
+            Defina quem conta cada categoria em cada estoque. A mesma pessoa pode contar várias categorias dentro de um estoque, ou dividir uma categoria entre estoques diferentes (ex: João conta Comidas + Bebidas no Estoque Seco; Maria conta Limpeza no mesmo Estoque Seco).
           </p>
+
+          {/* Banner de migração legado */}
+          {legacyAssignments.length > 0 && (
+            <div style={{padding:"12px 16px",background:"#eff6ff",border:"1px solid #93c5fd",borderRadius:10,marginBottom:16,display:"flex",gap:12,alignItems:"center",flexWrap:"wrap"}}>
+              <div style={{flex:1,minWidth:240}}>
+                <div style={{fontSize:13,fontWeight:700,color:"#1e40af",marginBottom:2}}>📥 Atribuições antigas detectadas</div>
+                <div style={{fontSize:12,color:"#1e3a8a",lineHeight:1.5}}>
+                  Encontramos <b>{legacyAssignments.length}</b> atribuição(ões) no modelo antigo (categoria × pessoa). Convertemos automaticamente pro modelo novo (estoque × categoria × pessoa) — clique pra aplicar a conversão.
+                </div>
+              </div>
+              <button onClick={migrateLegacyAssignments} style={{...S.btnPrimary,fontSize:12,padding:"7px 14px",background:"#2563eb",border:"none",color:"#fff"}}>Converter agora</button>
+            </div>
+          )}
+
           {eligibleEmps.length === 0 && (
             <div style={{padding:"12px 16px",background:"#fffbeb",border:"1px solid #f59e0b44",borderRadius:10,marginBottom:16,fontSize:13,color:"#92400e",lineHeight:1.5}}>
               ⚠️ Nenhum funcionário tem a área <b>Contagens</b> concedida. Primeiro marque a área em <b>Pessoas → Permissões Op.</b> para os funcionários elegíveis.
             </div>
           )}
-          {restCategories.length === 0 || restStocks.length === 0 ? (
+
+          {restStocks.length === 0 ? (
             <div style={{padding:"32px 16px",textAlign:"center",color:"var(--text3)",fontSize:14,background:"var(--card-bg)",borderRadius:12,border:"1px solid var(--border)"}}>
-              {restCategories.length === 0 ? "Cadastre ao menos uma categoria na aba Categorias." : "Cadastre ao menos um estoque na aba Estoques."}
+              Cadastre ao menos um estoque na aba Estoques.
+            </div>
+          ) : restItems.length === 0 ? (
+            <div style={{padding:"32px 16px",textAlign:"center",color:"var(--text3)",fontSize:14,background:"var(--card-bg)",borderRadius:12,border:"1px solid var(--border)"}}>
+              Cadastre produtos (e atribua estoque + categoria a eles) antes de definir quem conta cada parte.
             </div>
           ) : (
             <>
+              {/* Seletor de estoque */}
               <div style={{marginBottom:12,display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
-                <label style={{fontSize:13,color:"var(--text2)",fontWeight:600}}>Categoria:</label>
-                <select value={assignMatrixCat ?? ""} onChange={e=>setAssignMatrixCat(e.target.value || null)} style={{...S.input,maxWidth:260,width:"auto"}}>
-                  <option value="">— Selecione —</option>
-                  {restCategories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                <label style={{fontSize:13,color:"var(--text2)",fontWeight:600}}>Estoque:</label>
+                <select value={assignMatrixStock ?? ""} onChange={e=>setAssignMatrixStock(e.target.value || null)} style={{...S.input,maxWidth:280,width:"auto"}}>
+                  <option value="">— Selecione um estoque —</option>
+                  {[...restStocks].sort((a,b)=>a.name.localeCompare(b.name)).map(s => {
+                    const cnt = assignmentCountByStock(s.id);
+                    return <option key={s.id} value={s.id}>{s.name}{cnt>0?` (${cnt})`:""}</option>;
+                  })}
                 </select>
               </div>
-              {!selectedCat ? (
+
+              {!assignMatrixStock ? (
                 <div style={{padding:"32px 16px",textAlign:"center",color:"var(--text3)",fontSize:14,background:"var(--card-bg)",borderRadius:12,border:"1px solid var(--border)"}}>
-                  Selecione uma categoria para atribuir responsáveis.
+                  Selecione um estoque para definir quem conta cada categoria dentro dele.
                 </div>
               ) : (() => {
-                const linkedStockIds = selectedCat.stockIds || [];
-                const linkedStocks = restStocks.filter(s => linkedStockIds.includes(s.id));
-                const catType = selectedCat.type || "contagem";
-                const needsStocks = catType === "contagem" || catType === "ambos";
-                // Aviso se faltam estoques vinculados para categorias que precisam
-                if (needsStocks && linkedStocks.length === 0) {
+                const stock = restStocks.find(s => s.id === assignMatrixStock);
+                if (!stock) return null;
+                const cats = categoriesInStock(stock.id);
+                if (cats.length === 0) {
                   return (
                     <div style={{padding:"32px 16px",textAlign:"center",color:"var(--text3)",fontSize:14,background:"var(--card-bg)",borderRadius:12,border:"1px solid var(--border)"}}>
-                      <div style={{fontSize:32,marginBottom:10}}>📍</div>
-                      <div style={{color:"var(--text)",fontWeight:600,fontSize:14,marginBottom:6}}>Categoria sem estoques vinculados</div>
-                      <div style={{lineHeight:1.5,maxWidth:420,margin:"0 auto 12px"}}>
-                        A categoria <b>{selectedCat.name}</b> é do tipo <b>{catType}</b> e precisa estar vinculada a pelo menos um estoque antes de atribuir pessoas.
+                      <div style={{fontSize:32,marginBottom:10}}>📂</div>
+                      <div style={{color:"var(--text)",fontWeight:600,fontSize:14,marginBottom:6}}>Nenhuma categoria nesse estoque</div>
+                      <div style={{lineHeight:1.5,maxWidth:460,margin:"0 auto"}}>
+                        Atribua produtos a <b>{stock.name}</b> (na aba <b>Itens</b>) com uma categoria definida. As categorias disponíveis aqui aparecem automaticamente.
                       </div>
-                      <button onClick={()=>setCatStocksModalId(selectedCat.id)} style={{...S.btnPrimary,fontSize:12,padding:"6px 14px"}}>📍 Vincular estoques</button>
                     </div>
                   );
                 }
                 return (
                   <div style={{border:"1px solid var(--border)",borderRadius:12,background:"var(--card-bg)",overflow:"hidden"}}>
                     <div style={{padding:"10px 14px",background:"var(--bg2)",borderBottom:"1px solid var(--border)",fontSize:12,color:"var(--text3)",lineHeight:1.5}}>
-                      {catType === "pedido" ? (
-                        <>Categoria <b>{selectedCat.name}</b> é do tipo <b>Pedido</b>. Marque quem pode solicitar produtos dela.</>
-                      ) : (
-                        <>
-                          Categoria <b>{selectedCat.name}</b> existe em <b>{linkedStocks.length} estoque(s)</b>: {linkedStocks.map(s=>s.name).join(", ")}.
-                          {catType === "ambos" && <> Também aceita pedido direto.</>}
-                          <br/>Quem for atribuído <b>conta em todos os estoques</b> vinculados à categoria.
-                        </>
-                      )}
+                      Estoque <b>{stock.name}</b> tem <b>{cats.length} categoria(s)</b>. Marque quem conta cada uma. Quem não estiver marcado em nenhuma categoria desse estoque <b>não vê</b> esse estoque na contagem.
                     </div>
-                    {eligibleEmps.length === 0 ? (
-                      <div style={{padding:"32px 16px",textAlign:"center",color:"var(--text3)"}}>Nenhuma pessoa com a área Contagens concedida. Conceda em <b>Pessoas → Permissões</b>.</div>
-                    ) : [...eligibleEmps].sort((a,b)=>a.name.localeCompare(b.name)).map(emp => {
-                      const checked = isAssignedToCategory(selectedCat.id, emp.id);
+                    {/* Matriz: linhas = categorias; pra cada categoria, lista pessoas com checkboxes */}
+                    {cats.map((cat, idx) => {
+                      const itemCount = countItemsInStockCategory(stock.id, cat.id);
+                      const assignedHere = restAssignments.filter(a => a.stockId === stock.id && a.categoryId === cat.id);
                       return (
-                        <label key={emp.id} style={{display:"flex",alignItems:"center",gap:10,padding:"10px 14px",borderTop:"1px solid var(--border)",cursor:"pointer",background:checked?miseAc+"11":"transparent"}}>
-                          <input type="checkbox" checked={checked}
-                            onChange={() => toggleCategoryAssignment(selectedCat.id, emp.id)}
-                            style={{cursor:"pointer",width:18,height:18,accentColor:miseAc}} />
-                          <span style={{color:"var(--text)",fontWeight:500,flex:1}}>{emp.name}</span>
-                          {checked && (
-                            <span style={{fontSize:11,color:"#15803d",fontWeight:700}}>
-                              ✓ {catType === "pedido" ? "pode solicitar" : `conta em ${linkedStocks.length} estoque(s)`}
+                        <div key={cat.id} style={{borderTop: idx>0 ? "1px solid var(--border)" : "none"}}>
+                          <div style={{padding:"10px 14px",background:miseAc+"08",borderBottom:"1px solid var(--border)",display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
+                            <span style={{fontSize:13,fontWeight:700,color:"var(--text)"}}>{cat.name}</span>
+                            <span style={{fontSize:11,color:"var(--text3)"}}>{itemCount} produto(s)</span>
+                            <span style={{flex:1}} />
+                            <span style={{fontSize:11,color:assignedHere.length>0?"#15803d":"#dc2626",fontWeight:600}}>
+                              {assignedHere.length === 0 ? "⚠ ninguém atribuído" : `${assignedHere.length} pessoa(s)`}
                             </span>
+                          </div>
+                          {eligibleEmps.length === 0 ? (
+                            <div style={{padding:"16px",textAlign:"center",color:"var(--text3)",fontSize:12}}>—</div>
+                          ) : (
+                            <div style={{display:"flex",flexWrap:"wrap",gap:6,padding:"10px 14px"}}>
+                              {[...eligibleEmps].sort((a,b)=>a.name.localeCompare(b.name)).map(emp => {
+                                const checked = isAssigned(stock.id, cat.id, emp.id);
+                                return (
+                                  <button key={emp.id} type="button"
+                                    onClick={()=>toggleAssignment(stock.id, cat.id, emp.id)}
+                                    style={{
+                                      padding:"6px 12px",borderRadius:20,fontSize:12,fontWeight:checked?700:500,
+                                      background:checked?miseAc:"transparent",color:checked?"#fff":"var(--text2)",
+                                      border:`1px solid ${checked?miseAc:"var(--border)"}`,cursor:"pointer",
+                                    }}>
+                                    {checked ? "✓ " : ""}{emp.name}
+                                  </button>
+                                );
+                              })}
+                            </div>
                           )}
-                        </label>
+                        </div>
                       );
                     })}
                   </div>
                 );
               })()}
-              {selectedCat && (
-                <div style={{marginTop:12,fontSize:12,color:"var(--text3)",lineHeight:1.5}}>
-                  💡 Tipo <b>{selectedCat.type === "pedido" ? "Pedido" : selectedCat.type === "ambos" ? "Ambos" : "Contagem"}</b> · Estoques vinculados vêm da categoria (edite em <b>Categorias → 📍 estoques</b>).
-                </div>
-              )}
             </>
           )}
         </div>
@@ -17778,101 +18014,361 @@ function MiseContagensAdmin({ restaurantId, restaurantName = "", employees, mise
       )}
 
       {/* ITENS */}
-      {subTab === "itens" && (
+      {subTab === "itens" && (() => {
+        // ── Filtros
+        const filtered = restItems.filter(i => {
+          if (itemBulkFilter.categoryId === "__none" && i.categoryId) return false;
+          if (itemBulkFilter.categoryId !== "__all" && itemBulkFilter.categoryId !== "__none" && i.categoryId !== itemBulkFilter.categoryId) return false;
+          if (itemBulkFilter.stockId === "__none" && (i.stockIds || []).length > 0) return false;
+          if (itemBulkFilter.stockId !== "__all" && itemBulkFilter.stockId !== "__none" && !(i.stockIds || []).includes(itemBulkFilter.stockId)) return false;
+          if (itemBulkFilter.supplierId === "__none" && (i.suppliers || []).length > 0) return false;
+          if (itemBulkFilter.supplierId !== "__all" && itemBulkFilter.supplierId !== "__none" && !(i.suppliers || []).some(s => s.supplierId === itemBulkFilter.supplierId)) return false;
+          if (itemBulkFilter.missing === "noPkg" && i.pkgSize) return false;
+          if (itemBulkFilter.missing === "noIdeal" && Object.keys(i.idealQtys || {}).length > 0) return false;
+          if (itemFilter && !i.name.toLowerCase().includes(itemFilter.toLowerCase())) return false;
+          return true;
+        });
+        const sorted = [...filtered].sort((a,b) => {
+          const ca = restCategories.find(c => c.id === a.categoryId)?.name ?? "";
+          const cb = restCategories.find(c => c.id === b.categoryId)?.name ?? "";
+          return ca.localeCompare(cb) || a.name.localeCompare(b.name);
+        });
+        const visibleIds = sorted.map(i => i.id);
+        const selectedCount = visibleIds.filter(id => itemBulkSelected[id]).length;
+        const allSelected = visibleIds.length > 0 && selectedCount === visibleIds.length;
+
+        return (
         <div>
-          <h3 style={{color:"var(--text)",margin:"0 0 12px",fontSize:mobileOnly?16:18}}>🍷 Itens</h3>
-          {restCategories.length === 0 ? (
-            <div style={{padding:"12px 16px",background:"#fffbeb",border:"1px solid #f59e0b44",borderRadius:10,marginBottom:16,fontSize:13,color:"#92400e"}}>
-              Cadastre ao menos uma categoria antes de criar itens.
+          <h3 style={{color:"var(--text)",margin:"0 0 12px",fontSize:mobileOnly?16:18}}>🍷 Itens <span style={{fontSize:12,color:"var(--text3)",fontWeight:400,marginLeft:8}}>({restItems.length})</span></h3>
+
+          {/* Form de cadastro rápido */}
+          <div style={{padding:"12px",background:"var(--card-bg)",border:"1px solid var(--border)",borderRadius:10,marginBottom:16}}>
+            <div style={{display:"grid",gridTemplateColumns:mobileOnly?"1fr":"2.4fr 1.6fr 1fr 1fr 1.6fr 1.8fr auto",gap:8,alignItems:"end"}}>
+              <div>
+                <label style={{...S.label,fontSize:11}}>Nome do produto</label>
+                <input value={newItemName} onChange={e=>setNewItemName(e.target.value)} placeholder="ex: Vinho Malbec 750ml" style={{...S.input}} onKeyDown={e=>e.key==="Enter"&&addItem()} />
+              </div>
+              <div>
+                <label style={{...S.label,fontSize:11}}>Categoria <span style={{color:"var(--text3)",fontWeight:400,fontSize:10}}>(opc.)</span></label>
+                <select value={newItemCat} onChange={e=>setNewItemCat(e.target.value)} style={{...S.input}}>
+                  <option value="">— sem categoria —</option>
+                  {[...restCategories].sort((a,b)=>a.name.localeCompare(b.name)).map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                </select>
+              </div>
+              <div>
+                <label style={{...S.label,fontSize:11}}>Unidade</label>
+                <input value={newItemUnit} onChange={e=>setNewItemUnit(e.target.value)} placeholder="un, kg, L" style={{...S.input}} />
+              </div>
+              <div>
+                <label style={{...S.label,fontSize:11}} title="Tamanho do pacote — pedido arredonda pra cima">Pacote</label>
+                <input type="number" step="0.01" value={newItemPkg} onChange={e=>setNewItemPkg(e.target.value)} placeholder="opc." style={{...S.input,fontFamily:"'DM Mono',monospace"}} />
+              </div>
+              <div>
+                <label style={{...S.label,fontSize:11}}>Estoques</label>
+                <select multiple value={newItemStockIds} onChange={e=>setNewItemStockIds(Array.from(e.target.selectedOptions, o => o.value))}
+                  style={{...S.input,minHeight:34,height:34,padding:"4px 8px"}} title="Ctrl/Cmd+click pra múltiplos">
+                  {[...restStocks].sort((a,b)=>a.name.localeCompare(b.name)).map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                </select>
+              </div>
+              <div>
+                <label style={{...S.label,fontSize:11}}>Fornecedor pref.</label>
+                <select value={newItemSupplierPref} onChange={e=>setNewItemSupplierPref(e.target.value)} style={{...S.input}}>
+                  <option value="">— sem —</option>
+                  {[...restSuppliers].sort((a,b)=>a.name.localeCompare(b.name)).map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                </select>
+              </div>
+              <button onClick={addItem} disabled={!newItemName.trim()} style={{...S.btnPrimary,fontSize:13,padding:"8px 16px",opacity:!newItemName.trim()?0.5:1,cursor:!newItemName.trim()?"not-allowed":"pointer"}}>+ Adicionar</button>
             </div>
-          ) : (
-            <div style={{padding:"12px",background:"var(--card-bg)",border:"1px solid var(--border)",borderRadius:10,marginBottom:16}}>
-              <div style={{display:"grid",gridTemplateColumns:mobileOnly?"1fr":"2fr 2fr 1fr 1fr auto",gap:8,alignItems:"end"}}>
-                <div>
-                  <label style={{...S.label,fontSize:11}}>Categoria</label>
-                  <select value={newItemCat} onChange={e=>setNewItemCat(e.target.value)} style={{...S.input}}>
-                    <option value="">— Selecione —</option>
-                    {restCategories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-                  </select>
-                </div>
-                <div>
-                  <label style={{...S.label,fontSize:11}}>Nome do produto</label>
-                  <input value={newItemName} onChange={e=>setNewItemName(e.target.value)} placeholder="ex: Vinho Malbec 750ml" style={{...S.input}} />
-                </div>
-                <div>
-                  <label style={{...S.label,fontSize:11}}>Unidade</label>
-                  <input value={newItemUnit} onChange={e=>setNewItemUnit(e.target.value)} placeholder="un, kg, L" style={{...S.input}} />
-                </div>
-                <div>
-                  <label style={{...S.label,fontSize:11}} title="Mínimo em estoque para gerar reposição">Mínimo</label>
-                  <input type="number" step="0.01" value={newItemMinStock} onChange={e=>setNewItemMinStock(e.target.value)} placeholder="opc." style={{...S.input,fontFamily:"'DM Mono',monospace"}} />
-                </div>
-                <button onClick={addItem} disabled={!newItemCat||!newItemName.trim()} style={{...S.btnPrimary,fontSize:13,padding:"8px 16px",opacity:(!newItemCat||!newItemName.trim())?0.5:1,cursor:(!newItemCat||!newItemName.trim())?"not-allowed":"pointer"}}>+ Adicionar</button>
-              </div>
-              <div style={{marginTop:6,fontSize:11,color:"var(--text3)"}}>
-                💡 Mínimo é usado pela área de Compras para calcular reposição automática. Não é exibido ao contador.
-              </div>
+            <div style={{marginTop:6,fontSize:11,color:"var(--text3)",lineHeight:1.5}}>
+              💡 Categoria, estoques e fornecedor são opcionais aqui — você pode atribuir depois em massa. Use <b>Editar</b> pra definir o estoque ideal por dia da semana e fornecedores alternativos.
+            </div>
+          </div>
+
+          {/* Filtros + bulk-assign */}
+          <div style={{padding:"10px 12px",background:"var(--bg2,#f8f8f6)",border:"1px solid var(--border)",borderRadius:10,marginBottom:10,display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
+            <input value={itemFilter} onChange={e=>setItemFilter(e.target.value)} placeholder="🔍 Buscar..." style={{...S.input,flex:"1 1 200px",maxWidth:240,fontSize:12,padding:"6px 10px"}} />
+            <select value={itemBulkFilter.categoryId} onChange={e=>setItemBulkFilter({...itemBulkFilter,categoryId:e.target.value})} style={{...S.input,fontSize:12,padding:"6px 10px",maxWidth:200}}>
+              <option value="__all">Todas categorias</option>
+              <option value="__none">Sem categoria</option>
+              {[...restCategories].sort((a,b)=>a.name.localeCompare(b.name)).map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+            </select>
+            <select value={itemBulkFilter.stockId} onChange={e=>setItemBulkFilter({...itemBulkFilter,stockId:e.target.value})} style={{...S.input,fontSize:12,padding:"6px 10px",maxWidth:180}}>
+              <option value="__all">Todos estoques</option>
+              <option value="__none">Sem estoque</option>
+              {[...restStocks].sort((a,b)=>a.name.localeCompare(b.name)).map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+            </select>
+            <select value={itemBulkFilter.supplierId} onChange={e=>setItemBulkFilter({...itemBulkFilter,supplierId:e.target.value})} style={{...S.input,fontSize:12,padding:"6px 10px",maxWidth:200}}>
+              <option value="__all">Todos fornecedores</option>
+              <option value="__none">Sem fornecedor</option>
+              {[...restSuppliers].sort((a,b)=>a.name.localeCompare(b.name)).map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+            </select>
+            <select value={itemBulkFilter.missing} onChange={e=>setItemBulkFilter({...itemBulkFilter,missing:e.target.value})} style={{...S.input,fontSize:12,padding:"6px 10px",maxWidth:170}}>
+              <option value="__all">Pacote/ideal</option>
+              <option value="noPkg">Sem pacote</option>
+              <option value="noIdeal">Sem ideal definido</option>
+            </select>
+            <span style={{flex:1}} />
+            <span style={{fontSize:12,color:"var(--text3)"}}>{filtered.length} de {restItems.length}</span>
+          </div>
+
+          {/* Barra de bulk-assign — aparece quando algum item está selecionado */}
+          {selectedCount > 0 && (
+            <div style={{padding:"10px 12px",background:miseAc+"15",border:`1px solid ${miseAc}66`,borderRadius:10,marginBottom:10,display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
+              <span style={{fontSize:13,fontWeight:600,color:miseAc}}>{selectedCount} selecionado(s)</span>
+              <button onClick={()=>setItemBulkAction({open:true,type:"category",value:""})} style={{...S.btnSecondary,fontSize:11,padding:"5px 10px"}}>Atribuir categoria</button>
+              <button onClick={()=>setItemBulkAction({open:true,type:"addStock",value:""})} style={{...S.btnSecondary,fontSize:11,padding:"5px 10px"}}>+ Estoque</button>
+              <button onClick={()=>setItemBulkAction({open:true,type:"removeStock",value:""})} style={{...S.btnSecondary,fontSize:11,padding:"5px 10px"}}>– Estoque</button>
+              <button onClick={()=>setItemBulkAction({open:true,type:"preferredSupplier",value:""})} style={{...S.btnSecondary,fontSize:11,padding:"5px 10px"}}>Atribuir fornecedor pref.</button>
+              <button onClick={()=>setItemBulkAction({open:true,type:"unit",value:""})} style={{...S.btnSecondary,fontSize:11,padding:"5px 10px"}}>Atribuir unidade</button>
+              <button onClick={()=>setItemBulkAction({open:true,type:"pkgSize",value:""})} style={{...S.btnSecondary,fontSize:11,padding:"5px 10px"}}>Atribuir pacote</button>
+              <span style={{flex:1}} />
+              <button onClick={clearItemSelection} style={{...S.btnSecondary,fontSize:11,padding:"5px 10px"}}>Limpar seleção</button>
             </div>
           )}
-          <div style={{marginBottom:10}}>
-            <input value={itemFilter} onChange={e=>setItemFilter(e.target.value)} placeholder="🔍 Buscar item ou categoria..." style={{...S.input,maxWidth:360}} />
-          </div>
+
+          {/* Tabela */}
           {restItems.length === 0 ? (
             <div style={{padding:"32px 16px",textAlign:"center",color:"var(--text3)",fontSize:14,background:"var(--card-bg)",borderRadius:12,border:"1px solid var(--border)"}}>Nenhum item cadastrado</div>
+          ) : sorted.length === 0 ? (
+            <div style={{padding:"32px 16px",textAlign:"center",color:"var(--text3)",fontSize:14,background:"var(--card-bg)",borderRadius:12,border:"1px solid var(--border)"}}>Nenhum item bate com os filtros.</div>
           ) : (
             <div style={{overflowX:"auto",border:"1px solid var(--border)",borderRadius:12,background:"var(--card-bg)"}}>
               <table style={{width:"100%",borderCollapse:"collapse",fontSize:13}}>
                 <thead>
                   <tr style={{background:"var(--bg2)",borderBottom:"1px solid var(--border)"}}>
-                    <th style={{padding:"10px 12px",textAlign:"left",color:"var(--text)",fontWeight:700}}>Categoria</th>
+                    <th style={{padding:"10px 8px",textAlign:"center",width:36}}>
+                      <input type="checkbox" checked={allSelected} onChange={()=> allSelected ? clearItemSelection() : selectAllVisibleItems(visibleIds)} style={{cursor:"pointer",width:16,height:16,accentColor:miseAc}} />
+                    </th>
                     <th style={{padding:"10px 12px",textAlign:"left",color:"var(--text)",fontWeight:700}}>Produto</th>
+                    <th style={{padding:"10px 12px",textAlign:"left",color:"var(--text)",fontWeight:700}}>Categoria</th>
+                    <th style={{padding:"10px 12px",textAlign:"left",color:"var(--text)",fontWeight:700}}>Estoques</th>
+                    <th style={{padding:"10px 12px",textAlign:"left",color:"var(--text)",fontWeight:700}}>Fornecedor pref.</th>
                     <th style={{padding:"10px 12px",textAlign:"center",color:"var(--text)",fontWeight:700}}>Unid.</th>
-                    <th style={{padding:"10px 12px",textAlign:"right",color:"var(--text)",fontWeight:700}} title="Estoque mínimo — usado pela área de Compras para gerar reposição automática">Mínimo</th>
-                    <th style={{padding:"10px 12px",textAlign:"center",color:"var(--text)",fontWeight:700}}>Forn.</th>
+                    <th style={{padding:"10px 12px",textAlign:"right",color:"var(--text)",fontWeight:700}} title="Tamanho do pacote">Pkg</th>
+                    <th style={{padding:"10px 12px",textAlign:"center",color:"var(--text)",fontWeight:700}} title="Estoque ideal por dia da semana">Ideal</th>
                     <th style={{padding:"10px 12px",textAlign:"right",color:"var(--text)",fontWeight:700}}></th>
                   </tr>
                 </thead>
                 <tbody>
-                  {(() => {
-                    const q = itemFilter.trim().toLowerCase();
-                    const filtered = q
-                      ? restItems.filter(i => {
-                          const cat = restCategories.find(c => c.id === i.categoryId);
-                          return i.name.toLowerCase().includes(q) || (cat?.name??"").toLowerCase().includes(q);
-                        })
-                      : restItems;
-                    return [...filtered].sort((a,b) => {
-                      const ca = restCategories.find(c => c.id === a.categoryId)?.name ?? "";
-                      const cb = restCategories.find(c => c.id === b.categoryId)?.name ?? "";
-                      return ca.localeCompare(cb) || a.name.localeCompare(b.name);
-                    }).map(i => {
-                      const cat = restCategories.find(c => c.id === i.categoryId);
-                      const supLinksCount = restProductSuppliers.filter(ps => ps.productId === i.id).length;
-                      return (
-                        <tr key={i.id} style={{borderTop:"1px solid var(--border)"}}>
-                          <td style={{padding:"8px 12px",color:"var(--text3)",fontSize:12}}>{cat?.name ?? "—"}</td>
-                          <td style={{padding:"8px 12px",color:"var(--text)",fontWeight:500}}>{i.name}</td>
-                          <td style={{padding:"8px 12px",textAlign:"center",color:"var(--text2)",fontSize:12}}>{i.unit ?? "un"}</td>
-                          <td style={{padding:"4px 12px",textAlign:"right"}}>
-                            <input type="number" step="0.01" value={i.minStock ?? ""} onChange={e=>updateItemMinStock(i.id, e.target.value)} placeholder="—" style={{...S.input,width:80,textAlign:"right",fontFamily:"'DM Mono',monospace",fontSize:12,padding:"4px 8px"}} />
-                          </td>
-                          <td style={{padding:"8px 12px",textAlign:"center"}}>
-                            <button onClick={()=>setLinkModalProductId(i.id)} title="Vínculos com fornecedores"
-                              style={{...S.btnSecondary,fontSize:11,padding:"4px 10px",color:supLinksCount>0?miseAc:"var(--text3)",borderColor:supLinksCount>0?miseAc+"66":"var(--border)"}}>
-                              🔗 {supLinksCount > 0 ? supLinksCount : "+"}
-                            </button>
-                          </td>
-                          <td style={{padding:"8px 12px",textAlign:"right"}}>
-                            <button onClick={()=>delItem(i.id)} style={{...S.btnSecondary,fontSize:11,padding:"4px 10px",color:"var(--red)",borderColor:"var(--red)44"}}>Remover</button>
-                          </td>
-                        </tr>
-                      );
-                    });
-                  })()}
+                  {sorted.map(i => {
+                    const cat = restCategories.find(c => c.id === i.categoryId);
+                    const stockNames = (i.stockIds || []).map(sid => restStocks.find(s => s.id === sid)?.name).filter(Boolean);
+                    const prefSupplier = (i.suppliers || []).find(s => s.preferred);
+                    const prefSupplierName = prefSupplier ? restSuppliers.find(s => s.id === prefSupplier.supplierId)?.name : null;
+                    const altCount = (i.suppliers || []).filter(s => !s.preferred).length;
+                    const idealCount = Object.keys(i.idealQtys || {}).length;
+                    const isSelected = !!itemBulkSelected[i.id];
+                    return (
+                      <tr key={i.id} style={{borderTop:"1px solid var(--border)",background:isSelected?miseAc+"12":"transparent"}}>
+                        <td style={{padding:"6px 8px",textAlign:"center"}}>
+                          <input type="checkbox" checked={isSelected} onChange={()=>toggleItemSelect(i.id)} style={{cursor:"pointer",width:16,height:16,accentColor:miseAc}} />
+                        </td>
+                        <td style={{padding:"8px 12px",color:"var(--text)",fontWeight:500}}>{i.name}</td>
+                        <td style={{padding:"8px 12px",fontSize:12}}>
+                          {cat ? <span style={{color:"var(--text2)"}}>{cat.name}</span> : <span style={{color:"#f59e0b"}}>— sem —</span>}
+                        </td>
+                        <td style={{padding:"8px 12px",fontSize:12,color:"var(--text2)"}}>
+                          {stockNames.length === 0 ? <span style={{color:"#f59e0b"}}>— sem —</span> : stockNames.join(", ")}
+                        </td>
+                        <td style={{padding:"8px 12px",fontSize:12}}>
+                          {prefSupplierName ? (
+                            <span style={{color:"var(--text2)"}}>
+                              {prefSupplierName}
+                              {altCount > 0 && <span style={{color:"var(--text3)",marginLeft:4}}>+{altCount}</span>}
+                            </span>
+                          ) : <span style={{color:"#f59e0b"}}>— sem —</span>}
+                        </td>
+                        <td style={{padding:"8px 12px",textAlign:"center",color:"var(--text2)",fontSize:12}}>{i.unit ?? "un"}</td>
+                        <td style={{padding:"8px 12px",textAlign:"right",fontFamily:"'DM Mono',monospace",fontSize:12,color:"var(--text2)"}}>{i.pkgSize ?? "—"}</td>
+                        <td style={{padding:"8px 12px",textAlign:"center",fontSize:11,color:idealCount>0?miseAc:"var(--text3)",fontWeight:idealCount>0?700:400}} title="dias da semana com estoque ideal definido">
+                          {idealCount > 0 ? `${idealCount}/7` : "—"}
+                        </td>
+                        <td style={{padding:"8px 12px",textAlign:"right",whiteSpace:"nowrap"}}>
+                          <button onClick={()=>openEditItem(i)} style={{...S.btnSecondary,fontSize:11,padding:"4px 10px",marginRight:4}}>Editar</button>
+                          <button onClick={()=>delItem(i.id)} style={{...S.btnSecondary,fontSize:11,padding:"4px 10px",color:"var(--red)",borderColor:"var(--red)44"}}>×</button>
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
           )}
+
+          {/* Modal de bulk-assign */}
+          {itemBulkAction.open && (() => {
+            const labels = {
+              category: "Atribuir categoria a " + selectedCount + " item(ns)",
+              addStock: "Adicionar estoque a " + selectedCount + " item(ns)",
+              removeStock: "Remover estoque de " + selectedCount + " item(ns)",
+              preferredSupplier: "Definir fornecedor preferencial de " + selectedCount + " item(ns)",
+              unit: "Atribuir unidade a " + selectedCount + " item(ns)",
+              pkgSize: "Atribuir tamanho de pacote a " + selectedCount + " item(ns)",
+            };
+            return (
+              <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.45)",zIndex:1000,display:"flex",alignItems:"center",justifyContent:"center",padding:16}} onClick={()=>setItemBulkAction({open:false,type:"",value:""})}>
+                <div onClick={e=>e.stopPropagation()} style={{background:"var(--card-bg)",border:"1px solid var(--border)",borderRadius:14,maxWidth:440,width:"100%",padding:24,boxShadow:"0 20px 50px rgba(0,0,0,0.3)"}}>
+                  <h3 style={{margin:"0 0 12px",color:"var(--text)",fontSize:16,fontWeight:700}}>{labels[itemBulkAction.type]}</h3>
+                  {itemBulkAction.type === "category" && (
+                    <select value={itemBulkAction.value} onChange={e=>setItemBulkAction({...itemBulkAction,value:e.target.value})} style={{...S.input,width:"100%",marginBottom:14}}>
+                      <option value="">— sem categoria —</option>
+                      {[...restCategories].sort((a,b)=>a.name.localeCompare(b.name)).map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                    </select>
+                  )}
+                  {(itemBulkAction.type === "addStock" || itemBulkAction.type === "removeStock") && (
+                    <select value={itemBulkAction.value} onChange={e=>setItemBulkAction({...itemBulkAction,value:e.target.value})} style={{...S.input,width:"100%",marginBottom:14}}>
+                      <option value="">— escolha um —</option>
+                      {[...restStocks].sort((a,b)=>a.name.localeCompare(b.name)).map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                    </select>
+                  )}
+                  {itemBulkAction.type === "preferredSupplier" && (
+                    <select value={itemBulkAction.value} onChange={e=>setItemBulkAction({...itemBulkAction,value:e.target.value})} style={{...S.input,width:"100%",marginBottom:14}}>
+                      <option value="">— escolha um —</option>
+                      {[...restSuppliers].sort((a,b)=>a.name.localeCompare(b.name)).map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                    </select>
+                  )}
+                  {itemBulkAction.type === "unit" && (
+                    <input value={itemBulkAction.value} onChange={e=>setItemBulkAction({...itemBulkAction,value:e.target.value})} placeholder="un, kg, L, cx..." style={{...S.input,width:"100%",marginBottom:14}} />
+                  )}
+                  {itemBulkAction.type === "pkgSize" && (
+                    <input type="number" step="0.01" value={itemBulkAction.value} onChange={e=>setItemBulkAction({...itemBulkAction,value:e.target.value})} placeholder="ex: 12" style={{...S.input,width:"100%",marginBottom:14,fontFamily:"'DM Mono',monospace"}} />
+                  )}
+                  <div style={{display:"flex",gap:8,justifyContent:"flex-end"}}>
+                    <button onClick={()=>setItemBulkAction({open:false,type:"",value:""})} style={{...S.btnSecondary,padding:"8px 14px",fontSize:13}}>Cancelar</button>
+                    <button onClick={applyBulkAction} disabled={!itemBulkAction.value && itemBulkAction.type !== "category"} style={{...S.btnPrimary,padding:"8px 14px",fontSize:13,opacity:(!itemBulkAction.value && itemBulkAction.type !== "category")?0.5:1}}>Aplicar</button>
+                  </div>
+                </div>
+              </div>
+            );
+          })()}
+        </div>
+        );
+      })()}
+
+      {/* Modal: Editar produto (form completo) */}
+      {editItemId && editItemForm && (
+        <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.5)",zIndex:1001,display:"flex",alignItems:"flex-start",justifyContent:"center",padding:20,overflowY:"auto"}} onClick={cancelEditItem}>
+          <div onClick={e=>e.stopPropagation()} style={{background:"var(--card-bg)",borderRadius:14,maxWidth:760,width:"100%",margin:"40px 0",boxShadow:"0 20px 50px rgba(0,0,0,0.3)"}}>
+            <div style={{padding:"16px 20px",borderBottom:"1px solid var(--border)",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+              <div>
+                <div style={{fontSize:11,color:"var(--text3)",fontWeight:700,textTransform:"uppercase",letterSpacing:0.4}}>Editar produto</div>
+                <div style={{fontSize:16,color:"var(--text)",fontWeight:700,marginTop:2}}>{editItemForm.name || "(novo)"}</div>
+              </div>
+              <button onClick={cancelEditItem} style={{...S.btnSecondary,fontSize:12,padding:"6px 12px"}}>Fechar</button>
+            </div>
+            <div style={{padding:"16px 20px",display:"flex",flexDirection:"column",gap:16}}>
+              {/* Linha 1: Nome | Categoria | Unidade | Pacote */}
+              <div style={{display:"grid",gridTemplateColumns:mobileOnly?"1fr":"2fr 1.5fr 1fr 1fr",gap:10}}>
+                <div>
+                  <label style={{...S.label,fontSize:11}}>Nome</label>
+                  <input value={editItemForm.name} onChange={e=>setEditItemForm({...editItemForm,name:e.target.value})} style={S.input} />
+                </div>
+                <div>
+                  <label style={{...S.label,fontSize:11}}>Categoria</label>
+                  <select value={editItemForm.categoryId || ""} onChange={e=>setEditItemForm({...editItemForm,categoryId:e.target.value})} style={S.input}>
+                    <option value="">— sem categoria —</option>
+                    {[...restCategories].sort((a,b)=>a.name.localeCompare(b.name)).map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label style={{...S.label,fontSize:11}}>Unidade</label>
+                  <input value={editItemForm.unit} onChange={e=>setEditItemForm({...editItemForm,unit:e.target.value})} placeholder="un, kg, L" style={S.input} />
+                </div>
+                <div>
+                  <label style={{...S.label,fontSize:11}} title="Tamanho do pacote — pedido arredonda pra cima">Pacote</label>
+                  <input type="number" step="0.01" value={editItemForm.pkgSize} onChange={e=>setEditItemForm({...editItemForm,pkgSize:e.target.value})} placeholder="opc." style={{...S.input,fontFamily:"'DM Mono',monospace"}} />
+                </div>
+              </div>
+
+              {/* Linha 2: Estoques (chips) */}
+              <div>
+                <label style={{...S.label,fontSize:11}}>Estoques físicos onde o produto pode estar</label>
+                <div style={{display:"flex",flexWrap:"wrap",gap:6,padding:"8px 10px",background:"var(--bg2,#f8f8f6)",border:"1px solid var(--border)",borderRadius:10,minHeight:40}}>
+                  {restStocks.length === 0 && <span style={{fontSize:12,color:"var(--text3)"}}>Cadastre estoques na aba Estoques.</span>}
+                  {[...restStocks].sort((a,b)=>a.name.localeCompare(b.name)).map(s => {
+                    const active = editItemForm.stockIds.includes(s.id);
+                    return (
+                      <button key={s.id} type="button" onClick={()=>toggleEditFormStock(s.id)}
+                        style={{
+                          padding:"5px 12px",borderRadius:20,fontSize:12,fontWeight:active?700:500,
+                          background:active?miseAc:"transparent",color:active?"#fff":"var(--text2)",
+                          border:`1px solid ${active?miseAc:"var(--border)"}`,cursor:"pointer",
+                        }}>
+                        {active ? "✓ " : ""}{s.name}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Linha 3: Fornecedores */}
+              <div>
+                <label style={{...S.label,fontSize:11}}>Fornecedor preferencial</label>
+                <div style={{display:"flex",flexWrap:"wrap",gap:6,padding:"8px 10px",background:"var(--bg2,#f8f8f6)",border:"1px solid var(--border)",borderRadius:10,minHeight:40}}>
+                  {restSuppliers.length === 0 && <span style={{fontSize:12,color:"var(--text3)"}}>Cadastre fornecedores na aba Fornecedores.</span>}
+                  {(() => {
+                    const pref = editItemForm.suppliers.find(s => s.preferred);
+                    return [...restSuppliers].sort((a,b)=>a.name.localeCompare(b.name)).map(s => {
+                      const isPref = pref?.supplierId === s.id;
+                      return (
+                        <button key={s.id} type="button"
+                          onClick={()=> isPref ? clearEditFormSupplierPreferred() : setEditFormSupplierPreferred(s.id)}
+                          style={{
+                            padding:"5px 12px",borderRadius:20,fontSize:12,fontWeight:isPref?700:500,
+                            background:isPref?miseAc:"transparent",color:isPref?"#fff":"var(--text2)",
+                            border:`1px solid ${isPref?miseAc:"var(--border)"}`,cursor:"pointer",
+                          }}>
+                          {isPref ? "★ " : ""}{s.name}
+                        </button>
+                      );
+                    });
+                  })()}
+                </div>
+              </div>
+              <div>
+                <label style={{...S.label,fontSize:11}}>Fornecedores alternativos <span style={{color:"var(--text3)",fontSize:10,fontWeight:400}}>(até 3, caso o preferencial fique sem)</span></label>
+                <div style={{display:"flex",flexWrap:"wrap",gap:6,padding:"8px 10px",background:"var(--bg2,#f8f8f6)",border:"1px solid var(--border)",borderRadius:10,minHeight:40}}>
+                  {restSuppliers.length === 0 && <span style={{fontSize:12,color:"var(--text3)"}}>—</span>}
+                  {(() => {
+                    const pref = editItemForm.suppliers.find(s => s.preferred);
+                    return [...restSuppliers].sort((a,b)=>a.name.localeCompare(b.name)).filter(s => s.id !== pref?.supplierId).map(s => {
+                      const isAlt = editItemForm.suppliers.some(x => x.supplierId === s.id && !x.preferred);
+                      return (
+                        <button key={s.id} type="button" onClick={()=>toggleEditFormSupplierAlt(s.id)}
+                          style={{
+                            padding:"5px 12px",borderRadius:20,fontSize:12,fontWeight:isAlt?700:500,
+                            background:isAlt?"#94a3b8":"transparent",color:isAlt?"#fff":"var(--text2)",
+                            border:`1px solid ${isAlt?"#94a3b8":"var(--border)"}`,cursor:"pointer",
+                          }}>
+                          {isAlt ? "✓ " : ""}{s.name}
+                        </button>
+                      );
+                    });
+                  })()}
+                </div>
+              </div>
+
+              {/* Linha 4: idealQtys por dia da semana */}
+              <div>
+                <label style={{...S.label,fontSize:11}}>Estoque ideal por dia da semana <span style={{color:"var(--text3)",fontSize:10,fontWeight:400}}>(quanto você quer ter ANTES daquele dia)</span></label>
+                <div style={{display:"grid",gridTemplateColumns:"repeat(7, 1fr)",gap:6}}>
+                  {MISE_DAYS.map(d => (
+                    <div key={d.idx}>
+                      <div style={{fontSize:10,color:"var(--text3)",textAlign:"center",marginBottom:2,fontWeight:700}}>{d.label}</div>
+                      <input type="number" step="0.01" value={editItemForm.idealQtys[d.idx] ?? ""}
+                        onChange={e=>setEditFormIdealQty(d.idx, e.target.value)}
+                        placeholder="—"
+                        style={{...S.input,width:"100%",textAlign:"center",fontFamily:"'DM Mono',monospace",fontSize:13,padding:"6px 4px"}} />
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+            <div style={{padding:"14px 20px",borderTop:"1px solid var(--border)",display:"flex",gap:8,justifyContent:"flex-end"}}>
+              <button onClick={cancelEditItem} style={{...S.btnSecondary,padding:"8px 14px",fontSize:13}}>Cancelar</button>
+              <button onClick={saveEditItem} style={{...S.btnPrimary,padding:"8px 14px",fontSize:13}}>Salvar</button>
+            </div>
+          </div>
         </div>
       )}
 
@@ -17881,10 +18377,14 @@ function MiseContagensAdmin({ restaurantId, restaurantName = "", employees, mise
         <div>
           <h3 style={{color:"var(--text)",margin:"0 0 12px",fontSize:mobileOnly?16:18}}>🚚 Fornecedores</h3>
           <div style={{padding:"12px",background:"var(--card-bg)",border:"1px solid var(--border)",borderRadius:10,marginBottom:16}}>
-            <div style={{display:"grid",gridTemplateColumns:mobileOnly?"1fr":"2fr 1.5fr 2fr auto",gap:8,alignItems:"end"}}>
+            <div style={{display:"grid",gridTemplateColumns:mobileOnly?"1fr":"2fr 1.5fr 1.5fr 2fr auto",gap:8,alignItems:"end"}}>
               <div>
-                <label style={{...S.label,fontSize:11}}>Nome</label>
-                <input value={newSupName} onChange={e=>setNewSupName(e.target.value)} placeholder="ex: Heineken" style={S.input} onKeyDown={e=>e.key==="Enter"&&addSupplier()} />
+                <label style={{...S.label,fontSize:11}}>Empresa</label>
+                <input value={newSupName} onChange={e=>setNewSupName(e.target.value)} placeholder="ex: Distribuidora ABC" style={S.input} onKeyDown={e=>e.key==="Enter"&&addSupplier()} />
+              </div>
+              <div>
+                <label style={{...S.label,fontSize:11}}>Contato <span style={{color:"var(--text3)",fontWeight:400,fontSize:10}}>(nome da pessoa)</span></label>
+                <input value={newSupContato} onChange={e=>setNewSupContato(e.target.value)} placeholder="ex: João da Silva" style={S.input} onKeyDown={e=>e.key==="Enter"&&addSupplier()} />
               </div>
               <div>
                 <label style={{...S.label,fontSize:11}}>WhatsApp <span style={{color:"var(--text3)",fontWeight:400,fontSize:10}}>(com DDD+55)</span></label>
@@ -17897,7 +18397,7 @@ function MiseContagensAdmin({ restaurantId, restaurantName = "", employees, mise
               <button onClick={addSupplier} disabled={!newSupName.trim()} style={{...S.btnPrimary,fontSize:13,padding:"8px 16px",opacity:!newSupName.trim()?0.5:1}}>+ Adicionar</button>
             </div>
             <div style={{marginTop:6,fontSize:11,color:"var(--text3)"}}>
-              💡 O WhatsApp é usado para abrir o link <code style={{background:"var(--bg2)",padding:"1px 4px",borderRadius:4,fontFamily:"'DM Mono',monospace"}}>wa.me/NÚMERO</code> ao enviar o pedido. Inclua o código do país (ex: 55 para Brasil).
+              💡 <b>Contato</b> é o nome usado na mensagem WhatsApp ("Olá [contato], tudo bem? Segue o pedido..."). <b>WhatsApp</b> abre o link <code style={{background:"var(--bg2)",padding:"1px 4px",borderRadius:4,fontFamily:"'DM Mono',monospace"}}>wa.me/NÚMERO</code> ao enviar o pedido. Inclua o código do país (ex: 55 para Brasil).
             </div>
           </div>
           {restSuppliers.length === 0 ? (
@@ -17911,7 +18411,8 @@ function MiseContagensAdmin({ restaurantId, restaurantName = "", employees, mise
                   <div key={s.id} style={{display:"flex",alignItems:"center",gap:10,padding:"10px 14px",background:"var(--card-bg)",border:"1px solid var(--border)",borderRadius:10,flexWrap:"wrap"}}>
                     {isEditing ? (
                       <>
-                        <input value={editingSupForm.name} onChange={e=>setEditingSupForm({...editingSupForm,name:e.target.value})} style={{...S.input,flex:"1 1 140px"}} autoFocus />
+                        <input value={editingSupForm.name} onChange={e=>setEditingSupForm({...editingSupForm,name:e.target.value})} placeholder="Empresa" style={{...S.input,flex:"1 1 140px"}} autoFocus />
+                        <input value={editingSupForm.nomeContato} onChange={e=>setEditingSupForm({...editingSupForm,nomeContato:e.target.value})} placeholder="Contato" style={{...S.input,flex:"1 1 140px"}} />
                         <input value={editingSupForm.whatsapp} onChange={e=>setEditingSupForm({...editingSupForm,whatsapp:e.target.value})} placeholder="WhatsApp" style={{...S.input,flex:"1 1 140px",fontFamily:"'DM Mono',monospace"}} />
                         <input value={editingSupForm.notes} onChange={e=>setEditingSupForm({...editingSupForm,notes:e.target.value})} placeholder="Obs." style={{...S.input,flex:"1 1 200px"}} />
                         <button onClick={saveSupEdit} style={{...S.btnPrimary,fontSize:12,padding:"6px 12px"}}>Salvar</button>
@@ -17922,6 +18423,7 @@ function MiseContagensAdmin({ restaurantId, restaurantName = "", employees, mise
                         <div style={{flex:1,minWidth:160}}>
                           <div style={{color:"var(--text)",fontWeight:600}}>{s.name}</div>
                           <div style={{fontSize:11,color:"var(--text3)",marginTop:2,display:"flex",gap:10,flexWrap:"wrap"}}>
+                            {s.nomeContato && <span>👤 {s.nomeContato}</span>}
                             {s.whatsapp && <span style={{fontFamily:"'DM Mono',monospace"}}>📱 {s.whatsapp}</span>}
                             {s.notes && <span>📝 {s.notes}</span>}
                             <span>{linkedProductsCount} produto(s) vinculado(s)</span>
@@ -18204,94 +18706,66 @@ function MiseContagensAdmin({ restaurantId, restaurantName = "", employees, mise
 // ═══════════════════════════════════════════════════════════════
 // ──  MISE CONTAGENS — USER (Gestor Operacional)                ──
 // ═══════════════════════════════════════════════════════════════
-function OperationalContagens({ employee, miseCategories, miseStocks, miseAssignments, miseItems, miseCounts, onUpdate }) {
-  // Modelo simplificado (sem ciclo): cada submissão cria nova linha.
-  // miseCycles ignorado — Compras consome contagens não-arquivadas direto.
+function OperationalContagens({ employee, pessoas = [], miseCategories, miseStocks, miseAssignments, miseItems, miseCounts, onUpdate }) {
+  // Modelo novo (Fase 1.9): contagem POR ESTOQUE.
+  // 1. Pessoa vê estoques em que tem alguma atribuição
+  // 2. Seleciona estoque → vê categorias daquele estoque com checkboxes pré-marcados nas atribuídas
+  // 3. Pode marcar mais (cobrir colega) ou desmarcar (vai contar depois)
+  // 4. Conta os itens das categorias selecionadas (agrupados por categoria como header visual)
+  // 5. Tela de fechamento: avisa o que ficou sem contar com opções [Adicionar agora] / [Encerrar]
   const restaurantId = employee.restaurantId;
-  const myAssignments = miseAssignments.filter(a => a.restaurantId === restaurantId && a.userId === employee.id);
-  const [drafts, setDrafts] = useState({});
-  const [justSavedKey, setJustSavedKey] = useState(null);
+  const restAssignments = miseAssignments.filter(a => a.restaurantId === restaurantId);
+  const myAssignments = restAssignments.filter(a => a.userId === employee.id);
+  const restItems = miseItems.filter(i => i.restaurantId === restaurantId);
+  const restCategories = miseCategories.filter(c => c.restaurantId === restaurantId);
+  const restStocks = miseStocks.filter(s => s.restaurantId === restaurantId);
 
-  // Expande atribuições (cat × user) em grupos (cat × stock) baseado em cat.stockIds + cat.type
-  // Deduplica por categoria (ignora stockId antigo que ficou em registros legados)
-  const myCatIds = [...new Set(myAssignments.map(a => a.categoryId))];
-  const groups = [];
-  myCatIds.forEach(catId => {
-    const cat = miseCategories.find(c => c.id === catId && c.restaurantId === restaurantId);
-    if (!cat) return;
-    const catType = cat.type || "contagem";
-    if (catType === "contagem" || catType === "ambos") {
-      (cat.stockIds || []).forEach(sid => {
-        const stock = miseStocks.find(s => s.id === sid);
-        if (!stock) return;
-        groups.push({ key: `${cat.id}_${stock.id}`, cat, stock, isPedidoOnly: false });
-      });
-    }
-    if (catType === "pedido" || catType === "ambos") {
-      groups.push({ key: `${cat.id}___pedido__`, cat, stock: null, isPedidoOnly: true });
-    }
-  });
+  const [view, setView] = useState("list"); // list | categorias | contagem | fechamento
+  const [selectedStockId, setSelectedStockId] = useState(null);
+  const [selectedCategoryIds, setSelectedCategoryIds] = useState([]);
+  const [drafts, setDrafts] = useState({}); // { itemId: qtyString }
+  const [feedback, setFeedback] = useState(null);
 
-  if (myAssignments.length === 0) {
-    return (
-      <div style={{padding:"60px 24px",textAlign:"center",color:"var(--text3)"}}>
-        <div style={{fontSize:48,marginBottom:16}}>📦</div>
-        <h3 style={{color:"var(--text)",fontSize:18,fontWeight:700,margin:"0 0 8px"}}>Sem atribuições</h3>
-        <p style={{fontSize:14,lineHeight:1.6,maxWidth:420,margin:"0 auto"}}>
-          O gestor ainda não atribuiu nenhuma categoria para você contar.
-        </p>
-      </div>
-    );
-  }
-  if (groups.length === 0) {
-    return (
-      <div style={{padding:"60px 24px",textAlign:"center",color:"var(--text3)"}}>
-        <div style={{fontSize:48,marginBottom:16}}>📍</div>
-        <h3 style={{color:"var(--text)",fontSize:18,fontWeight:700,margin:"0 0 8px"}}>Categorias sem estoques</h3>
-        <p style={{fontSize:14,lineHeight:1.6,maxWidth:420,margin:"0 auto"}}>
-          Suas categorias atribuídas não estão vinculadas a nenhum estoque. Peça ao gestor para vincular em <b>Categorias → 📍 estoques</b>.
-        </p>
-      </div>
-    );
-  }
+  // Estoques onde a pessoa tem atribuição (modelo novo a.stockId)
+  const myStockIds = [...new Set(myAssignments.filter(a => a.stockId).map(a => a.stockId))];
+  const myStocks = restStocks.filter(s => myStockIds.includes(s.id)).sort((a,b)=>a.name.localeCompare(b.name));
 
-  // Cada submissão de contagem é uma nova linha (cycleId: null sempre).
-  // Compras consome todas as não-arquivadas e marca como `archivedAt` ao gerar pedido.
-
-  const saveGroup = (categoryId, stockId) => {
-    // stockId pode ser null (pedido-direto) ou uma string válida (contagem por estoque)
-    const stockKeyId = stockId === null || stockId === undefined ? "__pedido__" : stockId;
-    const key = `${categoryId}_${stockKeyId}`;
-    const items = miseItems.filter(i => i.restaurantId === restaurantId && i.categoryId === categoryId);
-    const now = new Date().toISOString();
-    let newCounts = [...miseCounts];
-    let changed = 0;
-    items.forEach((it, idx) => {
-      const draftKey = `${it.id}_${stockKeyId}`;
-      const draft = drafts[draftKey];
-      if (draft === undefined || draft === "") return;
-      const qty = parseFloat(String(draft).replace(",","."));
-      if (isNaN(qty)) return;
-      newCounts.push({
-        id: Date.now().toString() + "_" + Math.random().toString(36).slice(2,8) + "_" + idx,
-        restaurantId, cycleId: null, itemId: it.id, stockId: stockId ?? null, userId: employee.id, qty, countedAt: now
-      });
-      changed++;
+  // Helper: categorias presentes em um estoque (via produtos)
+  function categoriesInStock(stockId) {
+    const catIds = new Set();
+    restItems.forEach(i => {
+      if ((i.stockIds || []).includes(stockId) && i.categoryId) catIds.add(i.categoryId);
     });
-    if (changed > 0) {
-      onUpdate("miseCounts", newCounts);
-      setDrafts(prev => {
-        const next = {...prev};
-        items.forEach(it => { delete next[`${it.id}_${stockKeyId}`]; });
-        return next;
-      });
-      setJustSavedKey(key);
-      setTimeout(() => setJustSavedKey(null), 2000);
-    }
-  };
+    return restCategories.filter(c => catIds.has(c.id)).sort((a,b)=>a.name.localeCompare(b.name));
+  }
+  function isMyCategoryInStock(stockId, categoryId) {
+    return myAssignments.some(a => a.stockId === stockId && a.categoryId === categoryId);
+  }
+  function othersInStockCategory(stockId, categoryId) {
+    return restAssignments.filter(a => a.stockId === stockId && a.categoryId === categoryId && a.userId !== employee.id);
+  }
+  function pessoaName(userId) {
+    const p = pessoas.find(x => x.linkedEmployeeId === userId || x.id === userId);
+    return p?.name || "outro colega";
+  }
+  // Status de contagem do estoque hoje (visão geral pra mostrar na lista de estoques)
+  const todayISO = new Date().toISOString().slice(0,10);
+  function stockStatus(stockId) {
+    const cats = categoriesInStock(stockId);
+    if (cats.length === 0) return { total: 0, done: 0 };
+    const countedToday = new Set();
+    miseCounts.forEach(c => {
+      if (c.restaurantId !== restaurantId) return;
+      if (c.stockId !== stockId) return;
+      if (!c.countedAt || !c.countedAt.startsWith(todayISO)) return;
+      const item = restItems.find(i => i.id === c.itemId);
+      if (item?.categoryId) countedToday.add(item.categoryId);
+    });
+    return { total: cats.length, done: cats.filter(c => countedToday.has(c.id)).length };
+  }
 
-  // Helper: pega a última contagem do user pra (item, stock) — usada como "Última sua" na coluna
-  const lastCountFor = (itemId, stockId) => {
+  // Última contagem (do usuário) pra (item, stock)
+  function lastCountFor(itemId, stockId) {
     const matches = miseCounts.filter(c =>
       c.restaurantId === restaurantId &&
       c.itemId === itemId &&
@@ -18301,73 +18775,237 @@ function OperationalContagens({ employee, miseCategories, miseStocks, miseAssign
     );
     if (matches.length === 0) return null;
     return matches.sort((a,b) => (b.countedAt||"").localeCompare(a.countedAt||""))[0];
-  };
+  }
 
-  return (
-    <div style={{display:"flex",flexDirection:"column",gap:20}}>
-      {groups.map(g => {
-        const cat = g.cat;
-        const isPedidoOnly = g.isPedidoOnly;
-        const stock = g.stock;
-        const items = miseItems.filter(i => i.restaurantId === restaurantId && i.categoryId === cat.id);
-        const stockKeyId = isPedidoOnly ? "__pedido__" : stock.id;
-        const key = g.key;
-        const hasDrafts = items.some(i => {
-          const d = drafts[`${i.id}_${stockKeyId}`];
-          return d !== undefined && d !== "";
-        });
-        const wasJustSaved = justSavedKey === key;
-        return (
-          <div key={g.key} style={{background:"var(--card-bg)",border:`1px solid ${isPedidoOnly ? "#d9770644" : "var(--border)"}`,borderRadius:12,overflow:"hidden"}}>
-            <div style={{padding:"12px 16px",background: isPedidoOnly ? "#fffbeb" : "var(--bg2)",borderBottom:"1px solid var(--border)",display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:8}}>
-              <div>
-                <div style={{fontSize:15,color:"var(--text)",fontWeight:700}}>
-                  {isPedidoOnly ? (
-                    <>🛒 Pedido direto — <span style={{color:"var(--text3)",fontWeight:400}}>categoria</span> {cat.name}</>
-                  ) : (
-                    <>{cat.name} <span style={{color:"var(--text3)",fontWeight:400}}>em</span> {stock.name}</>
-                  )}
+  // Ações
+  function selectStock(stockId) {
+    const cats = categoriesInStock(stockId);
+    const myCatIds = cats.filter(c => isMyCategoryInStock(stockId, c.id)).map(c => c.id);
+    setSelectedStockId(stockId);
+    setSelectedCategoryIds(myCatIds);
+    setDrafts({});
+    setView("categorias");
+  }
+  function toggleCategorySelection(catId) {
+    setSelectedCategoryIds(prev => prev.includes(catId) ? prev.filter(c => c !== catId) : [...prev, catId]);
+  }
+  function startCounting() {
+    if (selectedCategoryIds.length === 0) {
+      alert("Selecione ao menos uma categoria pra contar.");
+      return;
+    }
+    setView("contagem");
+  }
+  function saveCounts() {
+    const items = restItems.filter(i =>
+      (i.stockIds || []).includes(selectedStockId) &&
+      i.categoryId &&
+      selectedCategoryIds.includes(i.categoryId)
+    );
+    const now = new Date().toISOString();
+    const newCounts = [...miseCounts];
+    let savedItems = 0;
+    items.forEach((it, idx) => {
+      const d = drafts[it.id];
+      if (d === undefined || d === "") return;
+      const qty = parseFloat(String(d).replace(",","."));
+      if (isNaN(qty)) return;
+      newCounts.push({
+        id: Date.now().toString() + "_" + Math.random().toString(36).slice(2,8) + "_" + idx,
+        restaurantId, cycleId: null,
+        itemId: it.id, stockId: selectedStockId,
+        userId: employee.id, qty, countedAt: now,
+      });
+      savedItems++;
+    });
+    if (savedItems === 0) {
+      alert("Nenhum item foi preenchido. Insira ao menos uma quantidade.");
+      return;
+    }
+    onUpdate("miseCounts", newCounts);
+    // Tela de fechamento
+    const allCats = categoriesInStock(selectedStockId);
+    const counted = selectedCategoryIds;
+    const notCounted = allCats.filter(c => !counted.includes(c.id));
+    setFeedback({
+      stockName: restStocks.find(s => s.id === selectedStockId)?.name || "?",
+      savedCount: savedItems,
+      savedCategories: allCats.filter(c => counted.includes(c.id)),
+      notCountedCategories: notCounted.map(c => ({
+        ...c,
+        otherUsers: othersInStockCategory(selectedStockId, c.id),
+      })),
+    });
+    setView("fechamento");
+    setDrafts({});
+  }
+  function backToList() {
+    setView("list");
+    setSelectedStockId(null);
+    setSelectedCategoryIds([]);
+    setDrafts({});
+    setFeedback(null);
+  }
+  function addCategoryAndCount(catId) {
+    setSelectedCategoryIds(prev => prev.includes(catId) ? prev : [...prev, catId]);
+    setView("contagem");
+    setFeedback(null);
+  }
+
+  // ─────────────────────────────────────────────────────────────────
+  // Render
+  // ─────────────────────────────────────────────────────────────────
+
+  if (myStocks.length === 0) {
+    return (
+      <div style={{padding:"60px 24px",textAlign:"center",color:"var(--text3)"}}>
+        <div style={{fontSize:48,marginBottom:16}}>📦</div>
+        <h3 style={{color:"var(--text)",fontSize:18,fontWeight:700,margin:"0 0 8px"}}>Sem atribuições</h3>
+        <p style={{fontSize:14,lineHeight:1.6,maxWidth:420,margin:"0 auto"}}>
+          O gestor ainda não atribuiu nenhum estoque pra você contar. Peça pra ele te atribuir em <b>Contagens → Atribuições</b>.
+        </p>
+      </div>
+    );
+  }
+
+  // VIEW: lista de estoques
+  if (view === "list") {
+    return (
+      <div>
+        <h3 style={{color:"var(--text)",fontSize:16,fontWeight:700,margin:"0 0 12px"}}>📦 Selecione o estoque pra contar</h3>
+        <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill, minmax(240px, 1fr))",gap:12}}>
+          {myStocks.map(s => {
+            const myCatCount = myAssignments.filter(a => a.stockId === s.id).length;
+            const status = stockStatus(s.id);
+            const allDone = status.total > 0 && status.done === status.total;
+            const partial = status.done > 0 && status.done < status.total;
+            return (
+              <button key={s.id} type="button" onClick={()=>selectStock(s.id)}
+                style={{textAlign:"left",background:"var(--card-bg)",border:`1px solid ${allDone?"#15803d44":partial?"#f59e0b44":"var(--border)"}`,borderRadius:12,padding:"14px 16px",cursor:"pointer",transition:"all 0.15s"}}>
+                <div style={{fontSize:16,fontWeight:700,color:"var(--text)",marginBottom:4}}>📦 {s.name}</div>
+                {s.location && <div style={{fontSize:11,color:"var(--text3)",marginBottom:8}}>📍 {s.location}</div>}
+                <div style={{fontSize:12,color:"var(--text2)",marginBottom:8}}>{myCatCount} categoria(s) pra você</div>
+                <div style={{display:"flex",alignItems:"center",gap:6,fontSize:12}}>
+                  <span style={{color:allDone?"#15803d":partial?"#f59e0b":"var(--text3)",fontWeight:700}}>
+                    {allDone ? "🟢" : partial ? "🟡" : "⚪"}
+                  </span>
+                  <span style={{color:"var(--text3)"}}>
+                    {status.done}/{status.total} categoria(s) contada(s) hoje
+                  </span>
                 </div>
-                {!isPedidoOnly && stock.location && <div style={{fontSize:11,color:"var(--text3)",marginTop:2}}>📍 {stock.location}</div>}
-                {isPedidoOnly && <div style={{fontSize:11,color:"#92400e",marginTop:2}}>Informe diretamente a quantidade que deseja pedir (sem contagem de estoque).</div>}
-              </div>
-              <div style={{fontSize:12,color:"var(--text3)"}}>{items.length} {items.length===1?"item":"itens"}</div>
-            </div>
-            {items.length === 0 ? (
-              <div style={{padding:"24px 16px",textAlign:"center",color:"var(--text3)",fontSize:13}}>
-                Nenhum item cadastrado nessa categoria ainda. Peça ao gestor para cadastrar.
-              </div>
-            ) : (
-              <>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+    );
+  }
+
+  // VIEW: seleção de categorias dentro do estoque
+  if (view === "categorias") {
+    const stock = restStocks.find(s => s.id === selectedStockId);
+    if (!stock) { backToList(); return null; }
+    const cats = categoriesInStock(selectedStockId);
+    return (
+      <div>
+        <button type="button" onClick={backToList} style={{...S.btnSecondary,fontSize:12,padding:"6px 12px",marginBottom:12}}>← Voltar</button>
+        <h3 style={{color:"var(--text)",fontSize:18,fontWeight:700,margin:"0 0 4px"}}>📦 {stock.name}</h3>
+        <p style={{color:"var(--text3)",fontSize:13,margin:"0 0 16px",lineHeight:1.5}}>
+          Marque as categorias que vai contar agora. As que estão atribuídas a você já vêm marcadas — desmarque se for contar depois, marque outras pra cobrir um colega.
+        </p>
+        {cats.length === 0 ? (
+          <div style={{padding:"32px 16px",textAlign:"center",color:"var(--text3)",fontSize:14,background:"var(--card-bg)",borderRadius:12,border:"1px solid var(--border)"}}>
+            Sem produtos cadastrados nesse estoque ainda.
+          </div>
+        ) : (
+          <div style={{display:"flex",flexDirection:"column",gap:8,marginBottom:16}}>
+            {cats.map(cat => {
+              const isMine = isMyCategoryInStock(selectedStockId, cat.id);
+              const others = othersInStockCategory(selectedStockId, cat.id);
+              const checked = selectedCategoryIds.includes(cat.id);
+              const itemCount = restItems.filter(i => i.categoryId === cat.id && (i.stockIds || []).includes(selectedStockId)).length;
+              return (
+                <label key={cat.id} style={{display:"flex",alignItems:"center",gap:12,padding:"12px 14px",background:"var(--card-bg)",border:`1px solid ${checked?"#7c9e5e66":"var(--border)"}`,borderRadius:10,cursor:"pointer",opacity:isMine?1:0.85}}>
+                  <input type="checkbox" checked={checked} onChange={()=>toggleCategorySelection(cat.id)}
+                    style={{cursor:"pointer",width:20,height:20,accentColor:"#7c9e5e"}} />
+                  <div style={{flex:1}}>
+                    <div style={{fontSize:14,fontWeight:600,color:"var(--text)"}}>{cat.name}</div>
+                    <div style={{fontSize:11,color:"var(--text3)",marginTop:2,display:"flex",gap:8,flexWrap:"wrap"}}>
+                      <span>{itemCount} produto(s)</span>
+                      {isMine && <span style={{color:"#15803d",fontWeight:600}}>· atribuído a você</span>}
+                      {!isMine && others.length > 0 && (
+                        <span style={{color:"#94a3b8"}}>· {others.map(a => pessoaName(a.userId)).join(", ")} {others.length===1?"conta":"contam"} normalmente</span>
+                      )}
+                      {!isMine && others.length === 0 && (
+                        <span style={{color:"#dc2626"}}>· sem responsável atribuído</span>
+                      )}
+                    </div>
+                  </div>
+                </label>
+              );
+            })}
+          </div>
+        )}
+        {cats.length > 0 && (
+          <div style={{display:"flex",justifyContent:"flex-end",gap:8}}>
+            <button type="button" onClick={backToList} style={{...S.btnSecondary,padding:"8px 16px",fontSize:13}}>Cancelar</button>
+            <button type="button" onClick={startCounting} disabled={selectedCategoryIds.length === 0}
+              style={{background:selectedCategoryIds.length>0?"#7c9e5e":"var(--border)",color:selectedCategoryIds.length>0?"#fff":"var(--text3)",border:"none",borderRadius:8,padding:"8px 18px",fontSize:13,fontWeight:700,cursor:selectedCategoryIds.length>0?"pointer":"not-allowed"}}>
+              ▶ Iniciar contagem ({selectedCategoryIds.length})
+            </button>
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  // VIEW: contagem dos itens
+  if (view === "contagem") {
+    const stock = restStocks.find(s => s.id === selectedStockId);
+    if (!stock) { backToList(); return null; }
+    const cats = categoriesInStock(selectedStockId).filter(c => selectedCategoryIds.includes(c.id));
+    const filledCount = Object.values(drafts).filter(v => v !== "" && v != null).length;
+    return (
+      <div>
+        <button type="button" onClick={()=>setView("categorias")} style={{...S.btnSecondary,fontSize:12,padding:"6px 12px",marginBottom:12}}>← Mudar categorias</button>
+        <h3 style={{color:"var(--text)",fontSize:18,fontWeight:700,margin:"0 0 4px"}}>📦 {stock.name}</h3>
+        <p style={{color:"var(--text3)",fontSize:13,margin:"0 0 16px"}}>
+          Contando: <b>{cats.map(c=>c.name).join(", ")}</b>
+        </p>
+        <div style={{display:"flex",flexDirection:"column",gap:16,marginBottom:80}}>
+          {cats.map(cat => {
+            const items = restItems.filter(i => i.categoryId === cat.id && (i.stockIds || []).includes(selectedStockId)).sort((a,b)=>a.name.localeCompare(b.name));
+            return (
+              <div key={cat.id} style={{background:"var(--card-bg)",border:"1px solid var(--border)",borderRadius:12,overflow:"hidden"}}>
+                <div style={{padding:"10px 14px",background:"#7c9e5e15",borderBottom:"1px solid var(--border)",fontSize:13,fontWeight:700,color:"var(--text)",textTransform:"uppercase",letterSpacing:0.4}}>
+                  {cat.name} <span style={{color:"var(--text3)",fontWeight:400,textTransform:"none",letterSpacing:0,marginLeft:4}}>· {items.length} {items.length===1?"item":"itens"}</span>
+                </div>
                 <div style={{overflowX:"auto"}}>
                   <table style={{width:"100%",borderCollapse:"collapse",fontSize:13}}>
                     <thead>
                       <tr style={{borderBottom:"1px solid var(--border)"}}>
-                        <th style={{padding:"8px 16px",textAlign:"left",color:"var(--text3)",fontWeight:600,fontSize:11,textTransform:"uppercase",letterSpacing:0.4}}>Item</th>
-                        <th style={{padding:"8px 12px",textAlign:"center",color:"var(--text3)",fontWeight:600,fontSize:11,textTransform:"uppercase",letterSpacing:0.4}}>Unid.</th>
-                        <th style={{padding:"8px 12px",textAlign:"right",color:"var(--text3)",fontWeight:600,fontSize:11,textTransform:"uppercase",letterSpacing:0.4}}>Última sua</th>
-                        <th style={{padding:"8px 12px",textAlign:"right",color:"var(--text3)",fontWeight:600,fontSize:11,textTransform:"uppercase",letterSpacing:0.4,minWidth:120}}>{isPedidoOnly ? "Qtd a pedir" : "Contagem"}</th>
+                        <th style={{padding:"6px 14px",textAlign:"left",color:"var(--text3)",fontWeight:600,fontSize:10,textTransform:"uppercase",letterSpacing:0.4}}>Item</th>
+                        <th style={{padding:"6px 10px",textAlign:"center",color:"var(--text3)",fontWeight:600,fontSize:10,textTransform:"uppercase",letterSpacing:0.4}}>Unid.</th>
+                        <th style={{padding:"6px 10px",textAlign:"right",color:"var(--text3)",fontWeight:600,fontSize:10,textTransform:"uppercase",letterSpacing:0.4}}>Última sua</th>
+                        <th style={{padding:"6px 10px",textAlign:"right",color:"var(--text3)",fontWeight:600,fontSize:10,textTransform:"uppercase",letterSpacing:0.4,minWidth:120}}>Contagem</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {[...items].sort((a,b)=>a.name.localeCompare(b.name)).map(it => {
-                        // "Última sua" agora é a contagem mais recente do user (não-arquivada) pra esse item/stock
-                        const existing = lastCountFor(it.id, isPedidoOnly ? null : stock.id);
-                        const draftKey = `${it.id}_${stockKeyId}`;
-                        const draftVal = drafts[draftKey];
+                      {items.map(it => {
+                        const last = lastCountFor(it.id, selectedStockId);
                         return (
                           <tr key={it.id} style={{borderTop:"1px solid var(--border)"}}>
-                            <td style={{padding:"10px 16px",color:"var(--text)",fontWeight:500}}>{it.name}</td>
-                            <td style={{padding:"10px 12px",textAlign:"center",color:"var(--text2)"}}>{it.unit ?? "un"}</td>
-                            <td style={{padding:"10px 12px",textAlign:"right",color:existing?"var(--text2)":"var(--text3)",fontFamily:"'DM Mono',monospace",fontSize:12}}>
-                              {existing ? existing.qty : "—"}
+                            <td style={{padding:"8px 14px",color:"var(--text)",fontWeight:500}}>{it.name}</td>
+                            <td style={{padding:"8px 10px",textAlign:"center",color:"var(--text2)"}}>{it.unit ?? "un"}</td>
+                            <td style={{padding:"8px 10px",textAlign:"right",color:last?"var(--text2)":"var(--text3)",fontFamily:"'DM Mono',monospace",fontSize:12}}>
+                              {last ? last.qty : "—"}
                             </td>
-                            <td style={{padding:"6px 12px",textAlign:"right"}}>
+                            <td style={{padding:"4px 10px",textAlign:"right"}}>
                               <input type="number" step="0.01" inputMode="decimal"
-                                value={draftVal ?? ""}
-                                onChange={e=>setDrafts(prev=>({...prev, [draftKey]: e.target.value}))}
-                                placeholder={existing ? String(existing.qty) : "—"}
-                                style={{...S.input,width:100,textAlign:"right",fontFamily:"'DM Mono',monospace"}}/>
+                                value={drafts[it.id] ?? ""}
+                                onChange={e=>setDrafts(prev=>({...prev, [it.id]: e.target.value}))}
+                                placeholder={last?String(last.qty):"—"}
+                                style={{...S.input,width:100,textAlign:"right",fontFamily:"'DM Mono',monospace"}} />
                             </td>
                           </tr>
                         );
@@ -18375,22 +19013,78 @@ function OperationalContagens({ employee, miseCategories, miseStocks, miseAssign
                     </tbody>
                   </table>
                 </div>
-                <div style={{padding:"10px 16px",borderTop:"1px solid var(--border)",display:"flex",justifyContent:"flex-end",alignItems:"center",gap:12}}>
-                  {wasJustSaved && <span style={{fontSize:12,color:"#15803d",fontWeight:600}}>✓ Salvo</span>}
-                  <button
-                    onClick={()=>saveGroup(cat.id, isPedidoOnly ? null : stock.id)}
-                    disabled={!hasDrafts}
-                    style={{background:hasDrafts?(isPedidoOnly?"#d97706":"#7c9e5e"):"var(--border)",color:hasDrafts?"#fff":"var(--text3)",border:"none",borderRadius:8,padding:"8px 18px",fontSize:13,fontWeight:700,cursor:hasDrafts?"pointer":"not-allowed",fontFamily:"'DM Sans',sans-serif",transition:"background 0.15s"}}>
-                    💾 {isPedidoOnly ? "Salvar pedido" : "Salvar contagens"}
-                  </button>
-                </div>
-              </>
-            )}
+              </div>
+            );
+          })}
+        </div>
+        {/* Barra de salvar fixa no rodapé */}
+        <div style={{position:"fixed",bottom:0,left:0,right:0,background:"var(--card-bg)",borderTop:"1px solid var(--border)",padding:"12px 16px",display:"flex",justifyContent:"space-between",alignItems:"center",gap:12,zIndex:10,boxShadow:"0 -4px 12px rgba(0,0,0,0.05)"}}>
+          <span style={{fontSize:12,color:"var(--text3)"}}>{filledCount} item(ns) preenchido(s)</span>
+          <button type="button" onClick={saveCounts} disabled={filledCount === 0}
+            style={{background:filledCount>0?"#7c9e5e":"var(--border)",color:filledCount>0?"#fff":"var(--text3)",border:"none",borderRadius:8,padding:"10px 22px",fontSize:14,fontWeight:700,cursor:filledCount>0?"pointer":"not-allowed"}}>
+            💾 Salvar contagem
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // VIEW: fechamento (resumo + avisos)
+  if (view === "fechamento" && feedback) {
+    return (
+      <div>
+        <div style={{textAlign:"center",padding:"24px 16px",background:"#15803d11",border:"1px solid #15803d44",borderRadius:14,marginBottom:20}}>
+          <div style={{fontSize:48,marginBottom:8}}>✅</div>
+          <h3 style={{color:"#15803d",fontSize:18,fontWeight:700,margin:"0 0 4px"}}>Contagem salva!</h3>
+          <p style={{color:"var(--text2)",fontSize:14,margin:0,lineHeight:1.5}}>
+            Você contou <b>{feedback.savedCount} {feedback.savedCount===1?"item":"itens"}</b> em <b>{feedback.savedCategories.length} categoria(s)</b> no estoque <b>{feedback.stockName}</b>.
+          </p>
+          <div style={{fontSize:11,color:"var(--text3)",marginTop:6}}>
+            {feedback.savedCategories.map(c => c.name).join(", ")}
           </div>
-        );
-      })}
-    </div>
-  );
+        </div>
+        {feedback.notCountedCategories.length > 0 && (
+          <div style={{background:"var(--card-bg)",border:"1px solid var(--border)",borderRadius:12,padding:"14px 16px",marginBottom:20}}>
+            <div style={{fontSize:14,fontWeight:700,color:"var(--text)",marginBottom:10}}>
+              ⏳ Categorias que não foram contadas hoje
+            </div>
+            <div style={{display:"flex",flexDirection:"column",gap:8}}>
+              {feedback.notCountedCategories.map(cat => {
+                const itemCount = restItems.filter(i => i.categoryId === cat.id && (i.stockIds || []).includes(selectedStockId)).length;
+                const others = cat.otherUsers || [];
+                return (
+                  <div key={cat.id} style={{display:"flex",alignItems:"center",gap:10,padding:"10px 12px",background:"var(--bg2,#f8f8f6)",borderRadius:10,flexWrap:"wrap"}}>
+                    <div style={{flex:1,minWidth:160}}>
+                      <div style={{fontSize:13,fontWeight:600,color:"var(--text)"}}>{cat.name}</div>
+                      <div style={{fontSize:11,color:"var(--text3)",marginTop:2}}>
+                        {itemCount} produto(s) ·{" "}
+                        {others.length > 0 ? (
+                          <span style={{color:"#94a3b8"}}>{others.map(a => pessoaName(a.userId)).join(", ")} {others.length===1?"conta":"contam"} normalmente</span>
+                        ) : (
+                          <span style={{color:"#dc2626",fontWeight:600}}>sem responsável atribuído</span>
+                        )}
+                      </div>
+                    </div>
+                    <button type="button" onClick={()=>addCategoryAndCount(cat.id)}
+                      style={{...S.btnSecondary,fontSize:12,padding:"6px 12px",color:"#7c9e5e",borderColor:"#7c9e5e66"}}>
+                      Contar agora
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+        <div style={{display:"flex",justifyContent:"center",gap:8}}>
+          <button type="button" onClick={backToList} style={{background:"#7c9e5e",color:"#fff",border:"none",borderRadius:8,padding:"10px 22px",fontSize:14,fontWeight:700,cursor:"pointer"}}>
+            ✓ Encerrar
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  return null;
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -18884,6 +19578,7 @@ function AppShell({ pessoa, data, activeRestaurantId, setActiveRestaurantId, use
       return (
         <OperationalContagens
           employee={buildVirtualEmpForPessoa(pessoa, activeRestaurantId)}
+          pessoas={data?.pessoas ?? []}
           miseCategories={data?.miseCategories ?? []}
           miseStocks={data?.miseStocks ?? []}
           miseAssignments={data?.miseAssignments ?? []}
