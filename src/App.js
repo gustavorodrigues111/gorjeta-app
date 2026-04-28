@@ -29375,6 +29375,36 @@ export default function App() {
         if (purged) { setInbox(purged); save(K.inbox, purged); }
       }
 
+      // Auto-cleanup de workSchedules: remove entries fantasma (sem dias com in/out preenchidos).
+      // Saves antigos com bug de race condition deixaram entries vazios que faziam o badge ⏰
+      // aparecer indevidamente. Limpa silenciosamente e re-grava o objeto saneado.
+      if (loaded_data.workSchedules && typeof loaded_data.workSchedules === "object") {
+        const ws = loaded_data.workSchedules;
+        let dirty = false;
+        const cleaned = {};
+        for (const [restId, byEmp] of Object.entries(ws)) {
+          if (!byEmp || typeof byEmp !== "object") { dirty = true; continue; }
+          const cleanedEmp = {};
+          for (const [empId, scheds] of Object.entries(byEmp)) {
+            if (!Array.isArray(scheds)) { dirty = true; continue; }
+            const validos = scheds.filter(s =>
+              s && s.days && typeof s.days === "object" &&
+              Object.values(s.days).some(d => d && d.in && d.out)
+            );
+            if (validos.length !== scheds.length) dirty = true;
+            if (validos.length > 0) cleanedEmp[empId] = validos;
+            else if (scheds.length > 0) dirty = true; // tinha lixo, agora vazio
+          }
+          if (Object.keys(cleanedEmp).length > 0) cleaned[restId] = cleanedEmp;
+          else if (Object.keys(byEmp).length > 0) dirty = true;
+        }
+        if (dirty) {
+          console.log("[cleanup] workSchedules: removidos entries fantasma");
+          setWorkSchedules(cleaned);
+          save(K.workSchedules, cleaned);
+        }
+      }
+
       // Migração automática: v4:superManagers → v4:owners (executa só uma vez)
       if (!loaded_data.owners || loaded_data.owners.length === 0) {
         const migrated = localStorage.getItem("apptip_migrated_owners");
