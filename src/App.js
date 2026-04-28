@@ -199,6 +199,59 @@ const maskCpf = (v) => { const d = (v ?? "").replace(/\D/g,"").slice(0,11); if(d
 const monthKey = (y, m) => `${y}-${String(m + 1).padStart(2, "0")}`;
 const monthLabel = (y, m) => new Date(y, m, 1).toLocaleDateString("pt-BR", { month: "long", year: "numeric" });
 const getWeekMonday = (dateStr) => { const d = new Date(dateStr + "T12:00:00"); const day = d.getDay(); const diff = d.getDate() - day + (day === 0 ? -6 : 1); d.setDate(diff); return d.toISOString().slice(0, 10); };
+
+// ─────────── HELPERS DE ESCALA ALTERNADA (A/B) ───────────
+// Retorna o tipo de semana ("A" | "B") para uma data, considerando overrides e re-anchors.
+// Para schedules type !== "alternating" retorna null (chamador usa schedule.days direto).
+function weekTypeForDate(schedule, dateStr) {
+  if (!schedule || schedule.type !== "alternating") return null;
+  if (!dateStr) return null;
+  const monday = getWeekMonday(dateStr);
+  // 1) Override pontual sobrepõe tudo
+  if (schedule.overrides && schedule.overrides[monday]) return schedule.overrides[monday];
+  // 2) Encontra o anchor ativo: o mais recente cuja date ≤ monday (anchor original ou re-anchor)
+  const allAnchors = [
+    schedule.anchor,
+    ...((schedule.reanchors || []).map(r => ({ date: r.date, week: r.week }))),
+  ].filter(a => a && a.date && a.week)
+   .sort((a, b) => a.date.localeCompare(b.date));
+  let active = allAnchors[0];
+  for (const a of allAnchors) {
+    if (a.date <= monday) active = a;
+    else break;
+  }
+  if (!active) return (schedule.pattern || ["A", "B"])[0];
+  // 3) Calcula paridade em semanas desde o anchor ativo
+  const t1 = new Date(active.date + "T12:00:00").getTime();
+  const t2 = new Date(monday + "T12:00:00").getTime();
+  const diffWeeks = Math.floor((t2 - t1) / (7 * 24 * 60 * 60 * 1000));
+  const pattern = schedule.pattern || ["A", "B"];
+  const startIdx = pattern.indexOf(active.week);
+  if (startIdx < 0) return pattern[0];
+  const idx = (((startIdx + diffWeeks) % pattern.length) + pattern.length) % pattern.length;
+  return pattern[idx];
+}
+
+// Retorna o objeto `days` efetivo (compatível com schedule.days antigo) para uma data específica.
+// Para "single" → schedule.days; para "alternating" → schedule.weeks[weekType].days.
+function getEffectiveDays(schedule, dateStr) {
+  if (!schedule) return null;
+  if (schedule.type !== "alternating") return schedule.days || null;
+  const wk = weekTypeForDate(schedule, dateStr || today());
+  return schedule.weeks?.[wk]?.days || null;
+}
+
+// Retorna totalContract efetivo para uma data (pode variar entre A e B)
+function getEffectiveTotalContract(schedule, dateStr) {
+  if (!schedule) return 0;
+  if (schedule.type !== "alternating") return schedule.totalContract || 0;
+  const wk = weekTypeForDate(schedule, dateStr || today());
+  return schedule.weeks?.[wk]?.totalContract || 0;
+}
+
+// Expõe helpers pra acesso nas próximas fases (escala mensal, VT, gorjeta) — silencia eslint
+// eslint-disable-next-line no-unused-expressions
+[getEffectiveDays, getEffectiveTotalContract];
 const getWeeksInMonth = (y, m) => { const daysInM = new Date(y, m + 1, 0).getDate(); const weeks = new Map(); for (let d = 1; d <= daysInM; d++) { const ds = `${y}-${String(m+1).padStart(2,"0")}-${String(d).padStart(2,"0")}`; const mon = getWeekMonday(ds); if (!weeks.has(mon)) { const sunD = new Date(mon + "T12:00:00"); sunD.setDate(sunD.getDate() + 6); weeks.set(mon, { monday: mon, sunday: sunD.toISOString().slice(0,10), daysInMonth: [] }); } weeks.get(mon).daysInMonth.push(d); } return [...weeks.values()]; };
 const WEEKDAYS = ["Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb"];
 const AREAS = ["Bar", "Cozinha", "Salão", "Limpeza"];
@@ -2685,16 +2738,32 @@ function WorkScheduleManagerTab({ restaurantId, employees, roles, workSchedules,
   // ── State ──
   // Se `forcedEmpId` vier (uso embutido em detalhe do empregado), pré-seleciona e esconde dropdown
   const [selEmpId, setSelEmpId]             = useState(forcedEmpId || null);
-  const [editDays, setEditDays]             = useState({});   // {dayIdx: {active:bool, in?, out?, break?}}
+  const [editDays, setEditDays]             = useState({});   // semana A (ou única se single)
+  const [editDaysB, setEditDaysB]           = useState({});   // semana B (só usado se alternating)
+  const [scheduleType, setScheduleType]     = useState("single"); // "single" | "alternating"
+  const [editWeek, setEditWeek]             = useState("A");  // qual semana está sendo editada (A|B)
+  const [anchorDate, setAnchorDate]         = useState(() => getWeekMonday(today())); // segunda da semana de referência
+  const [anchorWeek, setAnchorWeek]         = useState("A");  // qual semana é o anchor inicial
   const [errors, setErrors]                 = useState([]);
   const [showValidFrom, setShowValidFrom]   = useState(false);
   const [validFrom, setValidFrom]           = useState(today());
   const [selectedSchedIds, setSelectedSchedIds] = useState(new Set());
   const [, setSaveMode]                     = useState(null); // saveMode read elsewhere via effects
   const [validated, setValidated]           = useState(false); // true após validar horários com sucesso
+  // Modal de inversão de semana (só faz sentido pra schedules alternating)
+  const [invertingMonday, setInvertingMonday] = useState(null); // segunda da semana sendo invertida ou null
+  const [invertScope, setInvertScope]       = useState("once");  // "once" (override) | "forever" (re-anchor)
 
   const selEmp = restEmps.find(e => e.id === selEmpId);
   const empSchedules = workSchedules?.[restaurantId]?.[selEmpId] ?? [];
+
+  // ── Aliases dinâmicos: "days" e "setDays" sempre apontam pra semana sendo editada agora ──
+  // No modo single, apontam sempre pra editDays. No alternating, alternam entre A e B
+  // conforme o sub-tab selecionado (editWeek). Permite que toggleDay/handleDayChange/etc
+  // continuem funcionando com mínimo de mudanças no código existente.
+  const isAlternating = scheduleType === "alternating";
+  const days = isAlternating && editWeek === "B" ? editDaysB : editDays;
+  const setDays = isAlternating && editWeek === "B" ? setEditDaysB : setEditDays;
 
   // Sincroniza com forcedEmpId externo (modo embutido em detalhe do empregado)
   useEffect(() => {
@@ -2752,21 +2821,42 @@ function WorkScheduleManagerTab({ restaurantId, employees, roles, workSchedules,
     setSaveMode(null);
     setValidated(false);
     setCopyPickerOpen(false);
+    setEditWeek("A");
     const sched = (workSchedules?.[restaurantId]?.[empId] ?? []);
     const cur = sched[sched.length - 1];
-    if (cur) {
+    if (cur && cur.type === "alternating") {
+      // Alternating: popula A e B + anchor
+      setScheduleType("alternating");
+      setEditDays(toInternal(cur.weeks?.A || {}));
+      setEditDaysB(toInternal(cur.weeks?.B || {}));
+      setAnchorDate(cur.anchor?.date || getWeekMonday(today()));
+      setAnchorWeek(cur.anchor?.week || "A");
+    } else if (cur) {
+      // Single (atual): popula editDays e mantém B vazio até user trocar pra alternating
+      setScheduleType("single");
       setEditDays(toInternal(cur));
+      const freshB = {};
+      for (let i = 0; i < 7; i++) freshB[i] = { active: true };
+      setEditDaysB(freshB);
+      setAnchorDate(getWeekMonday(today()));
+      setAnchorWeek("A");
     } else {
       // New employee: all days active, no hours
+      setScheduleType("single");
       const fresh = {};
       for (let i = 0; i < 7; i++) fresh[i] = { active: true };
       setEditDays(fresh);
+      const freshB = {};
+      for (let i = 0; i < 7; i++) freshB[i] = { active: true };
+      setEditDaysB(freshB);
+      setAnchorDate(getWeekMonday(today()));
+      setAnchorWeek("A");
     }
   }
 
   // ── Toggle work/folga ──
   function toggleDay(dayIdx) {
-    setEditDays(prev => {
+    setDays(prev => {
       const cur = prev[dayIdx] ?? { active: true };
       return { ...prev, [dayIdx]: cur.active ? { active: false } : { active: true, in: "", out: "", break: 0 } };
     });
@@ -2776,7 +2866,7 @@ function WorkScheduleManagerTab({ restaurantId, employees, roles, workSchedules,
 
   // ── Update time/break field ──
   function handleDayChange(dayIdx, field, val) {
-    setEditDays(prev => ({
+    setDays(prev => ({
       ...prev,
       [dayIdx]: { ...(prev[dayIdx] ?? { active: true }), [field]: val }
     }));
@@ -2786,29 +2876,30 @@ function WorkScheduleManagerTab({ restaurantId, employees, roles, workSchedules,
 
 
   // ── "Validar Horários" (só valida, não salva) ──
+  // Suporta single (valida editDays) e alternating (valida editDays + editDaysB independentemente)
   function tryValidateFull() {
-    const activeDays = Object.values(editDays).filter(d => d.active);
-    if (activeDays.length === 0) { setErrors(["Selecione pelo menos um dia de trabalho."]); setValidated(false); return; }
-    if (!hasAllHours(editDays)) {
-      setErrors(["Preencha os horarios de todos os dias marcados como trabalho para validar a carga semanal."]);
-      setValidated(false);
-      return;
+    const semanas = isAlternating
+      ? [{ label: "Semana A", d: editDays }, { label: "Semana B", d: editDaysB }]
+      : [{ label: "", d: editDays }];
+    const allErrors = [];
+    for (const { label, d } of semanas) {
+      const prefix = label ? `[${label}] ` : "";
+      const activeDays = Object.values(d).filter(x => x.active);
+      if (activeDays.length === 0) { allErrors.push(`${prefix}Selecione pelo menos um dia de trabalho.`); continue; }
+      if (!hasAllHours(d)) { allErrors.push(`${prefix}Preencha os horários de todos os dias marcados como trabalho.`); continue; }
+      if (!selEmp?.isFreela) {
+        const storageDays = toStorage(d, false);
+        const { errors: errs } = validateWeekSchedule(storageDays);
+        errs.forEach(e => allErrors.push(`${prefix}${e}`));
+      }
     }
-    // Freela: pula validação CLT
-    if (selEmp?.isFreela) {
-      setErrors([]);
-      setValidated(true);
-      onUpdate("_toast", "✅ Horário registrado (freela — sem validação CLT)");
-      return;
-    }
-    const storageDays = toStorage(editDays, false);
-    const { errors: errs } = validateWeekSchedule(storageDays);
-    setErrors(errs);
-    if (errs.length === 0) {
-      setValidated(true);
-      onUpdate("_toast", "✅ Horário validado — clique em Salvar para confirmar");
-    } else {
-      setValidated(false);
+    setErrors(allErrors);
+    setValidated(allErrors.length === 0);
+    if (allErrors.length === 0) {
+      const msg = selEmp?.isFreela
+        ? "✅ Horário registrado (freela — sem validação CLT)"
+        : (isAlternating ? "✅ Semanas A e B validadas — clique em Salvar para confirmar" : "✅ Horário validado — clique em Salvar para confirmar");
+      onUpdate("_toast", msg);
     }
   }
 
@@ -2820,52 +2911,101 @@ function WorkScheduleManagerTab({ restaurantId, employees, roles, workSchedules,
 
   // ── Save schedule ──
   function saveSchedule() {
-    const storageDays = toStorage(editDays, false);
-
-    // Freela: pula validação CLT (jornada, interjornada, carga semanal, etc.)
     const isFreela = selEmp?.isFreela;
-    let totalContract = 0;
-    if (!isFreela) {
-      const { errors: errs, totalContract: tc } = validateWeekSchedule(storageDays);
-      totalContract = tc;
-      if (errs.length > 0) { setErrors(errs); return; }
-    } else {
-      // Calcula totalContract apenas para exibição, sem validar
-      const activeDays = Object.entries(storageDays).filter(([,d]) => d && d.in && d.out);
-      totalContract = activeDays.reduce((sum, [,d]) => {
-        const c = calcDayHours(d.in, d.out, d.break || 0);
-        return sum + (c.totalContract || 0);
-      }, 0);
+
+    // Helper: valida + calcula totalContract pra um conjunto de dias
+    function validateAndCalc(daysObj, label) {
+      const storageDays = toStorage(daysObj, false);
+      let totalContract = 0;
+      if (!isFreela) {
+        const { errors: errs, totalContract: tc } = validateWeekSchedule(storageDays);
+        if (errs.length > 0) {
+          const prefix = label ? `[${label}] ` : "";
+          return { errors: errs.map(e => prefix + e), storageDays, totalContract: tc };
+        }
+        totalContract = tc;
+      } else {
+        const activeDays = Object.entries(storageDays).filter(([,d]) => d && d.in && d.out);
+        totalContract = activeDays.reduce((sum, [,d]) => sum + (calcDayHours(d.in, d.out, d.break || 0).totalContract || 0), 0);
+      }
+      return { errors: [], storageDays, totalContract };
     }
 
-    const newEntry = {
-      id: `${Date.now()}-${Math.random().toString(36).slice(2,5)}`,
-      days: storageDays,
-      validFrom,
-      createdBy: currentManagerName,
-      createdAt: new Date().toISOString(),
-      totalContract,
-      hoursComplete: true,
-      ...(isFreela ? { freela: true } : {}),
-    };
+    let newEntry;
+    let storageDaysForNotif; // pra mensagem de notificação (no alternating, usa Semana A como representativa)
+    if (isAlternating) {
+      const a = validateAndCalc(editDays, "Semana A");
+      const b = validateAndCalc(editDaysB, "Semana B");
+      const allErrs = [...a.errors, ...b.errors];
+      if (allErrs.length > 0) { setErrors(allErrs); return; }
+      newEntry = {
+        id: `${Date.now()}-${Math.random().toString(36).slice(2,5)}`,
+        type: "alternating",
+        pattern: ["A", "B"],
+        weeks: {
+          A: { days: a.storageDays, totalContract: a.totalContract, hoursComplete: true },
+          B: { days: b.storageDays, totalContract: b.totalContract, hoursComplete: true },
+        },
+        anchor: { date: anchorDate, week: anchorWeek },
+        reanchors: [],
+        overrides: {},
+        validFrom,
+        createdBy: currentManagerName,
+        createdAt: new Date().toISOString(),
+        // Fallback `days` pra código legado que ainda lê schedule.days direto.
+        // Aponta pra Semana A — funciona aproximadamente até o consumidor usar getEffectiveDays.
+        days: a.storageDays,
+        // totalContract: média das duas (pra compatibilidade com código legado que lê esse campo)
+        totalContract: Math.round((a.totalContract + b.totalContract) / 2),
+        hoursComplete: true,
+        ...(isFreela ? { freela: true } : {}),
+      };
+      storageDaysForNotif = a.storageDays;
+    } else {
+      const r = validateAndCalc(editDays, "");
+      if (r.errors.length > 0) { setErrors(r.errors); return; }
+      newEntry = {
+        id: `${Date.now()}-${Math.random().toString(36).slice(2,5)}`,
+        type: "single",
+        days: r.storageDays,
+        validFrom,
+        createdBy: currentManagerName,
+        createdAt: new Date().toISOString(),
+        totalContract: r.totalContract,
+        hoursComplete: true,
+        ...(isFreela ? { freela: true } : {}),
+      };
+      storageDaysForNotif = r.storageDays;
+    }
 
     onUpdate("workSchedules", prev => {
       const empScheds = [...(prev?.[restaurantId]?.[selEmpId] ?? []), newEntry];
       return { ...prev, [restaurantId]: { ...(prev?.[restaurantId] ?? {}), [selEmpId]: empScheds } };
     });
 
-    // Format schedule description for notifications
-    function fmtSchedLine(i) {
-      const d = storageDays[i];
+    // Format schedule description for notifications (no alternating: ambas as semanas)
+    function fmtSchedLineFor(daysObj, i) {
+      const d = daysObj[i];
       if (!d) return `${WEEK_DAYS_LABEL[i]}: Folga`;
       if (d.in && d.out) return `${WEEK_DAYS_LABEL[i]}: ${d.in} - ${d.out} (intervalo ${d.break??0}min)`;
       return `${WEEK_DAYS_LABEL[i]}: Trabalha (horario a definir)`;
+    }
+    function fmtSchedLine(i) { return fmtSchedLineFor(storageDaysForNotif, i); }
+
+    // Body do horário (single = lista única, alternating = duas semanas)
+    function fmtBodyDoHorario() {
+      if (isAlternating) {
+        const linhasA = [0,1,2,3,4,5,6].map(i => fmtSchedLineFor(newEntry.weeks.A.days, i)).join("\n");
+        const linhasB = [0,1,2,3,4,5,6].map(i => fmtSchedLineFor(newEntry.weeks.B.days, i)).join("\n");
+        return `Tipo: Escala alternada A/B\nReferência: semana de ${fmtDate(anchorDate)} é Semana ${anchorWeek}\n\nSEMANA A:\n${linhasA}\n\nSEMANA B:\n${linhasB}`;
+      }
+      return [0,1,2,3,4,5,6].map(fmtSchedLine).join("\n");
     }
 
     // Notify DP managers
     const dpMgrs = managers.filter(m => m.isDP && (m.restaurantIds ?? []).includes(restaurantId));
     if (dpMgrs.length > 0) {
-      const body = `Horario alterado\n\nEmpregado: ${selEmp?.name}\nAlterado por: ${currentManagerName}\nVigencia a partir de: ${fmtDate(validFrom)}\n\nNovo horario:\n${[0,1,2,3,4,5,6].map(fmtSchedLine).join("\n")}`;
+      const body = `Horario alterado\n\nEmpregado: ${selEmp?.name}\nAlterado por: ${currentManagerName}\nVigencia a partir de: ${fmtDate(validFrom)}\n\nNovo horario:\n${fmtBodyDoHorario()}`;
       const notif = {
         id: `${Date.now()}-notif-${Math.random().toString(36).slice(2,5)}`,
         restaurantId, type: "horario", body,
@@ -2875,7 +3015,7 @@ function WorkScheduleManagerTab({ restaurantId, employees, roles, workSchedules,
     }
 
     // Comunicado for employee
-    const schedBody = `Seu horario de trabalho foi atualizado por ${currentManagerName}.\nVigencia a partir de: ${fmtDate(validFrom)}\n\nNovo horario:\n${[0,1,2,3,4,5,6].map(fmtSchedLine).join("\n")}`;
+    const schedBody = `Seu horario de trabalho foi atualizado por ${currentManagerName}.\nVigencia a partir de: ${fmtDate(validFrom)}\n\nNovo horario:\n${fmtBodyDoHorario()}`;
     const commForEmp = {
       id: `${Date.now()}-comm-${Math.random().toString(36).slice(2,5)}`,
       restaurantId,
@@ -2895,15 +3035,202 @@ function WorkScheduleManagerTab({ restaurantId, employees, roles, workSchedules,
     onUpdate("_toast", `Horario de ${selEmp?.name} salvo com vigencia a partir de ${fmtDate(validFrom)}`);
   }
 
-  // ── Calculated values ──
-  const activeDayCount = Object.values(editDays).filter(d => d.active).length;
+  // ── INVERSÃO de semana (só schedules alternating) ──
+  // monday: data ISO da segunda-feira da semana sendo invertida
+  // scope: "once" → cria override pontual; "forever" → cria re-anchor (inverte sequência daqui em diante)
+  function applyInversion(monday, scope) {
+    const cur = empSchedules[empSchedules.length - 1];
+    if (!cur || cur.type !== "alternating") return;
+    const wkAtual = weekTypeForDate(cur, monday);
+    const wkNovo = wkAtual === "A" ? "B" : "A";
+    let updated;
+    if (scope === "once") {
+      // Override: marca essa segunda específica como wkNovo
+      updated = {
+        ...cur,
+        overrides: { ...(cur.overrides || {}), [monday]: wkNovo },
+      };
+    } else {
+      // Re-anchor: adiciona à lista, sequência inverte daquela semana em diante
+      const novoReanchor = { date: monday, week: wkNovo };
+      const filtered = (cur.reanchors || []).filter(r => r.date !== monday); // sobrescreve se já existe
+      updated = {
+        ...cur,
+        reanchors: [...filtered, novoReanchor].sort((a,b) => a.date.localeCompare(b.date)),
+      };
+    }
+    onUpdate("workSchedules", prev => {
+      const list = (prev?.[restaurantId]?.[selEmpId] ?? []).slice();
+      list[list.length - 1] = updated;
+      return { ...prev, [restaurantId]: { ...(prev?.[restaurantId] ?? {}), [selEmpId]: list } };
+    });
+    setInvertingMonday(null);
+    onUpdate("_toast", scope === "once"
+      ? `🔄 Semana de ${fmtDate(monday)} marcada como Semana ${wkNovo} (apenas esta)`
+      : `🔄 Sequência invertida a partir de ${fmtDate(monday)} (Semana ${wkNovo} daqui em diante)`);
+  }
+
+  // ── Exporta PDF do horário (single ou alternating) ──
+  async function exportarHorarioPDF() {
+    const cur = empSchedules[empSchedules.length - 1];
+    if (!cur) { onUpdate("_toast", "Sem horário cadastrado pra exportar"); return; }
+    const jsPDFCtor = window.jspdf?.jsPDF || window.jsPDF;
+    if (!jsPDFCtor) { alert("Biblioteca PDF carregando — tente novamente em 2s."); return; }
+    const doc = new jsPDFCtor("p", "mm", "a4");
+    const W = doc.internal.pageSize.getWidth();
+    const H = doc.internal.pageSize.getHeight();
+
+    // Cabeçalho
+    doc.setFont("helvetica","bold"); doc.setFontSize(16);
+    doc.text("Horário de Trabalho", 14, 16);
+    doc.setFontSize(11); doc.setFont("helvetica","normal");
+    doc.text(`Empregado: ${selEmp?.name || "—"}`, 14, 24);
+    const role = roles.find(r => r.id === selEmp?.roleId);
+    if (role) doc.text(`Cargo: ${role.name}`, 14, 30);
+    doc.text(`Vigente desde: ${fmtDate(cur.validFrom)}`, 14, 36);
+    if (cur.type === "alternating") {
+      doc.text(`Tipo: Escala alternada A/B`, 14, 42);
+      doc.setFontSize(9);
+      doc.text(`Referência: semana de ${fmtDate(cur.anchor?.date)} é Semana ${cur.anchor?.week}`, 14, 47);
+    }
+
+    function buildBody(daysObj) {
+      return [0,1,2,3,4,5,6].map(i => {
+        const d = daysObj?.[i];
+        if (!d) return [WEEK_DAYS_LABEL[i], "Folga", "—", "—"];
+        if (d.in && d.out) return [WEEK_DAYS_LABEL[i], `${d.in} – ${d.out}`, `${d.break||0}min`, fmtHHMM(calcDayHours(d.in,d.out,d.break||0).totalContract)];
+        return [WEEK_DAYS_LABEL[i], "Trabalha", "—", "—"];
+      });
+    }
+
+    if (cur.type === "alternating") {
+      // Duas tabelas lado a lado: Semana A à esquerda, Semana B à direita
+      const startY = 54;
+      const colW = (W - 14*2 - 6) / 2;
+      const wkHoje = weekTypeForDate(cur, today()) || "A";
+      // Semana A
+      doc.autoTable({
+        head: [[`Semana A${wkHoje==="A"?" ★ esta semana":""}`,"Horário","Interv.","Carga"]],
+        body: buildBody(cur.weeks?.A?.days),
+        foot: cur.weeks?.A?.totalContract > 0 ? [["Total/sem","","",fmtHHMM(cur.weeks.A.totalContract)]] : null,
+        startY, theme: "grid",
+        styles: { fontSize: 8 },
+        headStyles: { fillColor: wkHoje==="A" ? [212,160,23] : [120,120,120], textColor: 255 },
+        footStyles: { fillColor: [240,235,210], fontStyle:"bold", textColor: 0 },
+        margin: { left: 14, right: W - 14 - colW },
+        tableWidth: colW,
+      });
+      doc.autoTable({
+        head: [[`Semana B${wkHoje==="B"?" ★ esta semana":""}`,"Horário","Interv.","Carga"]],
+        body: buildBody(cur.weeks?.B?.days),
+        foot: cur.weeks?.B?.totalContract > 0 ? [["Total/sem","","",fmtHHMM(cur.weeks.B.totalContract)]] : null,
+        startY, theme: "grid",
+        styles: { fontSize: 8 },
+        headStyles: { fillColor: wkHoje==="B" ? [212,160,23] : [120,120,120], textColor: 255 },
+        footStyles: { fillColor: [240,235,210], fontStyle:"bold", textColor: 0 },
+        margin: { left: 14 + colW + 6, right: 14 },
+        tableWidth: colW,
+      });
+      // Próximas 8 semanas
+      const monHoje = getWeekMonday(today());
+      const linhasSeq = [];
+      for (let i = 0; i < 8; i++) {
+        const d = new Date(monHoje + "T12:00:00");
+        d.setDate(d.getDate() + i * 7);
+        const ds = d.toISOString().slice(0,10);
+        const wk = weekTypeForDate(cur, ds);
+        linhasSeq.push([fmtDate(ds), `Semana ${wk}`, i===0?"esta":""]);
+      }
+      const yAfter = Math.max(doc.lastAutoTable.finalY + 8, startY + 80);
+      doc.setFontSize(11); doc.setFont("helvetica","bold");
+      doc.text("Próximas 8 semanas (calculadas automaticamente)", 14, yAfter);
+      doc.autoTable({
+        head: [["Início","Tipo","Obs"]],
+        body: linhasSeq,
+        startY: yAfter + 3,
+        theme: "striped",
+        styles: { fontSize: 9 },
+        headStyles: { fillColor: [212,160,23], textColor: 255 },
+      });
+      // Inversões existentes
+      const inv = [
+        ...((cur.reanchors || []).map(r => [fmtDate(r.date), "Re-anchor", `Daqui em diante = Semana ${r.week}`])),
+        ...(Object.entries(cur.overrides || {}).map(([dt, wk]) => [fmtDate(dt), "Override", `Apenas esta semana = Semana ${wk}`])),
+      ].sort((a,b) => a[0].localeCompare(b[0]));
+      if (inv.length > 0) {
+        const yInv = doc.lastAutoTable.finalY + 8;
+        doc.setFontSize(11); doc.setFont("helvetica","bold");
+        doc.text("Inversões registradas", 14, yInv);
+        doc.autoTable({
+          head: [["Data","Tipo","Detalhe"]],
+          body: inv,
+          startY: yInv + 3,
+          theme: "grid",
+          styles: { fontSize: 9 },
+          headStyles: { fillColor: [139,92,246], textColor: 255 },
+        });
+      }
+    } else {
+      // Single — uma tabela só
+      doc.autoTable({
+        head: [["Dia","Horário","Intervalo","Carga contratual"]],
+        body: buildBody(cur.days),
+        foot: cur.totalContract > 0 ? [["Total semanal","","",fmtHHMM(cur.totalContract)]] : null,
+        startY: 44,
+        theme: "grid",
+        styles: { fontSize: 10 },
+        headStyles: { fillColor: [212,160,23], textColor: 255 },
+        footStyles: { fillColor: [240,235,210], fontStyle:"bold", textColor: 0 },
+      });
+    }
+
+    // Rodapé
+    doc.setFontSize(8); doc.setTextColor(150);
+    doc.text(`AppTip · Gerado em ${new Date().toLocaleString("pt-BR")}`, 14, H - 8);
+    const safeName = (selEmp?.name || "horario").replace(/[^a-zA-Z0-9]/g,"_");
+    doc.save(`horario_${safeName}.pdf`);
+    onUpdate("_toast", "📄 PDF do horário gerado");
+  }
+
+  function removeInversion(kind, key) {
+    // kind: "override" | "reanchor"; key: data ISO
+    const cur = empSchedules[empSchedules.length - 1];
+    if (!cur) return;
+    let updated;
+    if (kind === "override") {
+      const next = { ...(cur.overrides || {}) };
+      delete next[key];
+      updated = { ...cur, overrides: next };
+    } else {
+      updated = { ...cur, reanchors: (cur.reanchors || []).filter(r => r.date !== key) };
+    }
+    onUpdate("workSchedules", prev => {
+      const list = (prev?.[restaurantId]?.[selEmpId] ?? []).slice();
+      list[list.length - 1] = updated;
+      return { ...prev, [restaurantId]: { ...(prev?.[restaurantId] ?? {}), [selEmpId]: list } };
+    });
+    onUpdate("_toast", `Inversão de ${fmtDate(key)} removida`);
+  }
+
+  // ── Calculated values (sempre da SEMANA SENDO EDITADA — `days` aponta pra A ou B) ──
+  const activeDayCount = Object.values(days).filter(d => d.active).length;
   const folgaDayCount = 7 - activeDayCount;
-  const allHoursFilled = hasAllHours(editDays);
-  const storageDaysCalc = allHoursFilled && activeDayCount > 0 ? toStorage(editDays, false) : {};
+  const allHoursFilled = hasAllHours(days);
+  const storageDaysCalc = allHoursFilled && activeDayCount > 0 ? toStorage(days, false) : {};
   const { totalContract } = allHoursFilled && activeDayCount > 0 ? validateWeekSchedule(storageDaysCalc) : { totalContract: 0 };
   const MIN_WEEK = 43*60+55, MAX_WEEK = 44*60;
   const isEmpFreela = selEmp?.isFreela;
   const weekOk = allHoursFilled && activeDayCount > 0 && (isEmpFreela || (totalContract >= MIN_WEEK && totalContract <= MAX_WEEK));
+  // No alternating: também checa carga da OUTRA semana pra mostrar status global "ambas OK"
+  const otherDays = isAlternating ? (editWeek === "A" ? editDaysB : editDays) : null;
+  const otherActive = otherDays ? Object.values(otherDays).filter(d => d.active).length : 0;
+  const otherFilled = otherDays ? hasAllHours(otherDays) : true;
+  const otherTC = (otherDays && otherFilled && otherActive > 0)
+    ? validateWeekSchedule(toStorage(otherDays, false)).totalContract : 0;
+  const otherOk = !otherDays || (otherFilled && otherActive > 0 && (isEmpFreela || (otherTC >= MIN_WEEK && otherTC <= MAX_WEEK)));
+  // bothWeeksOk pode ser usado em fases futuras pra mostrar status global
+  // eslint-disable-next-line no-unused-vars
+  const bothWeeksOk = isAlternating ? (weekOk && otherOk) : weekOk;
 
   // ── IA Assistant state ──
   const [aiOpen, setAiOpen] = useState(false);
@@ -2920,7 +3247,10 @@ function WorkScheduleManagerTab({ restaurantId, employees, roles, workSchedules,
     const srcScheds = workSchedules?.[restaurantId]?.[srcEmpId] ?? [];
     const src = srcScheds[srcScheds.length - 1];
     if (!src) { onUpdate("_toast","⚠️ Empregado de origem sem horário cadastrado"); return; }
-    setEditDays(toInternal(src));
+    // Copia o `days` de origem pra semana atualmente sendo editada (A ou B no alternating, única no single)
+    // Se o source for alternating, copia a Semana A dele (decisão pragmática — user pode trocar de aba e copiar de novo).
+    const sourceDays = src.type === "alternating" ? (src.weeks?.A?.days || {}) : src.days;
+    setDays(toInternal({ days: sourceDays }));
     setErrors([]);
     setCopyPickerOpen(false);
     const srcEmp = restEmps.find(e => e.id === srcEmpId);
@@ -2937,7 +3267,8 @@ function WorkScheduleManagerTab({ restaurantId, employees, roles, workSchedules,
     const normText = (s) => s.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g,"").replace(/\s+/g," ").trim();
     // Normaliza: lowercase, remove acentos, normaliza espaços
     const lower = normText(text);
-    const newDays = JSON.parse(JSON.stringify(editDays));
+    // parseAi opera SEMPRE na semana sendo editada agora (`days`, alias dinâmico A ou B)
+    const newDays = JSON.parse(JSON.stringify(days));
     const changes = [];
 
     // Helper: extrai indices de dias de um trecho (sem duplicar)
@@ -3219,7 +3550,8 @@ function WorkScheduleManagerTab({ restaurantId, employees, roles, workSchedules,
 
   function applyAiSuggestion() {
     if (aiResult?.days) {
-      setEditDays(aiResult.days);
+      // Aplica na semana sendo editada (A ou B no alternating, única no single)
+      setDays(aiResult.days);
       setErrors([]);
       setAiResult(null);
       setAiPrompt("");
@@ -3378,68 +3710,224 @@ function WorkScheduleManagerTab({ restaurantId, employees, roles, workSchedules,
             🔄 {mobileOnly?"Resetar":"Resetar horário"}
           </button>
         )}
+        {empSchedules.length > 0 && (
+          <button onClick={exportarHorarioPDF}
+            style={{...S.btnSecondary,fontSize:mobileOnly?11:12,padding:mobileOnly?"5px 10px":"6px 14px",color:"var(--ac-text)",borderColor:"var(--ac)44"}}>
+            📄 {mobileOnly?"PDF":"Imprimir horário"}
+          </button>
+        )}
       </div>
 
-      {/* ═══ Horário ATIVO (replica do que o empregado vê) — só pra quem já tem horário cadastrado ═══ */}
+      {/* ═══ Horário ATIVO — só pra quem já tem horário cadastrado ═══ */}
       {empSchedules.length > 0 && (() => {
         const current = empSchedules[empSchedules.length - 1];
-        if (!current?.days) return null;
+        if (!current) return null;
+        const isCurAlt = current.type === "alternating";
+        // Helper: renderiza um bloco de "dias" (semana única OU semana A/B)
+        function renderDaysBlock(daysObj, opts = {}) {
+          const { highlight, totalContract: tc, hoursComplete: hc, label } = opts;
+          return (
+            <div style={{
+              ...(label?{
+                background: highlight ? "var(--ac-bg)" : "var(--bg1)",
+                border: `2px solid ${highlight ? "var(--ac)" : "var(--border)"}`,
+                borderRadius: 8, padding: mobileOnly?"8px 10px":"10px 14px",
+              }:{}),
+            }}>
+              {label && (
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6,flexWrap:"wrap",gap:4}}>
+                  <span style={{fontSize:11,fontWeight:700,letterSpacing:0.3,color:highlight?"var(--ac-text)":"var(--text2)"}}>
+                    {label} {highlight && "← esta semana"}
+                  </span>
+                  {tc > 0 && <span style={{fontFamily:"'DM Mono',monospace",fontSize:11,color:highlight?"var(--ac-text)":"var(--text3)",fontWeight:600}}>{fmtHHMM(tc)}/sem</span>}
+                </div>
+              )}
+              {hc === false && (
+                <div style={{background:"#f59e0b15",borderRadius:6,padding:"4px 8px",marginBottom:6,fontSize:10,color:"#f59e0b",fontWeight:600}}>⚠️ Horários pendentes</div>
+              )}
+              {[0,1,2,3,4,5,6].map(i => {
+                const d = daysObj?.[i];
+                const hasShift = d?.in && d?.out;
+                const isWorkDay = !!d;
+                const isWeekend = i === 0 || i === 6;
+                return (
+                  <div key={i} style={{
+                    padding:mobileOnly?"4px 8px":"5px 10px",
+                    marginBottom:2,
+                    borderRadius:5,
+                    background:isWorkDay && !label ? "var(--bg1)" : "transparent",
+                    border:`1px solid ${isWorkDay && !label ? "var(--border)" : "transparent"}`,
+                    opacity:isWorkDay?1:0.55,
+                    fontSize:mobileOnly?11:12,
+                  }}>
+                    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:6,flexWrap:"wrap"}}>
+                      <span style={{color:isWeekend?"#f59e0b":"var(--text)",fontWeight:700,minWidth:30}}>{WEEK_DAYS_LABEL[i]}</span>
+                      {hasShift
+                        ? <span style={{color:"var(--text2)",fontFamily:"'DM Mono',monospace"}}>{d.in}–{d.out}{d.break>0?` (${d.break}m)`:""}</span>
+                        : isWorkDay
+                          ? <span style={{color:"#f59e0b",fontSize:10}}>Trab. (pendente)</span>
+                          : <span style={{color:"var(--text3)",fontSize:10}}>Folga</span>
+                      }
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          );
+        }
+        // Cabeçalho: tipo + vigência
         return (
           <div style={{...S.card, marginBottom: mobileOnly?10:14, padding: mobileOnly?"12px 14px":"16px 20px", borderColor: "var(--ac)33", background: "var(--ac-bg)"}}>
             <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10,flexWrap:"wrap",gap:6}}>
-              <span style={{color:"var(--ac-text)",fontSize:mobileOnly?12:13,fontWeight:700,letterSpacing:0.3}}>📋 Horário ativo (igual o que o empregado vê)</span>
+              <span style={{color:"var(--ac-text)",fontSize:mobileOnly?12:13,fontWeight:700,letterSpacing:0.3}}>
+                📋 Horário ativo {isCurAlt && "(Escala alternada A/B)"}
+              </span>
               <span style={{color:"var(--text3)",fontSize:11}}>Vigente desde {fmtDate(current.validFrom)}</span>
             </div>
-            {current.hoursComplete === false && (
-              <div style={{background:"#f59e0b15",borderRadius:6,padding:"6px 10px",marginBottom:10,border:"1px solid #f59e0b33"}}>
-                <span style={{color:"#f59e0b",fontSize:11,fontWeight:600}}>⚠️ Apenas dias definidos — horários ainda não preenchidos.</span>
-              </div>
-            )}
-            {current.totalContract > 0 && (
+            {!isCurAlt && current.totalContract > 0 && (
               <div style={{background:"var(--bg1)",borderRadius:6,padding:"6px 10px",marginBottom:10,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
                 <span style={{color:"var(--text3)",fontSize:11}}>Carga semanal</span>
                 <span style={{color:"var(--ac-text)",fontWeight:700,fontSize:13,fontFamily:"'DM Mono',monospace"}}>{fmtHHMM(current.totalContract)}/sem</span>
               </div>
             )}
-            <div>
-              {[0,1,2,3,4,5,6].map(i => {
-                const d = current.days[i];
-                const hasShift = d?.in && d?.out;
-                const isWorkDay = !!d;
-                const isWeekend = i === 0 || i === 6;
-                const calc = hasShift ? calcDayHours(d.in, d.out, parseInt(d.break)||0) : null;
-                return (
-                  <div key={i} style={{
-                    padding:mobileOnly?"6px 10px":"8px 12px",
-                    marginBottom:4,
-                    borderRadius:6,
-                    background:isWorkDay?"var(--bg1)":"transparent",
-                    border:`1px solid ${isWorkDay?"var(--border)":"transparent"}`,
-                    opacity:isWorkDay?1:0.55,
-                    fontSize:mobileOnly?12:13,
-                  }}>
-                    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:8,flexWrap:"wrap"}}>
-                      <span style={{color:isWeekend?"#f59e0b":"var(--text)",fontWeight:700,minWidth:36}}>{WEEK_DAYS_LABEL[i]}</span>
-                      {hasShift
-                        ? <span style={{color:"var(--text2)",fontFamily:"'DM Mono',monospace"}}>{d.in} – {d.out}</span>
-                        : isWorkDay
-                          ? <span style={{color:"#f59e0b",fontSize:11}}>Trabalha (horário pendente)</span>
-                          : <span style={{color:"var(--text3)",fontSize:11}}>Folga</span>
-                      }
-                    </div>
-                    {hasShift && calc && !mobileOnly && (
-                      <div style={{display:"flex",gap:10,marginTop:3,fontSize:10,fontFamily:"'DM Mono',monospace",color:"var(--text3)",flexWrap:"wrap"}}>
-                        <span>Intervalo: {d.break||0}min</span>
-                        <span>Contratual: <strong style={{color:"var(--ac-text)"}}>{fmtHHMM(calc.totalContract)}</strong></span>
-                        {calc.nocturnal > 0 && <span style={{color:"#8b5cf6"}}>Noturna: {fmtHHMM(calc.nocturnalFicta)}</span>}
+            {/* Render single ou alternating */}
+            {isCurAlt ? (() => {
+              const wkHoje = weekTypeForDate(current, today()) || "A";
+              const monHoje = getWeekMonday(today());
+              // Próximas 4 semanas previstas
+              const futuras = [];
+              for (let i = 1; i <= 4; i++) {
+                const d = new Date(monHoje + "T12:00:00");
+                d.setDate(d.getDate() + i * 7);
+                const ds = d.toISOString().slice(0,10);
+                futuras.push({ monday: ds, week: weekTypeForDate(current, ds) });
+              }
+              return (
+                <>
+                  <div style={{background:"var(--bg1)",borderRadius:8,padding:"8px 12px",marginBottom:10,fontSize:12,textAlign:"center"}}>
+                    Esta semana ({fmtDate(monHoje)} a {fmtDate((() => { const d = new Date(monHoje+"T12:00:00"); d.setDate(d.getDate()+6); return d.toISOString().slice(0,10); })())}): <strong style={{color:"var(--ac-text)",fontSize:14}}>Semana {wkHoje}</strong>
+                  </div>
+                  <div style={{display:"grid",gridTemplateColumns:mobileOnly?"1fr":"1fr 1fr",gap:10,marginBottom:10}}>
+                    {renderDaysBlock(current.weeks?.A?.days || {}, {
+                      label: "Semana A",
+                      highlight: wkHoje === "A",
+                      totalContract: current.weeks?.A?.totalContract || 0,
+                      hoursComplete: current.weeks?.A?.hoursComplete,
+                    })}
+                    {renderDaysBlock(current.weeks?.B?.days || {}, {
+                      label: "Semana B",
+                      highlight: wkHoje === "B",
+                      totalContract: current.weeks?.B?.totalContract || 0,
+                      hoursComplete: current.weeks?.B?.hoursComplete,
+                    })}
+                  </div>
+                  <div style={{fontSize:10,color:"var(--text3)",padding:"6px 0",borderTop:"1px dashed var(--border)"}}>
+                    <strong>Próximas:</strong> {futuras.map((f, i) => (
+                      <span key={i} style={{marginRight:8}}>{fmtDate(f.monday).slice(0,5)}: <strong style={{color:f.week==="A"?"var(--ac-text)":"#8b5cf6"}}>{f.week}</strong></span>
+                    ))}
+                  </div>
+                  {/* Botão inverter + lista de inversões existentes */}
+                  <div style={{marginTop:10,paddingTop:10,borderTop:"1px solid var(--border)",display:"flex",flexDirection:"column",gap:8}}>
+                    <button onClick={()=>{ setInvertingMonday(monHoje); setInvertScope("once"); }}
+                      style={{background:"transparent",color:"#8b5cf6",border:"1px dashed #8b5cf6",borderRadius:6,padding:"6px 12px",fontSize:11,fontWeight:600,cursor:"pointer",alignSelf:"flex-start"}}>
+                      🔄 Inverter esta semana
+                    </button>
+                    {((current.overrides && Object.keys(current.overrides).length > 0) || (current.reanchors && current.reanchors.length > 0)) && (
+                      <div style={{fontSize:10,color:"var(--text3)"}}>
+                        <strong>Inversões registradas:</strong>
+                        {(current.reanchors || []).map(r => (
+                          <div key={"r"+r.date} style={{display:"flex",alignItems:"center",gap:6,padding:"3px 0"}}>
+                            <span style={{flex:1}}>🔁 {fmtDate(r.date)} → re-anchor (sequência inverteu, daqui em diante semana = {r.week})</span>
+                            <button onClick={()=>removeInversion("reanchor", r.date)} title="Desfazer" style={{background:"none",border:"none",color:"var(--red)",cursor:"pointer",fontSize:11}}>✕</button>
+                          </div>
+                        ))}
+                        {Object.entries(current.overrides || {}).sort(([a],[b])=>a.localeCompare(b)).map(([dt, wk]) => (
+                          <div key={"o"+dt} style={{display:"flex",alignItems:"center",gap:6,padding:"3px 0"}}>
+                            <span style={{flex:1}}>📌 {fmtDate(dt)} → override (apenas essa semana = {wk})</span>
+                            <button onClick={()=>removeInversion("override", dt)} title="Desfazer" style={{background:"none",border:"none",color:"var(--red)",cursor:"pointer",fontSize:11}}>✕</button>
+                          </div>
+                        ))}
                       </div>
                     )}
                   </div>
-                );
-              })}
-            </div>
+                </>
+              );
+            })() : (
+              renderDaysBlock(current.days || {}, {})
+            )}
             <div style={{fontSize:10,color:"var(--text3)",marginTop:8,fontStyle:"italic",textAlign:"center"}}>
               Edite abaixo pra criar uma nova vigência. Esse card mostra o que está em vigor.
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* ═══ Modal de inversão (override vs re-anchor) ═══ */}
+      {invertingMonday && (() => {
+        const cur = empSchedules[empSchedules.length - 1];
+        if (!cur || cur.type !== "alternating") return null;
+        const wkAtual = weekTypeForDate(cur, invertingMonday) || "A";
+        const wkNovo = wkAtual === "A" ? "B" : "A";
+        // Preview das próximas 3 semanas em cada cenário
+        const previewOnce = [];
+        const previewForever = [];
+        for (let i = 0; i < 4; i++) {
+          const d = new Date(invertingMonday + "T12:00:00");
+          d.setDate(d.getDate() + i * 7);
+          const ds = d.toISOString().slice(0,10);
+          // Once: só essa semana inverte; demais seguem padrão original
+          const onceWk = i === 0 ? wkNovo : weekTypeForDate(cur, ds);
+          previewOnce.push({ date: ds, week: onceWk });
+          // Forever: a partir desta semana, sequência inverte
+          const tmpCur = { ...cur, reanchors: [...(cur.reanchors||[]).filter(r=>r.date!==invertingMonday), { date: invertingMonday, week: wkNovo }].sort((a,b)=>a.date.localeCompare(b.date)) };
+          previewForever.push({ date: ds, week: weekTypeForDate(tmpCur, ds) });
+        }
+        return (
+          <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.5)",zIndex:9999,display:"flex",alignItems:"center",justifyContent:"center",padding:16}} onClick={()=>setInvertingMonday(null)}>
+            <div onClick={e=>e.stopPropagation()}
+              style={{background:"var(--card-bg)",borderRadius:12,padding:mobileOnly?"18px 16px":"24px 28px",maxWidth:540,width:"100%",maxHeight:"90vh",overflowY:"auto",border:"1px solid var(--border)"}}>
+              <div style={{fontSize:16,fontWeight:700,color:"var(--text)",marginBottom:6}}>🔄 Inverter semana</div>
+              <div style={{fontSize:12,color:"var(--text3)",marginBottom:14}}>
+                Semana de {fmtDate(invertingMonday)} a {fmtDate((() => { const d = new Date(invertingMonday+"T12:00:00"); d.setDate(d.getDate()+6); return d.toISOString().slice(0,10); })())}
+              </div>
+              <div style={{padding:"10px 12px",background:"var(--bg2)",borderRadius:8,marginBottom:14,fontSize:12}}>
+                Hoje essa semana é <strong>Semana {wkAtual}</strong>. Você quer marcar como <strong>Semana {wkNovo}</strong>.
+              </div>
+              {/* Opção 1: only */}
+              <label style={{display:"block",padding:12,borderRadius:8,border:`2px solid ${invertScope==="once"?"var(--ac)":"var(--border)"}`,marginBottom:10,cursor:"pointer",background:invertScope==="once"?"var(--ac-bg)":"transparent"}}>
+                <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:6}}>
+                  <input type="radio" checked={invertScope==="once"} onChange={()=>setInvertScope("once")}/>
+                  <strong style={{color:"var(--text)",fontSize:13}}>Apenas esta semana</strong>
+                </div>
+                <div style={{fontSize:11,color:"var(--text3)",fontFamily:"'DM Mono',monospace",lineHeight:1.6,paddingLeft:24}}>
+                  {previewOnce.map((p, i) => (
+                    <div key={i}>
+                      • {fmtDate(p.date).slice(0,5)} – {fmtDate((()=>{const d=new Date(p.date+"T12:00:00");d.setDate(d.getDate()+6);return d.toISOString().slice(0,10);})()).slice(0,5)}: <strong style={{color:p.week===wkNovo?"var(--ac-text)":"var(--text2)"}}>Semana {p.week}</strong>{i===0?" (invertida)":i>0?" (padrão)":""}
+                    </div>
+                  ))}
+                </div>
+              </label>
+              {/* Opção 2: forever */}
+              <label style={{display:"block",padding:12,borderRadius:8,border:`2px solid ${invertScope==="forever"?"var(--ac)":"var(--border)"}`,marginBottom:14,cursor:"pointer",background:invertScope==="forever"?"var(--ac-bg)":"transparent"}}>
+                <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:6}}>
+                  <input type="radio" checked={invertScope==="forever"} onChange={()=>setInvertScope("forever")}/>
+                  <strong style={{color:"var(--text)",fontSize:13}}>A partir desta semana, pra sempre</strong>
+                </div>
+                <div style={{fontSize:11,color:"var(--text3)",fontFamily:"'DM Mono',monospace",lineHeight:1.6,paddingLeft:24}}>
+                  {previewForever.map((p, i) => (
+                    <div key={i}>
+                      • {fmtDate(p.date).slice(0,5)} – {fmtDate((()=>{const d=new Date(p.date+"T12:00:00");d.setDate(d.getDate()+6);return d.toISOString().slice(0,10);})()).slice(0,5)}: <strong style={{color:"var(--ac-text)"}}>Semana {p.week}</strong>
+                    </div>
+                  ))}
+                </div>
+              </label>
+              <div style={{display:"flex",gap:8,justifyContent:"flex-end"}}>
+                <button onClick={()=>setInvertingMonday(null)} style={{...S.btnSecondary,fontSize:13,padding:"8px 16px"}}>Cancelar</button>
+                <button onClick={()=>applyInversion(invertingMonday, invertScope)}
+                  style={{background:"var(--ac)",color:"#fff",border:"none",borderRadius:8,padding:"8px 18px",fontSize:13,fontWeight:700,cursor:"pointer"}}>
+                  🔄 Confirmar
+                </button>
+              </div>
             </div>
           </div>
         );
@@ -3629,12 +4117,84 @@ function WorkScheduleManagerTab({ restaurantId, employees, roles, workSchedules,
         </div>
         {!mobileOnly && <p style={{color:"var(--text3)",fontSize:11,margin:"6px 0 0"}}>Defina os dias de trabalho e folga. Horarios podem ser preenchidos agora ou depois.</p>}
       </div>
+
+      {/* ═══ TIPO DE HORÁRIO: Fixo (single) vs Alternado (A/B) ═══ */}
+      <div style={{...S.card,marginBottom:mobileOnly?8:12,padding:mobileOnly?"10px 12px":"14px 18px"}}>
+        <div style={{display:"flex",gap:8,marginBottom:isAlternating?12:0,flexWrap:"wrap"}}>
+          <button onClick={()=>{ if (isAlternating) { setScheduleType("single"); setEditWeek("A"); setValidated(false); setErrors([]); } }}
+            style={{
+              flex:1, minWidth:140, padding:mobileOnly?"10px 12px":"12px 14px", borderRadius:8,
+              border:`2px solid ${!isAlternating?"var(--ac)":"var(--border)"}`,
+              background:!isAlternating?"var(--ac-bg)":"transparent",
+              cursor:"pointer", fontSize:mobileOnly?12:13, fontWeight:!isAlternating?700:500,
+              color:!isAlternating?"var(--ac-text)":"var(--text2)",
+            }}>
+            📅 Fixo<div style={{fontSize:10,fontWeight:400,marginTop:2,opacity:0.7}}>Mesma semana sempre</div>
+          </button>
+          <button onClick={()=>{ if (!isAlternating) { setScheduleType("alternating"); setEditWeek("A"); setValidated(false); setErrors([]); } }}
+            style={{
+              flex:1, minWidth:140, padding:mobileOnly?"10px 12px":"12px 14px", borderRadius:8,
+              border:`2px solid ${isAlternating?"var(--ac)":"var(--border)"}`,
+              background:isAlternating?"var(--ac-bg)":"transparent",
+              cursor:"pointer", fontSize:mobileOnly?12:13, fontWeight:isAlternating?700:500,
+              color:isAlternating?"var(--ac-text)":"var(--text2)",
+            }}>
+            🔄 Alternado A/B<div style={{fontSize:10,fontWeight:400,marginTop:2,opacity:0.7}}>Duas semanas que se revezam</div>
+          </button>
+        </div>
+
+        {/* Sub-tabs A | B + anchor (só aparecem no modo alternating) */}
+        {isAlternating && (
+          <>
+            <div style={{display:"flex",gap:4,borderBottom:"1px solid var(--border)",marginBottom:10}}>
+              {["A","B"].map(w => {
+                const isCurrent = editWeek === w;
+                const dArr = w === "A" ? editDays : editDaysB;
+                const cnt = Object.values(dArr).filter(d => d.active).length;
+                const filled = hasAllHours(dArr) && cnt > 0;
+                return (
+                  <button key={w} onClick={()=>{ setEditWeek(w); setValidated(false); setErrors([]); }}
+                    style={{
+                      flex:1, padding:mobileOnly?"10px 12px":"10px 14px", border:"none",
+                      borderBottom:`3px solid ${isCurrent?"var(--ac)":"transparent"}`,
+                      background:"none", cursor:"pointer",
+                      fontSize:mobileOnly?13:14, fontWeight:isCurrent?700:500,
+                      color:isCurrent?"var(--text)":"var(--text3)",
+                    }}>
+                    Semana {w}
+                    <span style={{fontSize:10,marginLeft:6,padding:"1px 6px",borderRadius:4,background:filled?"#10b98122":cnt>0?"#f59e0b22":"var(--bg2)",color:filled?"#15803d":cnt>0?"#92400e":"var(--text3)"}}>
+                      {cnt} dias{filled?" ✓":cnt>0?" ⚠":""}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+            <div style={{display:"grid",gridTemplateColumns:mobileOnly?"1fr":"1.4fr 1fr",gap:8,marginBottom:6}}>
+              <div>
+                <label style={{...S.label,fontSize:11}}>Esta segunda-feira (referência)</label>
+                <input type="date" value={anchorDate} onChange={e=>setAnchorDate(getWeekMonday(e.target.value))} style={{...S.input,fontSize:13}}/>
+              </div>
+              <div>
+                <label style={{...S.label,fontSize:11}}>É a Semana</label>
+                <select value={anchorWeek} onChange={e=>setAnchorWeek(e.target.value)} style={{...S.input,fontSize:13,cursor:"pointer"}}>
+                  <option value="A">A</option>
+                  <option value="B">B</option>
+                </select>
+              </div>
+            </div>
+            <div style={{fontSize:10,color:"var(--text3)",fontStyle:"italic"}}>
+              A semana do dia {fmtDate(anchorDate)} é considerada Semana {anchorWeek}. As próximas alternam: {anchorWeek === "A" ? "B → A → B → A..." : "A → B → A → B..."}
+            </div>
+          </>
+        )}
+      </div>
+
       {/* ═══ DAY ROWS ═══ */}
       {mobileOnly ? (
         /* ── MOBILE: single card with all days as compact rows ── */
         <div style={{...S.card,padding:0,marginBottom:8,overflow:"hidden"}}>
           {[0,1,2,3,4,5,6].map(dayIdx => {
-            const d = editDays[dayIdx] ?? { active: true };
+            const d = days[dayIdx] ?? { active: true };
             const isActive = d.active;
             const hasHours = isActive && d.in && d.out;
             const calc = hasHours ? calcDayHours(d.in, d.out, parseInt(d.break)||0) : null;
@@ -3679,7 +4239,7 @@ function WorkScheduleManagerTab({ restaurantId, employees, roles, workSchedules,
         /* ── DESKTOP: linhas espaçosas com grid generoso ── */
         <div style={{...S.card,padding:0,marginBottom:16,overflow:"hidden"}}>
           {[0,1,2,3,4,5,6].map(dayIdx => {
-            const d = editDays[dayIdx] ?? { active: true };
+            const d = days[dayIdx] ?? { active: true };
             const isActive = d.active;
             const hasHours = isActive && d.in && d.out;
             const calc = hasHours ? calcDayHours(d.in, d.out, parseInt(d.break)||0) : null;
@@ -3836,11 +4396,77 @@ function WorkScheduleEmployeeTab({ empId, restaurantId, workSchedules }) {
   const empScheds = [...(workSchedules?.[restaurantId]?.[empId] ?? [])].sort((a,b)=>a.validFrom.localeCompare(b.validFrom));
   const current = empScheds[empScheds.length - 1];
 
-  function scheduleBlock(s, validUntil) {
+  // Helper genérico: renderiza um bloco de days a partir de objeto {0:..., 1:..., ...}
+  function daysBlock(daysObj) {
     return (
       <div>
         {[0,1,2,3,4,5,6].map(i => {
-          const d = s.days[i];
+          const d = daysObj?.[i];
+          const hasShift = d?.in && d?.out;
+          const isWorkDay = !!d;
+          const isWeekend = i === 0 || i === 6;
+          const calc = hasShift ? calcDayHours(d.in, d.out, parseInt(d.break)||0) : null;
+          return (
+            <div key={i} style={{
+              padding:"10px 14px",marginBottom:6,borderRadius:10,
+              background:isWorkDay?"var(--card-bg)":"var(--bg1)",
+              border:`1px solid ${isWorkDay?"var(--border)":"transparent"}`,
+              opacity:isWorkDay?1:0.5,
+            }}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                <span style={{color:isWeekend?"#f59e0b":"var(--text)",fontWeight:700,fontSize:14,minWidth:36}}>{WEEK_DAYS_LABEL[i]}</span>
+                {hasShift
+                  ? <span style={{color:"var(--text2)",fontSize:13,fontFamily:"'DM Mono',monospace"}}>{d.in} - {d.out}</span>
+                  : isWorkDay
+                    ? <span style={{color:"#f59e0b",fontSize:12}}>Trabalha (horario pendente)</span>
+                    : <span style={{color:"var(--text3)",fontSize:12}}>Folga</span>
+                }
+              </div>
+              {hasShift && calc && (
+                <div style={{display:"flex",gap:8,marginTop:4,fontSize:11,fontFamily:"'DM Mono',monospace",color:"var(--text3)",flexWrap:"wrap"}}>
+                  <span>Intervalo: {d.break||0}min</span>
+                  <span>Contratual: <strong style={{color:ac}}>{fmtHHMM(calc.totalContract)}</strong></span>
+                  {calc.nocturnal > 0 && <span style={{color:"#8b5cf6"}}>Noturna: {fmtHHMM(calc.nocturnalFicta)}</span>}
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    );
+  }
+
+  function scheduleBlock(s, validUntil) {
+    // Se for alternating, mostra Semana A + Semana B + indicador da semana atual
+    if (s?.type === "alternating") {
+      const wkHoje = weekTypeForDate(s, today()) || "A";
+      return (
+        <div>
+          <div style={{background:"var(--bg1)",borderRadius:8,padding:"8px 12px",marginBottom:10,fontSize:12,textAlign:"center"}}>
+            Esta semana: <strong style={{color:ac,fontSize:14}}>Semana {wkHoje}</strong>
+          </div>
+          {["A","B"].map(wk => {
+            const wkData = s.weeks?.[wk];
+            const isCurrent = wkHoje === wk;
+            return (
+              <div key={wk} style={{marginBottom:14,border:`2px solid ${isCurrent?ac:"var(--border)"}`,borderRadius:10,padding:"10px 12px",background:isCurrent?"var(--ac-bg)":"transparent"}}>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
+                  <strong style={{color:isCurrent?ac:"var(--text2)",fontSize:13}}>Semana {wk} {isCurrent && "← esta semana"}</strong>
+                  {wkData?.totalContract > 0 && <span style={{fontSize:11,fontFamily:"'DM Mono',monospace",color:"var(--text3)"}}>{fmtHHMM(wkData.totalContract)}/sem</span>}
+                </div>
+                {daysBlock(wkData?.days)}
+              </div>
+            );
+          })}
+          {validUntil && <p style={{color:"var(--text3)",fontSize:11,marginTop:6,textAlign:"right"}}>Vigente ate {fmtDate(validUntil)}</p>}
+        </div>
+      );
+    }
+    // Single (legado): renderização original
+    return (
+      <div>
+        {[0,1,2,3,4,5,6].map(i => {
+          const d = s.days?.[i];
           const hasShift = d?.in && d?.out;
           const isWorkDay = !!d; // day exists in storage = work day
           const isWeekend = i === 0 || i === 6;
@@ -11811,14 +12437,16 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                     const empScheds = data?.workSchedules?.[rid]?.[emp.id] ?? [];
                     const currentSched = empScheds[empScheds.length - 1];
                     if (!currentSched) return;
-                    const folgaDays = new Set([0,1,2,3,4,5,6].filter(d => !currentSched.days[d]));
                     const empDayMap = { ...(effectiveMonth[emp.id] ?? {}) };
                     const empEdits = {};
                     for (let d = 1; d <= daysInMonth; d++) {
                       const date = `${year}-${String(month+1).padStart(2,"0")}-${String(d).padStart(2,"0")}`;
                       const weekday = new Date(date+"T12:00:00").getDay();
+                      // Pega dias efetivos pra ESTA data — respeita alternância A/B + overrides + reanchors
+                      const effDays = getEffectiveDays(currentSched, date) || currentSched.days || {};
+                      const isFolga = !effDays[weekday];
                       const current = empDayMap[date];
-                      if (folgaDays.has(weekday)) {
+                      if (isFolga) {
                         if (!current) { empEdits[date] = DAY_OFF; added++; }
                       } else {
                         if (current === DAY_OFF) { empEdits[date] = null; removed++; }
