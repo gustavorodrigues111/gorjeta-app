@@ -15,8 +15,9 @@ const firebaseConfig = {
 const app = initializeApp(firebaseConfig);
 
 // App Check — garante que só o domínio apptip.app acessa o Firebase
+// Chave está cadastrada como reCAPTCHA v3 (legacy) — confirmado no admin do reCAPTCHA
 initializeAppCheck(app, {
-  provider: new ReCaptchaV3Provider("6LclvLEsAAAAAGNmvN4j87YL0j6o_GS6lP5l73SV"),
+  provider: new ReCaptchaV3Provider("6LclvLEsAAAAAGNmvN4j87YL0j6o_GS6lP5I73SV"),
   isTokenAutoRefreshEnabled: true,
 });
 
