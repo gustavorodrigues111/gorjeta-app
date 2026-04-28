@@ -29633,32 +29633,45 @@ export default function App() {
     // When value is a function, it receives the latest state (like setState(prev => ...))
     // IMPORTANTE: o callback do setState pode rodar de forma assíncrona em React 18,
     // então usamos uma Promise para garantir que resolvedValue está populado antes do save.
+    // Captura o valor anterior pra poder reverter caso o save falhe.
     let resolvedValue;
+    let prevValue;
     if (typeof value === 'function') {
       resolvedValue = await new Promise(resolve => {
         setters[field]?.(prev => {
+          prevValue = prev;
           const v = value(prev);
           resolve(v);
           return v;
         });
       });
     } else {
+      // Pra capturar prevValue no caminho não-funcional, usamos setter com callback também
+      await new Promise(resolve => {
+        setters[field]?.(prev => {
+          prevValue = prev;
+          resolve();
+          return value;
+        });
+      });
       resolvedValue = value;
-      setters[field]?.(value);
     }
     if (keys[field]) {
       const ok = await save(keys[field], resolvedValue);
       if (!ok) {
-        // Alerta em vez de toast pra garantir visibilidade — o save falhou e a mudança NÃO persiste
-        // mesmo que a tela esteja mostrando como se tivesse dado certo.
+        // Save falhou — reverter o state local pra refletir o que está realmente no Firestore.
+        // Se não revertemos, a UI mostra dados "fantasmas" que somem no próximo refresh.
+        if (prevValue !== undefined) {
+          setters[field]?.(prevValue);
+        }
         const msg = `❌ Falha ao salvar no servidor (${field}).\n\n`
-          + `O que você fez aparece na tela localmente, mas NÃO foi gravado. Após um refresh, vai sumir.\n\n`
+          + `Sua alteração foi REVERTIDA — a tela voltou pro estado anterior.\n\n`
           + `Possíveis causas:\n`
-          + `• Internet instável — tente de novo\n`
-          + `• Documento excedeu 1 MB (muitos registros acumulados)\n`
-          + `• Bloqueio de segurança (App Check / Firestore rules)\n\n`
+          + `• Bloqueio de segurança (App Check / reCAPTCHA / Firestore rules)\n`
+          + `• Internet instável\n`
+          + `• Documento excedeu 1 MB\n\n`
           + `Abra o Console do navegador (⌘⌥I) e procure por "save error" pra ver a causa real.`;
-        setToast(`❌ Falha ao salvar ${field} — ver alerta`);
+        setToast(`❌ Falha ao salvar ${field} — alteração revertida`);
         if (typeof window !== "undefined") {
           try { window.alert(msg); } catch (_) {}
         }
