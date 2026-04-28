@@ -3251,14 +3251,40 @@ function WorkScheduleManagerTab({ restaurantId, employees, roles, workSchedules,
     const srcScheds = workSchedules?.[restaurantId]?.[srcEmpId] ?? [];
     const src = srcScheds[srcScheds.length - 1];
     if (!src) { onUpdate("_toast","⚠️ Empregado de origem sem horário cadastrado"); return; }
-    // Copia o `days` de origem pra semana atualmente sendo editada (A ou B no alternating, única no single)
-    // Se o source for alternating, copia a Semana A dele (decisão pragmática — user pode trocar de aba e copiar de novo).
-    const sourceDays = src.type === "alternating" ? (src.weeks?.A?.days || {}) : src.days;
-    setDays(toInternal({ days: sourceDays }));
-    setErrors([]);
-    setCopyPickerOpen(false);
+
+    // Validação de compatibilidade: só copia entre tipos iguais (single↔single OU alternating↔alternating)
+    const srcIsAlt = src.type === "alternating";
+    const dstIsAlt = isAlternating;
+    if (srcIsAlt !== dstIsAlt) {
+      const srcLabel = srcIsAlt ? "Alternada A/B" : "Fixa";
+      const dstLabel = dstIsAlt ? "Alternada A/B" : "Fixa";
+      const srcEmp = restEmps.find(e => e.id === srcEmpId);
+      alert(
+        `⚠️ Tipos de escala incompatíveis\n\n`
+        + `Origem (${srcEmp?.name || "?"}): ${srcLabel}\n`
+        + `Destino atual: ${dstLabel}\n\n`
+        + `Pra copiar, troque o tipo do horário do empregado destino pra "${srcLabel}" antes — usando o toggle "📅 Fixo / 🔄 Alternado A/B" no topo.`
+      );
+      return;
+    }
+
     const srcEmp = restEmps.find(e => e.id === srcEmpId);
-    onUpdate("_toast", `📋 Horário copiado de ${srcEmp?.name ?? "outro empregado"}`);
+    if (srcIsAlt) {
+      // Copia AMBAS as semanas A e B do source pro destino
+      const daysA = src.weeks?.A?.days || {};
+      const daysB = src.weeks?.B?.days || {};
+      setEditDays(toInternal({ days: daysA }));
+      setEditDaysB(toInternal({ days: daysB }));
+      // Mantém anchor e inversões do destino — só copia os horários (decisão de design: anchor é algo pessoal)
+      onUpdate("_toast", `📋 Semanas A e B copiadas de ${srcEmp?.name ?? "outro empregado"}`);
+    } else {
+      // Single → single: copia o days
+      setDays(toInternal({ days: src.days || {} }));
+      onUpdate("_toast", `📋 Horário copiado de ${srcEmp?.name ?? "outro empregado"}`);
+    }
+    setErrors([]);
+    setValidated(false);
+    setCopyPickerOpen(false);
   }
 
   function parseAiCommand(text) {
@@ -4034,10 +4060,14 @@ function WorkScheduleManagerTab({ restaurantId, employees, roles, workSchedules,
                     const scheds = workSchedules?.[restaurantId]?.[emp.id] ?? [];
                     const cur = scheds[scheds.length - 1];
                     const hasHoursComplete = cur?.hoursComplete !== false;
-                    const workDays = cur ? Object.keys(cur.days).length : 0;
+                    const isAlt = cur?.type === "alternating";
+                    const workDays = cur ? Object.keys(cur.days || {}).length : 0;
+                    const tipoLabel = isAlt ? " 🔄A/B" : " 📅Fixa";
+                    // Marca incompatibilidade com o tipo do destino atual pra o user ver de cara
+                    const incompat = (isAlt !== isAlternating) ? " ⚠ tipo diferente" : "";
                     const suf = hasHoursComplete && cur?.totalContract
-                      ? ` — ${fmtHHMM(cur.totalContract)}/sem`
-                      : ` — ${workDays} dias (pendente)`;
+                      ? ` —${tipoLabel} ${fmtHHMM(cur.totalContract)}/sem${incompat}`
+                      : ` —${tipoLabel} ${workDays} dias (pendente)${incompat}`;
                     return <option key={emp.id} value={emp.id}>{emp.name}{role ? ` (${role.name})` : ""}{suf}</option>;
                   };
                   const groups = [];
