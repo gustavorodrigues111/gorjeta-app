@@ -127,11 +127,18 @@ async function load(key, retries = 3) {
   return cacheGet(key);
 }
 // Remove campos `undefined` recursivamente — Firestore rejeita undefined em qualquer nível
-// e quebra o save inteiro. Bugs de dados (workSchedules, etc.) costumam introduzir undefined
-// silenciosamente; sanitizar aqui é a defesa mais robusta sem caçar cada origem.
+// (inclusive dentro de arrays) e quebra o save inteiro. Bugs de dados (workSchedules, etc.)
+// costumam introduzir undefined silenciosamente; sanitizar aqui é a defesa mais robusta.
+// Estratégia:
+//  - undefined em chave de objeto → remove a chave
+//  - undefined em elemento de array → vira null (preserva índice)
+//  - undefined no topo → null
 function sanitizeForFirestore(v) {
-  if (v === undefined || v === null) return v;
-  if (Array.isArray(v)) return v.map(sanitizeForFirestore);
+  if (v === undefined) return null;
+  if (v === null) return null;
+  if (typeof v === "function") return null; // funções nunca devem ir pro Firestore
+  if (v instanceof Date) return v.toISOString();
+  if (Array.isArray(v)) return v.map(item => sanitizeForFirestore(item));
   if (typeof v === "object") {
     const out = {};
     for (const [k, val] of Object.entries(v)) {
@@ -143,7 +150,29 @@ function sanitizeForFirestore(v) {
   return v;
 }
 
+// Debug helper: encontra caminho do primeiro undefined num objeto (pra logs)
+function findUndefinedPath(v, path = "") {
+  if (v === undefined) return path || "(root)";
+  if (v === null) return null;
+  if (typeof v !== "object") return null;
+  if (Array.isArray(v)) {
+    for (let i = 0; i < v.length; i++) {
+      const r = findUndefinedPath(v[i], `${path}[${i}]`);
+      if (r) return r;
+    }
+    return null;
+  }
+  for (const [k, val] of Object.entries(v)) {
+    if (val === undefined) return `${path}.${k}`;
+    const r = findUndefinedPath(val, `${path}.${k}`);
+    if (r) return r;
+  }
+  return null;
+}
+
 async function save(key, value, retries = 3) {
+  const undefPath = findUndefinedPath(value);
+  if (undefPath) console.warn(`[save] removendo undefined em ${key}${undefPath}`);
   const cleanValue = sanitizeForFirestore(value);
   for (let i = 0; i < retries; i++) {
     try {
