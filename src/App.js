@@ -29547,11 +29547,16 @@ export default function App() {
     const keys    = { owners:K.owners, managers:K.managers, restaurants:K.restaurants, employees:K.employees, roles:K.roles, tips:K.tips, splits:K.splits, schedules:K.schedules, communications:K.communications, commAcks:K.commAcks, faq:K.faq, dpMessages:K.dpMessages, workSchedules:K.workSchedules, notifications:K.notifications, noTipDays:K.noTipDays, trash:K.trash, schedTemplates:K.schedTemplates, schedDrafts:K.schedDrafts, scheduleVersions:K.scheduleVersions, tipVersions:K.tipVersions, vtConfig:K.vtConfig, vtMonthly:K.vtMonthly, vtPayments:K.vtPayments, incidents:K.incidents, feedbacks:K.feedbacks, devChecklists:K.devChecklists, scheduleAdjustments:K.scheduleAdjustments, scheduleStatus:K.scheduleStatus, schedulePrevista:K.schedulePrevista, employeeGoals:K.employeeGoals, delays:K.delays, tipApprovals:K.tipApprovals, meetingPlans:K.meetingPlans, meetingIdeas:K.meetingIdeas, meetingAgendas:K.meetingAgendas, meetingActions:K.meetingActions, inbox:K.inbox, inboxFolders:K.inboxFolders, miseCategories:K.miseCategories, miseStocks:K.miseStocks, miseAssignments:K.miseAssignments, miseItems:K.miseItems, miseCycles:K.miseCycles, miseCounts:K.miseCounts, miseSuppliers:K.miseSuppliers, miseProductSuppliers:K.miseProductSuppliers, miseSupplierOrders:K.miseSupplierOrders, miseChecklistTemplates:K.miseChecklistTemplates, miseChecklistRuns:K.miseChecklistRuns, miseFtInsumos:K.miseFtInsumos, miseFtEquipamentos:K.miseFtEquipamentos, miseFtDishes:K.miseFtDishes, pessoas:K.pessoas, pessoasMigratedAt:K.pessoasMigratedAt, tuyaLinks:K.tuyaLinks, tempSensors:K.tempSensors, tempReadings:K.tempReadings, tempAlerts:K.tempAlerts, permProfiles:K.permProfiles, freelaShifts:K.freelaShifts, freelaPagamentos:K.freelaPagamentos };
     // Support functional updates to prevent stale-state race conditions:
     // When value is a function, it receives the latest state (like setState(prev => ...))
+    // IMPORTANTE: o callback do setState pode rodar de forma assíncrona em React 18,
+    // então usamos uma Promise para garantir que resolvedValue está populado antes do save.
     let resolvedValue;
     if (typeof value === 'function') {
-      setters[field]?.(prev => {
-        resolvedValue = value(prev);
-        return resolvedValue;
+      resolvedValue = await new Promise(resolve => {
+        setters[field]?.(prev => {
+          const v = value(prev);
+          resolve(v);
+          return v;
+        });
       });
     } else {
       resolvedValue = value;
