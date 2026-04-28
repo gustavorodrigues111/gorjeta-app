@@ -5204,6 +5204,14 @@ function EmployeeSpreadsheet({ restEmps, restRoles, rid, employees, pessoas, onU
                 <div style={{background:"var(--bg2)",border:"1px solid var(--border)",borderRadius:12,padding:14,marginBottom:12,display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:10}}>
                   <div>
                     <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
+                      {(() => {
+                        const qtd = workSchedules?.[rid]?.[emp.id]?.length ?? 0;
+                        if (qtd === 0) return null;
+                        return (
+                          <span title={`${qtd} horário${qtd>1?"s":""} cadastrado${qtd>1?"s":""}`}
+                            style={{fontSize:13,lineHeight:1,color:"#0284c7"}}>⏰</span>
+                        );
+                      })()}
                       <span style={{fontWeight:700,color:"var(--text)",fontSize:15}}>{emp.name}</span>
                       <span style={{fontSize:10,padding:"2px 8px",borderRadius:6,background:badge.bg,color:badge.color,fontWeight:700}}>{badge.label}</span>
                       {emp.isProducao && <span style={{fontSize:10,padding:"2px 8px",borderRadius:6,background:"#ec489922",color:"#ec4899",fontWeight:700}}>Produção</span>}
@@ -6127,6 +6135,14 @@ function EmployeeSpreadsheet({ restEmps, restRoles, rid, employees, pessoas, onU
                   {/* Info */}
                   <div style={{flex:1,minWidth:0}}>
                     <div style={{display:"flex",alignItems:"center",gap:6,flexWrap:"wrap"}}>
+                      {(() => {
+                        const qtd = workSchedules?.[rid]?.[emp.id]?.length ?? 0;
+                        if (qtd === 0) return null;
+                        return (
+                          <span title={`${qtd} horário${qtd>1?"s":""} cadastrado${qtd>1?"s":""}`}
+                            style={{fontSize:11,lineHeight:1,color:"#0284c7",flexShrink:0}}>⏰</span>
+                        );
+                      })()}
                       <span style={{fontSize:13,fontWeight:700,color:"var(--text)",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{emp.name}</span>
                       <span style={{fontSize:9,padding:"1px 6px",borderRadius:4,background:badge.bg,color:badge.color,fontWeight:700}}>{badge.label}</span>
                       {emp.isProducao && <span style={{fontSize:9,padding:"1px 5px",borderRadius:4,background:"#ec489922",color:"#ec4899"}}>Prod</span>}
