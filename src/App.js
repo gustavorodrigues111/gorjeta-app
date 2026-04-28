@@ -406,454 +406,6 @@ function makeEmpCode(restaurantCode, seq) {
   return restaurantCode.toUpperCase() + String(seq).padStart(4, "0");
 }
 
-// ═══════════════════════════════════════════════════════════════
-// ──  Ponto Import: Parser determinístico + Comparador         ──
-// ═══════════════════════════════════════════════════════════════
-
-const PONTO_SYSTEMS = [
-  { id: "solides", label: "Sólides" },
-  // futuro: { id: "tangerino", label: "Tangerino" }, etc.
-];
-
-// ── Helpers de horário ──
-function parseHHMM(str) {
-  if (!str) return null;
-  const m = str.replace(/[^\d:]/g,"").match(/^(\d{1,2}):(\d{2})$/);
-  if (!m) return null;
-  return parseInt(m[1]) * 60 + parseInt(m[2]);
-}
-function fmtMinutes(mins) {
-  const h = Math.floor(Math.abs(mins) / 60);
-  const m = Math.abs(mins) % 60;
-  return `${h}h${m.toString().padStart(2,"0")}min`;
-}
-
-// ── Normalizar string p/ fuzzy match ──
-function normalizeStr(s) {
-  return (s||"").normalize("NFD").replace(/[\u0300-\u036f]/g,"").toLowerCase().trim();
-}
-function fuzzyNameMatch(pdfName, sysEmps) {
-  const norm = normalizeStr(pdfName);
-  const normParts = norm.split(/\s+/);
-  // 1. Exact normalized match
-  const exact = sysEmps.find(e => normalizeStr(e.name) === norm);
-  if (exact) return exact;
-  // 2. First+Last name match
-  if (normParts.length >= 2) {
-    const first = normParts[0], last = normParts[normParts.length - 1];
-    const match = sysEmps.find(e => {
-      const ep = normalizeStr(e.name).split(/\s+/);
-      return ep[0] === first && ep[ep.length - 1] === last;
-    });
-    if (match) return match;
-  }
-  // 3. Contains match (one name contains the other)
-  const contains = sysEmps.find(e => {
-    const en = normalizeStr(e.name);
-    return en.includes(norm) || norm.includes(en);
-  });
-  if (contains) return contains;
-  // 4. Partial word overlap (>= 70%)
-  const best = { emp: null, score: 0 };
-  sysEmps.forEach(e => {
-    const ep = new Set(normalizeStr(e.name).split(/\s+/));
-    const overlap = normParts.filter(w => ep.has(w)).length;
-    const score = overlap / Math.max(normParts.length, ep.size);
-    if (score > best.score) { best.score = score; best.emp = e; }
-  });
-  if (best.score >= 0.6 && best.emp) return best.emp;
-  return null;
-}
-
-// ── Mapa dia da semana pt-BR → index (0=dom) ──
-const DOW_MAP = { domingo:0, segunda:1, "terça":1, terca:1, quarta:2, quinta:3, sexta:4, "sábado":5, sabado:5 };
-function getDow(dateStr) { // "2026-03-01" → 0-6 (dom-sáb)
-  const d = new Date(dateStr + "T12:00:00");
-  return d.getDay();
-}
-// ── Parser Sólides ──
-function parseSolidesPDF(fullText, expectedYear, expectedMonth) {
-  // Validate month from PDF header
-  const periodMatch = fullText.match(/(\d{2})\/(\d{2})\/(\d{4})\s+a\s+(\d{2})\/(\d{2})\/(\d{4})/);
-  if (periodMatch) {
-    const pdfMonth = parseInt(periodMatch[2]) - 1; // 0-indexed
-    const pdfYear = parseInt(periodMatch[3]);
-    if (pdfMonth !== expectedMonth || pdfYear !== expectedYear) {
-      return { error: `O PDF é de ${periodMatch[2]}/${periodMatch[3]} mas você está vendo ${String(expectedMonth+1).padStart(2,"0")}/${expectedYear}. Navegue para o mês correto.` };
-    }
-  }
-
-  // Split into per-employee blocks using "DADOS DO COLABORADOR" as separator
-  const blocks = fullText.split(/DADOS DO COLABORADOR/i);
-  blocks.shift(); // remove header before first employee
-
-  const employees = [];
-
-  for (const block of blocks) {
-    const lines = block.split("\n").map(l => l.trim()).filter(Boolean);
-
-    // Extract name
-    let name = "";
-    for (const l of lines) {
-      const nm = l.match(/Nome:\s*(.+?)(?:\s{2,}CPF|CPF:|$)/);
-      if (nm && nm[1].trim().length > 2 && !nm[1].includes("CNPJ")) { name = nm[1].trim(); break; }
-    }
-    if (!name) continue;
-
-    // Extract function/role
-    let funcao = "";
-    for (const l of lines) {
-      const fm = l.match(/Fun[çc][aã]o:\s*(.+?)(?:\s{2,}|Centro|$)/);
-      if (fm) { funcao = fm[1].trim(); break; }
-    }
-
-    // Extract "Quadro de Horários" — expected schedule per day of week
-    const quadro = {}; // { 0: {start:min, end:min, total:min}, 1: ... } (0=dom,1=seg...)
-    let inQuadro = false;
-    for (const l of lines) {
-      if (/Quadro de Hor/i.test(l)) { inQuadro = true; continue; }
-      if (/DIA\s*\/\s*M[EÊ]S/i.test(l)) { inQuadro = false; continue; }
-      if (inQuadro) {
-        const dowMatch = l.match(/^(Domingo|Segunda|Ter[çc]a|Quarta|Quinta|Sexta|S[aá]bado)/i);
-        if (dowMatch) {
-          const dowName = normalizeStr(dowMatch[1].replace(/-feira/i,""));
-          const dowIdx = DOW_MAP[dowName];
-          if (dowIdx !== undefined) {
-            // Extract all HH:MM times in the line
-            const times = l.match(/\d{1,2}:\d{2}/g) || [];
-            // Last HH:MM is usually the Total
-            const totalStr = times.length > 0 ? times[times.length - 1] : null;
-            const total = parseHHMM(totalStr);
-            // First time is start, second-to-last time pair is end
-            const start = times.length >= 2 ? parseHHMM(times[0]) : null;
-            // Find "às" pattern: "09:00 às 11:00  12:00 às 18:00" → start=09:00
-            const asMatch = l.match(/(\d{1,2}:\d{2})\s+[aà]s\s+(\d{1,2}:\d{2})/g);
-            let firstStart = start;
-            let lastEnd = null;
-            if (asMatch && asMatch.length > 0) {
-              const firstPair = asMatch[0].match(/(\d{1,2}:\d{2})\s+[aà]s\s+(\d{1,2}:\d{2})/);
-              if (firstPair) firstStart = parseHHMM(firstPair[1]);
-              const lastPair = asMatch[asMatch.length - 1].match(/(\d{1,2}:\d{2})\s+[aà]s\s+(\d{1,2}:\d{2})/);
-              if (lastPair) lastEnd = parseHHMM(lastPair[2]);
-            }
-            quadro[dowIdx] = { start: firstStart, end: lastEnd, total };
-          }
-        }
-      }
-    }
-
-    // Extract daily entries
-    const dailyEntries = []; // [{date:"YYYY-MM-DD", status:"work"|"folga"|"faultu"|"faultj"|"ferias"|"off_day", firstEntry:min|null, lastExit:min|null, worked:min|null, expected:min|null, saldo:min|null}]
-
-    // Regex to match day lines: "01/03  domingo  ..."
-    const dayLineRegex = /^(\d{2})\/(\d{2})\s+(domingo|segunda|ter[çc]a|quarta|quinta|sexta|s[aá]bado)[-\s]*(feira)?\s*(.*)/i;
-
-    for (const l of lines) {
-      const dm = l.match(dayLineRegex);
-      if (!dm) continue;
-      const day = dm[1], mon = dm[2];
-      const dateStr = `${expectedYear}-${mon}-${day}`;
-      const rest = dm[5] || "";
-      const restUpper = rest.toUpperCase();
-
-      let status = "work";
-      let firstEntry = null;
-      let lastExit = null;
-      let worked = null;
-      let expected = null;
-      let saldo = null;
-
-      if (restUpper.includes("FALTA") && restUpper.includes("NAO JUSTIFICADA")) {
-        status = "faultu";
-      } else if (restUpper.includes("FALTA") && restUpper.includes("JUSTIFICADA")) {
-        status = "faultj";
-      } else if (restUpper.includes("FÉRIAS") || restUpper.includes("FERIAS")) {
-        status = "ferias";
-      } else if (restUpper.trim() === "FOLGA" || restUpper.startsWith("FOLGA ") || restUpper.includes(" FOLGA")) {
-        status = "folga";
-      } else if (rest.trim() === "-" || rest.trim() === "") {
-        status = "off_day";
-      } else {
-        // Work day — extract times
-        // Format: "(m)11:30 16:00 | (m)18:30 22:55 | 08:55 10:00 -1:05"
-        // Pipe-separated sections: entry/exit pairs, then LAST section = summary (TRABALHADAS [ABONO] PREVISTAS SALDO)
-
-        // Clean (m), (fh), (p) markers for parsing
-        const cleaned = rest.replace(/\([a-z]+\)/gi, "");
-
-        // Split by pipe |
-        const pipeParts = cleaned.split(/\|/).map(p => p.trim()).filter(Boolean);
-
-        if (pipeParts.length >= 2) {
-          // Last pipe section = summary (TRABALHADAS [ABONO] PREVISTAS SALDO)
-          const summaryPart = pipeParts[pipeParts.length - 1];
-          // Entry/exit sections = all except last
-          const entryParts = pipeParts.slice(0, -1);
-
-          // Extract entry/exit times
-          const entryTimes = [];
-          for (const part of entryParts) {
-            const ts = part.match(/\d{1,2}:\d{2}/g) || [];
-            entryTimes.push(...ts.map(parseHHMM).filter(t => t !== null));
-          }
-
-          if (entryTimes.length >= 2) {
-            firstEntry = entryTimes[0]; // first clock-in
-            lastExit = entryTimes[entryTimes.length - 1]; // last clock-out
-          } else if (entryTimes.length === 1) {
-            firstEntry = entryTimes[0];
-          }
-
-          // Parse summary: TRABALHADAS [ABONO] PREVISTAS SALDO
-          const summaryTokens = summaryPart.match(/-?\d{1,2}:\d{2}/g) || [];
-          for (const st of summaryTokens) {
-            const val = parseHHMM(st.replace(/^[+-]/, ""));
-            if (st.startsWith("-") || st.startsWith("+")) {
-              saldo = st.startsWith("-") ? -val : val;
-            } else if (worked === null) {
-              worked = val;
-            } else if (expected === null) {
-              expected = val;
-            }
-          }
-          // If saldo wasn't explicitly signed, calculate from worked-expected
-          if (saldo === null && worked !== null && expected !== null) {
-            saldo = worked - expected;
-          }
-        } else if (pipeParts.length === 1) {
-          // No pipe — might be a single entry or just summary
-          const allTimes = pipeParts[0].match(/\d{1,2}:\d{2}/g) || [];
-          if (allTimes.length >= 4) {
-            // Likely: entry exit worked expected [saldo]
-            firstEntry = parseHHMM(allTimes[0]);
-            lastExit = parseHHMM(allTimes[1]);
-            worked = parseHHMM(allTimes[2]);
-            expected = parseHHMM(allTimes[3]);
-          } else if (allTimes.length >= 2) {
-            firstEntry = parseHHMM(allTimes[0]);
-            lastExit = parseHHMM(allTimes[1]);
-          }
-        }
-      }
-
-      // For non-work statuses, try to extract expected hours from the line
-      if (status !== "work" && status !== "off_day") {
-        const allTimes = rest.match(/\d{1,2}:\d{2}/g) || [];
-        if (allTimes.length > 0) {
-          expected = parseHHMM(allTimes[allTimes.length - 1]);
-        }
-      }
-
-      dailyEntries.push({ date: dateStr, status, firstEntry, lastExit, worked, expected, saldo });
-    }
-
-    // Extract "Dias Faltosos"
-    let diasFaltosos = 0;
-    for (const l of lines) {
-      const df = l.match(/Dias Faltosos:\s*(\d+)/);
-      if (df) { diasFaltosos = parseInt(df[1]); break; }
-    }
-
-    employees.push({ name, funcao, quadro, dailyEntries, diasFaltosos });
-  }
-
-  return { employees, error: null };
-}
-
-// ── Comparador: ponto vs escala do sistema ──
-function comparePontoVsSchedule(parsedEmps, schedEmps, effectiveMonth, mk, restRoles) {
-  const TOLERANCE_ATRASO = 10; // minutos
-  const TOLERANCE_SAIDA = 30; // minutos
-  const TOLERANCE_HE = 30; // minutos para hora extra
-
-  const scheduleChanges = {}; // {empId: {date: status}}
-  const incidents = [];
-  const unmatchedNames = [];
-  const matchedSummary = []; // [{pdfName, sysName, empId}]
-  const noScheduleEmps = []; // empregados sem escala no sistema
-
-  for (const pEmp of parsedEmps) {
-    // Fuzzy match
-    const sysEmp = fuzzyNameMatch(pEmp.name, schedEmps);
-
-    if (!sysEmp) {
-      // Build unmatched entry
-      const uSchedChanges = {};
-      const uIncidents = [];
-      for (const entry of pEmp.dailyEntries) {
-        if (entry.status === "faultu") {
-          uSchedChanges[entry.date] = "faultu";
-          uIncidents.push({ type: "faultu", date: entry.date, description: "Falta não justificada", severity: "media" });
-        } else if (entry.status === "faultj") {
-          uSchedChanges[entry.date] = "faultj";
-          uIncidents.push({ type: "faultj", date: entry.date, description: "Falta justificada", severity: "leve" });
-        } else if (entry.status === "ferias") {
-          uSchedChanges[entry.date] = "vac";
-        } else if (entry.status === "folga") {
-          uSchedChanges[entry.date] = "off";
-        }
-      }
-      unmatchedNames.push({
-        name: pEmp.name,
-        funcao: pEmp.funcao,
-        scheduleChanges: uSchedChanges,
-        incidents: uIncidents
-      });
-      continue;
-    }
-
-    matchedSummary.push({ pdfName: pEmp.name, sysName: sysEmp.name, empId: sysEmp.id });
-    const empSched = effectiveMonth[sysEmp.id] ?? {};
-    const hasSchedule = Object.keys(empSched).length > 0;
-
-    if (!hasSchedule) {
-      noScheduleEmps.push(sysEmp.name);
-    }
-
-    for (const entry of pEmp.dailyEntries) {
-      const sysStatus = empSched[entry.date] ?? "";
-      const dow = getDow(entry.date);
-      const quadroDay = pEmp.quadro[dow];
-
-      // ── Faltas ──
-      if (entry.status === "faultu") {
-        if (sysStatus !== "faultu") {
-          if (!scheduleChanges[sysEmp.id]) scheduleChanges[sysEmp.id] = {};
-          scheduleChanges[sysEmp.id][entry.date] = "faultu";
-        }
-        incidents.push({
-          empId: sysEmp.id,
-          empName: sysEmp.name,
-          type: "faultu",
-          date: entry.date,
-          description: "Falta não justificada",
-          severity: "media"
-        });
-        continue;
-      }
-      if (entry.status === "faultj") {
-        if (sysStatus !== "faultj") {
-          if (!scheduleChanges[sysEmp.id]) scheduleChanges[sysEmp.id] = {};
-          scheduleChanges[sysEmp.id][entry.date] = "faultj";
-        }
-        incidents.push({
-          empId: sysEmp.id,
-          empName: sysEmp.name,
-          type: "faultj",
-          date: entry.date,
-          description: "Falta justificada",
-          severity: "leve"
-        });
-        continue;
-      }
-
-      // ── Férias ──
-      if (entry.status === "ferias") {
-        if (sysStatus !== "vac") {
-          if (!scheduleChanges[sysEmp.id]) scheduleChanges[sysEmp.id] = {};
-          scheduleChanges[sysEmp.id][entry.date] = "vac";
-        }
-        continue;
-      }
-
-      // ── Folga ──
-      if (entry.status === "folga") {
-        if (sysStatus !== "off" && sysStatus !== "comp" && sysStatus !== "") {
-          // System says work but PDF says folga
-          if (!scheduleChanges[sysEmp.id]) scheduleChanges[sysEmp.id] = {};
-          scheduleChanges[sysEmp.id][entry.date] = "off";
-        } else if (sysStatus === "" || sysStatus === "trabalho") {
-          // System has as work day, PDF has folga
-          if (!scheduleChanges[sysEmp.id]) scheduleChanges[sysEmp.id] = {};
-          scheduleChanges[sysEmp.id][entry.date] = "off";
-        }
-        continue;
-      }
-
-      // ── Dia sem escala (off_day) — skip ──
-      if (entry.status === "off_day") continue;
-
-      // ── Trabalho — check atraso, saída antecipada, hora extra ──
-      if (entry.status === "work" && quadroDay && hasSchedule) {
-        // Atraso na entrada
-        if (entry.firstEntry !== null && quadroDay.start !== null) {
-          const atraso = entry.firstEntry - quadroDay.start;
-          if (atraso > TOLERANCE_ATRASO) {
-            const sev = atraso > 60 ? "grave" : atraso > 30 ? "media" : "leve";
-            incidents.push({
-              empId: sysEmp.id,
-              empName: sysEmp.name,
-              type: "atraso",
-              date: entry.date,
-              description: `Atraso de ${fmtMinutes(atraso)} na entrada (previsto ${Math.floor(quadroDay.start/60)}:${String(quadroDay.start%60).padStart(2,"0")}, entrada ${Math.floor(entry.firstEntry/60)}:${String(entry.firstEntry%60).padStart(2,"0")})`,
-              severity: sev
-            });
-          }
-        }
-
-        // Saída antecipada
-        if (entry.lastExit !== null && quadroDay.end !== null) {
-          const antecipada = quadroDay.end - entry.lastExit;
-          if (antecipada > TOLERANCE_SAIDA) {
-            const sev = antecipada > 60 ? "grave" : antecipada > 30 ? "media" : "leve";
-            incidents.push({
-              empId: sysEmp.id,
-              empName: sysEmp.name,
-              type: "saida_antecipada",
-              date: entry.date,
-              description: `Saída ${fmtMinutes(antecipada)} antes do previsto (previsto ${Math.floor(quadroDay.end/60)}:${String(quadroDay.end%60).padStart(2,"0")}, saída ${Math.floor(entry.lastExit/60)}:${String(entry.lastExit%60).padStart(2,"0")})`,
-              severity: sev
-            });
-          }
-        }
-
-        // Hora extra (saldo positivo)
-        if (entry.saldo !== null && entry.saldo > TOLERANCE_HE) {
-          incidents.push({
-            empId: sysEmp.id,
-            empName: sysEmp.name,
-            type: "hora_extra",
-            date: entry.date,
-            description: `Hora extra de ${fmtMinutes(entry.saldo)} (trabalhou ${entry.worked ? fmtMinutes(entry.worked) : "?"} / previsto ${entry.expected ? fmtMinutes(entry.expected) : "?"})`,
-            severity: entry.saldo > 120 ? "grave" : entry.saldo > 60 ? "media" : "leve"
-          });
-        }
-      }
-    }
-  }
-
-  // Detect system employees NOT found in PDF
-  const matchedEmpIds = new Set(matchedSummary.map(m => m.empId));
-  const missingFromPonto = schedEmps
-    .filter(e => !matchedEmpIds.has(e.id))
-    .map(e => ({ empId: e.id, empName: e.name, roleId: e.roleId }));
-
-  // Count schedule changes
-  let totalSchedChanges = 0;
-  Object.values(scheduleChanges).forEach(days => { totalSchedChanges += Object.keys(days).length; });
-
-  // Build summary
-  const parts = [];
-  parts.push(`${parsedEmps.length} empregado(s) no PDF`);
-  parts.push(`${matchedSummary.length} identificado(s) no sistema`);
-  if (unmatchedNames.length > 0) parts.push(`${unmatchedNames.length} não identificado(s)`);
-  if (missingFromPonto.length > 0) parts.push(`${missingFromPonto.length} do sistema ausente(s) no PDF`);
-  if (totalSchedChanges > 0) parts.push(`${totalSchedChanges} alteração(ões) na escala`);
-  if (incidents.length > 0) parts.push(`${incidents.length} ocorrência(s)`);
-  if (noScheduleEmps.length > 0) parts.push(`${noScheduleEmps.length} sem escala no sistema (atrasos não verificados): ${noScheduleEmps.join(", ")}`);
-
-  return {
-    scheduleChanges,
-    incidents,
-    unmatchedNames: unmatchedNames.map((u, i) => ({ ...u, _key: `unm-${i}` })),
-    missingFromPonto,
-    totalSchedChanges,
-    matchedSummary,
-    summary: parts.join(". ") + "."
-  };
-}
-
-//
 const K = {
   owners: "v4:owners",
   managers:      "v4:managers",
@@ -10393,14 +9945,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
   const [schedArea, setSchedArea]           = useState("Todos");
   const [showVacForm, setShowVacForm]       = useState(false);
   const [showSchedHistory, setShowSchedHistory] = useState(false);
-  // Ponto import
-  const [showPontoImport, setShowPontoImport] = useState(false);
-  const [pontoLoading, setPontoLoading] = useState(false);
-  const [pontoError, setPontoError] = useState("");
-  const [pontoPreview, setPontoPreview] = useState(null); // { scheduleChanges, incidents, unmatchedNames, totalSchedChanges, summary, matchedSummary }
-  const [pontoResolutions, setPontoResolutions] = useState({}); // { _key: { action:"ignore"|"link"|"create", linkedEmpId, newRoleId } }
-  const [pontoMissingReasons, setPontoMissingReasons] = useState({}); // { empId: "ferias_licenca"|"demitido"|"erro_ponto"|"outro_sistema"|"ignorar" }
-  const [pontoSystem, setPontoSystem] = useState("solides");
+  // Ponto import — REMOVIDO em abril/2026 (parser PDF Sólides era frágil; voltar quando estável)
   // Delay (atraso) batch form
   const [showDelayForm, setShowDelayForm] = useState(false);
   const [delayEmpId, setDelayEmpId] = useState("");
@@ -10412,8 +9957,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
   const [showReopenConfirm, setShowReopenConfirm] = useState(false);
   const [closeDelta, setCloseDelta] = useState(null);
   const [closeVtImpact, setCloseVtImpact] = useState(null);
-  // Ponto summary for post-import dashboard
-  const [pontoSummary, setPontoSummary] = useState(null);
+  // pontoSummary REMOVIDO junto com Importar ponto (abril/2026)
   // Local schedule edits — accumulated before saving as new version
   const [schedLocalEdits, setSchedLocalEdits] = useState(null); // null = no pending edits, object = pending edits overlay
   const schedDirty = schedLocalEdits !== null;
@@ -12370,11 +11914,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                   ))}
                 </div>
               </div>
-              {isOwner && !mobileOnly && <button onClick={async ()=>{
-                if (schedDirty && !await appConfirm("Você tem edições não salvas. Deseja descartar e resetar?")) return;
-                const ok = resetTab("schedule","Escala",()=>({schedules:schedules?.[rid]}));
-                if(ok){ const s={...schedules}; delete s[rid]; onUpdate("schedules",s); setSchedLocalEdits(null); onUpdate("_toast","🗑️ Escala enviada para a lixeira"); }
-              }} style={{...S.btnSecondary,fontSize:12,color:"var(--red)",borderColor:"var(--red)44"}}>🗑️ Reset</button>}
+              {/* Botão "Apagar todas as escalas" movido pra "Mais ações" no rodapé (Configurações avançadas) */}
             </div>
             {/* Pending edits banner */}
             {schedDirty && (
@@ -12458,79 +11998,94 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                 </summary>
                 <div style={{display:"flex",gap:mobileOnly?4:8,flexWrap:"wrap"}}>
 
-                {/* Pre-fill contract days off */}
+                {/* Pre-fill contract days off — agora com PREVIEW */}
                 <button onClick={async ()=>{
                   const emps = areaEmps;
                   if (!emps.length) return;
                   const mesNome = monthLabel(year, month);
-                  if (!await appConfirm(`Aplicar folgas do contrato em ${mesNome}?\n\nIsso vai:\n• Marcar como Folga todos os dias do contrato\n• Remover folgas marcadas em dias que NÃO são de folga no contrato\n\nOutros status (férias, faltas, compensações) não serão alterados.`)) return;
+
+                  // 1) PRE-CÁLCULO: monta o bulkEdits + stats SEM aplicar nada ainda
                   const daysInMonth = new Date(year, month+1, 0).getDate();
                   let added = 0, removed = 0;
                   const bulkEdits = {};
+                  const empsAfetados = []; // [{ name, addedCount, removedCount }]
+                  const empsSemHorario = [];
                   emps.forEach(emp => {
                     const empScheds = data?.workSchedules?.[rid]?.[emp.id] ?? [];
                     const currentSched = empScheds[empScheds.length - 1];
-                    if (!currentSched) return;
+                    if (!currentSched) { empsSemHorario.push(emp.name); return; }
                     const empDayMap = { ...(effectiveMonth[emp.id] ?? {}) };
                     const empEdits = {};
+                    let empAdded = 0, empRemoved = 0;
                     for (let d = 1; d <= daysInMonth; d++) {
                       const date = `${year}-${String(month+1).padStart(2,"0")}-${String(d).padStart(2,"0")}`;
                       const weekday = new Date(date+"T12:00:00").getDay();
-                      // Pega dias efetivos pra ESTA data — respeita alternância A/B + overrides + reanchors
                       const effDays = getEffectiveDays(currentSched, date) || currentSched.days || {};
                       const isFolga = !effDays[weekday];
                       const current = empDayMap[date];
                       if (isFolga) {
-                        if (!current) { empEdits[date] = DAY_OFF; added++; }
+                        if (!current) { empEdits[date] = DAY_OFF; empAdded++; }
                       } else {
-                        if (current === DAY_OFF) { empEdits[date] = null; removed++; }
+                        if (current === DAY_OFF) { empEdits[date] = null; empRemoved++; }
                       }
                     }
-                    if (Object.keys(empEdits).length) bulkEdits[emp.id] = empEdits;
+                    if (Object.keys(empEdits).length) {
+                      bulkEdits[emp.id] = empEdits;
+                      empsAfetados.push({ name: emp.name, addedCount: empAdded, removedCount: empRemoved });
+                      added += empAdded;
+                      removed += empRemoved;
+                    }
                   });
-                  if (Object.keys(bulkEdits).length) {
-                    setSchedLocalEdits(prev => {
-                      const edits = prev ? { ...prev } : {};
-                      Object.entries(bulkEdits).forEach(([eid, dayMap]) => {
-                        edits[eid] = { ...(edits[eid] ?? {}), ...dayMap };
-                      });
-                      return edits;
-                    });
+
+                  // 2) Caso especial: nada a fazer
+                  if (added === 0 && removed === 0) {
+                    onUpdate("_toast", "✅ Escala já está de acordo com o contrato");
+                    return;
                   }
+
+                  // 3) Monta mensagem de preview
+                  const linhas = [];
+                  linhas.push(`📅 APLICAR FOLGAS DO CONTRATO — ${mesNome}\n`);
+                  linhas.push(`Empregados afetados: ${empsAfetados.length}${schedArea==="Todos"?"":` (área ${schedArea})`}`);
+                  if (added > 0) linhas.push(`✅ Vai marcar como Folga: ${added} dia(s)`);
+                  if (removed > 0) linhas.push(`🔄 Vai REMOVER folga de: ${removed} dia(s) (não são folga no contrato)`);
+                  linhas.push("");
+                  // Lista os primeiros empregados afetados
+                  const top = empsAfetados.slice(0, 8);
+                  top.forEach(e => {
+                    const parts = [];
+                    if (e.addedCount > 0) parts.push(`+${e.addedCount} folga(s)`);
+                    if (e.removedCount > 0) parts.push(`-${e.removedCount} folga(s) removida(s)`);
+                    linhas.push(`  • ${e.name}: ${parts.join(", ")}`);
+                  });
+                  if (empsAfetados.length > top.length) linhas.push(`  ... e mais ${empsAfetados.length - top.length}`);
+                  if (empsSemHorario.length > 0) {
+                    linhas.push("");
+                    linhas.push(`⚠️ Sem horário cadastrado (não afetados): ${empsSemHorario.length}`);
+                  }
+                  linhas.push("");
+                  linhas.push("ℹ️ Outros status (férias, faltas, freelas, compensações) NÃO serão alterados.");
+                  linhas.push("ℹ️ As alterações ficam pendentes — clique em Salvar pra confirmar no banco.");
+
+                  // 4) Confirmação
+                  if (!await appConfirm(linhas.join("\n"))) return;
+
+                  // 5) Aplica como edições locais (vão aparecer marcadas; user salva pra persistir)
+                  setSchedLocalEdits(prev => {
+                    const edits = prev ? { ...prev } : {};
+                    Object.entries(bulkEdits).forEach(([eid, dayMap]) => {
+                      edits[eid] = { ...(edits[eid] ?? {}), ...dayMap };
+                    });
+                    return edits;
+                  });
                   const parts = [];
                   if (added) parts.push(`${added} folga(s) adicionada(s)`);
-                  if (removed) parts.push(`${removed} folga(s) removida(s) fora do contrato`);
-                  onUpdate("_toast", parts.length ? `✅ ${parts.join(" · ")} — salve para confirmar` : "Escala já está de acordo com o contrato");
+                  if (removed) parts.push(`${removed} folga(s) removida(s)`);
+                  onUpdate("_toast", `✅ ${parts.join(" · ")} — salve pra confirmar`);
                 }} style={{...S.btnSecondary,fontSize:mobileOnly?11:12,color:"var(--red)",borderColor:"var(--red)44",whiteSpace:"nowrap"}}>
                   {mobileOnly?"📅 Folgas":"📅 Folgas do contrato"}
                 </button>
-                {/* Reiniciar escala */}
-                <button onClick={async ()=>{
-                  const mesNome = monthLabel(year, month);
-                  const n = areaEmps.length;
-                  if (!n) return;
-                  if (!await appConfirm(`Reiniciar escala de ${mesNome}?\n\nTodos os ${n} empregado(s) ${schedArea==="Todos"?"":"da área "+schedArea+" "}voltarão ao status "Trabalho" em todos os dias.\n\nIsso remove folgas, freelas, férias, faltas e compensações do mês.\n\nSalve a escala para confirmar a alteração.`)) return;
-                  // Accumulate reset as local edits — null each existing day status
-                  const resetEdits = {};
-                  areaEmps.forEach(emp => {
-                    const empDayMap = effectiveMonth[emp.id] ?? {};
-                    const empNulls = {};
-                    Object.keys(empDayMap).forEach(date => { empNulls[date] = null; });
-                    if (Object.keys(empNulls).length) resetEdits[emp.id] = empNulls;
-                  });
-                  if (Object.keys(resetEdits).length) {
-                    setSchedLocalEdits(prev => {
-                      const edits = prev ? { ...prev } : {};
-                      Object.entries(resetEdits).forEach(([eid, dayMap]) => {
-                        edits[eid] = { ...(edits[eid] ?? {}), ...dayMap };
-                      });
-                      return edits;
-                    });
-                  }
-                  onUpdate("_toast", `🔄 Escala de ${mesNome} reiniciada para ${n} empregado(s) — salve para confirmar`);
-                }} style={{...S.btnSecondary,fontSize:mobileOnly?11:12,color:"var(--red)",borderColor:"var(--red)44",whiteSpace:"nowrap"}}>
-                  {mobileOnly?"🔄 Reiniciar":"🔄 Reiniciar escala"}
-                </button>
+                {/* "Limpar este mês" movido pra "Mais ações" no rodapé */}
 
                 {/* Marcar férias */}
                 <button onClick={()=>{setShowVacForm(!showVacForm);setVacEmpId("");setVacFrom("");setVacTo("");}}
@@ -12538,12 +12093,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                   {mobileOnly?"🏖️ Férias":"🏖️ Marcar férias"}
                 </button>
 
-                {/* Importar folha de ponto */}
-                <button onClick={()=>{if(monthClosed)return;setShowPontoImport(!showPontoImport);setPontoError("");setPontoPreview(null);setPontoResolutions({});setPontoMissingReasons({});}}
-                  disabled={monthClosed}
-                  style={{...S.btnSecondary,fontSize:mobileOnly?11:12,border:`1px solid ${showPontoImport?"var(--ac)":"var(--ac)"}`,background:showPontoImport?"var(--ac)22":"transparent",color:"var(--ac)",whiteSpace:"nowrap",opacity:monthClosed?0.4:1}}>
-                  {mobileOnly?"📄 Ponto":"📄 Importar ponto"}
-                </button>
+                {/* Botão "📄 Importar ponto" REMOVIDO em abril/2026 */}
 
                 {/* Registrar atrasos */}
                 <button onClick={()=>{setShowDelayForm(!showDelayForm);setDelayEmpId("");setDelayInputs({});}}
@@ -12551,17 +12101,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                   {mobileOnly?"⏰ Atrasos":"⏰ Registrar atrasos"}
                 </button>
 
-                {/* Histórico — só Admin e DP */}
-                {(isOwner || isDP) && (() => {
-                  const vCount = (data?.scheduleVersions?.[rid]?.[mk] ?? []).length;
-                  return (
-                    <button onClick={()=>setShowSchedHistory(true)}
-                      title="Ver e restaurar versões anteriores desta escala"
-                      style={{...S.btnSecondary,fontSize:mobileOnly?11:12,color:"var(--ac-text)",borderColor:"var(--ac)44",whiteSpace:"nowrap"}}>
-                      🕐 Histórico{vCount>0?` (${vCount})`:""}
-                    </button>
-                  );
-                })()}
+                {/* "Histórico" movido pra "Mais ações" no rodapé */}
 
                 {/* Fechar / Reabrir mês */}
                 {(isOwner || isDP) && !monthClosed && (
@@ -12899,520 +12439,6 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                 ))}
               </div>
             )}
-
-            {/* ═══ Importar folha de ponto ═══ */}
-            {showPontoImport && (
-              <div style={{...S.card,marginBottom:14,border:"1px solid var(--ac)44",background:"var(--ac)06"}}>
-                <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:8}}>
-                  <span style={{fontSize:18}}>📄</span>
-                  <div>
-                    <div style={{color:"var(--ac)",fontWeight:700,fontSize:14}}>Importar folha de ponto</div>
-                    <div style={{color:"var(--text3)",fontSize:11}}>Upload do PDF da folha de ponto — compara automaticamente com a escala e detecta divergências</div>
-                  </div>
-                </div>
-
-                {!pontoPreview && (
-                  <div>
-                    {/* System selector */}
-                    <div style={{marginBottom:10,display:"flex",alignItems:"center",gap:8}}>
-                      <label style={{color:"var(--text3)",fontSize:12,fontWeight:500}}>Sistema de ponto:</label>
-                      <select value={pontoSystem} onChange={e=>setPontoSystem(e.target.value)}
-                        style={{...S.input,width:"auto",fontSize:12,padding:"5px 10px"}}>
-                        {PONTO_SYSTEMS.map(s => <option key={s.id} value={s.id}>{s.label}</option>)}
-                      </select>
-                    </div>
-
-                    <input type="file" accept=".pdf" id="ponto-upload" style={{display:"none"}} onChange={async(e)=>{
-                      const file = e.target.files?.[0];
-                      if (!file) return;
-                      setPontoLoading(true); setPontoError(""); setPontoPreview(null);
-                      try {
-                        // 1. Extract text from PDF using pdf.js
-                        await loadScript("https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js");
-                        window.pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
-                        const arrayBuf = await file.arrayBuffer();
-                        const pdfDoc = await window.pdfjsLib.getDocument({data:arrayBuf}).promise;
-                        let fullText = "";
-                        for (let p = 1; p <= pdfDoc.numPages; p++) {
-                          const page = await pdfDoc.getPage(p);
-                          const content = await page.getTextContent();
-                          // Group items by Y position to reconstruct lines
-                          const lineMap = {};
-                          for (const item of content.items) {
-                            if (!item.str.trim()) continue;
-                            // transform[5] is the Y position (inverted: higher = top)
-                            const y = Math.round(item.transform[5]);
-                            if (!lineMap[y]) lineMap[y] = [];
-                            lineMap[y].push({ x: item.transform[4], text: item.str });
-                          }
-                          // Sort Y positions descending (top to bottom in PDF)
-                          const sortedYs = Object.keys(lineMap).map(Number).sort((a, b) => b - a);
-                          for (const y of sortedYs) {
-                            // Sort items left to right within the line
-                            const items = lineMap[y].sort((a, b) => a.x - b.x);
-                            fullText += items.map(it => it.text).join(" ") + "\n";
-                          }
-                        }
-                        if (!fullText.trim() || fullText.trim().length < 20) {
-                          setPontoError("PDF parece ser uma imagem escaneada (sem texto selecionável). Use PDFs com texto digital.");
-                          setPontoLoading(false);
-                          return;
-                        }
-
-                        // 2. Parse PDF based on selected system
-                        let parsed;
-                        if (pontoSystem === "solides") {
-                          parsed = parseSolidesPDF(fullText, year, month);
-                        } else {
-                          setPontoError(`Parser para "${pontoSystem}" ainda não implementado.`);
-                          setPontoLoading(false);
-                          return;
-                        }
-
-                        if (parsed.error) {
-                          setPontoError(parsed.error);
-                          setPontoLoading(false);
-                          return;
-                        }
-
-                        if (!parsed.employees || parsed.employees.length === 0) {
-                          setPontoError("Nenhum empregado encontrado no PDF. Verifique se o formato é compatível com o sistema selecionado.");
-                          setPontoLoading(false);
-                          return;
-                        }
-
-                        // 3. Compare against system schedule
-                        const preview = comparePontoVsSchedule(parsed.employees, schedEmps, effectiveMonth, mk, restRoles);
-                        setPontoPreview(preview);
-
-                        // Init resolutions for unmatched names
-                        if (preview.unmatchedNames.length > 0) {
-                          const init = {};
-                          preview.unmatchedNames.forEach(u => { init[u._key] = { action:"ignore", linkedEmpId:null, newRoleId:"" }; });
-                          setPontoResolutions(init);
-                        } else {
-                          setPontoResolutions({});
-                        }
-                      } catch(err) {
-                        console.error("[Ponto Import]", err);
-                        setPontoError(err.message || "Erro ao processar PDF.");
-                      } finally {
-                        setPontoLoading(false);
-                        e.target.value = "";
-                      }
-                    }}/>
-                    <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
-                      <button onClick={()=>document.getElementById("ponto-upload").click()} disabled={pontoLoading}
-                        style={{...S.btnPrimary,fontSize:13,opacity:pontoLoading?0.6:1}}>
-                        {pontoLoading ? "⏳ Processando..." : "📎 Selecionar PDF da folha de ponto"}
-                      </button>
-                      <button onClick={()=>{setShowPontoImport(false);setPontoError("");setPontoPreview(null);setPontoResolutions({});}} style={S.btnSecondary}>Cancelar</button>
-                    </div>
-                    {pontoError && <p style={{color:"var(--red)",fontSize:12,margin:"8px 0 0"}}>{pontoError}</p>}
-                    <p style={{color:"var(--text3)",fontSize:11,margin:"8px 0 0"}}>O PDF precisa ter texto selecionável (não escaneado). Será comparado com a escala de {monthLabel(year,month)}.</p>
-                  </div>
-                )}
-
-                {pontoPreview && (
-                  <div>
-                    {/* Summary */}
-                    <div style={{background:"var(--bg1)",borderRadius:8,padding:"10px 14px",marginBottom:12}}>
-                      <p style={{color:"var(--text)",fontSize:13,margin:0,lineHeight:1.5}}>{pontoPreview.summary}</p>
-                    </div>
-
-                    {/* Matched employees */}
-                    {pontoPreview.matchedSummary?.length > 0 && (
-                      <details style={{marginBottom:12,fontSize:12}}>
-                        <summary style={{color:"var(--text3)",cursor:"pointer",fontSize:11}}>👥 Empregados identificados ({pontoPreview.matchedSummary.length})</summary>
-                        <div style={{marginTop:6,display:"flex",flexWrap:"wrap",gap:4}}>
-                          {pontoPreview.matchedSummary.map(m => (
-                            <span key={m.empId} style={{fontSize:10,padding:"3px 8px",borderRadius:4,background:"var(--bg2)",border:"1px solid var(--border)",color:"var(--text2)"}}>
-                              {m.pdfName !== m.sysName ? `${m.pdfName} → ${m.sysName}` : m.sysName}
-                            </span>
-                          ))}
-                        </div>
-                      </details>
-                    )}
-
-                    {/* Schedule changes */}
-                    {pontoPreview.totalSchedChanges > 0 && (
-                      <div style={{marginBottom:12}}>
-                        <div style={{color:"#3b82f6",fontSize:12,fontWeight:700,marginBottom:6}}>📅 Alterações na escala ({pontoPreview.totalSchedChanges})</div>
-                        {Object.entries(pontoPreview.scheduleChanges).map(([empId, days]) => {
-                          const emp = schedEmps.find(e=>e.id===empId);
-                          if (!emp) return null;
-                          const STATUS_LABELS = {off:"Folga",faultu:"Falta Injust.",faultj:"Falta Just.",vac:"Férias",comp:"Folga Comp.",comptrab:"Trab. Comp.",freela:"Freela","":"Trabalho"};
-                          return (
-                            <div key={empId} style={{padding:"8px 12px",borderRadius:8,background:"#3b82f609",border:"1px solid #3b82f622",marginBottom:4}}>
-                              <div style={{fontWeight:700,fontSize:12,color:"var(--text)",marginBottom:4}}>{emp.name}</div>
-                              <div style={{display:"flex",flexWrap:"wrap",gap:4}}>
-                                {Object.entries(days).map(([date, newStatus]) => {
-                                  const oldStatus = effectiveMonth[empId]?.[date] ?? "";
-                                  return (
-                                    <div key={date} style={{fontSize:10,padding:"3px 8px",borderRadius:4,background:"var(--bg2)",border:"1px solid var(--border)"}}>
-                                      <span style={{color:"var(--text3)"}}>{new Date(date+"T12:00:00").toLocaleDateString("pt-BR",{day:"2-digit",month:"2-digit"})}</span>
-                                      <span style={{color:"var(--red)",marginLeft:4}}>{STATUS_LABELS[oldStatus]??"Trabalho"}</span>
-                                      <span style={{color:"var(--text3)",margin:"0 3px"}}>→</span>
-                                      <span style={{color:"#3b82f6",fontWeight:700}}>{STATUS_LABELS[newStatus]??newStatus}</span>
-                                    </div>
-                                  );
-                                })}
-                              </div>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    )}
-
-                    {/* Incidents */}
-                    {pontoPreview.incidents.length > 0 && (
-                      <div style={{marginBottom:12}}>
-                        <div style={{color:"var(--red)",fontSize:12,fontWeight:700,marginBottom:6}}>🚨 Ocorrências detectadas ({pontoPreview.incidents.length})</div>
-                        {pontoPreview.incidents.map((inc, i) => {
-                          const sevColor = {leve:"#f59e0b",media:"#f97316",grave:"#e74c3c"}[inc.severity] ?? "#888";
-                          const typeLabel = {atraso:"⏰ Atraso",saida_antecipada:"🚪 Saída antecipada",hora_extra:"⏱️ Hora extra",faultu:"❌ Falta injust.",faultj:"⚠️ Falta just."}[inc.type] ?? inc.type;
-                          return (
-                            <div key={i} style={{padding:"8px 12px",borderRadius:8,background:"#e74c3c09",border:"1px solid #e74c3c22",marginBottom:4,display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:8}}>
-                              <div>
-                                <span style={{fontWeight:700,fontSize:12,color:"var(--text)"}}>{inc.empName}</span>
-                                <span style={{color:"var(--text3)",fontSize:11,marginLeft:6}}>{new Date(inc.date+"T12:00:00").toLocaleDateString("pt-BR")}</span>
-                                <span style={{fontSize:10,marginLeft:6,color:"var(--text3)"}}>{typeLabel}</span>
-                                <div style={{color:"var(--text2)",fontSize:12,marginTop:2}}>{inc.description}</div>
-                              </div>
-                              <span style={{fontSize:9,padding:"2px 6px",borderRadius:4,background:sevColor+"22",color:sevColor,fontWeight:700,whiteSpace:"nowrap",flexShrink:0}}>{inc.severity}</span>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    )}
-
-                    {/* Unmatched names */}
-                    {pontoPreview.unmatchedNames?.length > 0 && (
-                      <div style={{marginBottom:12}}>
-                        <div style={{color:"#f59e0b",fontSize:12,fontWeight:700,marginBottom:6}}>⚠️ Empregados não identificados ({pontoPreview.unmatchedNames.length})</div>
-                        <p style={{color:"var(--text3)",fontSize:11,margin:"0 0 8px"}}>Esses nomes do PDF não foram encontrados no cadastro. Escolha o que fazer com cada um:</p>
-                        {pontoPreview.unmatchedNames.map(u => {
-                          const res = pontoResolutions[u._key] ?? { action:"ignore" };
-                          const schedCount = Object.keys(u.scheduleChanges).length;
-                          const incCount = u.incidents.length;
-                          return (
-                            <div key={u._key} style={{padding:"10px 14px",borderRadius:8,background:"#f59e0b09",border:"1px solid #f59e0b22",marginBottom:6}}>
-                              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
-                                <span style={{fontWeight:700,fontSize:13,color:"var(--text)"}}>{u.name}</span>
-                                <span style={{fontSize:10,color:"var(--text3)"}}>
-                                  {schedCount > 0 && `${schedCount} dia(s)`}{schedCount > 0 && incCount > 0 && " · "}{incCount > 0 && `${incCount} ocorrência(s)`}
-                                  {schedCount === 0 && incCount === 0 && "sem alterações"}
-                                </span>
-                              </div>
-                              {/* Action selector */}
-                              <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:res.action !== "ignore" ? 8 : 0}}>
-                                {["ignore","link","create"].map(act => {
-                                  const labels = {ignore:"Ignorar",link:"Vincular a existente",create:"Criar novo"};
-                                  const active = res.action === act;
-                                  return (
-                                    <button key={act} onClick={()=>setPontoResolutions(prev=>({...prev,[u._key]:{...prev[u._key],action:act}}))}
-                                      style={{padding:"4px 10px",borderRadius:6,fontSize:11,border:`1px solid ${active?"var(--ac)":"var(--border)"}`,background:active?"var(--ac)22":"transparent",color:active?"var(--ac)":"var(--text3)",cursor:"pointer",fontFamily:"'DM Sans',sans-serif"}}>
-                                      {labels[act]}
-                                    </button>
-                                  );
-                                })}
-                              </div>
-                              {/* Link to existing */}
-                              {res.action === "link" && (
-                                <select value={res.linkedEmpId||""} onChange={e=>setPontoResolutions(prev=>({...prev,[u._key]:{...prev[u._key],linkedEmpId:e.target.value}}))}
-                                  style={{...S.input,fontSize:12,padding:"6px 10px"}}>
-                                  <option value="">Selecione o empregado...</option>
-                                  {schedEmps.map(emp => <option key={emp.id} value={emp.id}>{emp.name} — {restRoles.find(r=>r.id===emp.roleId)?.name??"—"}</option>)}
-                                </select>
-                              )}
-                              {/* Create new — pick role */}
-                              {res.action === "create" && (
-                                <select value={res.newRoleId||""} onChange={e=>setPontoResolutions(prev=>({...prev,[u._key]:{...prev[u._key],newRoleId:e.target.value}}))}
-                                  style={{...S.input,fontSize:12,padding:"6px 10px"}}>
-                                  <option value="">Selecione o cargo...</option>
-                                  {restRoles.filter(r=>!r.inactive).map(r => <option key={r.id} value={r.id}>{r.name} — {r.area}</option>)}
-                                </select>
-                              )}
-                            </div>
-                          );
-                        })}
-                      </div>
-                    )}
-
-                    {/* Missing from ponto — system employees not found in PDF */}
-                    {pontoPreview.missingFromPonto?.length > 0 && (
-                      <div style={{marginBottom:12}}>
-                        <div style={{color:"#6366f1",fontSize:12,fontWeight:700,marginBottom:6}}>📋 Empregados do sistema ausentes no PDF ({pontoPreview.missingFromPonto.length})</div>
-                        <p style={{color:"var(--text3)",fontSize:11,margin:"0 0 8px"}}>Estes empregados estão ativos no sistema mas não apareceram na folha de ponto. Justifique cada um:</p>
-                        {pontoPreview.missingFromPonto.map(m => {
-                          const role = restRoles.find(r=>r.id===m.roleId);
-                          const reason = pontoMissingReasons[m.empId] ?? "ignorar";
-                          return (
-                            <div key={m.empId} style={{padding:"10px 14px",borderRadius:8,background:"#6366f109",border:"1px solid #6366f122",marginBottom:6,display:"flex",alignItems:"center",justifyContent:"space-between",gap:8,flexWrap:"wrap"}}>
-                              <div>
-                                <span style={{fontWeight:700,fontSize:13,color:"var(--text)"}}>{m.empName}</span>
-                                {role && <span style={{color:"var(--text3)",fontSize:11,marginLeft:6}}>{role.name}</span>}
-                              </div>
-                              <select value={reason} onChange={e=>setPontoMissingReasons(prev=>({...prev,[m.empId]:e.target.value}))}
-                                style={{...S.input,fontSize:11,padding:"4px 8px",maxWidth:200,cursor:"pointer"}}>
-                                <option value="ignorar">Ignorar</option>
-                                <option value="ferias_licenca">Ferias/Licenca</option>
-                                <option value="demitido">Demitido no periodo</option>
-                                <option value="erro_ponto">Erro no ponto</option>
-                                <option value="outro_sistema">Outro sistema</option>
-                              </select>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    )}
-
-                    {pontoPreview.totalSchedChanges === 0 && pontoPreview.incidents.length === 0 && (pontoPreview.unmatchedNames?.length??0) === 0 && (pontoPreview.missingFromPonto?.length??0) === 0 && (
-                      <p style={{color:"var(--green)",fontSize:13,textAlign:"center",padding:16}}>✅ Nenhuma diferença encontrada entre o ponto e a escala prevista.</p>
-                    )}
-
-                    {/* Actions */}
-                    <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
-                      {(pontoPreview.totalSchedChanges > 0 || pontoPreview.incidents.length > 0 || pontoPreview.unmatchedNames?.some(u => {const r = pontoResolutions[u._key]; return r && r.action !== "ignore";})) && (
-                        <button onClick={()=>{
-                          // Validate unmatched resolutions
-                          const hasInvalidLink = pontoPreview.unmatchedNames?.some(u => {
-                            const r = pontoResolutions[u._key];
-                            return r?.action === "link" && !r.linkedEmpId;
-                          });
-                          const hasInvalidCreate = pontoPreview.unmatchedNames?.some(u => {
-                            const r = pontoResolutions[u._key];
-                            return r?.action === "create" && !r.newRoleId;
-                          });
-                          if (hasInvalidLink) { setPontoError("Selecione o empregado para vincular."); return; }
-                          if (hasInvalidCreate) { setPontoError("Selecione o cargo para criar o novo empregado."); return; }
-                          setPontoError("");
-
-                          // 0. Process unmatched resolutions — create new employees and collect extra changes
-                          let updatedEmployees = [...employees];
-                          const extraSchedChanges = {};
-                          const extraIncidents = [];
-                          let createdCount = 0;
-                          let linkedCount = 0;
-
-                          (pontoPreview.unmatchedNames ?? []).forEach(u => {
-                            const res = pontoResolutions[u._key];
-                            if (!res || res.action === "ignore") return;
-
-                            let targetEmpId = null;
-
-                            if (res.action === "link") {
-                              targetEmpId = res.linkedEmpId;
-                              linkedCount++;
-                            } else if (res.action === "create") {
-                              // Create new employee
-                              const restCode = restaurant.shortCode || "XXX";
-                              const seq = nextEmpSeq(updatedEmployees, restCode);
-                              const empCode = makeEmpCode(restCode, seq);
-                              const pin = String(seq).padStart(4, "0");
-                              const newEmp = {
-                                id: Date.now().toString() + Math.random().toString(36).slice(2,4),
-                                name: u.name,
-                                cpf: "",
-                                admission: today(),
-                                roleId: res.newRoleId,
-                                restaurantId: rid,
-                                empCode,
-                                pin
-                              };
-                              updatedEmployees = [...updatedEmployees, newEmp];
-                              targetEmpId = newEmp.id;
-                              createdCount++;
-                            }
-
-                            if (targetEmpId) {
-                              // Merge schedule changes
-                              if (Object.keys(u.scheduleChanges).length > 0) {
-                                extraSchedChanges[targetEmpId] = { ...(extraSchedChanges[targetEmpId]??{}), ...u.scheduleChanges };
-                              }
-                              // Merge incidents
-                              u.incidents.forEach(inc => {
-                                extraIncidents.push({ ...inc, empId: targetEmpId });
-                              });
-                            }
-                          });
-
-                          // Save new employees if any were created
-                          if (createdCount > 0) {
-                            onUpdate("employees", updatedEmployees);
-                          }
-
-                          // 1. Apply schedule changes as local edits (matched + unmatched)
-                          const allSchedChanges = { ...pontoPreview.scheduleChanges, ...extraSchedChanges };
-                          if (Object.keys(allSchedChanges).length > 0) {
-                            setSchedLocalEdits(prev => {
-                              const edits = prev ? {...prev} : {};
-                              Object.entries(allSchedChanges).forEach(([eid, dayMap]) => {
-                                edits[eid] = { ...(edits[eid]??{}), ...dayMap };
-                              });
-                              return edits;
-                            });
-                          }
-
-                          // 2. Create incidents (matched + unmatched)
-                          const allNewIncidents = [
-                            ...pontoPreview.incidents,
-                            ...extraIncidents
-                          ];
-                          if (allNewIncidents.length > 0) {
-                            const newIncs = allNewIncidents.map(inc => ({
-                              id: `${Date.now()}-${Math.random().toString(36).slice(2,6)}`,
-                              restaurantId: rid,
-                              employeeIds: [inc.empId],
-                              type: inc.type === "atraso" ? "outro" : inc.type === "saida_antecipada" ? "outro" : inc.type === "hora_extra" ? "destaque_positivo" : inc.type === "faultu" ? "indisciplina" : inc.type === "faultj" ? "outro" : inc.type,
-                              severity: inc.severity || "leve",
-                              description: `[Importado do ponto] ${inc.description}`,
-                              date: inc.date,
-                              createdAt: new Date().toISOString(),
-                              createdBy: isOwner ? "Gestor AppTip" : (currentUser?.name ?? "Gestor Adm."),
-                              createdById: currentUser?.id ?? null,
-                              visibility: "internal",
-                            }));
-                            onUpdate("incidents", [...(data?.incidents??[]), ...newIncs]);
-                          }
-
-                          const parts = [];
-                          const totalSched = Object.values(allSchedChanges).reduce((s,d) => s + Object.keys(d).length, 0);
-                          if (totalSched > 0) parts.push(`${totalSched} dia(s) atualizados na escala`);
-                          if (allNewIncidents.length > 0) parts.push(`${allNewIncidents.length} ocorrência(s) registrada(s)`);
-                          if (createdCount > 0) parts.push(`${createdCount} empregado(s) criado(s)`);
-                          if (linkedCount > 0) parts.push(`${linkedCount} empregado(s) vinculado(s)`);
-                          // Phase 5: Build and persist import summary
-                          const faltaCount = allNewIncidents.filter(i=>i.type==="faultu"||i.type==="faultj").length;
-                          const atrasoCount = allNewIncidents.filter(i=>i.type==="atraso").length;
-                          const heCount = allNewIncidents.filter(i=>i.type==="hora_extra").length;
-                          const saidaCount = allNewIncidents.filter(i=>i.type==="saida_antecipada").length;
-                          const importSummary = {
-                            matchedCount: pontoPreview.matchedSummary?.length ?? 0,
-                            totalPdf: (pontoPreview.matchedSummary?.length ?? 0) + (pontoPreview.unmatchedNames?.length ?? 0),
-                            totalSystem: schedEmps.length,
-                            faltas: faltaCount,
-                            atrasos: atrasoCount,
-                            horasExtras: heCount,
-                            saidasAntecipadas: saidaCount,
-                            schedChanges: totalSched,
-                            incidents: allNewIncidents.map(i => ({ empId: i.empId, empName: i.empName, type: i.type, date: i.date, description: i.description, severity: i.severity })),
-                            missingFromPonto: (pontoPreview.missingFromPonto ?? []).map(m => ({ empId: m.empId, empName: m.empName, reason: pontoMissingReasons[m.empId] ?? "ignorar" })),
-                            importedAt: new Date().toISOString(),
-                          };
-                          setPontoSummary(importSummary);
-
-                          // Phase 6: Append to import history + update scheduleStatus
-                          const historyEntry = {
-                            date: new Date().toISOString(),
-                            system: pontoSystem,
-                            matchedCount: importSummary.matchedCount,
-                            totalPdf: importSummary.totalPdf,
-                            user: currentUser?.name || (isOwner ? "Gestor AppTip" : "Gestor Adm."),
-                            incidents: allNewIncidents.length,
-                            schedChanges: totalSched,
-                          };
-                          const newSchedStatus = { ...(data?.scheduleStatus ?? {}) };
-                          if (!newSchedStatus[rid]) newSchedStatus[rid] = {};
-                          newSchedStatus[rid][mk] = {
-                            ...(newSchedStatus[rid][mk] ?? {}),
-                            lastPontoImport: new Date().toISOString(),
-                            pontoSystem: pontoSystem,
-                            missingFromPonto: importSummary.missingFromPonto,
-                            lastImportSummary: importSummary,
-                            importHistory: [...(newSchedStatus[rid][mk]?.importHistory ?? []), historyEntry],
-                          };
-                          onUpdate("scheduleStatus", newSchedStatus);
-
-                          onUpdate("_toast", `✅ Ponto importado — ${parts.join(" · ")}${totalSched > 0 ? " — salve a escala para confirmar" : ""}`);
-                          setPontoPreview(null);
-                          setPontoResolutions({});
-                          setPontoMissingReasons({});
-                          setShowPontoImport(false);
-                        }} style={{...S.btnPrimary,fontSize:13}}>
-                          ✅ Aplicar alterações
-                        </button>
-                      )}
-                      <button onClick={()=>setPontoPreview(null)} style={S.btnSecondary}>Reprocessar</button>
-                      <button onClick={()=>{setPontoPreview(null);setPontoResolutions({});setShowPontoImport(false);}} style={{...S.btnSecondary,color:"var(--red)",borderColor:"var(--red)44"}}>Cancelar</button>
-                    </div>
-                  </div>
-                )}
-              </div>
-            )}
-
-            {/* Phase 5: Post-import dashboard */}
-            {pontoSummary && !showPontoImport && (
-              <div style={{...S.card,marginBottom:14,border:"1px solid var(--ac)44"}}>
-                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
-                  <span style={{color:"var(--ac)",fontWeight:700,fontSize:14}}>Resumo da importacao do ponto</span>
-                  <button onClick={()=>setPontoSummary(null)} style={{background:"none",border:"none",color:"var(--text3)",cursor:"pointer",fontSize:16,padding:0}}>x</button>
-                </div>
-                <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(100px,1fr))",gap:8,marginBottom:12}}>
-                  {[
-                    {label:"Identificados",value:`${pontoSummary.matchedCount}/${pontoSummary.totalPdf}`,color:"var(--green)"},
-                    {label:"Faltas",value:pontoSummary.faltas,color:"var(--red)"},
-                    {label:"Atrasos",value:pontoSummary.atrasos,color:"#f59e0b"},
-                    {label:"Horas extras",value:pontoSummary.horasExtras,color:"#3b82f6"},
-                    {label:"Saidas antecipadas",value:pontoSummary.saidasAntecipadas,color:"#f97316"},
-                    {label:"Alteracoes escala",value:pontoSummary.schedChanges,color:"var(--ac)"},
-                  ].map((item,i)=>(
-                    <div key={i} style={{background:"var(--bg1)",borderRadius:8,padding:"10px 12px",textAlign:"center"}}>
-                      <div style={{color:item.color,fontSize:18,fontWeight:700}}>{item.value}</div>
-                      <div style={{color:"var(--text3)",fontSize:10,marginTop:2}}>{item.label}</div>
-                    </div>
-                  ))}
-                </div>
-                {pontoSummary.incidents?.length > 0 && (
-                  <details style={{marginBottom:8}}>
-                    <summary style={{color:"var(--text2)",cursor:"pointer",fontSize:12}}>Detalhes por empregado ({[...new Set(pontoSummary.incidents.map(i=>i.empId))].length} empregados)</summary>
-                    <div style={{marginTop:8}}>
-                      {[...new Set(pontoSummary.incidents.map(i=>i.empId))].map(empId => {
-                        const empIncs = pontoSummary.incidents.filter(i=>i.empId===empId);
-                        const empName = empIncs[0]?.empName ?? empId;
-                        return (
-                          <details key={empId} style={{marginBottom:4}}>
-                            <summary style={{color:"var(--text)",fontSize:12,fontWeight:600,cursor:"pointer"}}>{empName} ({empIncs.length} ocorrencia(s))</summary>
-                            <div style={{marginLeft:12,marginTop:4}}>
-                              {empIncs.map((inc,i) => (
-                                <div key={i} style={{fontSize:11,color:"var(--text2)",padding:"2px 0"}}>
-                                  <span style={{color:"var(--text3)"}}>{new Date(inc.date+"T12:00:00").toLocaleDateString("pt-BR",{day:"2-digit",month:"2-digit"})}</span>
-                                  <span style={{marginLeft:6}}>{inc.description}</span>
-                                </div>
-                              ))}
-                            </div>
-                          </details>
-                        );
-                      })}
-                    </div>
-                  </details>
-                )}
-              </div>
-            )}
-
-            {/* Phase 6: Import history link */}
-            {(() => {
-              const history = data?.scheduleStatus?.[rid]?.[mk]?.importHistory;
-              if (!history || history.length === 0) return null;
-              return (
-                <details style={{marginBottom:14}}>
-                  <summary style={{color:"var(--ac)",cursor:"pointer",fontSize:12,fontWeight:600}}>Historico de importacoes ({history.length})</summary>
-                  <div style={{marginTop:8,display:"flex",flexDirection:"column",gap:4}}>
-                    {history.slice().reverse().map((h,i) => (
-                      <div key={i} style={{background:"var(--bg1)",borderRadius:8,padding:"8px 12px",border:"1px solid var(--border)",fontSize:12}}>
-                        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-                          <span style={{color:"var(--text)",fontWeight:600}}>{new Date(h.date).toLocaleDateString("pt-BR")} {new Date(h.date).toLocaleTimeString("pt-BR",{hour:"2-digit",minute:"2-digit"})}</span>
-                          <span style={{color:"var(--text3)",fontSize:11}}>{h.system}</span>
-                        </div>
-                        <div style={{color:"var(--text2)",fontSize:11,marginTop:4}}>
-                          {h.matchedCount}/{h.totalPdf} identificados, {h.incidents} ocorrencia(s), {h.schedChanges} alteracao(oes) — por {h.user}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </details>
-              );
-            })()}
 
             {/* Formulário de atrasos em lote */}
             {showDelayForm && (
@@ -13792,6 +12818,88 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                 </div>
               );
             })()}
+
+            {/* ═══ MAIS AÇÕES — rodapé com itens menos comuns ═══ */}
+            <details style={{marginTop:18,padding:"12px 14px",background:"var(--bg2)",borderRadius:10,border:"1px solid var(--border)"}}>
+              <summary style={{cursor:"pointer",fontSize:12,fontWeight:600,color:"var(--text2)",padding:"4px 0"}}>⋯ Mais ações</summary>
+              <div style={{marginTop:12,display:"flex",flexDirection:"column",gap:10}}>
+                {(isOwner || isDP) && (() => {
+                  const vCount = (data?.scheduleVersions?.[rid]?.[mk] ?? []).length;
+                  return (
+                    <button onClick={()=>setShowSchedHistory(true)}
+                      title="Ver e restaurar versões anteriores desta escala"
+                      style={{...S.btnSecondary,fontSize:12,color:"var(--ac-text)",borderColor:"var(--ac)44",alignSelf:"flex-start"}}>
+                      🕐 Histórico{vCount>0?` (${vCount} versões)`:""}
+                    </button>
+                  );
+                })()}
+                <button onClick={async ()=>{
+                  const mesNome = monthLabel(year, month);
+                  const n = areaEmps.length;
+                  if (!n) return;
+                  const typed = window.prompt(
+                    `🔄 LIMPAR ESTE MÊS\n\n`
+                    + `Vai apagar TODOS os status (folgas, freelas, férias, faltas, compensações) `
+                    + `de ${mesNome} pra ${n} empregado(s)${schedArea==="Todos"?"":` da área ${schedArea}`}.\n\n`
+                    + `Os dias voltam pro status "Trabalho". Salvar a escala depois confirma a alteração no banco.\n\n`
+                    + `Pra confirmar, digite o nome do mês:\n${mesNome}`
+                  );
+                  if (typed == null) return;
+                  if ((typed || "").trim().toLowerCase() !== mesNome.toLowerCase()) {
+                    onUpdate("_toast", "Nome do mês não bateu — ação cancelada por segurança"); return;
+                  }
+                  const resetEdits = {};
+                  areaEmps.forEach(emp => {
+                    const empDayMap = effectiveMonth[emp.id] ?? {};
+                    const empNulls = {};
+                    Object.keys(empDayMap).forEach(date => { empNulls[date] = null; });
+                    if (Object.keys(empNulls).length) resetEdits[emp.id] = empNulls;
+                  });
+                  if (Object.keys(resetEdits).length) {
+                    setSchedLocalEdits(prev => {
+                      const edits = prev ? { ...prev } : {};
+                      Object.entries(resetEdits).forEach(([eid, dayMap]) => {
+                        edits[eid] = { ...(edits[eid] ?? {}), ...dayMap };
+                      });
+                      return edits;
+                    });
+                  }
+                  onUpdate("_toast", `🔄 ${mesNome} limpo pra ${n} empregado(s) — salve para confirmar`);
+                }} style={{...S.btnSecondary,fontSize:12,color:"var(--red)",borderColor:"var(--red)44",alignSelf:"flex-start"}}>
+                  🔄 Limpar este mês
+                </button>
+
+                {/* Configurações avançadas — Apagar todas as escalas */}
+                {isOwner && (
+                  <details style={{marginTop:6,padding:"10px 12px",background:"var(--bg1)",borderRadius:8,border:"1px dashed var(--red)44"}}>
+                    <summary style={{cursor:"pointer",fontSize:11,fontWeight:600,color:"var(--red)"}}>⚙️ Configurações avançadas (perigoso)</summary>
+                    <div style={{marginTop:10}}>
+                      <button onClick={async ()=>{
+                        if (schedDirty && !await appConfirm("Você tem edições não salvas. Deseja descartar antes de continuar?")) return;
+                        const expected = (restaurant?.name || "").trim();
+                        const typed = window.prompt(
+                          `🗑️ APAGAR TODAS AS ESCALAS\n\n`
+                          + `Esta ação envia pra LIXEIRA todas as escalas de TODOS os meses e TODOS os empregados deste restaurante.\n`
+                          + `Os dados ficam na lixeira por 90 dias (pode ser restaurado).\n\n`
+                          + `Pra confirmar, digite o nome do restaurante:\n${expected}`
+                        );
+                        if (typed == null) return;
+                        if ((typed || "").trim().toLowerCase() !== expected.toLowerCase()) {
+                          onUpdate("_toast", "Nome não bateu — ação cancelada por segurança"); return;
+                        }
+                        const ok = resetTab("schedule","Escala",()=>({schedules:schedules?.[rid]}));
+                        if(ok){ const s={...schedules}; delete s[rid]; onUpdate("schedules",s); setSchedLocalEdits(null); onUpdate("_toast","🗑️ Todas as escalas foram movidas pra lixeira"); }
+                      }} style={{...S.btnSecondary,fontSize:12,color:"var(--red)",borderColor:"var(--red)44"}}>
+                        🗑️ Apagar todas as escalas (lixeira)
+                      </button>
+                      <p style={{marginTop:6,fontSize:10,color:"var(--text3)",fontStyle:"italic"}}>
+                        Apaga TODAS as escalas de TODOS os meses deste restaurante. Vai pra lixeira (90 dias) — pode ser restaurado.
+                      </p>
+                    </div>
+                  </details>
+                )}
+              </div>
+            </details>
           </div>
         )}
 
