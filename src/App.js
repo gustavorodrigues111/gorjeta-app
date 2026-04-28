@@ -2596,6 +2596,10 @@ function NotificacoesTab({ restaurantId, dpMessages, notifications, onUpdate, is
 
 // ── Work Schedule helpers ──────────────────────────────────────────────────────
 const WEEK_DAYS_LABEL = ["Dom","Seg","Ter","Qua","Qui","Sex","Sáb"];
+// Ordem visual de exibição dos 7 dias (Seg→Dom), padronizando com a escala mensal.
+// Os índices internos seguem JS padrão (0=Dom, 6=Sáb) em validações, calcDayHours, etc.
+// Esta constante é usada APENAS pra renderização e exibição em listas/PDFs/notificações.
+const WEEK_DISPLAY_ORDER = [1, 2, 3, 4, 5, 6, 0];
 
 function timeToMin(t) {
   if (!t) return null;
@@ -2995,11 +2999,11 @@ function WorkScheduleManagerTab({ restaurantId, employees, roles, workSchedules,
     // Body do horário (single = lista única, alternating = duas semanas)
     function fmtBodyDoHorario() {
       if (isAlternating) {
-        const linhasA = [0,1,2,3,4,5,6].map(i => fmtSchedLineFor(newEntry.weeks.A.days, i)).join("\n");
-        const linhasB = [0,1,2,3,4,5,6].map(i => fmtSchedLineFor(newEntry.weeks.B.days, i)).join("\n");
+        const linhasA = WEEK_DISPLAY_ORDER.map(i => fmtSchedLineFor(newEntry.weeks.A.days, i)).join("\n");
+        const linhasB = WEEK_DISPLAY_ORDER.map(i => fmtSchedLineFor(newEntry.weeks.B.days, i)).join("\n");
         return `Tipo: Escala alternada A/B\nReferência: semana de ${fmtDate(anchorDate)} é Semana ${anchorWeek}\n\nSEMANA A:\n${linhasA}\n\nSEMANA B:\n${linhasB}`;
       }
-      return [0,1,2,3,4,5,6].map(fmtSchedLine).join("\n");
+      return WEEK_DISPLAY_ORDER.map(fmtSchedLine).join("\n");
     }
 
     // Notify DP managers
@@ -3095,7 +3099,7 @@ function WorkScheduleManagerTab({ restaurantId, employees, roles, workSchedules,
     }
 
     function buildBody(daysObj) {
-      return [0,1,2,3,4,5,6].map(i => {
+      return WEEK_DISPLAY_ORDER.map(i => {
         const d = daysObj?.[i];
         if (!d) return [WEEK_DAYS_LABEL[i], "Folga", "—", "—"];
         if (d.in && d.out) return [WEEK_DAYS_LABEL[i], `${d.in} – ${d.out}`, `${d.break||0}min`, fmtHHMM(calcDayHours(d.in,d.out,d.break||0).totalContract)];
@@ -3745,7 +3749,7 @@ function WorkScheduleManagerTab({ restaurantId, employees, roles, workSchedules,
               {hc === false && (
                 <div style={{background:"#f59e0b15",borderRadius:6,padding:"4px 8px",marginBottom:6,fontSize:10,color:"#f59e0b",fontWeight:600}}>⚠️ Horários pendentes</div>
               )}
-              {[0,1,2,3,4,5,6].map(i => {
+              {WEEK_DISPLAY_ORDER.map(i => {
                 const d = daysObj?.[i];
                 const hasShift = d?.in && d?.out;
                 const isWorkDay = !!d;
@@ -4193,7 +4197,7 @@ function WorkScheduleManagerTab({ restaurantId, employees, roles, workSchedules,
       {mobileOnly ? (
         /* ── MOBILE: single card with all days as compact rows ── */
         <div style={{...S.card,padding:0,marginBottom:8,overflow:"hidden"}}>
-          {[0,1,2,3,4,5,6].map(dayIdx => {
+          {WEEK_DISPLAY_ORDER.map(dayIdx => {
             const d = days[dayIdx] ?? { active: true };
             const isActive = d.active;
             const hasHours = isActive && d.in && d.out;
@@ -4238,7 +4242,7 @@ function WorkScheduleManagerTab({ restaurantId, employees, roles, workSchedules,
       ) : (
         /* ── DESKTOP: linhas espaçosas com grid generoso ── */
         <div style={{...S.card,padding:0,marginBottom:16,overflow:"hidden"}}>
-          {[0,1,2,3,4,5,6].map(dayIdx => {
+          {WEEK_DISPLAY_ORDER.map(dayIdx => {
             const d = days[dayIdx] ?? { active: true };
             const isActive = d.active;
             const hasHours = isActive && d.in && d.out;
@@ -4400,7 +4404,7 @@ function WorkScheduleEmployeeTab({ empId, restaurantId, workSchedules }) {
   function daysBlock(daysObj) {
     return (
       <div>
-        {[0,1,2,3,4,5,6].map(i => {
+        {WEEK_DISPLAY_ORDER.map(i => {
           const d = daysObj?.[i];
           const hasShift = d?.in && d?.out;
           const isWorkDay = !!d;
@@ -4465,7 +4469,7 @@ function WorkScheduleEmployeeTab({ empId, restaurantId, workSchedules }) {
     // Single (legado): renderização original
     return (
       <div>
-        {[0,1,2,3,4,5,6].map(i => {
+        {WEEK_DISPLAY_ORDER.map(i => {
           const d = s.days?.[i];
           const hasShift = d?.in && d?.out;
           const isWorkDay = !!d; // day exists in storage = work day
