@@ -18130,9 +18130,11 @@ function buildShellSections({ pessoa, restaurantId, isOwner }) {
 
   const sections = [];
 
-  // 0) INÍCIO — saudação + dashboard geral (futuro)
+  // 0) INÍCIO — saudação + dashboard geral. Não aparece na sidebar:
+  // o atalho fica ao lado do nome do restaurante no header (botão 🏠).
   sections.push({
     group: "",
+    hidden: true,
     color: "#7c3aed",
     items: [
       { id: "mod_inicio", label: "Início", icon: "🏠", kind: "manager", tab: "inicio" },
@@ -18651,11 +18653,28 @@ function AppShell({ pessoa, data, activeRestaurantId, setActiveRestaurantId, use
         <button onClick={()=>setSidebarOpen(o=>!o)} title={sidebarOpen?"Fechar menu":"Abrir menu"} style={{background:sidebarOpen?"var(--bg2)":"none",border:"none",cursor:"pointer",fontSize:20,color:"var(--text2)",padding:"4px 10px",borderRadius:8,flexShrink:0}}>☰</button>
         {!isMobile && <div style={{fontSize:14,fontWeight:800,color:"var(--text)",flexShrink:0}}>AppTip</div>}
         {accessibleRestaurants.length > 0 && (
-          <select value={activeRestaurantId ?? ""} onChange={e=>setActiveRestaurantId(e.target.value)}
-            style={{background:"var(--bg1)",border:"1px solid var(--border)",borderRadius:8,padding:isMobile?"6px 8px":"4px 10px",fontSize:isMobile?12:13,color:"var(--text)",fontFamily:"'DM Sans',sans-serif",cursor:"pointer",maxWidth:isMobile?180:"none",minWidth:isMobile?100:"auto",flexShrink:0,textOverflow:"ellipsis"}}>
-            {accessibleRestaurants.length > 1 && <option value="">— Selecione —</option>}
-            {accessibleRestaurants.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
-          </select>
+          <>
+            <button
+              onClick={()=>setActiveSectionId("mod_inicio")}
+              title="Início — saudação e visão geral"
+              style={{
+                background: activeSectionId === "mod_inicio" ? "#7c3aed22" : "var(--bg1)",
+                border: `1px solid ${activeSectionId === "mod_inicio" ? "#7c3aed" : "var(--border)"}`,
+                borderRadius: 8,
+                padding: isMobile ? "6px 9px" : "4px 9px",
+                fontSize: isMobile ? 14 : 15,
+                cursor: "pointer",
+                lineHeight: 1,
+                flexShrink: 0,
+              }}>
+              🏠
+            </button>
+            <select value={activeRestaurantId ?? ""} onChange={e=>setActiveRestaurantId(e.target.value)}
+              style={{background:"var(--bg1)",border:"1px solid var(--border)",borderRadius:8,padding:isMobile?"6px 8px":"4px 10px",fontSize:isMobile?12:13,color:"var(--text)",fontFamily:"'DM Sans',sans-serif",cursor:"pointer",maxWidth:isMobile?180:"none",minWidth:isMobile?100:"auto",flexShrink:0,textOverflow:"ellipsis"}}>
+              {accessibleRestaurants.length > 1 && <option value="">— Selecione —</option>}
+              {accessibleRestaurants.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
+            </select>
+          </>
         )}
         <div style={{flex:1,minWidth:0}}/>
         {!isMobile && (
@@ -18711,7 +18730,7 @@ function AppShell({ pessoa, data, activeRestaurantId, setActiveRestaurantId, use
                 <div style={{padding:"16px",fontSize:12,color:"var(--text3)",textAlign:"center"}}>Selecione um restaurante no topo pra ver as áreas disponíveis.</div>
               ) : sections.length === 0 ? (
                 <div style={{padding:"16px",fontSize:12,color:"var(--text3)",textAlign:"center"}}>Nenhuma área disponível.</div>
-              ) : sections.map((sec, secIdx) => (
+              ) : sections.filter(s => !s.hidden).map((sec, secIdx) => (
                 <div key={sec.group || `__sec_${secIdx}`} style={{marginBottom:14}}>
                   {sec.group && <div style={{padding:"4px 16px",fontSize:10,color:sec.color,fontWeight:700,textTransform:"uppercase",letterSpacing:0.5}}>{sec.group}</div>}
                   {sec.items.map(it => {
