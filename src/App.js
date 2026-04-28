@@ -3357,6 +3357,71 @@ function WorkScheduleManagerTab({ restaurantId, employees, roles, workSchedules,
         )}
       </div>
 
+      {/* ═══ Horário ATIVO (replica do que o empregado vê) — só pra quem já tem horário cadastrado ═══ */}
+      {empSchedules.length > 0 && (() => {
+        const current = empSchedules[empSchedules.length - 1];
+        if (!current?.days) return null;
+        return (
+          <div style={{...S.card, marginBottom: mobileOnly?10:14, padding: mobileOnly?"12px 14px":"16px 20px", borderColor: "var(--ac)33", background: "var(--ac-bg)"}}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10,flexWrap:"wrap",gap:6}}>
+              <span style={{color:"var(--ac-text)",fontSize:mobileOnly?12:13,fontWeight:700,letterSpacing:0.3}}>📋 Horário ativo (igual o que o empregado vê)</span>
+              <span style={{color:"var(--text3)",fontSize:11}}>Vigente desde {fmtDate(current.validFrom)}</span>
+            </div>
+            {current.hoursComplete === false && (
+              <div style={{background:"#f59e0b15",borderRadius:6,padding:"6px 10px",marginBottom:10,border:"1px solid #f59e0b33"}}>
+                <span style={{color:"#f59e0b",fontSize:11,fontWeight:600}}>⚠️ Apenas dias definidos — horários ainda não preenchidos.</span>
+              </div>
+            )}
+            {current.totalContract > 0 && (
+              <div style={{background:"var(--bg1)",borderRadius:6,padding:"6px 10px",marginBottom:10,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                <span style={{color:"var(--text3)",fontSize:11}}>Carga semanal</span>
+                <span style={{color:"var(--ac-text)",fontWeight:700,fontSize:13,fontFamily:"'DM Mono',monospace"}}>{fmtHHMM(current.totalContract)}/sem</span>
+              </div>
+            )}
+            <div>
+              {[0,1,2,3,4,5,6].map(i => {
+                const d = current.days[i];
+                const hasShift = d?.in && d?.out;
+                const isWorkDay = !!d;
+                const isWeekend = i === 0 || i === 6;
+                const calc = hasShift ? calcDayHours(d.in, d.out, parseInt(d.break)||0) : null;
+                return (
+                  <div key={i} style={{
+                    padding:mobileOnly?"6px 10px":"8px 12px",
+                    marginBottom:4,
+                    borderRadius:6,
+                    background:isWorkDay?"var(--bg1)":"transparent",
+                    border:`1px solid ${isWorkDay?"var(--border)":"transparent"}`,
+                    opacity:isWorkDay?1:0.55,
+                    fontSize:mobileOnly?12:13,
+                  }}>
+                    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:8,flexWrap:"wrap"}}>
+                      <span style={{color:isWeekend?"#f59e0b":"var(--text)",fontWeight:700,minWidth:36}}>{WEEK_DAYS_LABEL[i]}</span>
+                      {hasShift
+                        ? <span style={{color:"var(--text2)",fontFamily:"'DM Mono',monospace"}}>{d.in} – {d.out}</span>
+                        : isWorkDay
+                          ? <span style={{color:"#f59e0b",fontSize:11}}>Trabalha (horário pendente)</span>
+                          : <span style={{color:"var(--text3)",fontSize:11}}>Folga</span>
+                      }
+                    </div>
+                    {hasShift && calc && !mobileOnly && (
+                      <div style={{display:"flex",gap:10,marginTop:3,fontSize:10,fontFamily:"'DM Mono',monospace",color:"var(--text3)",flexWrap:"wrap"}}>
+                        <span>Intervalo: {d.break||0}min</span>
+                        <span>Contratual: <strong style={{color:"var(--ac-text)"}}>{fmtHHMM(calc.totalContract)}</strong></span>
+                        {calc.nocturnal > 0 && <span style={{color:"#8b5cf6"}}>Noturna: {fmtHHMM(calc.nocturnalFicta)}</span>}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+            <div style={{fontSize:10,color:"var(--text3)",marginTop:8,fontStyle:"italic",textAlign:"center"}}>
+              Edite abaixo pra criar uma nova vigência. Esse card mostra o que está em vigor.
+            </div>
+          </div>
+        );
+      })()}
+
       {/* History */}
       {empSchedules.length > 1 && (
         <details style={{marginBottom:12}}>
