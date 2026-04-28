@@ -25266,6 +25266,11 @@ function OperationalTemperaturas({ restaurantId, restaurantName, tempSensors, te
   const openAlerts = (tempAlerts || []).filter(a => !a.closedAt && !a.acknowledgedAt);
   const [polling, setPolling] = useState(false);
   const [lastPollAt, setLastPollAt] = useState(null);
+  const [backfilling, setBackfilling] = useState(false); // pull histórico do Tuya
+  // eslint-disable-next-line no-unused-vars
+  const [lastBackfillAt, setLastBackfillAt] = useState(null); // pra exibir status no futuro
+  const [selectedSensorId, setSelectedSensorId] = useState(null); // modal de histórico 72h
+  const backfillRanRef = React.useRef(false); // flag pra rodar 1x por mount
 
   // Última leitura de cada sensor
   const lastReadingBySensor = {};
@@ -25436,10 +25441,113 @@ function OperationalTemperaturas({ restaurantId, restaurantName, tempSensors, te
     setPolling(false);
   }
 
-  // Auto-polling a cada 5 minutos enquanto a tela está montada
+  // ── BACKFILL DO HISTÓRICO TUYA ──
+  // Puxa do servidor Tuya as leituras que aconteceram enquanto NINGUÉM estava com a tela aberta.
+  // Roda 1x por mount, pra cada sensor ativo, do último timestamp salvo até agora (limitado a 7 dias).
+  async function backfillHistory() {
+    if (activeSensors.length === 0 || backfilling) return;
+    setBackfilling(true);
+    const now = Date.now();
+    const MAX_RANGE = 7 * 24 * 60 * 60 * 1000; // Tuya limita a 7 dias por request
+    const allNew = []; // leituras novas pra mesclar
+    const errors = [];
+
+    await Promise.all(activeSensors.map(async (s) => {
+      try {
+        // Última leitura salva desse sensor (pra saber de onde retomar)
+        const sensorReadings = (tempReadings || []).filter(r => r.sensorId === s.id);
+        const lastSaved = sensorReadings.reduce((max, r) => {
+          const t = new Date(r.timestamp).getTime();
+          return t > max ? t : max;
+        }, 0);
+        // Se nunca teve leitura ou a última foi > 7d atrás, puxa só os últimos 7d
+        const fromMs = Math.max(lastSaved + 1000, now - MAX_RANGE);
+        // Se não há buraco pra preencher (tela acabou de ser atualizada), pula
+        if (fromMs >= now - 60_000) return;
+
+        let lastRowKey = null;
+        let pages = 0;
+        // Paginação: até 5 páginas (500 leituras max por sensor por chamada)
+        do {
+          const params = new URLSearchParams({
+            device: s.tuyaDeviceId,
+            from: String(fromMs),
+            to: String(now),
+            size: "100",
+          });
+          if (lastRowKey) params.set("lastRowKey", lastRowKey);
+          const res = await fetch(`/api/tuya/device-history?${params.toString()}`);
+          const data = await res.json();
+          if (!data.success) {
+            errors.push(`${s.name}: ${data.error || 'erro'}`);
+            break;
+          }
+          // Agrupa logs por timestamp pra montar 1 leitura por momento (logs vêm separados por code)
+          const byTs = new Map();
+          (data.readings || []).forEach(log => {
+            const ts = log.timestampMs;
+            if (!byTs.has(ts)) byTs.set(ts, { temp: null, humidity: null, battery: null });
+            const cur = byTs.get(ts);
+            if (log.temp != null) cur.temp = log.temp;
+            if (log.humidity != null) cur.humidity = log.humidity;
+            if (log.battery != null) cur.battery = log.battery;
+          });
+          // Materializa as leituras
+          [...byTs.entries()].forEach(([ts, vals]) => {
+            // Só inclui se pelo menos a temp foi reportada
+            if (vals.temp == null) return;
+            allNew.push({
+              id: `rd_${ts.toString(36)}_${s.id.slice(-4)}_h`,
+              sensorId: s.id,
+              restaurantId,
+              timestamp: new Date(ts).toISOString(),
+              temp: vals.temp,
+              humidity: vals.humidity,
+              battery: vals.battery,
+              online: true,
+              source: "tuya_history", // marca pra audit
+            });
+          });
+          lastRowKey = data.hasMore ? data.lastRowKey : null;
+          pages += 1;
+        } while (lastRowKey && pages < 5);
+      } catch (e) {
+        errors.push(`${s.name}: ${e.message}`);
+      }
+    }));
+
+    if (allNew.length > 0) {
+      // Dedupe contra leituras já salvas (mesmo sensor + mesmo timestamp ≈)
+      const existingKeys = new Set(
+        (tempReadings || []).map(r => `${r.sensorId}|${r.timestamp}`)
+      );
+      const toAdd = allNew.filter(r => !existingKeys.has(`${r.sensorId}|${r.timestamp}`));
+      if (toAdd.length > 0) {
+        // Mantém só últimos 7 dias (mesmo cutoff usado no fetchReadings)
+        const cutoff = Date.now() - 7 * 24 * 60 * 60 * 1000;
+        const keptOld = (tempReadings || []).filter(r => new Date(r.timestamp).getTime() >= cutoff);
+        // Junta + ordena por timestamp
+        const merged = [...keptOld, ...toAdd].sort((a,b) => new Date(a.timestamp) - new Date(b.timestamp));
+        onUpdate("tempReadings", merged);
+        onUpdate("_toast", `📥 ${toAdd.length} leitura(s) histórica(s) recuperada(s) do Tuya`);
+      }
+    }
+    if (errors.length > 0) console.warn("[backfillHistory] erros:", errors);
+    setLastBackfillAt(new Date().toISOString());
+    setBackfilling(false);
+  }
+
+  // Auto-polling a cada 5 minutos enquanto a tela está montada + backfill no mount
   useEffect(() => {
     if (activeSensors.length === 0) return;
-    // Primeira leitura: se não tem nenhuma dos últimos 5min, busca agora
+
+    // BACKFILL: roda 1x por mount, recupera leituras históricas do Tuya
+    if (!backfillRanRef.current) {
+      backfillRanRef.current = true;
+      backfillHistory();
+    }
+
+    // Primeira leitura "agora" (em paralelo com backfill): se não tem dos últimos 5min, busca
     const freshCutoff = Date.now() - 5 * 60 * 1000;
     const hasFresh = Object.values(lastReadingBySensor).some(r => new Date(r.timestamp).getTime() > freshCutoff);
     if (!hasFresh) fetchReadings();
@@ -25495,6 +25603,11 @@ function OperationalTemperaturas({ restaurantId, restaurantName, tempSensors, te
             style={{background:polling?"var(--bg3)":ac+"22",border:`1px solid ${polling?"var(--border)":ac+"66"}`,borderRadius:8,padding:"8px 14px",fontSize:12,fontWeight:700,color:polling?"var(--text3)":ac,cursor:polling?"wait":"pointer",fontFamily:"'DM Sans',sans-serif",minHeight:isMobile?44:"auto"}}>
             {polling ? "🔄 Atualizando…" : "🔄 Atualizar"}
           </button>
+          <button onClick={() => { backfillRanRef.current = true; backfillHistory(); }} disabled={backfilling}
+            title="Recupera leituras históricas do servidor Tuya (preenche buracos enquanto sistema esteve fechado)"
+            style={{background:backfilling?"var(--bg3)":"transparent",border:"1px solid #6366f166",borderRadius:8,padding:"8px 14px",fontSize:12,fontWeight:700,color:backfilling?"var(--text3)":"#6366f1",cursor:backfilling?"wait":"pointer",fontFamily:"'DM Sans',sans-serif",minHeight:isMobile?44:"auto"}}>
+            {backfilling ? "📥 Buscando…" : "📥 Histórico Tuya"}
+          </button>
           <button onClick={()=>setShowExport(true)}
             style={{background:"transparent",border:"1px solid var(--border)",borderRadius:8,padding:"8px 14px",fontSize:12,fontWeight:700,color:"var(--text2)",cursor:"pointer",fontFamily:"'DM Sans',sans-serif",minHeight:isMobile?44:"auto"}}>
             📤 Exportar
@@ -25531,7 +25644,12 @@ function OperationalTemperaturas({ restaurantId, restaurantName, tempSensors, te
           const status = tempStatus(reading?.temp, s.minTemp, s.maxTemp);
           const offline = reading && reading.online === false;
           return (
-            <div key={s.id} style={{background:"var(--card-bg)",border:`1px solid ${status.color}33`,borderRadius:12,padding:"14px 16px",position:"relative"}}>
+            <div key={s.id}
+              onClick={()=>setSelectedSensorId(s.id)}
+              title="Clique pra ver histórico das últimas 72h"
+              style={{background:"var(--card-bg)",border:`1px solid ${status.color}33`,borderRadius:12,padding:"14px 16px",position:"relative",cursor:"pointer",transition:"transform 0.1s,box-shadow 0.1s"}}
+              onMouseEnter={e=>{ e.currentTarget.style.transform="translateY(-1px)"; e.currentTarget.style.boxShadow="0 2px 8px rgba(0,0,0,0.06)"; }}
+              onMouseLeave={e=>{ e.currentTarget.style.transform="none"; e.currentTarget.style.boxShadow="none"; }}>
               <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:8}}>
                 <div style={{flex:1,minWidth:0}}>
                   <div style={{fontSize:13,color:"var(--text)",fontWeight:700,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{s.name}</div>
@@ -25548,10 +25666,24 @@ function OperationalTemperaturas({ restaurantId, restaurantName, tempSensors, te
                 {reading?.battery != null && <span>🔋 {reading.battery}%</span>}
                 {offline && <span style={{color:"var(--red)",fontWeight:700}}>offline</span>}
               </div>
+              <div style={{textAlign:"center",fontSize:9,color:"var(--text3)",marginTop:6,opacity:0.6}}>📈 ver histórico 72h →</div>
             </div>
           );
         })}
       </div>
+
+      {/* Modal de histórico 72h por sensor */}
+      {selectedSensorId && (
+        <SensorHistoryModal
+          sensor={activeSensors.find(s => s.id === selectedSensorId)}
+          allReadings={tempReadings || []}
+          onClose={()=>setSelectedSensorId(null)}
+          onUpdate={onUpdate}
+          restaurantId={restaurantId}
+          isMobile={isMobile}
+          ac={ac}
+        />
+      )}
 
       <div style={{marginTop:18,fontSize:11,color:"var(--text3)",lineHeight:1.5,textAlign:"center"}}>
         🟢 Leituras reais do Tuya Cloud. Atualização automática a cada 5 min enquanto esta tela está aberta.
@@ -25569,6 +25701,236 @@ function OperationalTemperaturas({ restaurantId, restaurantName, tempSensors, te
           isMobile={isMobile}
         />
       )}
+    </div>
+  );
+}
+
+// ─── Modal de histórico de 72h por sensor (gráfico SVG) ──
+// Ao abrir, dispara backfill de 72h pra preencher buracos.
+function SensorHistoryModal({ sensor, allReadings, onClose, onUpdate, restaurantId, isMobile, ac }) {
+  const [loading, setLoading] = useState(false);
+  const [hoursToShow, setHoursToShow] = useState(72);
+  const ranBackfill = React.useRef(false);
+
+  // Filtra leituras do sensor + últimas 72h
+  const cutoffMs = Date.now() - hoursToShow * 60 * 60 * 1000;
+  const sensorReadings = (allReadings || [])
+    .filter(r => r.sensorId === sensor?.id && new Date(r.timestamp).getTime() >= cutoffMs)
+    .sort((a,b) => new Date(a.timestamp) - new Date(b.timestamp));
+
+  // Backfill específico (72h) ao abrir o modal — preenche buracos pra esse sensor só
+  useEffect(() => {
+    if (!sensor || ranBackfill.current) return;
+    ranBackfill.current = true;
+    (async () => {
+      setLoading(true);
+      try {
+        // Última leitura desse sensor pra saber de onde retomar
+        const lastSaved = sensorReadings.reduce((max, r) => Math.max(max, new Date(r.timestamp).getTime()), 0);
+        const fromMs = Math.max(lastSaved + 1000, Date.now() - 72 * 60 * 60 * 1000);
+        if (fromMs >= Date.now() - 60_000) { setLoading(false); return; }
+
+        const newOnes = [];
+        let lastRowKey = null;
+        let pages = 0;
+        do {
+          const params = new URLSearchParams({
+            device: sensor.tuyaDeviceId,
+            from: String(fromMs),
+            to: String(Date.now()),
+            size: "100",
+          });
+          if (lastRowKey) params.set("lastRowKey", lastRowKey);
+          const res = await fetch(`/api/tuya/device-history?${params.toString()}`);
+          const data = await res.json();
+          if (!data.success) break;
+          const byTs = new Map();
+          (data.readings || []).forEach(log => {
+            const ts = log.timestampMs;
+            if (!byTs.has(ts)) byTs.set(ts, { temp: null, humidity: null, battery: null });
+            const cur = byTs.get(ts);
+            if (log.temp != null) cur.temp = log.temp;
+            if (log.humidity != null) cur.humidity = log.humidity;
+            if (log.battery != null) cur.battery = log.battery;
+          });
+          [...byTs.entries()].forEach(([ts, vals]) => {
+            if (vals.temp == null) return;
+            newOnes.push({
+              id: `rd_${ts.toString(36)}_${sensor.id.slice(-4)}_h`,
+              sensorId: sensor.id,
+              restaurantId,
+              timestamp: new Date(ts).toISOString(),
+              temp: vals.temp,
+              humidity: vals.humidity,
+              battery: vals.battery,
+              online: true,
+              source: "tuya_history",
+            });
+          });
+          lastRowKey = data.hasMore ? data.lastRowKey : null;
+          pages += 1;
+        } while (lastRowKey && pages < 5);
+
+        if (newOnes.length > 0) {
+          const existingKeys = new Set((allReadings || []).map(r => `${r.sensorId}|${r.timestamp}`));
+          const toAdd = newOnes.filter(r => !existingKeys.has(`${r.sensorId}|${r.timestamp}`));
+          if (toAdd.length > 0) {
+            const cutoff = Date.now() - 7 * 24 * 60 * 60 * 1000;
+            const keptOld = (allReadings || []).filter(r => new Date(r.timestamp).getTime() >= cutoff);
+            const merged = [...keptOld, ...toAdd].sort((a,b) => new Date(a.timestamp) - new Date(b.timestamp));
+            onUpdate("tempReadings", merged);
+          }
+        }
+      } catch (e) {
+        console.warn("[SensorHistoryModal backfill]", e);
+      }
+      setLoading(false);
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sensor?.id]);
+
+  if (!sensor) return null;
+
+  // Estatísticas
+  const temps = sensorReadings.map(r => r.temp).filter(t => t != null);
+  const minT = temps.length ? Math.min(...temps) : null;
+  const maxT = temps.length ? Math.max(...temps) : null;
+  const avgT = temps.length ? (temps.reduce((s,t)=>s+t,0) / temps.length) : null;
+  const outOfRange = sensorReadings.filter(r => r.temp != null && (r.temp < sensor.minTemp || r.temp > sensor.maxTemp)).length;
+  const pctOutOfRange = sensorReadings.length ? ((outOfRange / sensorReadings.length) * 100).toFixed(1) : "0";
+
+  // Gráfico SVG — últimas 72h
+  const W = isMobile ? 320 : 720;
+  const H = 220;
+  const padL = 36, padR = 12, padT = 12, padB = 28;
+  const plotW = W - padL - padR;
+  const plotH = H - padT - padB;
+  const tNow = Date.now();
+  const tFrom = tNow - hoursToShow * 60 * 60 * 1000;
+  // Faixa de Y: usa min/max do sensor + margem 20%
+  const dataMin = Math.min(sensor.minTemp, ...(temps.length ? temps : [sensor.minTemp]));
+  const dataMax = Math.max(sensor.maxTemp, ...(temps.length ? temps : [sensor.maxTemp]));
+  const margin = (dataMax - dataMin) * 0.2 || 2;
+  const yMin = dataMin - margin;
+  const yMax = dataMax + margin;
+  const xOf = (ts) => padL + ((ts - tFrom) / (tNow - tFrom)) * plotW;
+  const yOf = (t) => padT + plotH - ((t - yMin) / (yMax - yMin)) * plotH;
+
+  const linePoints = sensorReadings.map(r => {
+    const x = xOf(new Date(r.timestamp).getTime());
+    const y = yOf(r.temp);
+    return `${x.toFixed(1)},${y.toFixed(1)}`;
+  }).join(" ");
+
+  // Faixa permitida (banda verde)
+  const yMinSafe = yOf(sensor.maxTemp);
+  const yMaxSafe = yOf(sensor.minTemp);
+
+  // Ticks do eixo X (a cada 12h)
+  const xTicks = [];
+  for (let h = 0; h <= hoursToShow; h += 12) {
+    const ts = tFrom + h * 60 * 60 * 1000;
+    const d = new Date(ts);
+    const lbl = `${String(d.getHours()).padStart(2,"0")}h`;
+    xTicks.push({ x: xOf(ts), label: lbl, isToday: d.toDateString() === new Date().toDateString() });
+  }
+
+  return (
+    <div onClick={onClose}
+      style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.5)",zIndex:9999,display:"flex",alignItems:"center",justifyContent:"center",padding:isMobile?12:24}}>
+      <div onClick={e=>e.stopPropagation()}
+        style={{background:"var(--card-bg)",borderRadius:12,padding:isMobile?"16px":"20px 24px",maxWidth:780,width:"100%",maxHeight:"92vh",overflowY:"auto",border:"1px solid var(--border)"}}>
+
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:12,gap:8}}>
+          <div>
+            <div style={{fontSize:16,fontWeight:700,color:"var(--text)"}}>📈 {sensor.name}</div>
+            {sensor.location && <div style={{fontSize:11,color:"var(--text3)",marginTop:2}}>{sensor.location}</div>}
+            <div style={{fontSize:11,color:"var(--text3)",marginTop:2}}>Faixa permitida: {sensor.minTemp}°C a {sensor.maxTemp}°C</div>
+          </div>
+          <button onClick={onClose} style={{background:"none",border:"none",fontSize:20,cursor:"pointer",color:"var(--text3)",padding:0}}>✕</button>
+        </div>
+
+        {/* Botões de janela de tempo */}
+        <div style={{display:"flex",gap:6,marginBottom:10,flexWrap:"wrap"}}>
+          {[24, 48, 72, 168].map(h => (
+            <button key={h} onClick={()=>setHoursToShow(h)}
+              style={{
+                padding:"5px 12px",borderRadius:6,border:`1px solid ${hoursToShow===h?ac:"var(--border)"}`,
+                background:hoursToShow===h?ac+"22":"transparent",color:hoursToShow===h?ac:"var(--text2)",
+                cursor:"pointer",fontSize:11,fontWeight:600,
+              }}>
+              {h===168?"7 dias":`${h}h`}
+            </button>
+          ))}
+          {loading && <span style={{fontSize:11,color:"var(--text3)",alignSelf:"center"}}>📥 Buscando histórico do Tuya…</span>}
+        </div>
+
+        {/* KPIs */}
+        <div style={{display:"grid",gridTemplateColumns:"repeat(4, 1fr)",gap:6,marginBottom:12}}>
+          {[
+            { lbl: "Mínima", val: minT != null ? `${minT.toFixed(1)}°C` : "—", color: "#3b82f6" },
+            { lbl: "Média", val: avgT != null ? `${avgT.toFixed(1)}°C` : "—", color: "var(--text)" },
+            { lbl: "Máxima", val: maxT != null ? `${maxT.toFixed(1)}°C` : "—", color: "var(--red)" },
+            { lbl: "Fora faixa", val: `${pctOutOfRange}%`, color: outOfRange > 0 ? "var(--red)" : "var(--green)" },
+          ].map((k, i) => (
+            <div key={i} style={{background:"var(--bg1)",borderRadius:8,padding:"6px 8px",textAlign:"center"}}>
+              <div style={{fontSize:9,color:"var(--text3)",textTransform:"uppercase",letterSpacing:0.3}}>{k.lbl}</div>
+              <div style={{fontSize:13,fontWeight:700,color:k.color,fontFamily:"'DM Mono',monospace",marginTop:2}}>{k.val}</div>
+            </div>
+          ))}
+        </div>
+
+        {/* Gráfico SVG */}
+        {sensorReadings.length === 0 ? (
+          <div style={{padding:"40px 20px",textAlign:"center",color:"var(--text3)",background:"var(--bg1)",borderRadius:8,fontSize:13}}>
+            {loading ? "📥 Carregando histórico…" : "📭 Sem leituras nas últimas " + hoursToShow + "h"}
+          </div>
+        ) : (
+          <div style={{background:"var(--bg1)",borderRadius:8,padding:8,overflowX:"auto"}}>
+            <svg width={W} height={H} style={{display:"block",margin:"0 auto"}}>
+              {/* Banda da faixa permitida (verde) */}
+              <rect x={padL} y={yMinSafe} width={plotW} height={yMaxSafe - yMinSafe}
+                fill="#10b98115" stroke="#10b98144" strokeDasharray="3,3" />
+              {/* Linhas de min/max */}
+              <line x1={padL} y1={yOf(sensor.minTemp)} x2={padL+plotW} y2={yOf(sensor.minTemp)} stroke="#10b981" strokeDasharray="2,2" strokeWidth={1}/>
+              <line x1={padL} y1={yOf(sensor.maxTemp)} x2={padL+plotW} y2={yOf(sensor.maxTemp)} stroke="#10b981" strokeDasharray="2,2" strokeWidth={1}/>
+
+              {/* Eixo Y — ticks */}
+              {[yMin, (yMin+yMax)/2, yMax].map((t, i) => (
+                <g key={i}>
+                  <line x1={padL} y1={yOf(t)} x2={padL+plotW} y2={yOf(t)} stroke="var(--border)" strokeWidth={0.5} opacity={0.4}/>
+                  <text x={padL-4} y={yOf(t)+3} fontSize={9} fill="var(--text3)" textAnchor="end" fontFamily="'DM Mono',monospace">{t.toFixed(0)}°</text>
+                </g>
+              ))}
+
+              {/* Eixo X — ticks */}
+              {xTicks.map((tk, i) => (
+                <g key={i}>
+                  <line x1={tk.x} y1={padT+plotH} x2={tk.x} y2={padT+plotH+3} stroke="var(--text3)" strokeWidth={0.5}/>
+                  <text x={tk.x} y={padT+plotH+14} fontSize={9} fill="var(--text3)" textAnchor="middle" fontFamily="'DM Mono',monospace">{tk.label}</text>
+                </g>
+              ))}
+
+              {/* Linha de leituras */}
+              {linePoints && (
+                <polyline points={linePoints} fill="none" stroke={ac} strokeWidth={1.5} strokeLinejoin="round"/>
+              )}
+
+              {/* Pontos com cor por status */}
+              {sensorReadings.map((r, i) => {
+                const x = xOf(new Date(r.timestamp).getTime());
+                const y = yOf(r.temp);
+                const out = r.temp < sensor.minTemp || r.temp > sensor.maxTemp;
+                return <circle key={i} cx={x} cy={y} r={1.8} fill={out ? "var(--red)" : ac} />;
+              })}
+            </svg>
+          </div>
+        )}
+
+        <div style={{marginTop:10,fontSize:10,color:"var(--text3)",textAlign:"center"}}>
+          {sensorReadings.length} leitura(s) nas últimas {hoursToShow}h. Banda verde = faixa permitida ({sensor.minTemp}°–{sensor.maxTemp}°). Pontos vermelhos = fora da faixa.
+        </div>
+      </div>
     </div>
   );
 }
