@@ -16,7 +16,7 @@ const app = initializeApp(firebaseConfig);
 
 // App Check — garante que só o domínio apptip.app acessa o Firebase
 initializeAppCheck(app, {
-  provider: new ReCaptchaV3Provider("6LclvLEsAAAAAGNmvN4j87YL0j6o_GS6lP5I73SV"),
+  provider: new ReCaptchaV3Provider("6LclvLEsAAAAAGNmvN4j87YL0j6o_GS6lP5l73SV"),
   isTokenAutoRefreshEnabled: true,
 });
 
