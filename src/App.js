@@ -25451,6 +25451,7 @@ function OperationalTemperaturas({ restaurantId, restaurantName, tempSensors, te
     const MAX_RANGE = 7 * 24 * 60 * 60 * 1000; // Tuya limita a 7 dias por request
     const allNew = []; // leituras novas pra mesclar
     const errors = [];
+    console.log("[backfill] 🚀 iniciando — sensores:", activeSensors.length);
 
     await Promise.all(activeSensors.map(async (s) => {
       try {
@@ -25462,8 +25463,12 @@ function OperationalTemperaturas({ restaurantId, restaurantName, tempSensors, te
         }, 0);
         // Se nunca teve leitura ou a última foi > 7d atrás, puxa só os últimos 7d
         const fromMs = Math.max(lastSaved + 1000, now - MAX_RANGE);
+        console.log(`[backfill] 📡 ${s.name} (device=${s.tuyaDeviceId}): from=${new Date(fromMs).toISOString()} to=${new Date(now).toISOString()} (${((now-fromMs)/3600000).toFixed(1)}h)`);
         // Se não há buraco pra preencher (tela acabou de ser atualizada), pula
-        if (fromMs >= now - 60_000) return;
+        if (fromMs >= now - 60_000) {
+          console.log(`[backfill]   ⏭️ pulando — sem buraco pra preencher`);
+          return;
+        }
 
         let lastRowKey = null;
         let pages = 0;
@@ -25478,9 +25483,14 @@ function OperationalTemperaturas({ restaurantId, restaurantName, tempSensors, te
           if (lastRowKey) params.set("lastRowKey", lastRowKey);
           const res = await fetch(`/api/tuya/device-history?${params.toString()}`);
           const data = await res.json();
+          console.log(`[backfill]   📥 ${s.name} pg${pages+1}: status=${res.status} success=${data.success} readings=${data.readings?.length || 0} hasMore=${data.hasMore}`);
           if (!data.success) {
+            console.error(`[backfill]   ❌ erro:`, data.error, "tuyaCode:", data.tuyaCode);
             errors.push(`${s.name}: ${data.error || 'erro'}`);
             break;
+          }
+          if ((data.readings?.length || 0) > 0) {
+            console.log(`[backfill]   📊 primeiras 3 leituras:`, data.readings.slice(0, 3));
           }
           // Agrupa logs por timestamp pra montar 1 leitura por momento (logs vêm separados por code)
           const byTs = new Map();
@@ -25516,23 +25526,31 @@ function OperationalTemperaturas({ restaurantId, restaurantName, tempSensors, te
       }
     }));
 
+    console.log(`[backfill] 🧮 total acumulado antes do dedupe:`, allNew.length, "leituras");
     if (allNew.length > 0) {
       // Dedupe contra leituras já salvas (mesmo sensor + mesmo timestamp ≈)
       const existingKeys = new Set(
         (tempReadings || []).map(r => `${r.sensorId}|${r.timestamp}`)
       );
       const toAdd = allNew.filter(r => !existingKeys.has(`${r.sensorId}|${r.timestamp}`));
+      console.log(`[backfill] 🧹 após dedupe:`, toAdd.length, "novas (de", allNew.length, "totais)");
       if (toAdd.length > 0) {
         // Mantém só últimos 7 dias (mesmo cutoff usado no fetchReadings)
         const cutoff = Date.now() - 7 * 24 * 60 * 60 * 1000;
         const keptOld = (tempReadings || []).filter(r => new Date(r.timestamp).getTime() >= cutoff);
         // Junta + ordena por timestamp
         const merged = [...keptOld, ...toAdd].sort((a,b) => new Date(a.timestamp) - new Date(b.timestamp));
+        console.log(`[backfill] 💾 salvando — total final no banco:`, merged.length);
         onUpdate("tempReadings", merged);
         onUpdate("_toast", `📥 ${toAdd.length} leitura(s) histórica(s) recuperada(s) do Tuya`);
+      } else {
+        console.log(`[backfill] ⏸️ nada novo após dedupe — todas as leituras já estavam salvas`);
       }
+    } else {
+      console.log(`[backfill] ⚠️ NENHUMA leitura veio do Tuya — verifique configuração`);
     }
-    if (errors.length > 0) console.warn("[backfillHistory] erros:", errors);
+    if (errors.length > 0) console.warn("[backfill] erros:", errors);
+    console.log(`[backfill] ✅ fim`);
     setLastBackfillAt(new Date().toISOString());
     setBackfilling(false);
   }
