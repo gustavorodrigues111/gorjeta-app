@@ -3071,10 +3071,12 @@ function WorkScheduleManagerTab({ restaurantId, employees, roles, workSchedules,
 
     // ═══ 3. Parse "trabalha/trabalhe nos outros dias" ═══
     const trabOutros = /trabalh\w*\s+(?:n[oa]s?\s+)?outr\w*\s+dias?/.test(lower);
+    let trabExplicitoCount = 0; // rastreia se houve menção explícita de dias de trabalho
     if (trabOutros) {
       for (let i = 0; i < 7; i++) {
         if (!folgaDays.has(i)) {
           newDays[i] = { active: true, in: newDays[i]?.in||"", out: newDays[i]?.out||"", break: newDays[i]?.break||0 };
+          trabExplicitoCount++;
         }
       }
       changes.push(`Trabalha: ${7 - folgaDays.size} dias`);
@@ -3086,6 +3088,7 @@ function WorkScheduleManagerTab({ restaurantId, employees, roles, workSchedules,
           if (!folgaDays.has(idx)) {
             newDays[idx] = { active: true, in: newDays[idx]?.in||"", out: newDays[idx]?.out||"", break: newDays[idx]?.break||0 };
             changes.push(`${WEEK_DAYS_LABEL[idx]}: Trabalha`);
+            trabExplicitoCount++;
           }
         });
       }
@@ -3151,6 +3154,26 @@ function WorkScheduleManagerTab({ restaurantId, employees, roles, workSchedules,
       if (saiH) changes.push(`Saída: ${saiH}`);
     }
     if (breakMin !== null && !(cargaSemanalMin > 0 && entH && !saiH)) changes.push(`Intervalo: ${breakMin}min`);
+
+    // ═══ 7.5. INFERÊNCIA DE COMPLEMENTO ═══
+    // Caso "folga sábado e domingo, entra 09:00 sai 18:48 intervalo 60min":
+    // user só citou folgas + um horário, sem dizer "trabalha em X". Assumir que TODOS
+    // os dias não-mencionados como folga trabalham com o horário fornecido.
+    // Importante: SOBRESCREVE active=false residual de versão anterior (loadEmp pode ter trazido
+    // folgas antigas que o user agora quer substituir).
+    const temHorario = !!(entH || saiH || calcSaiH);
+    if (folgaDays.size > 0 && trabExplicitoCount === 0 && temHorario && !escalaMatch && cargaSemanalMin === 0) {
+      const inferidos = [];
+      for (let i = 0; i < 7; i++) {
+        if (!folgaDays.has(i)) {
+          newDays[i] = { active: true, in: newDays[i]?.in || "", out: newDays[i]?.out || "", break: newDays[i]?.break || 0 };
+          inferidos.push(WEEK_DAYS_LABEL[i]);
+        }
+      }
+      if (inferidos.length > 0) {
+        changes.push(`Inferido — Trabalha em ${inferidos.join(", ")} com o horário fornecido`);
+      }
+    }
 
     // Apply horários aos dias ativos
     const finalEnt = entH;
