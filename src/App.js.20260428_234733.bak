@@ -3,7 +3,7 @@ import React, { useState, useEffect, useMemo, useRef, Component } from "react";
 import { db } from "./firebase";
 import { doc, getDoc, setDoc } from "firebase/firestore";
 
-const APP_VERSION = "7.0.0";
+const APP_VERSION = "6.0.0";
 
 const DEFAULT_ADMISSION = () => `${new Date().getFullYear()}-01-01`;
 const round2 = (v) => Math.round(v * 100) / 100;
@@ -7544,11 +7544,9 @@ const AGENDA_TEMPLATES = [
   ]},
 ];
 
-function MeetingPlannerSection({ restaurantId, employees, roles, areas, meetingPlans, allMeetingPlans, feedbacks, onUpdate, currentUser, isOwner, mobileOnly, isLider, managerAreas, data, forceSubTab }) {
+function MeetingPlannerSection({ restaurantId, employees, roles, areas, meetingPlans, allMeetingPlans, feedbacks, onUpdate, currentUser, isOwner, mobileOnly, isLider, managerAreas, data }) {
   // Sub-tab state
-  const [subTab, setSubTab] = useState(forceSubTab || "reunioes"); // reunioes | ideias | ocorrencias | pendencias | relatorio
-  // v7: se forceSubTab muda externamente (top-level tab "ideias"/"ocorrencias"), seguir
-  useEffect(() => { if (forceSubTab && forceSubTab !== subTab) setSubTab(forceSubTab); }, [forceSubTab]); // eslint-disable-line react-hooks/exhaustive-deps
+  const [subTab, setSubTab] = useState("reunioes"); // reunioes | ideias | ocorrencias | pendencias | relatorio
   // Reuniões (existing) — showForm: false | "equipe" | "lideranca"
   const [showForm, setShowForm] = useState(false);
   const [planType, setPlanType] = useState("alinhamento");
@@ -8086,11 +8084,12 @@ function MeetingPlannerSection({ restaurantId, employees, roles, areas, meetingP
   const pendingActions = allActions.filter(a => !a.done);
 
   // Sub-tabs config
+  const newOccCount = filteredOccurrences.filter(o=>o.status==="nova").length;
   const activePendCount = allPendencias.filter(p=>p.status==="ativa").length;
-  // v7: Ideias e Ocorrências viraram tabs top-level (em Planejamento/Operação).
-  // Aqui dentro de Reuniões só mostramos Reuniões, Pendências e Relatório.
   const subTabs = [
     ["reunioes",`📅 Reuniões${pendingActions.length>0?` (${pendingActions.length})`:""}`],
+    ["ideias",`💡 Ideias${filteredIdeas.filter(i=>i.status==="nova").length>0?` (${filteredIdeas.filter(i=>i.status==="nova").length})`:""}`],
+    ["ocorrencias",`🚨 Ocorrências${newOccCount>0?` (${newOccCount})`:""}`],
     ["pendencias",`📌 Pendências${activePendCount>0?` (${activePendCount})`:""}`],
     ...(!isLider ? [["relatorio","📄 Relatório"]] : []),
   ];
@@ -8111,18 +8110,16 @@ function MeetingPlannerSection({ restaurantId, employees, roles, areas, meetingP
         </div>
       )}
 
-      {/* Sub-tabs — ocultas quando v7 força um subTab via prop (página dedicada Ideias/Ocorrências) */}
-      {!forceSubTab && (
-        <div style={{display:"flex",gap:4,marginBottom:16,overflowX:"auto",scrollbarWidth:"none",WebkitOverflowScrolling:"touch"}}>
-          {subTabs.map(([id,lbl]) => (
-            <button key={id} onClick={()=>setSubTab(id)} style={{
-              padding:mobileOnly?"8px 12px":"9px 16px",borderRadius:10,border:`1px solid ${subTab===id?"var(--ac)":"var(--border)"}`,
-              background:subTab===id?"var(--ac)11":"transparent",color:subTab===id?"var(--ac)":"var(--text3)",
-              cursor:"pointer",fontSize:mobileOnly?11:12,fontFamily:"'DM Sans',sans-serif",fontWeight:subTab===id?700:500,whiteSpace:"nowrap",flexShrink:0
-            }}>{lbl}</button>
-          ))}
-        </div>
-      )}
+      {/* Sub-tabs */}
+      <div style={{display:"flex",gap:4,marginBottom:16,overflowX:"auto",scrollbarWidth:"none",WebkitOverflowScrolling:"touch"}}>
+        {subTabs.map(([id,lbl]) => (
+          <button key={id} onClick={()=>setSubTab(id)} style={{
+            padding:mobileOnly?"8px 12px":"9px 16px",borderRadius:10,border:`1px solid ${subTab===id?"var(--ac)":"var(--border)"}`,
+            background:subTab===id?"var(--ac)11":"transparent",color:subTab===id?"var(--ac)":"var(--text3)",
+            cursor:"pointer",fontSize:mobileOnly?11:12,fontFamily:"'DM Sans',sans-serif",fontWeight:subTab===id?700:500,whiteSpace:"nowrap",flexShrink:0
+          }}>{lbl}</button>
+        ))}
+      </div>
 
       {/* Pending actions reminder */}
       {pendingActions.length > 0 && subTab !== "reunioes" && (
@@ -9876,7 +9873,7 @@ function EmpTrilhaView({ empId, employees, roles, schedules, incidents, feedback
   );
 }
 
-function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, splits, schedules, onUpdate, perms, isOwner, data, currentUser, privacyMask, mobileOnly, onEnterOperational, hideTabNav, forceTab, realIsOwner, onStartImpersonate, restrictToOperational }) {
+function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, splits, schedules, onUpdate, perms, isOwner, data, currentUser, privacyMask, mobileOnly, onEnterOperational, hideTabNav, forceTab, realIsOwner, onStartImpersonate }) {
   const now = new Date();
   const [year, setYear] = useState(now.getFullYear());
   const [month, setMonth] = useState(now.getMonth());
@@ -10255,79 +10252,66 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
   // Líder Operacional: acesso restrito a Dashboard + Escala + Horários + Equipe
   // ── Grouped tabs ──
   const liderInboxCount = isLider ? getInboxForUser({ inbox: data?.inbox, userId: currentUser?.id, userRole: "lider", restaurantId: rid, includeRead: false }).length : 0;
-  // ──────────────────────────────────────────────────────────────────────
-  // v7.0 IA — 5 seções: Início, Operação, Planejamento, Escritório, Ajustes
-  // Líder Operacional: vê Início + Planejamento + Escritório (restrito)
-  // ──────────────────────────────────────────────────────────────────────
   const TAB_GROUPS = isLider ? [
-    { id:"inicio", label:"🏠 Início", icon:"🏠", tabs: [
-      ["inicio",`Início${liderInboxCount>0?` (${liderInboxCount})`:""}`],
-    ] },
-    canSched && { id:"planejamento", label:"📅 Planejamento", icon:"📅", tabs: [
-      canSched && ["schedule","Escalas"],
-      ["reunioes","Reuniões"],
-    ].filter(Boolean) },
-    { id:"escritorio", label:"🏢 Escritório", icon:"🏢", tabs: [
+    { id:"equipe", label:"👥 Pessoas", icon:"👥", tabs: [
       ["employees","Equipe"],
       ["freelas","🎒 Freelas"],
+      ["reunioes","Reuniões"],
     ].filter(Boolean) },
-  ].filter(Boolean) : [
-    { id:"inicio", label:"🏠 Início", icon:"🏠", tabs: [
-      ["inicio",`Início${inboxUnread>0?` (${inboxUnread})`:""}`],
+    canSched && { id:"escalas", label:"📅 Escalas", icon:"📅", tabs: [
+      ["schedule","Escala"],
     ] },
-    { id:"operacao", label:"🔧 Operação", icon:"🔧", tabs: [
-      (canTips || isOwner) && ["ocorrencias","🚨 Ocorrências"],
-      (canTips || isOwner) && ["mise_checklists","Checklists"],
-      (canTips || isOwner) && ["mise_contagens","Contagens"],
-      (canTips || isOwner) && ["mise_temperaturas","Temperaturas"],
-      (canTips || isOwner) && ["mise_fichas","Fichas Técnicas"],
+    { id:"comunicacao", label:"📢 Comunicação", icon:"📢", tabs: [
+      ["notificacoes",`Caixa${liderInboxCount>0?` (${liderInboxCount})`:""}`],
+    ] },
+  ].filter(Boolean) : [
+    { id:"operacao", label:"💰 Operação", icon:"💰", tabs: [
+      canTips && ["dashboard","Dashboard"],
+      canTips && ["tips","Gorjetas"],
+      canTips && ["regra_divisao","Regra"],
     ].filter(Boolean) },
-    { id:"planejamento", label:"📅 Planejamento", icon:"📅", tabs: [
-      canSched && ["schedule","Escalas"],
-      (isOwner || isDP || isLider) && ["freelas","🎒 Freelas"],
-      (isOwner || canTips || tabVisible("employees")) && ["reunioes","Reuniões"],
-      (canTips || isOwner) && ["trilhas","Trilhas"],
-      (canTips || isOwner) && ["ideias","💡 Ideias"],
-    ].filter(Boolean) },
-    { id:"escritorio", label:"🏢 Escritório", icon:"🏢", tabs: [
+    { id:"equipe", label:"👥 Pessoas", icon:"👥", tabs: [
       (isOwner || canTips) && ["pessoas","Pessoas"],
       (isOwner || canTips) && ["permissoes","Permissões"],
       (isOwner || canTips || tabVisible("employees")) && ["employees","Equipe"],
-      (isOwner || (perms.vt !== false && tabVisible("vt"))) && ["vt","Vale Transporte"],
+      (isOwner || isDP || isLider) && ["freelas","🎒 Freelas"],
       (isOwner || tabVisible("roles")) && ["roles","Cargos"],
-      (canTips || isOwner) && ["mise_compras","🛒 Compras"],
-      canTips && ["tips","Gorjetas"],
-      canTips && ["dashboard","Dashboard"],
-      canTips && ["regra_divisao","Regra"],
+      (isOwner || canTips || tabVisible("employees")) && ["reunioes","Reuniões"],
+    ].filter(Boolean) },
+    // Novo grupo: Escalas + VT (jornada e pagamento de transporte ficam juntos)
+    { id:"escalas", label:"📅 Escalas e VT", icon:"📅", tabs: [
+      canSched && ["schedule","Escala"],
+      (isOwner || (perms.vt !== false && tabVisible("vt"))) && ["vt","Vale Transporte"],
+    ].filter(Boolean) },
+    { id:"comunicacao", label:"📢 Comunicação", icon:"📢", tabs: [
       (isOwner || tabVisible("comunicados")) && ["comunicados","Comunicados"],
       (isOwner || tabVisible("faq")) && ["faq","FAQ"],
       (isOwner || tabVisible("dp")) && ["dp","Fale com DP"],
+      (isDP || isOwner || currentIsMasterDP) && ["notificacoes",`Caixa${inboxUnread>0?` (${inboxUnread})`:""}`],
     ].filter(Boolean) },
-    { id:"ajustes", label:"⚙️ Ajustes", icon:"⚙️", tabs: [
+    { id:"config", label:"⚙️ Config", icon:"⚙️", tabs: [
       (canTips || isOwner) && ["config","Configurações"],
+      // Aba "Gestores" removida — substituída pelo fluxo Pessoas + Permissões.
+      // Render block de dp_gestores mantido por compat — não alcançável pela navegação.
+    ].filter(Boolean) },
+    { id:"mise", label:"📦 Mise", icon:"📦", tabs: [
+      (canTips || isOwner) && ["mise_contagens","Contagens"],
+      (canTips || isOwner) && ["mise_checklists","Checklists"],
+      (canTips || isOwner) && ["mise_fichas","Fichas Técnicas"],
+      (canTips || isOwner) && ["mise_temperaturas","Temperaturas"],
     ].filter(Boolean) },
   ].filter(g => g.tabs.length > 0);
 
-  // Mobile: ampla — perms já filtram por pessoa. Inclui IDs novos da v7.
-  const MOBILE_ALLOWED = [
-    "inicio","ocorrencias","mise_checklists","mise_contagens","mise_temperaturas","mise_fichas",
-    "schedule","freelas","reunioes","trilhas","ideias",
-    "pessoas","permissoes","employees","vt","roles","mise_compras","tips","dashboard","regra_divisao","comunicados","faq","dp",
-    "config","horarios","notificacoes","dp_gestores",
-  ];
-  // v7: se restrictToOperational, oculta seções "escritorio" e "ajustes" (modo Operação)
-  const OPERATIONAL_ALLOWED_GROUPS = ["inicio","operacao","planejamento"];
-  const TAB_GROUPS_BASE = restrictToOperational
-    ? TAB_GROUPS.filter(g => OPERATIONAL_ALLOWED_GROUPS.includes(g.id))
-    : TAB_GROUPS;
+  // Mobile: restrict to dashboard, schedule, horarios, employees, reunioes, notificacoes, config, dp_gestores
+  const MOBILE_ALLOWED = ["dashboard","schedule","horarios","employees","freelas","reunioes","notificacoes","config","dp_gestores"];
   const TAB_GROUPS_FINAL = mobileOnly
-    ? TAB_GROUPS_BASE.map(g => ({ ...g, tabs: g.tabs.filter(([id]) => MOBILE_ALLOWED.includes(id)) })).filter(g => g.tabs.length > 0)
-    : TAB_GROUPS_BASE;
+    ? TAB_GROUPS.map(g => ({ ...g, tabs: g.tabs.filter(([id]) => MOBILE_ALLOWED.includes(id)) })).filter(g => g.tabs.length > 0)
+    : TAB_GROUPS;
 
   // Flat TABS for backward compatibility
   const TABS = TAB_GROUPS_FINAL.flatMap(g => g.tabs.map(([id,lbl]) => [id,lbl]));
 
-  const defaultGroup = "inicio";
+  const defaultGroup = isLider ? "equipe" : "operacao";
   const [tabGroup, setTabGroup] = useState(defaultGroup);
   const [tab, setTab] = useState(forceTab || (isLider ? "employees" : "inicio"));
   // Se o shell forçar um tab específico, sincroniza
@@ -10340,8 +10324,6 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
   // Mantemos o listener pra evitar warnings caso outro código dispare o evento.
 
   const [empResetSignal, setEmpResetSignal] = useState(0);
-  // v7: state pra aba Trilhas (admin) — qual empregado está selecionado pra drilldown
-  const [trilhasAdminSelEmp, setTrilhasAdminSelEmp] = useState(null);
   const activeGroup = TAB_GROUPS_FINAL.find(g => g.id === tabGroup) ?? TAB_GROUPS_FINAL[0];
 
   // Fase B v2: auto-recálculo unificado. Vigia mudanças em employees, roles,
@@ -11798,175 +11780,18 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
           />
         )}
 
-        {/* INÍCIO — saudação + Caixa de entrada (v7) + widgets opcionais (futuro) */}
+        {/* INÍCIO — saudação e dashboard geral (em construção) */}
         {tab === "inicio" && (
-          <div>
-            <InicioModule
-              currentUser={currentUser}
-              restaurant={restaurant}
-              isOwner={isOwner}
-              isDP={isDP}
-              isLider={isLider}
-              mobileOnly={mobileOnly}
-              setTab={setTab}
-            />
-            {/* Inbox direto na página inicial — antes ficava em "notificacoes" (separado) */}
-            {!privacyMask && (
-              <div style={{maxWidth:760,margin:"0 auto",padding:mobileOnly?"8px 4px":"16px 8px"}}>
-                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:12,marginBottom:12,marginTop:8}}>
-                  <h3 style={{color:"var(--text)",margin:0,fontSize:mobileOnly?15:18}}>📬 Caixa de entrada</h3>
-                </div>
-                <NotificacoesTab
-                  restaurantId={rid}
-                  dpMessages={[]}
-                  notifications={data?.notifications??[]}
-                  onUpdate={onUpdate}
-                  isOwner={isOwner}
-                  inbox={data?.inbox??[]}
-                  managerId={currentUser?.id}
-                  managerRole={userRoleForInbox}
-                  inboxFolders={data?.inboxFolders??{}}
-                />
-              </div>
-            )}
-          </div>
+          <InicioModule
+            currentUser={currentUser}
+            restaurant={restaurant}
+            isOwner={isOwner}
+            isDP={isDP}
+            isLider={isLider}
+            mobileOnly={mobileOnly}
+            setTab={setTab}
+          />
         )}
-
-        {/* OCORRÊNCIAS — top-level v7 (reaproveita MeetingPlannerSection com forceSubTab) */}
-        {tab === "ocorrencias" && (() => {
-          const restEmps = employees.filter(e => e.restaurantId === rid && !e.inactive);
-          const areas = [...new Set(restRoles.map(r => r.area).filter(Boolean))];
-          const plans = (data?.meetingPlans ?? []).filter(p => p.restaurantId === rid).sort((a,b) => (b.plannedDate??"").localeCompare(a.plannedDate??""));
-          return (
-            <div>
-              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:12,marginBottom:16}}>
-                <h3 style={{color:"var(--text)",margin:0,fontSize:mobileOnly?16:20}}>🚨 Ocorrências</h3>
-              </div>
-              <MeetingPlannerSection
-                restaurantId={rid}
-                employees={restEmps}
-                roles={restRoles}
-                areas={areas}
-                meetingPlans={plans}
-                allMeetingPlans={data?.meetingPlans ?? []}
-                feedbacks={data?.feedbacks ?? []}
-                onUpdate={onUpdate}
-                currentUser={currentUser}
-                isOwner={isOwner}
-                mobileOnly={mobileOnly}
-                isLider={isLider}
-                managerAreas={managerAreas}
-                data={data}
-                forceSubTab="ocorrencias"
-              />
-            </div>
-          );
-        })()}
-
-        {/* IDEIAS — top-level v7 (reaproveita MeetingPlannerSection com forceSubTab) */}
-        {tab === "ideias" && (() => {
-          const restEmps = employees.filter(e => e.restaurantId === rid && !e.inactive);
-          const areas = [...new Set(restRoles.map(r => r.area).filter(Boolean))];
-          const plans = (data?.meetingPlans ?? []).filter(p => p.restaurantId === rid).sort((a,b) => (b.plannedDate??"").localeCompare(a.plannedDate??""));
-          return (
-            <div>
-              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:12,marginBottom:16}}>
-                <h3 style={{color:"var(--text)",margin:0,fontSize:mobileOnly?16:20}}>💡 Ideias</h3>
-              </div>
-              <MeetingPlannerSection
-                restaurantId={rid}
-                employees={restEmps}
-                roles={restRoles}
-                areas={areas}
-                meetingPlans={plans}
-                allMeetingPlans={data?.meetingPlans ?? []}
-                feedbacks={data?.feedbacks ?? []}
-                onUpdate={onUpdate}
-                currentUser={currentUser}
-                isOwner={isOwner}
-                mobileOnly={mobileOnly}
-                isLider={isLider}
-                managerAreas={managerAreas}
-                data={data}
-                forceSubTab="ideias"
-              />
-            </div>
-          );
-        })()}
-
-        {/* COMPRAS — admin v7 (reaproveita OperationalCompras com employee virtual) */}
-        {tab === "mise_compras" && (() => {
-          const virtEmp = {
-            id: currentUser?.id ? `admin_${currentUser.id}` : `admin_compras_${rid}`,
-            restaurantId: rid,
-            name: currentUser?.name || (isOwner ? "Gestor AppTip" : "Gestor"),
-            cpf: currentUser?.cpf || "",
-            operationalAreas: { compras: true, contagens: true, checklists: true, fichasTecnicas: true, temperaturas: true },
-          };
-          return (
-            <div>
-              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:12,marginBottom:16}}>
-                <h3 style={{color:"var(--text)",margin:0,fontSize:mobileOnly?16:20}}>🛒 Compras</h3>
-              </div>
-              <OperationalCompras employee={virtEmp} data={data} onUpdate={onUpdate} />
-            </div>
-          );
-        })()}
-        {/* TRILHAS — admin v7 (lista de equipe + drilldown EmpTrilhaView) */}
-        {tab === "trilhas" && (() => {
-          const teamEmps = restEmps.filter(e => !e.inactive).sort((a,b)=>(a.name||"").localeCompare(b.name||""));
-          if (trilhasAdminSelEmp) {
-            const emp = teamEmps.find(e => e.id === trilhasAdminSelEmp);
-            if (!emp) { setTrilhasAdminSelEmp(null); return null; }
-            return (
-              <div>
-                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:12,marginBottom:16}}>
-                  <button onClick={()=>setTrilhasAdminSelEmp(null)} style={{...S.btnSecondary,fontSize:12}}>← Voltar à lista</button>
-                  <h3 style={{color:"var(--text)",margin:0,fontSize:mobileOnly?14:18}}>🎯 Trilha · {emp.name}</h3>
-                </div>
-                <EmpTrilhaView
-                  empId={emp.id}
-                  employees={employees}
-                  roles={roles}
-                  schedules={schedules}
-                  incidents={data?.incidents??[]}
-                  feedbacks={data?.feedbacks??[]}
-                  devChecklists={data?.devChecklists??{}}
-                  restaurantId={rid}
-                  onUpdate={onUpdate}
-                  employeeGoals={data?.employeeGoals??{}}
-                  meetingPlans={data?.meetingPlans??[]}
-                />
-              </div>
-            );
-          }
-          return (
-            <div>
-              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:12,marginBottom:16}}>
-                <h3 style={{color:"var(--text)",margin:0,fontSize:mobileOnly?16:20}}>🎯 Trilhas</h3>
-                <span style={{fontSize:12,color:"var(--text3)"}}>{teamEmps.length} {teamEmps.length===1?"pessoa":"pessoas"}</span>
-              </div>
-              {teamEmps.length === 0 ? (
-                <div style={{padding:32,textAlign:"center",color:"var(--text3)",fontSize:13}}>Nenhum funcionário cadastrado ainda.</div>
-              ) : (
-                <div style={{display:"grid",gridTemplateColumns:mobileOnly?"1fr":"repeat(auto-fill,minmax(220px,1fr))",gap:10}}>
-                  {teamEmps.map(emp => {
-                    const role = restRoles.find(r => r.id === emp.roleId);
-                    return (
-                      <button key={emp.id} onClick={()=>setTrilhasAdminSelEmp(emp.id)}
-                        style={{textAlign:"left",padding:"14px 16px",border:"1px solid var(--border)",borderRadius:12,background:"var(--card-bg)",cursor:"pointer",fontFamily:"'DM Sans',sans-serif",transition:"all .15s"}}
-                        onMouseEnter={e=>{e.currentTarget.style.borderColor="var(--ac)";e.currentTarget.style.background="var(--ac)08";}}
-                        onMouseLeave={e=>{e.currentTarget.style.borderColor="var(--border)";e.currentTarget.style.background="var(--card-bg)";}}>
-                        <div style={{fontWeight:700,color:"var(--text)",fontSize:14,marginBottom:4}}>{emp.name}</div>
-                        <div style={{fontSize:11,color:"var(--text3)"}}>{role?.name || "—"}{role?.area ? ` · ${role.area}` : ""}</div>
-                      </button>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
-          );
-        })()}
 
         {/* FREELAS — Lançamento, Fechamento, Histórico */}
         {tab === "freelas" && (
@@ -16690,10 +16515,6 @@ function OperationalPortal({ employee, data, onUpdate, onBack, toggleTheme, them
   const areas = employee.operationalAreas ?? {};
   const activeAreas = OPERATIONAL_AREA_DEFS.filter(a => areas[a.key] === true);
   const [tab, setTab] = useState(() => activeAreas[0]?.key ?? null);
-  // v7: opt-in para preview do shell unificado. Não persistido — só nesta sessão.
-  // OBS: as tabs Mise no shell unificado renderizam as versões ADMIN (CRUD completo)
-  // e não as lean operacionais — full migration fica pra v7.1.
-  const [unifiedV7Mode, setUnifiedV7Mode] = useState(false);
 
   // Se a permissão da aba atual foi revogada ao vivo, realinha
   useEffect(() => {
@@ -16701,36 +16522,6 @@ function OperationalPortal({ employee, data, onUpdate, onBack, toggleTheme, them
       setTab(activeAreas[0]?.key ?? null);
     }
   }, [tab, activeAreas.length]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // v7: render do modo unificado (após todos os hooks pra não violar rules-of-hooks)
-  if (unifiedV7Mode && restaurant) {
-    const synthCurrentUser = { id: employee.id, name: employee.name, cpf: employee.cpf || "" };
-    return (
-      <div>
-        <div style={{background:"#7c9e5e15",borderBottom:"1px solid #7c9e5e44",padding:"8px 16px",display:"flex",justifyContent:"space-between",alignItems:"center",fontSize:12,color:"#7c9e5e",fontFamily:"'DM Sans',sans-serif"}}>
-          <span><strong>🧪 Modo unificado v7 (preview)</strong> — Operação + Planejamento. Escritório e Ajustes ocultos.</span>
-          <button onClick={()=>setUnifiedV7Mode(false)} style={{background:"none",border:"1px solid #7c9e5e88",borderRadius:8,padding:"3px 10px",cursor:"pointer",color:"#7c9e5e",fontSize:11,fontFamily:"inherit"}}>← Voltar ao modo Operacional</button>
-        </div>
-        <RestaurantPanel
-          restaurant={restaurant}
-          restaurants={restaurants}
-          employees={data?.employees ?? []}
-          roles={data?.roles ?? []}
-          tips={data?.tips ?? {}}
-          splits={data?.splits ?? {}}
-          schedules={data?.schedules ?? {}}
-          onUpdate={onUpdate}
-          perms={{ tips:false, schedule:false, vt:false }}
-          isOwner={false}
-          data={data}
-          currentUser={synthCurrentUser}
-          privacyMask={false}
-          mobileOnly={false}
-          restrictToOperational
-        />
-      </div>
-    );
-  }
 
   if (activeAreas.length === 0) {
     return (
@@ -16777,10 +16568,6 @@ function OperationalPortal({ employee, data, onUpdate, onBack, toggleTheme, them
               ← Super
             </button>
           )}
-          <button onClick={()=>setUnifiedV7Mode(true)} title="Preview do shell unificado v7 (Operação + Planejamento)"
-            style={{...S.btnSecondary,fontSize:11,padding:"5px 10px",color:"#7c9e5e",borderColor:"#7c9e5e"}}>
-            🧪 v7
-          </button>
           {onSwitchToEmployee && !employee?._isOwnerVirtual && <button onClick={onSwitchToEmployee} style={{...S.btnSecondary,fontSize:11,padding:"5px 10px",color:"var(--ac)",borderColor:"var(--ac)"}}>👤 Empregado</button>}
           <button onClick={onBack} style={{...S.btnSecondary,fontSize:11,padding:"5px 10px"}}>Sair</button>
         </div>
@@ -22639,50 +22426,42 @@ Regras:
 // ═══════════════════════════════════════════════════════════════
 // ──  PERMISSÕES — MATRIZ COM SANFONA                            ──
 // ═══════════════════════════════════════════════════════════════
-// v7: PERM_GROUPS reorganizado em 5 seções pra refletir a IA nova do menu.
-// As keys dos perms (operational.x / admin.x / special.x) continuam idênticas
-// — só a forma de agrupar visualmente na matriz mudou.
 const PERM_GROUPS = [
   {
-    id: "secao_operacao", label: "🔧 Operação", color: "#7c9e5e", bg: "#7c9e5e22",
+    id: "tip_op", label: "AppTip Operacional", color: "var(--ac)", bg: "var(--ac)22",
     perms: [
-      { key: "operational.checklists",     label: "Checklists",     icon: "✅" },
+      { key: "operational.escalas",  label: "Escalas",  icon: "📅" },
+      { key: "operational.gorjetas", label: "Gorjetas", icon: "💰" },
+      { key: "operational.trilhas",  label: "Trilhas",  icon: "🎯" },
+      { key: "operational.reunioes", label: "Reuniões", icon: "🗣️" },
+    ],
+  },
+  {
+    id: "tip_adm", label: "AppTip Admin", color: "#0284c7", bg: "#0284c722",
+    perms: [
+      { key: "admin.tips",        label: "Lançar Gorjetas",  icon: "💰" },
+      { key: "admin.schedule",    label: "Fechar Escala",    icon: "📅" },
+      { key: "admin.employees",   label: "Equipe",           icon: "👥" },
+      { key: "admin.roles",       label: "Cargos",           icon: "🏷️" },
+      { key: "admin.vt",          label: "Vale Transporte",  icon: "🚌" },
+      { key: "admin.comunicados", label: "Comunicados",      icon: "📢" },
+      { key: "admin.faq",         label: "FAQ",              icon: "❓" },
+      { key: "admin.config",      label: "Configurações",    icon: "⚙️" },
+      { key: "admin.pessoas",     label: "Gerenciar Pessoas",icon: "🛂" },
+    ],
+  },
+  {
+    id: "mise", label: "AppMise", color: "#7c9e5e", bg: "#7c9e5e22",
+    perms: [
       { key: "operational.contagens",      label: "Contagens",      icon: "📦" },
-      { key: "operational.temperaturas",   label: "Temperaturas",   icon: "🌡️" },
+      { key: "operational.compras",        label: "Compras",        icon: "🛒" },
+      { key: "operational.checklists",     label: "Checklists",     icon: "✅" },
       { key: "operational.fichasTecnicas", label: "Fichas Técnicas",icon: "📋" },
+      { key: "operational.temperaturas",   label: "Temperaturas",   icon: "🌡️" },
     ],
   },
   {
-    id: "secao_planejamento", label: "📅 Planejamento", color: "var(--ac)", bg: "var(--ac)22",
-    perms: [
-      { key: "operational.escalas",  label: "Escalas",     icon: "📅" },
-      { key: "operational.reunioes", label: "Reuniões",    icon: "🗣️" },
-      { key: "operational.trilhas",  label: "Trilhas",     icon: "🎯" },
-      { key: "operational.gorjetas", label: "Gorjetas (visualizar)", icon: "💰" },
-    ],
-  },
-  {
-    id: "secao_escritorio", label: "🏢 Escritório", color: "#0284c7", bg: "#0284c722",
-    perms: [
-      { key: "admin.pessoas",       label: "Pessoas",          icon: "🛂" },
-      { key: "admin.employees",     label: "Equipe",           icon: "👥" },
-      { key: "admin.vt",            label: "Vale Transporte",  icon: "🚌" },
-      { key: "admin.roles",         label: "Cargos",           icon: "🏷️" },
-      { key: "operational.compras", label: "Compras",          icon: "🛒" },
-      { key: "admin.tips",          label: "Lançar Gorjetas",  icon: "💰" },
-      { key: "admin.comunicados",   label: "Comunicados",      icon: "📢" },
-      { key: "admin.faq",           label: "FAQ",              icon: "❓" },
-    ],
-  },
-  {
-    id: "secao_ajustes", label: "⚙️ Ajustes", color: "#64748b", bg: "#64748b22",
-    perms: [
-      { key: "admin.config",   label: "Configurações", icon: "⚙️" },
-      { key: "admin.schedule", label: "Fechar Escala", icon: "🔒" },
-    ],
-  },
-  {
-    id: "esp", label: "✨ Especiais", color: "#a855f7", bg: "#a855f722",
+    id: "esp", label: "Especiais", color: "#a855f7", bg: "#a855f722",
     perms: [
       { key: "special.isDP",    label: "Master DP",     icon: "🛂" },
       { key: "special.isLider", label: "Líder de Área", icon: "⭐" },
@@ -22707,9 +22486,9 @@ function permSet(pessoa, restaurantId, key, value) {
 
 // Profiles pré-prontos pra aplicar conjuntos de permissões com 1 clique.
 // Cada profile define quais chaves devem virar `true` (todas as outras viram `false`).
-// v7: perfis "operação" e "escritório" como defaults da nova IA.
+// Lista enxuta — perfis específicos por área ficam por conta de customs do restaurante.
 const PERM_PROFILES = [
-  { id: "escritorio_total", label: "Escritório", icon: "🏢", color: "#0284c7", desc: "Acesso total — Início + Operação + Planejamento + Escritório + Ajustes",
+  { id: "owner_total", label: "Owner total", icon: "👑", color: "#dc2626", desc: "Acesso total — tudo marcado",
     keys: [
       "operational.escalas","operational.gorjetas","operational.trilhas","operational.reunioes",
       "operational.contagens","operational.compras","operational.checklists","operational.fichasTecnicas","operational.temperaturas",
@@ -22717,13 +22496,7 @@ const PERM_PROFILES = [
       "special.isDP",
     ],
   },
-  { id: "operacao", label: "Operação", icon: "🔧", color: "#7c9e5e", desc: "Acessa Início + Operação + Planejamento (sem Escritório nem Ajustes)",
-    keys: [
-      "operational.escalas","operational.gorjetas","operational.trilhas","operational.reunioes",
-      "operational.contagens","operational.checklists","operational.fichasTecnicas","operational.temperaturas",
-    ],
-  },
-  { id: "gestor_pessoas", label: "Gestor de pessoas", icon: "🛂", color: "#0284c7", desc: "Gerencia equipe, cargos, comunicações (Escritório parcial)",
+  { id: "gestor_pessoas", label: "Gestor de pessoas", icon: "🛂", color: "#0284c7", desc: "Gerencia equipe, cargos, comunicações",
     keys: ["admin.employees","admin.roles","admin.pessoas","admin.comunicados","admin.faq"],
   },
   { id: "lider", label: "Líder de área", icon: "⭐", color: "#a855f7", desc: "Vê só funcionários das áreas que lidera",
@@ -22774,7 +22547,7 @@ function PermissoesMatrix({ restaurantId, pessoas, employees, managers, owners, 
     if (cpfD && ownerCpfSet.has(cpfD)) return false;
     return true;
   });
-  const [expanded, setExpanded] = useState({ secao_operacao: true, secao_planejamento: true, secao_escritorio: false, secao_ajustes: false, esp: false });
+  const [expanded, setExpanded] = useState({ tip_op: true, tip_adm: false, mise: false, esp: false });
   const [filter, setFilter] = useState("");
   const [accessFilter, setAccessFilter] = useState("todos"); // todos | apptip_admin | apptip_op | mise | sem_perm
   const [sortMode, setSortMode] = useState("az"); // az | mais_perms | menos_perms
@@ -22877,8 +22650,8 @@ function PermissoesMatrix({ restaurantId, pessoas, employees, managers, owners, 
   function toggleGroup(gid) {
     setExpanded(prev => ({ ...prev, [gid]: !prev[gid] }));
   }
-  function expandAll() { setExpanded({ secao_operacao: true, secao_planejamento: true, secao_escritorio: true, secao_ajustes: true, esp: true }); }
-  function collapseAll() { setExpanded({ secao_operacao: false, secao_planejamento: false, secao_escritorio: false, secao_ajustes: false, esp: false }); }
+  function expandAll() { setExpanded({ tip_op: true, tip_adm: true, mise: true, esp: true }); }
+  function collapseAll() { setExpanded({ tip_op: false, tip_adm: false, mise: false, esp: false }); }
 
   // Conta status agregado de um grupo de permissões para uma pessoa.
   // Retorna 0 (nenhuma), 1 (algumas), 2 (todas).
