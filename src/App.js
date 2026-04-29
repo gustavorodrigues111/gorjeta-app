@@ -3,7 +3,7 @@ import React, { useState, useEffect, useMemo, useRef, Component } from "react";
 import { db } from "./firebase";
 import { doc, getDoc, setDoc } from "firebase/firestore";
 
-const APP_VERSION = "8.1.0";
+const APP_VERSION = "8.2.0";
 
 const DEFAULT_ADMISSION = () => `${new Date().getFullYear()}-01-01`;
 const round2 = (v) => Math.round(v * 100) / 100;
@@ -871,58 +871,87 @@ function CalendarGrid({ year, month, dayMap, onDayClick, readOnly, delayMap }) {
   for (let d = 1; d <= daysInMonth; d++)
     cells.push(`${year}-${String(month + 1).padStart(2, "0")}-${String(d).padStart(2, "0")}`);
 
-  const colorOf = (dateStr) => {
+  // v8.2 — paleta sólida com cores distintas para pares conflitantes (Folga vs Falta Injust; FC vs TC)
+  // Cada célula: bg sólido + texto branco + número do dia + código bold no centro
+  const styleOf = (dateStr) => {
     if (!dateStr) return null;
     const s = dayMap?.[dateStr];
-    if (s === DAY_OFF)       return { bg: "#e74c3c22", border: "var(--red)",  text: "var(--red)"  };
-    if (s === DAY_FREELA)    return { bg: "#06b6d422", border: "#06b6d4",  text: "#06b6d4"  };
-    if (s === DAY_COMP)      return { bg: "#3b82f622", border: "#3b82f6",  text: "#3b82f6"  };
-    if (s === DAY_COMP_TRAB) return { bg: "#0ea5e922", border: "#0ea5e9",  text: "#0ea5e9"  };
-    if (s === DAY_VACATION)  return { bg: "#8b5cf622", border: "#8b5cf6",  text: "#8b5cf6"  };
-    if (s === DAY_FAULT_J)   return { bg: "#f59e0b22", border: "#f59e0b",  text: "#f59e0b"  };
-    if (s === DAY_FAULT_U)   return { bg: "#ef444422", border: "var(--red)",  text: "var(--red)"  };
-    return { bg: "#10b98122", border: "var(--green)", text: "var(--green)" };
+    if (s === DAY_OFF)       return { bg: "#dc2626", code: "F",   label: "Folga" };
+    if (s === DAY_FREELA)    return { bg: "#14b8a6", code: "FL",  label: "Freela" };
+    if (s === DAY_COMP)      return { bg: "#2563eb", code: "FC",  label: "Folga Comp." };
+    if (s === DAY_COMP_TRAB) return { bg: "#06b6d4", code: "TC",  label: "Trab. Comp." };
+    if (s === DAY_VACATION)  return { bg: "#7c3aed", code: "Fér", label: "Férias" };
+    if (s === DAY_FAULT_J)   return { bg: "#f59e0b", code: "FJ",  label: "Falta Just." };
+    if (s === DAY_FAULT_U)   return { bg: "#7f1d1d", code: "FI",  label: "Falta Injust." }; // vermelho mais escuro pra distinguir de Folga
+    return { bg: "#16a34a", code: "T", label: "Trabalho" };
   };
 
-  const LEGEND = [
-    ["var(--green)", "Trabalho"],
-    ["var(--red)", "Folga"],
-    ["#06b6d4", "Freela"],
-    ["#3b82f6", "Folga p/ Comp. (FC)"],
-    ["#0ea5e9", "Trab. p/ Comp. (TC)"],
-    ["#8b5cf6", "Férias"],
-    ["#f59e0b", "Falta Just."],
-    ["var(--red)", "Falta Injust."],
+  // Lista enxuta pra legenda — somente status que aparecem ou são frequentes
+  const LEGEND_ALL = [
+    { bg: "#16a34a", code: "T",   label: "Trabalho" },
+    { bg: "#dc2626", code: "F",   label: "Folga" },
+    { bg: "#7f1d1d", code: "FI",  label: "Falta Injust." },
+    { bg: "#f59e0b", code: "FJ",  label: "Falta Just." },
+    { bg: "#2563eb", code: "FC",  label: "Folga Comp." },
+    { bg: "#06b6d4", code: "TC",  label: "Trab. Comp." },
+    { bg: "#7c3aed", code: "Fér", label: "Férias" },
+    { bg: "#14b8a6", code: "FL",  label: "Freela" },
   ];
 
   return (
     <div>
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 3, marginBottom: 3 }}>
-        {WEEKDAYS.map(w => <div key={w} style={{ textAlign: "center", color: "var(--text3)", fontSize: 10, fontFamily: "'DM Mono',monospace", padding: "4px 0" }}>{w}</div>)}
+      {/* v8.2 — Legenda no topo, mini-células com mesmo visual da grid */}
+      <div style={{ display: "flex", gap: 6, marginBottom: 12, flexWrap: "wrap", alignItems: "center" }}>
+        <span style={{ color: "var(--text3)", fontSize: 11, fontFamily: "'DM Sans',sans-serif", marginRight: 4 }}>Legenda:</span>
+        {LEGEND_ALL.map(s => (
+          <div key={s.code} style={{ display: "flex", alignItems: "center", gap: 5 }}>
+            <div style={{
+              minWidth: 26, height: 22, borderRadius: 5, background: s.bg, color: "#fff",
+              fontSize: 10, fontWeight: 700, fontFamily: "'DM Mono',monospace",
+              display: "flex", alignItems: "center", justifyContent: "center", padding: "0 6px",
+            }}>{s.code}</div>
+            <span style={{ color: "var(--text2)", fontSize: 11, fontFamily: "'DM Sans',sans-serif" }}>{s.label}</span>
+          </div>
+        ))}
       </div>
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 3 }}>
+
+      {/* Cabeçalho dias da semana */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 4, marginBottom: 4 }}>
+        {WEEKDAYS.map(w => <div key={w} style={{ textAlign: "center", color: "var(--text3)", fontSize: 11, fontFamily: "'DM Sans',sans-serif", fontWeight: 600, padding: "4px 0", letterSpacing: 0.3 }}>{w}</div>)}
+      </div>
+
+      {/* Grid */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 4 }}>
         {cells.map((dateStr, idx) => {
           if (!dateStr) return <div key={`e-${idx}`} />;
           const d = parseInt(dateStr.slice(-2));
-          const col = colorOf(dateStr);
+          const st = styleOf(dateStr);
           const hasDelay = delayMap && (delayMap[String(d)] > 0);
           return (
             <button key={dateStr} onClick={() => !readOnly && onDayClick && onDayClick(dateStr)}
-              title={hasDelay ? `Atraso: ${delayMap[String(d)]} min` : undefined}
-              style={{ aspectRatio: "1", borderRadius: 8, border: `1px solid ${col.border}`, background: col.bg, color: col.text, cursor: readOnly ? "default" : "pointer", fontFamily: "'DM Mono',monospace", fontSize: 12, fontWeight: 600, padding: 0, position:"relative" }}>
-              {d}
-              {hasDelay && <span style={{position:"absolute",top:1,right:2,fontSize:7,color:"#f59e0b",fontWeight:800,lineHeight:1}}>⏰</span>}
+              title={`${st.label}${hasDelay ? ` · Atraso ${delayMap[String(d)]} min` : ""}`}
+              style={{
+                aspectRatio: "1", borderRadius: 8, border: "none",
+                background: st.bg, color: "#fff",
+                cursor: readOnly ? "default" : "pointer",
+                fontFamily: "'DM Sans',sans-serif", padding: 0, position: "relative",
+                display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
+                boxShadow: "0 1px 2px rgba(0,0,0,0.08)",
+                transition: "transform .1s",
+              }}
+              onMouseEnter={e => { if (!readOnly) e.currentTarget.style.transform = "scale(1.03)"; }}
+              onMouseLeave={e => { e.currentTarget.style.transform = "scale(1)"; }}
+            >
+              {/* Número do dia no canto superior, sutil */}
+              <span style={{ position: "absolute", top: 4, left: 6, fontSize: 10, fontWeight: 600, opacity: 0.85, fontFamily: "'DM Mono',monospace" }}>{d}</span>
+              {/* Código do status no centro, bold */}
+              <span style={{ fontSize: 16, fontWeight: 800, fontFamily: "'DM Mono',monospace", letterSpacing: 0.5, lineHeight: 1 }}>{st.code}</span>
+              {hasDelay && (
+                <span style={{ position: "absolute", top: 3, right: 4, fontSize: 8, lineHeight: 1, background: "#fff", color: "#f59e0b", borderRadius: 3, padding: "1px 3px", fontWeight: 800 }}>⏰</span>
+              )}
             </button>
           );
         })}
-      </div>
-      <div style={{ display: "flex", gap: 10, marginTop: 14, flexWrap: "wrap" }}>
-        {LEGEND.map(([c, lbl]) => (
-          <div key={lbl} style={{ display: "flex", alignItems: "center", gap: 4 }}>
-            <div style={{ width: 11, height: 11, borderRadius: 3, background: c + "33", border: `1px solid ${c}`, flexShrink: 0 }} />
-            <span style={{ color: "var(--text3)", fontSize: 10, fontFamily: "'DM Mono',monospace" }}>{lbl}</span>
-          </div>
-        ))}
       </div>
     </div>
   );
