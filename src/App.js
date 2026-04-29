@@ -3,7 +3,7 @@ import React, { useState, useEffect, useMemo, useRef, Component } from "react";
 import { db } from "./firebase";
 import { doc, getDoc, setDoc } from "firebase/firestore";
 
-const APP_VERSION = "7.4.0";
+const APP_VERSION = "7.5.0";
 
 const DEFAULT_ADMISSION = () => `${new Date().getFullYear()}-01-01`;
 const round2 = (v) => Math.round(v * 100) / 100;
@@ -19545,18 +19545,17 @@ function buildShellSections({ pessoa, restaurantId, isOwner, employees }) {
     ],
   });
 
-  // 1) MEU DIA — área pessoal do membro da equipe (não some, mantida abaixo de Início)
+  // 1) MINHA JORNADA — área PESSOAL do membro da equipe (v7.5)
+  // Renomeado de "Meu Dia". Conteúdo limpo: só itens pessoais (extrato, escala, trilhas).
+  // Comunicados/FAQ/DP saíram pra seção "Comunicação" (todos).
   if (isTeam) {
     sections.push({
-      group: "Meu Dia",
+      group: "Minha Jornada",
       color: "#d4a017",
       items: [
-        { id: "me_home",        label: "Início",         icon: "🏠", kind: "employee", tab: "comunicados" },
-        { id: "me_gorjeta",     label: "Meu extrato",    icon: "💰", kind: "employee", tab: "gorjeta" },
-        { id: "me_escala",      label: "Minha escala",   icon: "📅", kind: "employee", tab: "schedule" },
-        { id: "me_trilha",      label: "Minhas trilhas", icon: "🎯", kind: "employee", tab: "trilha" },
-        { id: "me_comunicados", label: "Comunicados",    icon: "📬", kind: "employee", tab: "comunicados" },
-        { id: "me_dp",          label: "Fale com DP",    icon: "💬", kind: "employee", tab: "dp" },
+        { id: "me_gorjeta", label: "Meu extrato",    icon: "💰", kind: "employee", tab: "gorjeta" },
+        { id: "me_escala",  label: "Minha escala",   icon: "📅", kind: "employee", tab: "schedule" },
+        { id: "me_trilha",  label: "Minhas trilhas", icon: "🎯", kind: "employee", tab: "trilha" },
       ],
     });
   }
@@ -19666,18 +19665,24 @@ function buildShellSections({ pessoa, restaurantId, isOwner, employees }) {
       ),
     });
   }
-  if (ad.comunicados || isOwner) {
-    officeItems.push({ id: "mod_comunicados", label: "Comunicados", icon: "📢", kind: "manager", tab: "comunicados" });
-  }
-  if (ad.faq || isOwner) {
-    officeItems.push({ id: "mod_faq", label: "FAQ", icon: "❓", kind: "manager", tab: "faq" });
-  }
-  if (sp.isDP || isOwner) {
-    officeItems.push({ id: "mod_dp", label: "Fale com DP", icon: "💬", kind: "manager", tab: "dp" });
-  }
   if (officeItems.length > 0) {
     sections.push({ group: "Escritório", color: "#0284c7", items: officeItems });
   }
+
+  // 4.5) COMUNICAÇÃO — Comunicados, FAQ, Fale com DP (TODOS, v7.5)
+  // kind dinâmico: admin renderiza UI de gestão (criar/editar); empregado renderiza UI de leitura.
+  // Visível pra qualquer pessoa logada (todo mundo precisa de canais de comunicação interna).
+  const commItems = [];
+  const commKind = (ad.comunicados || isOwner) ? "manager" : "employee";
+  commItems.push({ id: "mod_comunicados", label: "Comunicados", icon: "📢", kind: commKind, tab: "comunicados" });
+  if (ad.faq || isOwner) {
+    commItems.push({ id: "mod_faq", label: "FAQ", icon: "❓", kind: "manager", tab: "faq" });
+  } else if (isTeam) {
+    commItems.push({ id: "mod_faq", label: "FAQ", icon: "❓", kind: "employee", tab: "faq" });
+  }
+  // Fale com DP: empregado envia / admin DP responde
+  commItems.push({ id: "mod_dp", label: "Fale com DP", icon: "💬", kind: (sp.isDP || isOwner) ? "manager" : "employee", tab: "dp" });
+  sections.push({ group: "Comunicação", color: "#8b5cf6", items: commItems });
 
   // 5) AJUSTES — Configurações do restaurante (separado de Escritório por escolha do produto)
   if (ad.config || isOwner) {
@@ -31645,6 +31650,56 @@ export default function App() {
     const rid = currentUser.restaurantId || (pessoa.restaurantIds || [])[0] || null;
     if (!rid) return;
     console.log(`[v7.3] Redirect employee→shell: pessoa=${pessoa.name} rid=${rid}`);
+    localStorage.setItem("apptip_role", "shell");
+    setShellActiveRest(rid);
+    setUserRole("shell");
+    setView("shell");
+  }, [view, loaded, currentUser?.id, pessoas?.length]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // v7.5 — Redirect view='manager' → view='shell' quando há pessoa correspondente.
+  // Toda gestora admin entra no shell unificado em vez do ManagerPortal legacy.
+  useEffect(() => {
+    if (view !== "manager") return;
+    if (!loaded) return;
+    if (!currentUser) return;
+    if (currentUser.mustChangePin) return; // mantém ManagerPinChange screen
+    const cpfDigits = (currentUser.cpf || "").replace(/\D/g, "");
+    let pessoa = null;
+    if (currentUser.id) {
+      pessoa = (pessoas || []).find(p => p.linkedManagerId === currentUser.id);
+    }
+    if (!pessoa && cpfDigits) {
+      pessoa = (pessoas || []).find(p => (p.cpf || "").replace(/\D/g, "") === cpfDigits);
+    }
+    if (!pessoa) return; // fallback: continua no ManagerPortal legacy
+    const rid = (pessoa.restaurantIds || [])[0] || (currentUser.restaurantIds || [])[0] || null;
+    if (!rid) return;
+    console.log(`[v7.5] Redirect manager→shell: pessoa=${pessoa.name} rid=${rid}`);
+    localStorage.setItem("apptip_role", "shell");
+    setShellActiveRest(rid);
+    setUserRole("shell");
+    setView("shell");
+  }, [view, loaded, currentUser?.id, pessoas?.length]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // v7.5 — Redirect view='operational' → view='shell' quando há pessoa correspondente.
+  // Gestor operacional entra no shell. As tabs operacionais (Mise) usam versões lean
+  // (OperationalContagens etc.) por dispatching de kind=operational no renderContent.
+  useEffect(() => {
+    if (view !== "operational") return;
+    if (!loaded) return;
+    if (!currentUser) return;
+    const cpfDigits = (currentUser.cpf || "").replace(/\D/g, "");
+    let pessoa = null;
+    if (currentUser.id) {
+      pessoa = (pessoas || []).find(p => p.linkedEmployeeId === currentUser.id);
+    }
+    if (!pessoa && cpfDigits) {
+      pessoa = (pessoas || []).find(p => (p.cpf || "").replace(/\D/g, "") === cpfDigits);
+    }
+    if (!pessoa) return; // fallback: continua no OperationalPortal legacy
+    const rid = currentUser.restaurantId || (pessoa.restaurantIds || [])[0] || null;
+    if (!rid) return;
+    console.log(`[v7.5] Redirect operational→shell: pessoa=${pessoa.name} rid=${rid}`);
     localStorage.setItem("apptip_role", "shell");
     setShellActiveRest(rid);
     setUserRole("shell");
