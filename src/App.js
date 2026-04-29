@@ -3,7 +3,7 @@ import React, { useState, useEffect, useMemo, useRef, Component } from "react";
 import { db } from "./firebase";
 import { doc, getDoc, setDoc } from "firebase/firestore";
 
-const APP_VERSION = "7.6.0";
+const APP_VERSION = "7.7.0";
 
 const DEFAULT_ADMISSION = () => `${new Date().getFullYear()}-01-01`;
 const round2 = (v) => Math.round(v * 100) / 100;
@@ -5422,7 +5422,32 @@ function EmployeeSpreadsheet({ restEmps, restRoles, rid, employees, pessoas, onU
   async function resetPin(emp) {
     const numericPin = (emp.empCode ?? "").replace(/\D/g, "").padStart(4, "0"); // sempre 4 dígitos ex: "0005"
     if (!await appConfirm(`Resetar PIN de "${emp.name}"?\n\nO PIN voltará para ${numericPin} e ele será obrigado a trocar no próximo acesso.`)) return;
-    onUpdate("employees", employees.map(x => x.id===emp.id ? {...x, pin: numericPin, mustChangePin: true} : x));
+    // v7.7: sincroniza reset nos 3 records (pessoa + employee + manager) com mustChangePin=true
+    // pra forçar troca no próximo login em qualquer portal.
+    const cpfDigits = (emp.cpf || "").replace(/\D/g, "");
+    const linkedPessoa = (pessoas || []).find(p =>
+      p.linkedEmployeeId === emp.id ||
+      (cpfDigits && (p.cpf || "").replace(/\D/g, "") === cpfDigits)
+    );
+    onUpdate("employees", (employees || []).map(x => {
+      if (x.id === emp.id) return { ...x, pin: numericPin, mustChangePin: true };
+      if (cpfDigits && (x.cpf || "").replace(/\D/g, "") === cpfDigits) return { ...x, pin: numericPin, mustChangePin: true };
+      return x;
+    }));
+    if ((pessoas || []).length > 0) {
+      onUpdate("pessoas", pessoas.map(p => {
+        if (linkedPessoa && p.id === linkedPessoa.id) return { ...p, pin: numericPin, mustChangePin: true };
+        if (cpfDigits && (p.cpf || "").replace(/\D/g, "") === cpfDigits) return { ...p, pin: numericPin, mustChangePin: true };
+        return p;
+      }));
+    }
+    if ((managers || []).length > 0) {
+      onUpdate("managers", managers.map(m => {
+        if (linkedPessoa?.linkedManagerId && m.id === linkedPessoa.linkedManagerId) return { ...m, pin: numericPin, mustChangePin: true };
+        if (cpfDigits && (m.cpf || "").replace(/\D/g, "") === cpfDigits) return { ...m, pin: numericPin, mustChangePin: true };
+        return m;
+      }));
+    }
     onUpdate("_toast", `🔐 PIN de ${emp.name} resetado para ${numericPin}`);
   }
 
@@ -13433,7 +13458,23 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                           if (cpfDigits.length < 4) { onUpdate("_toast","⚠️ CPF inválido — não foi possível gerar PIN automático"); return; }
                           const newPin = cpfDigits.slice(0,4);
                           if(!await appConfirm(`Resetar PIN de "${m.name}"?\n\nO PIN voltará para ${newPin} (4 primeiros dígitos do CPF) e ele será obrigado a trocar no próximo acesso.`)) return;
-                          onUpdate("managers", managers.map(x=>x.id===m.id?{...x,pin:newPin,mustChangePin:true}:x));
+                          // v7.7: sincroniza reset nos 3 records (manager + pessoa + employee linked) com mustChangePin=true
+                          const allPessoas = data?.pessoas || [];
+                          const allEmployees = data?.employees || [];
+                          onUpdate("managers", managers.map(x=>{
+                            if (x.id === m.id) return { ...x, pin:newPin, mustChangePin:true };
+                            if ((x.cpf||"").replace(/\D/g,"") === cpfDigits) return { ...x, pin:newPin, mustChangePin:true };
+                            return x;
+                          }));
+                          if (allPessoas.length > 0) onUpdate("pessoas", allPessoas.map(p=>{
+                            if (p.linkedManagerId === m.id) return { ...p, pin:newPin, mustChangePin:true };
+                            if ((p.cpf||"").replace(/\D/g,"") === cpfDigits) return { ...p, pin:newPin, mustChangePin:true };
+                            return p;
+                          }));
+                          if (allEmployees.length > 0) onUpdate("employees", allEmployees.map(e=>{
+                            if ((e.cpf||"").replace(/\D/g,"") === cpfDigits) return { ...e, pin:newPin, mustChangePin:true };
+                            return e;
+                          }));
                           onUpdate("_toast",`🔐 PIN de ${m.name} resetado para ${newPin}`);
                         }} title="Resetar PIN para os 4 primeiros dígitos do CPF" style={{...S.btnSecondary,fontSize:11,padding:"5px 10px"}}>🔐 Resetar PIN</button>
                         <button onClick={()=>{
@@ -14322,7 +14363,23 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme, 
                         if (cpfDigits.length < 4) { onUpdate("_toast","⚠️ CPF inválido — não foi possível gerar PIN automático"); return; }
                         const newPin = cpfDigits.slice(0,4);
                         if(!await appConfirm(`Resetar PIN de "${m.name}"?\n\nO PIN voltará para ${newPin} (4 primeiros dígitos do CPF) e ele será obrigado a trocar no próximo acesso.`)) return;
-                        onUpdate("managers", managers.map(x=>x.id===m.id?{...x,pin:newPin,mustChangePin:true}:x));
+                        // v7.7: sincroniza reset nos 3 records (manager + pessoa + employee) com mustChangePin=true
+                        const allPessoas = data?.pessoas || [];
+                        const allEmployees = data?.employees || [];
+                        onUpdate("managers", managers.map(x=>{
+                          if (x.id === m.id) return { ...x, pin:newPin, mustChangePin:true };
+                          if ((x.cpf||"").replace(/\D/g,"") === cpfDigits) return { ...x, pin:newPin, mustChangePin:true };
+                          return x;
+                        }));
+                        if (allPessoas.length > 0) onUpdate("pessoas", allPessoas.map(p=>{
+                          if (p.linkedManagerId === m.id) return { ...p, pin:newPin, mustChangePin:true };
+                          if ((p.cpf||"").replace(/\D/g,"") === cpfDigits) return { ...p, pin:newPin, mustChangePin:true };
+                          return p;
+                        }));
+                        if (allEmployees.length > 0) onUpdate("employees", allEmployees.map(e=>{
+                          if ((e.cpf||"").replace(/\D/g,"") === cpfDigits) return { ...e, pin:newPin, mustChangePin:true };
+                          return e;
+                        }));
                         onUpdate("_toast", `🔐 PIN de ${m.name} resetado para ${newPin}`);
                       }} title="Resetar PIN para os 4 primeiros dígitos do CPF" style={{...S.btnSecondary,fontSize:isMobile?11:12,flex:isMobile?1:undefined,textAlign:"center",padding:isMobile?"6px 8px":undefined}}>{isMobile?"🔐 PIN":"🔐 Resetar PIN"}</button>
                       <button onClick={()=>{setEditMgrId(m.id);setMgrForm({name:m.name,cpf:m.cpf??"",pin:m.pin??"",restaurantIds:m.restaurantIds??[],perms:m.perms??{tips:true,schedule:true},isDP:m.isDP??false,profile:m.profile??"custom",areas:m.areas??[],masterRestaurantIds:m.masterRestaurantIds??[]});setShowMgrModal(true);}} style={{...S.btnSecondary,fontSize:isMobile?11:12,flex:isMobile?1:undefined,textAlign:"center",padding:isMobile?"6px 8px":undefined}}>Editar</button>
@@ -15868,7 +15925,24 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme, 
                     <button onClick={()=>{setEditMgrId(m.id);setMgrForm({name:m.name,cpf:m.cpf??"",pin:m.pin??"",restaurantIds:m.restaurantIds??[],perms:m.perms??{tips:true,schedule:true},isDP:m.isDP??false,profile:m.profile??"custom",areas:m.areas??[]});setShowMgrModal(true);}} style={{...S.btnSecondary,fontSize:isMobile?11:12,flex:isMobile?1:undefined,textAlign:"center"}}>✏️ Editar</button>
                     <button onClick={async ()=>{
                       if(!await appConfirm(`Resetar o PIN de ${m.name}? O novo PIN temporário será 0000.`)) return;
-                      onUpdate("managers", managers.map(x=>x.id===m.id?{...x,pin:"0000",mustChangePin:true}:x));
+                      // v7.7: sincroniza reset nos 3 records (manager + pessoa + employee linked) com mustChangePin=true
+                      const cpfDigits = (m.cpf||"").replace(/\D/g,"");
+                      const allPessoas = data?.pessoas || [];
+                      const allEmployees = data?.employees || [];
+                      onUpdate("managers", managers.map(x=>{
+                        if (x.id === m.id) return { ...x, pin:"0000", mustChangePin:true };
+                        if (cpfDigits && (x.cpf||"").replace(/\D/g,"") === cpfDigits) return { ...x, pin:"0000", mustChangePin:true };
+                        return x;
+                      }));
+                      if (allPessoas.length > 0) onUpdate("pessoas", allPessoas.map(p=>{
+                        if (p.linkedManagerId === m.id) return { ...p, pin:"0000", mustChangePin:true };
+                        if (cpfDigits && (p.cpf||"").replace(/\D/g,"") === cpfDigits) return { ...p, pin:"0000", mustChangePin:true };
+                        return p;
+                      }));
+                      if (allEmployees.length > 0 && cpfDigits) onUpdate("employees", allEmployees.map(e=>{
+                        if ((e.cpf||"").replace(/\D/g,"") === cpfDigits) return { ...e, pin:"0000", mustChangePin:true };
+                        return e;
+                      }));
                       onUpdate("_toast",`🔐 PIN de ${m.name} resetado para 0000`);
                     }} style={{...S.btnSecondary,fontSize:isMobile?11:12,flex:isMobile?1:undefined,textAlign:"center"}}>{isMobile?"🔐 PIN":"🔐 Resetar PIN"}</button>
                   </div>
