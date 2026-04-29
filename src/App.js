@@ -3,7 +3,7 @@ import React, { useState, useEffect, useMemo, useRef, Component } from "react";
 import { db } from "./firebase";
 import { doc, getDoc, setDoc } from "firebase/firestore";
 
-const APP_VERSION = "7.9.0";
+const APP_VERSION = "7.9.1";
 
 const DEFAULT_ADMISSION = () => `${new Date().getFullYear()}-01-01`;
 const round2 = (v) => Math.round(v * 100) / 100;
@@ -10024,7 +10024,24 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
     setSchedLocalEdits(null);
   }
 
-  const curSplit  = splits?.[rid]?.[mk] ?? DEFAULT_SPLIT;
+  // v7.9: usa getSplitForDate (suporta versionado novo + legacy). Pega regra ativa
+  // no fim do mês visualizado (mk) — essa é a referência canônica pra resumo do mês.
+  const _mkLastDay = (() => {
+    const [yy, mm] = mk.split("-").map(Number);
+    const last = new Date(yy, mm, 0).getDate(); // último dia do mês
+    return `${mk}-${String(last).padStart(2, "0")}`;
+  })();
+  const _activeSplitMk = getSplitForDate(splits?.[rid], _mkLastDay);
+  const _empsPerAreaMk = {};
+  (employees || [])
+    .filter(e => e.restaurantId === rid && !e.isFreela && !(e.inactive && e.inactiveFrom && e.inactiveFrom <= _mkLastDay))
+    .forEach(e => {
+      const r = (roles || []).find(x => x.id === e.roleId);
+      if (r?.area) _empsPerAreaMk[r.area] = (_empsPerAreaMk[r.area] || 0) + 1;
+    });
+  const curSplit = _activeSplitMk?.percentages
+    ? computeAreaPercentages(_activeSplitMk.percentages, _empsPerAreaMk)
+    : DEFAULT_SPLIT;
   const monthTips = tips.filter(t => t.restaurantId === rid && t.monthKey === mk);
   const tipDates  = [...new Set(monthTips.map(t => t.date))].sort();
   const totalNet   = monthTips.reduce((a, t) => a + t.myNet, 0);
@@ -13242,8 +13259,19 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
               const restRolesSem = (data?.roles??[]).filter(r=>r.restaurantId===rid&&!r.inactive&&r.noTip);
               const totalPts = restRolesCom.reduce((s,r)=>s+(parseFloat(r.points)||0),0);
               const now2 = new Date();
-              const mk2 = `${now2.getFullYear()}-${String(now2.getMonth()+1).padStart(2,"0")}`;
-              const curSplit2 = splits?.[rid]?.[mk2] ?? DEFAULT_SPLIT;
+              // v7.9.1: getSplitForDate (suporta versionado novo + legacy)
+              const _todayStr2 = now2.toISOString().slice(0, 10);
+              const _activeSplit2 = getSplitForDate(splits?.[rid], _todayStr2);
+              const _empsPerArea2 = {};
+              (data?.employees || [])
+                .filter(e => e.restaurantId === rid && !e.isFreela && !(e.inactive && e.inactiveFrom && e.inactiveFrom <= _todayStr2))
+                .forEach(e => {
+                  const r = (data?.roles || []).find(x => x.id === e.roleId);
+                  if (r?.area) _empsPerArea2[r.area] = (_empsPerArea2[r.area] || 0) + 1;
+                });
+              const curSplit2 = _activeSplit2?.percentages
+                ? computeAreaPercentages(_activeSplit2.percentages, _empsPerArea2)
+                : DEFAULT_SPLIT;
               const EX = 1000;
               const fmtR2 = n=>n.toLocaleString("pt-BR",{minimumFractionDigits:2,maximumFractionDigits:2});
 
