@@ -3,7 +3,7 @@ import React, { useState, useEffect, useMemo, useRef, Component } from "react";
 import { db } from "./firebase";
 import { doc, getDoc, setDoc } from "firebase/firestore";
 
-const APP_VERSION = "7.9.1";
+const APP_VERSION = "8.0.0";
 
 const DEFAULT_ADMISSION = () => `${new Date().getFullYear()}-01-01`;
 const round2 = (v) => Math.round(v * 100) / 100;
@@ -197,6 +197,18 @@ const fmtDate = (d) => d ? new Date(d + "T12:00:00").toLocaleDateString("pt-BR")
 const today = () => new Date().toISOString().slice(0, 10);
 const maskCpf = (v) => { const d = (v ?? "").replace(/\D/g,"").slice(0,11); if(d.length<=3) return d; if(d.length<=6) return `${d.slice(0,3)}.${d.slice(3)}`; if(d.length<=9) return `${d.slice(0,3)}.${d.slice(3,6)}.${d.slice(6)}`; return `${d.slice(0,3)}.${d.slice(3,6)}.${d.slice(6,9)}-${d.slice(9,11)}`; };
 const monthKey = (y, m) => `${y}-${String(m + 1).padStart(2, "0")}`;
+
+// v8.0 — Default inteligente de mês pra telas que tipicamente envolvem planejamento/visualização forward.
+// Se hoje é dia ≥ 20, o usuário provavelmente quer ver o PRÓXIMO mês (estamos no fim do mês atual,
+// planejando o que vem). Senão, default = mês atual.
+function smartDefaultMonth() {
+  const d = new Date();
+  if (d.getDate() >= 20) {
+    const next = new Date(d.getFullYear(), d.getMonth() + 1, 1);
+    return { year: next.getFullYear(), month: next.getMonth() };
+  }
+  return { year: d.getFullYear(), month: d.getMonth() };
+}
 const monthLabel = (y, m) => new Date(y, m, 1).toLocaleDateString("pt-BR", { month: "long", year: "numeric" });
 const getWeekMonday = (dateStr) => { const d = new Date(dateStr + "T12:00:00"); const day = d.getDay(); const diff = d.getDate() - day + (day === 0 ? -6 : 1); d.setDate(diff); return d.toISOString().slice(0, 10); };
 
@@ -6647,9 +6659,10 @@ function EmployeeSpreadsheet({ restEmps, restRoles, rid, employees, pessoas, onU
 // VALE TRANSPORTE TAB
 // ═══════════════════════════════════════════════════════════════════
 function ValeTransporteTab({ restaurantId, employees, roles, workSchedules, schedules, vtConfig, vtMonthly, vtPayments, onUpdate, currentUser, isOwner, mobileOnly, schedulePrevista, scheduleStatus, scheduleVersions }) {
-  const now = new Date();
-  const [year, setYear] = useState(now.getFullYear());
-  const [month, setMonth] = useState(now.getMonth());
+  // v8.0 — default inteligente: dia ≥ 20 → próximo mês (planejamento de fechamento)
+  const _smartDefVT = smartDefaultMonth();
+  const [year, setYear] = useState(_smartDefVT.year);
+  const [month, setMonth] = useState(_smartDefVT.month);
   const mk = monthKey(year, month);
   const ac = "var(--accent)";
   const [showPayDateModal, setShowPayDateModal] = useState(false);
@@ -9976,8 +9989,10 @@ function EmpTrilhaView({ empId, employees, roles, schedules, incidents, feedback
 
 function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, splits, schedules, onUpdate, perms, isOwner, data, currentUser, privacyMask, mobileOnly, onEnterOperational, hideTabNav, forceTab, realIsOwner, onStartImpersonate, restrictToOperational }) {
   const now = new Date();
-  const [year, setYear] = useState(now.getFullYear());
-  const [month, setMonth] = useState(now.getMonth());
+  // v8.0 — default inteligente: dia ≥ 20 → próximo mês (planejamento)
+  const _smartDef = smartDefaultMonth();
+  const [year, setYear] = useState(_smartDef.year);
+  const [month, setMonth] = useState(_smartDef.month);
   const mk = monthKey(year, month);
   const rid = restaurant.id;
 
@@ -10673,14 +10688,38 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
 
       <div style={{ padding:mobileOnly?"12px 10px":"20px 24px", maxWidth:1100, margin:"0 auto" }}>
         {["dashboard","tips","schedule"].includes(tab) && (
-          <div style={{ marginBottom: 20 }}><MonthNav year={year} month={month} onChange={async (y,m)=>{
-            if (tab === "schedule" && schedDirty) {
-              const action = await appConfirm("Você tem edições na escala não salvas.\n\nDeseja salvar como nova versão antes de mudar de mês?");
-              if (action) commitPendingScheduleEdits();
-              else setSchedLocalEdits(null);
-            }
-            setYear(y);setMonth(m);setWeekIdx(calcWeekForToday(y,m));
-          }} /></div>
+          <>
+            <div style={{ marginBottom: 12 }}><MonthNav year={year} month={month} onChange={async (y,m)=>{
+              if (tab === "schedule" && schedDirty) {
+                const action = await appConfirm("Você tem edições na escala não salvas.\n\nDeseja salvar como nova versão antes de mudar de mês?");
+                if (action) commitPendingScheduleEdits();
+                else setSchedLocalEdits(null);
+              }
+              setYear(y);setMonth(m);setWeekIdx(calcWeekForToday(y,m));
+              onUpdate("_toast", `📅 ${monthLabel(y, m)} selecionado`);
+            }} /></div>
+            {/* v8.0 — Banner contextual de mês: futuro/atual/passado/fechado, cor-coded */}
+            {(() => {
+              const today = new Date();
+              const cYear = today.getFullYear(); const cMonth = today.getMonth();
+              const isFuture = year > cYear || (year === cYear && month > cMonth);
+              const isPast = year < cYear || (year === cYear && month < cMonth);
+              const isClosed = !!data?.scheduleStatus?.[rid]?.[mk] && data.scheduleStatus[rid][mk].status === "closed";
+              let bg, color, label;
+              if (isClosed) { bg = "#dc262615"; color = "#dc2626"; label = "🔒 Mês fechado — somente leitura recomendada"; }
+              else if (isPast) { bg = "#64748b15"; color = "#64748b"; label = "⚠️ Mês passado — edições retroativas"; }
+              else if (isFuture) { bg = "#16a34a15"; color = "#16a34a"; label = "📆 Mês futuro — planejamento"; }
+              else { bg = "#d4a01715"; color = "#d4a017"; label = "📍 Mês vigente"; }
+              return (
+                <div style={{ background:bg, border:`1px solid ${color}33`, borderLeft:`4px solid ${color}`, borderRadius:10, padding:mobileOnly?"10px 14px":"12px 18px", marginBottom: 16, display:"flex", alignItems:"center", justifyContent:"space-between", gap:12, flexWrap:"wrap" }}>
+                  <div style={{ display:"flex", alignItems:"center", gap:10 }}>
+                    <span style={{ fontSize:mobileOnly?15:18, fontWeight:800, color }}>Você está em {monthLabel(year, month)}</span>
+                    <span style={{ fontSize:mobileOnly?11:12, color, fontWeight:600 }}>{label}</span>
+                  </div>
+                </div>
+              );
+            })()}
+          </>
         )}
 
         {/* Banner de privacidade */}
