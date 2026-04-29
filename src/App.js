@@ -3,7 +3,7 @@ import React, { useState, useEffect, useMemo, useRef, Component } from "react";
 import { db } from "./firebase";
 import { doc, getDoc, setDoc } from "firebase/firestore";
 
-const APP_VERSION = "8.0.0";
+const APP_VERSION = "8.1.0";
 
 const DEFAULT_ADMISSION = () => `${new Date().getFullYear()}-01-01`;
 const round2 = (v) => Math.round(v * 100) / 100;
@@ -6668,6 +6668,7 @@ function ValeTransporteTab({ restaurantId, employees, roles, workSchedules, sche
   const [showPayDateModal, setShowPayDateModal] = useState(false);
   const [payDate, setPayDate] = useState(today());
   const [versionWarning, setVersionWarning] = useState(null);
+  const [vtSavedAt, setVtSavedAt] = useState(null); // v8.1 — timestamp do último auto-save
 
   const restEmps = (employees ?? []).filter(e => e.restaurantId === restaurantId && !e.isFreela && !(e.inactive && e.inactiveFrom && e.inactiveFrom <= today()));
   const restRoles = (roles ?? []).filter(r => r.restaurantId === restaurantId);
@@ -6814,6 +6815,7 @@ function ValeTransporteTab({ restaurantId, employees, roles, workSchedules, sche
     });
     onUpdate("vtMonthly", newMonthly);
     setDirty(false);
+    setVtSavedAt(Date.now()); // v8.1 — atualiza indicador de save
   }
 
 
@@ -7061,7 +7063,10 @@ function ValeTransporteTab({ restaurantId, employees, roles, workSchedules, sche
     <div>
       {/* Header */}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 12, marginBottom: 16 }}>
-        <h3 style={{ color: "var(--text)", margin: 0, fontSize: mobileOnly ? 16 : 20 }}>🚌 Vale Transporte</h3>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+          <h3 style={{ color: "var(--text)", margin: 0, fontSize: mobileOnly ? 16 : 20 }}>🚌 Vale Transporte</h3>
+          <SaveIndicator mode="auto" pending={dirty} savedAt={vtSavedAt} compact />
+        </div>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
           <button onClick={exportCSV} style={{ ...S.btnSecondary, fontSize: 12, padding: "6px 14px" }}>📊 CSV</button>
           <button onClick={exportPDF} style={{ ...S.btnSecondary, fontSize: 12, padding: "6px 14px" }}>🖨️ PDF</button>
@@ -9987,6 +9992,39 @@ function EmpTrilhaView({ empId, employees, roles, schedules, incidents, feedback
   );
 }
 
+// v8.1 — Indicador padronizado de status de salvamento.
+// Usado tanto em telas auto-save quanto em telas com botão Salvar manual.
+// Props:
+//   mode: "auto" (auto-save) ou "manual" (botão explícito)
+//   pending: bool — há edições não persistidas?
+//   savedAt: Date|number|null — timestamp do último save bem-sucedido (auto)
+//   compact: bool — versão pequena pra encaixar em header
+function SaveIndicator({ mode = "auto", pending = false, savedAt = null, compact = false }) {
+  const fmtTime = (t) => {
+    if (!t) return "";
+    const d = t instanceof Date ? t : new Date(t);
+    return d.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
+  };
+  let bg, color, text;
+  if (mode === "auto") {
+    if (pending) { bg = "#f59e0b15"; color = "#b45309"; text = "💾 Salvando…"; }
+    else if (savedAt) { bg = "#10b98115"; color = "var(--green)"; text = `✓ Salvo às ${fmtTime(savedAt)}`; }
+    else { bg = "#3b82f615"; color = "#0284c7"; text = "✓ Salvamento automático ativo"; }
+  } else {
+    if (pending) { bg = "#f59e0b22"; color = "#b45309"; text = "📝 Edições não salvas"; }
+    else { bg = "#10b98115"; color = "var(--green)"; text = "✓ Salvo"; }
+  }
+  return (
+    <span style={{
+      display: "inline-flex", alignItems: "center", gap: 6,
+      padding: compact ? "3px 8px" : "5px 11px",
+      borderRadius: 999, background: bg, color,
+      fontSize: compact ? 10 : 11, fontWeight: 700, whiteSpace: "nowrap",
+      fontFamily: "'DM Sans',sans-serif",
+    }}>{text}</span>
+  );
+}
+
 function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, splits, schedules, onUpdate, perms, isOwner, data, currentUser, privacyMask, mobileOnly, onEnterOperational, hideTabNav, forceTab, realIsOwner, onStartImpersonate, restrictToOperational }) {
   const now = new Date();
   // v8.0 — default inteligente: dia ≥ 20 → próximo mês (planejamento)
@@ -12248,6 +12286,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
             <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:12,marginBottom:schedDirty?8:16}}>
               <div style={{display:"flex",alignItems:"center",gap:10,flexWrap:"wrap"}}>
                 <h3 style={{color:"var(--text)",margin:0,fontSize:mobileOnly?16:20}}>📅 Escala — {monthLabel(year,month)}</h3>
+                <SaveIndicator mode="manual" pending={schedDirty} compact />
                 {monthClosed && <span style={{fontSize:11,padding:"3px 10px",borderRadius:6,background:"var(--red)22",color:"var(--red)",fontWeight:700}}>Mes fechado</span>}
                 {(() => { const vtPaidInfo = data?.vtPayments?.[rid]?.[mk]; return vtPaidInfo ? <span style={{fontSize:11,padding:"3px 10px",borderRadius:6,background:"#10b98122",color:"var(--green)",fontWeight:700}}>VT pago em {new Date(vtPaidInfo.paidAt).toLocaleDateString("pt-BR")}</span> : null; })()}
                 <div style={{display:"flex",borderRadius:6,overflow:"hidden",border:"1px solid var(--border)"}}>
