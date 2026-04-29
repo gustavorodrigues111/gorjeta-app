@@ -3,7 +3,7 @@ import React, { useState, useEffect, useMemo, useRef, Component } from "react";
 import { db } from "./firebase";
 import { doc, getDoc, setDoc } from "firebase/firestore";
 
-const APP_VERSION = "7.7.0";
+const APP_VERSION = "7.8.0";
 
 const DEFAULT_ADMISSION = () => `${new Date().getFullYear()}-01-01`;
 const round2 = (v) => Math.round(v * 100) / 100;
@@ -19641,14 +19641,15 @@ function buildShellSections({ pessoa, restaurantId, isOwner, employees }) {
   // 1) MINHA JORNADA — área PESSOAL do membro da equipe (v7.5)
   // Renomeado de "Meu Dia". Conteúdo limpo: só itens pessoais (extrato, escala, trilhas).
   // Comunicados/FAQ/DP saíram pra seção "Comunicação" (todos).
+  // v7.8: tab IDs ajustados pra bater com os do EmployeePortal (extrato, escala) — não com os do admin (gorjeta, schedule).
   if (isTeam) {
     sections.push({
       group: "Minha Jornada",
       color: "#d4a017",
       items: [
-        { id: "me_gorjeta", label: "Meu extrato",    icon: "💰", kind: "employee", tab: "gorjeta" },
-        { id: "me_escala",  label: "Minha escala",   icon: "📅", kind: "employee", tab: "schedule" },
-        { id: "me_trilha",  label: "Minhas trilhas", icon: "🎯", kind: "employee", tab: "trilha" },
+        { id: "me_extrato", label: "Meu extrato",    icon: "💰", kind: "employee", tab: "extrato" },
+        { id: "me_escala",  label: "Minha escala",   icon: "📅", kind: "employee", tab: "escala"  },
+        { id: "me_trilha",  label: "Minhas trilhas", icon: "🎯", kind: "employee", tab: "trilha"  },
       ],
     });
   }
