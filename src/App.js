@@ -6930,7 +6930,7 @@ function ValeTransporteTab({ restaurantId, employees, roles, workSchedules, sche
           })
         ) : (
           /* ── DESKTOP: table section ── */
-          <div style={{ ...S.card, padding: 0, overflow: "hidden", marginBottom: 4 }}>
+          <div style={{ ...S.card, padding: "0 12px", overflow: "hidden", marginBottom: 4 }}>
             <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13, tableLayout: "fixed" }}>
               <thead>
                 <tr style={{ background: "var(--bg1)" }}>
