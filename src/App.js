@@ -3,7 +3,7 @@ import React, { useState, useEffect, useMemo, useRef, Component } from "react";
 import { db } from "./firebase";
 import { doc, getDoc, setDoc } from "firebase/firestore";
 
-const APP_VERSION = "7.3.0";
+const APP_VERSION = "7.4.0";
 
 const DEFAULT_ADMISSION = () => `${new Date().getFullYear()}-01-01`;
 const round2 = (v) => Math.round(v * 100) / 100;
@@ -9974,11 +9974,20 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
   const managerAreas = perms.managerAreas ?? [];
   const isLider = managerAreas.length > 0;
   const allRestEmps = employees.filter(e => e.restaurantId === rid && !(e.inactive && e.inactiveFrom && e.inactiveFrom <= today()));
-  // For schedule: include dismissed employees whose dismissal month matches the viewed month
-  const allSchedEmps = employees.filter(e => e.restaurantId === rid && (
-    !(e.inactive && e.inactiveFrom && e.inactiveFrom <= today()) ||
-    (e.demitidoEm && e.demitidoEm.slice(0,7) === mk)
-  ));
+  // For schedule: regra v7.4
+  //   - Empregado demitido em MÊS ANTERIOR ao visualizado (mk) → fora, sempre
+  //     (mesmo que inactive flag não tenha sido setado por algum bug histórico)
+  //   - Empregado inativo por outro motivo (ex.: férias, afastamento longo) → fora
+  //   - Empregado demitido NESTE mês visualizado → APARECE (pra ver últimos dias)
+  //   - Empregado ativo → APARECE
+  const allSchedEmps = employees.filter(e => {
+    if (e.restaurantId !== rid) return false;
+    const demMonth = e.demitidoEm ? e.demitidoEm.slice(0,7) : null;
+    if (demMonth && demMonth < mk) return false; // demitido antes deste mês — sempre fora
+    const isInactiveNow = !!(e.inactive && e.inactiveFrom && e.inactiveFrom <= today());
+    if (isInactiveNow && demMonth !== mk) return false; // inativo e não demitido neste mês — fora
+    return true;
+  });
   const restRoles = roles.filter(r => r.restaurantId === rid);
   const restEmps  = isLider
     ? allRestEmps.filter(e => { const role = restRoles.find(r => r.id === e.roleId); return role && managerAreas.includes(role.area); })
