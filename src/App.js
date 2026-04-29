@@ -6858,8 +6858,9 @@ function ValeTransporteTab({ restaurantId, employees, roles, workSchedules, sche
   const goMonth = (dir) => { const d = new Date(year, month + dir, 1); setYear(d.getFullYear()); setMonth(d.getMonth()); };
 
   // ── Render helpers ──
-  const inputStyle = { ...S.input, width: mobileOnly ? 80 : 100, textAlign: "right", padding: "8px 10px", fontSize: 14 };
-  const cellPad = mobileOnly ? "8px 6px" : "12px 16px";
+  // v7.2: width reduzida pra caber tudo sem scroll horizontal no desktop
+  const inputStyle = { ...S.input, width: mobileOnly ? 80 : 80, textAlign: "right", padding: "6px 8px", fontSize: 13 };
+  const cellPad = mobileOnly ? "8px 6px" : "9px 10px";
 
   // ── BR money input helpers (inline, not a component — avoids focus loss) ──
   const moneyOnChange = (e, setter, empId, field) => {
@@ -6929,20 +6930,20 @@ function ValeTransporteTab({ restaurantId, employees, roles, workSchedules, sche
           })
         ) : (
           /* ── DESKTOP: table section ── */
-          <div style={{ ...S.card, padding: 0, overflow: "auto", marginBottom: 4 }}>
-            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 14 }}>
+          <div style={{ ...S.card, padding: 0, overflow: "hidden", marginBottom: 4 }}>
+            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13, tableLayout: "fixed" }}>
               <thead>
                 <tr style={{ background: "var(--bg1)" }}>
                   <th style={{ padding: cellPad, textAlign: "left", color: "var(--text)", fontWeight: 700, borderBottom: "2px solid var(--border)" }}>Empregado</th>
-                  <th style={{ padding: cellPad, textAlign: "left", color: "var(--text3)", fontWeight: 600, borderBottom: "2px solid var(--border)" }}>Cargo</th>
-                  <th style={{ padding: cellPad, textAlign: "right", color: "var(--text3)", fontWeight: 600, borderBottom: "2px solid var(--border)", width: 110 }}>VT Diário</th>
-                  <th style={{ padding: cellPad, textAlign: "center", color: "var(--text3)", fontWeight: 600, borderBottom: "2px solid var(--border)", width: 60 }}>Dias</th>
-                  <th style={{ padding: cellPad, textAlign: "right", color: "var(--text3)", fontWeight: 600, borderBottom: "2px solid var(--border)", width: 110 }}>VT Bruto</th>
-                  <th style={{ padding: cellPad, textAlign: "center", color: "var(--text3)", fontWeight: 600, borderBottom: "2px solid var(--border)", width: 80 }}>Real (mês ant.)</th>
-                  <th style={{ padding: cellPad, textAlign: "right", color: "var(--text3)", fontWeight: 600, borderBottom: "2px solid var(--border)", width: 140 }}>Ajuste Mês Ant.</th>
-                  <th style={{ padding: cellPad, textAlign: "right", color: "var(--text3)", fontWeight: 600, borderBottom: "2px solid var(--border)", width: 120 }} title="Pré-preenchido com o valor do mês anterior">Ajuda de Custo</th>
-                  <th style={{ padding: cellPad, textAlign: "right", color: "var(--text3)", fontWeight: 600, borderBottom: "2px solid var(--border)", width: 110 }}>Desconto</th>
-                  <th style={{ padding: cellPad, textAlign: "right", color: "var(--text)", fontWeight: 700, borderBottom: "2px solid var(--border)", width: 120 }}>Total</th>
+                  <th style={{ padding: cellPad, textAlign: "left", color: "var(--text3)", fontWeight: 600, borderBottom: "2px solid var(--border)", width: "13%" }}>Cargo</th>
+                  <th style={{ padding: cellPad, textAlign: "right", color: "var(--text3)", fontWeight: 600, borderBottom: "2px solid var(--border)", width: 86 }}>VT Diário</th>
+                  <th style={{ padding: cellPad, textAlign: "center", color: "var(--text3)", fontWeight: 600, borderBottom: "2px solid var(--border)", width: 50 }}>Dias</th>
+                  <th style={{ padding: cellPad, textAlign: "right", color: "var(--text3)", fontWeight: 600, borderBottom: "2px solid var(--border)", width: 85 }}>VT Bruto</th>
+                  <th style={{ padding: cellPad, textAlign: "center", color: "var(--text3)", fontWeight: 600, borderBottom: "2px solid var(--border)", width: 60 }} title="Dias trabalhados no mês anterior (quando fechado)">Real ant.</th>
+                  <th style={{ padding: cellPad, textAlign: "right", color: "var(--text3)", fontWeight: 600, borderBottom: "2px solid var(--border)", width: 100 }}>Ajuste</th>
+                  <th style={{ padding: cellPad, textAlign: "right", color: "var(--text3)", fontWeight: 600, borderBottom: "2px solid var(--border)", width: 90 }} title="Pré-preenchido com o valor do mês anterior">Ajuda</th>
+                  <th style={{ padding: cellPad, textAlign: "right", color: "var(--text3)", fontWeight: 600, borderBottom: "2px solid var(--border)", width: 86 }}>Desconto</th>
+                  <th style={{ padding: cellPad, textAlign: "right", color: "var(--text)", fontWeight: 700, borderBottom: "2px solid var(--border)", width: 96 }}>Total</th>
                 </tr>
               </thead>
               <tbody>
@@ -6959,9 +6960,11 @@ function ValeTransporteTab({ restaurantId, employees, roles, workSchedules, sche
                       <td style={{ padding: cellPad, textAlign: "right", color: "var(--text)", fontFamily: "'DM Mono',monospace" }}>{fmt(r.grossVT)}</td>
                       <td style={{ padding: cellPad, textAlign: "center", color: r.prevActualDays !== null ? "var(--text)" : "var(--text3)", fontFamily: "'DM Mono',monospace", fontSize: 13 }}>{r.prevActualDays !== null ? r.prevActualDays : "—"}</td>
                       <td style={{ padding: cellPad, textAlign: "right" }}>
-                        <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 6 }}>
-                          {r.suggestedAdjust !== 0 && <span style={{ fontSize: 10, color: "var(--text3)" }} title="Sugerido pelo sistema">({r.suggestedAdjust > 0 ? "+" : ""}{fmtBR(r.suggestedAdjust)})</span>}
+                        <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 2 }}>
                           <input type="text" inputMode="decimal" placeholder="0,00" value={localOverrides[r.emp.id]?.adjustDisplay ?? toBR(r.autoAdjust)} onChange={e => moneyOnChange(e, setLocalOverrides, r.emp.id, "adjust")} onBlur={e => moneyOnBlur(e, setLocalOverrides, r.emp.id, "adjust")} style={{ ...inputStyle, color: adjustColor }} />
+                          {r.suggestedAdjust !== 0 && r.suggestedAdjust !== r.autoAdjust && (
+                            <span style={{ fontSize: 9, color: "var(--text3)" }} title="Sugerido pelo sistema com base no mês anterior">sug: {r.suggestedAdjust > 0 ? "+" : ""}{fmtBR(r.suggestedAdjust)}</span>
+                          )}
                         </div>
                       </td>
                       <td style={{ padding: cellPad, textAlign: "right" }}>
