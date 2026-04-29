@@ -3,7 +3,7 @@ import React, { useState, useEffect, useMemo, useRef, Component } from "react";
 import { db } from "./firebase";
 import { doc, getDoc, setDoc } from "firebase/firestore";
 
-const APP_VERSION = "7.1.0";
+const APP_VERSION = "7.2.0";
 
 const DEFAULT_ADMISSION = () => `${new Date().getFullYear()}-01-01`;
 const round2 = (v) => Math.round(v * 100) / 100;
@@ -428,8 +428,8 @@ const K = {
   scheduleVersions: "v4:scheduleVersions", // {[restaurantId]: {[monthKey]: [{id,ts,author,reason,snapshot}]}}
   tipVersions:      "v4:tipVersions",      // {[restaurantId]: {[monthKey]: [{id,ts,author,reason,snapshot}]}}
   vtConfig:         "v4:vtConfig",          // {[restaurantId]: {[employeeId]: {dailyRate: number}}}
-  vtMonthly:        "v4:vtMonthly",         // {[restaurantId]: {[monthKey]: {[employeeId]: {adjustOverride: number|null, manualDiscount: number}}}}
-  vtPayments:       "v4:vtPayments",        // {[restaurantId]: {[monthKey]: {paidAt: ISO, paidBy: string, snapshot: [{empId,name,role,dailyRate,plannedDays,grossVT,autoAdjust,manualDiscount,totalPaid}]}}}
+  vtMonthly:        "v4:vtMonthly",         // {[restaurantId]: {[monthKey]: {[employeeId]: {adjustOverride: number|null, manualDiscount: number, manualBonus: number}}}}
+  vtPayments:       "v4:vtPayments",        // {[restaurantId]: {[monthKey]: {paidAt: ISO, paidBy: string, snapshot: [{empId,name,role,dailyRate,plannedDays,grossVT,autoAdjust,manualBonus,manualDiscount,totalPaid}]}}}
   incidents:        "v4:incidents",         // [{id, restaurantId, employeeIds:[], type, severity, description, date, createdAt, createdBy, createdById, visibility:"internal"}]
   feedbacks:        "v4:feedbacks",         // [{id, restaurantId, employeeId, quarter, year, rating, strengths, improvements, internalNotes, goal, targetRoleId, devChecklist:[{title,link,type,done}], createdAt, createdBy}]
   devChecklists:    "v4:devChecklists",     // {[roleId]: [{title, link, type:"livro"|"video"|"curso"|"pratica"}]}
@@ -6611,9 +6611,33 @@ function ValeTransporteTab({ restaurantId, employees, roles, workSchedules, sche
 
   useEffect(() => {
     const monthData = vtMonthly?.[restaurantId]?.[mk] ?? {};
+    // v7.2: pre-fill da coluna Ajuda de Custo (manualBonus) com o valor do MESMO empregado no mês anterior.
+    // Fallback: vtMonthly do prevMk → snapshot pago em vtPayments do prevMk → 0.
+    const prevDateLocal = new Date(year, month - 1, 1);
+    const prevMkLocal = monthKey(prevDateLocal.getFullYear(), prevDateLocal.getMonth());
+    const prevMonthData = vtMonthly?.[restaurantId]?.[prevMkLocal] ?? {};
+    const prevPay = vtPayments?.[restaurantId]?.[prevMkLocal];
+    const prevBonusFor = (empId) => {
+      if (prevMonthData[empId]?.manualBonus !== undefined && prevMonthData[empId]?.manualBonus !== null) {
+        return prevMonthData[empId].manualBonus;
+      }
+      const ps = prevPay?.snapshot?.find(s => s.empId === empId);
+      if (ps?.manualBonus !== undefined && ps?.manualBonus !== null) return ps.manualBonus;
+      return 0;
+    };
     const overrides = {};
-    Object.entries(monthData).forEach(([empId, v]) => {
-      overrides[empId] = { adjustOverride: v.adjustOverride ?? null, adjustDisplay: toBR(v.adjustOverride), manualDiscount: v.manualDiscount ?? 0, discountDisplay: toBR(v.manualDiscount) };
+    // Pré-popula TODOS os empregados (mesmo os sem registro no mês atual) pra puxar o bônus.
+    restEmps.forEach(emp => {
+      const v = monthData[emp.id] || {};
+      const bonus = (v.manualBonus !== undefined && v.manualBonus !== null) ? v.manualBonus : prevBonusFor(emp.id);
+      overrides[emp.id] = {
+        adjustOverride: v.adjustOverride ?? null,
+        adjustDisplay: toBR(v.adjustOverride),
+        manualDiscount: v.manualDiscount ?? 0,
+        discountDisplay: toBR(v.manualDiscount),
+        manualBonus: bonus,
+        bonusDisplay: toBR(bonus),
+      };
     });
     setLocalOverrides(overrides);
 
@@ -6681,7 +6705,8 @@ function ValeTransporteTab({ restaurantId, employees, roles, workSchedules, sche
     const overrides = localOverrides[emp.id] ?? {};
     const autoAdjust = overrides.adjustOverride !== null && overrides.adjustOverride !== undefined ? overrides.adjustOverride : suggestedAdjust;
     const manualDiscount = overrides.manualDiscount ?? 0;
-    const totalPaid = round2(grossVT + autoAdjust - manualDiscount);
+    const manualBonus = overrides.manualBonus ?? 0;
+    const totalPaid = round2(grossVT + autoAdjust + manualBonus - manualDiscount);
     // Previous month actual days (only when closed)
     const prevClosed = scheduleStatus?.[restaurantId]?.[prevMk]?.status === "closed";
     let prevActualDays = null;
@@ -6691,7 +6716,7 @@ function ValeTransporteTab({ restaurantId, employees, roles, workSchedules, sche
         prevActualDays = countActualDays(emp.id, prevMk, prevDate.getFullYear(), prevDate.getMonth());
       }
     }
-    return { emp, role, area, dailyRate, plannedDays, grossVT, suggestedAdjust, autoAdjust, manualDiscount, totalPaid, prevActualDays };
+    return { emp, role, area, dailyRate, plannedDays, grossVT, suggestedAdjust, autoAdjust, manualBonus, manualDiscount, totalPaid, prevActualDays };
   }).sort((a,b) => (a.emp.name??"").localeCompare(b.emp.name??""));
 
   // ── Group by area ──
@@ -6713,7 +6738,7 @@ function ValeTransporteTab({ restaurantId, employees, roles, workSchedules, sche
 
     const newMonthly = { ...(vtMonthly ?? {}), [restaurantId]: { ...(vtMonthly?.[restaurantId] ?? {}), [mk]: {} } };
     Object.entries(localOverrides).forEach(([empId, v]) => {
-      newMonthly[restaurantId][mk][empId] = { adjustOverride: v.adjustOverride ?? null, manualDiscount: v.manualDiscount ?? 0 };
+      newMonthly[restaurantId][mk][empId] = { adjustOverride: v.adjustOverride ?? null, manualDiscount: v.manualDiscount ?? 0, manualBonus: v.manualBonus ?? 0 };
     });
     onUpdate("vtMonthly", newMonthly);
     setDirty(false);
@@ -6759,18 +6784,18 @@ function ValeTransporteTab({ restaurantId, employees, roles, workSchedules, sche
       snapshot = rows.map(r => {
         const empDays = oldSched?.[r.emp.id] ? Object.values(oldSched[r.emp.id]).filter(s => s === "work" || s === null || s === undefined).length : r.plannedDays;
         const gross = round2(empDays * r.dailyRate);
-        const total = round2(gross + r.autoAdjust - (r.manualDiscount ?? 0));
+        const total = round2(gross + r.autoAdjust + (r.manualBonus ?? 0) - (r.manualDiscount ?? 0));
         return {
           empId: r.emp.id, name: r.emp.name, role: r.role?.name ?? "—", area: r.area,
           dailyRate: r.dailyRate, plannedDays: empDays, grossVT: gross,
-          autoAdjust: r.autoAdjust, manualDiscount: r.manualDiscount, totalPaid: Math.max(0, total),
+          autoAdjust: r.autoAdjust, manualBonus: r.manualBonus ?? 0, manualDiscount: r.manualDiscount, totalPaid: Math.max(0, total),
         };
       });
     } else {
       snapshot = rows.map(r => ({
         empId: r.emp.id, name: r.emp.name, role: r.role?.name ?? "—", area: r.area,
         dailyRate: r.dailyRate, plannedDays: r.plannedDays, grossVT: r.grossVT,
-        autoAdjust: r.autoAdjust, manualDiscount: r.manualDiscount, totalPaid: Math.max(0, r.totalPaid),
+        autoAdjust: r.autoAdjust, manualBonus: r.manualBonus ?? 0, manualDiscount: r.manualDiscount, totalPaid: Math.max(0, r.totalPaid),
       }));
     }
     const paidAtISO = new Date(chosenDate + "T12:00:00").toISOString();
@@ -6792,15 +6817,15 @@ function ValeTransporteTab({ restaurantId, employees, roles, workSchedules, sche
 
   // ── Export CSV (grouped) ──
   function exportCSV() {
-    const header = "Área;Empregado;Cargo;VT Diário;Dias;VT Bruto;Ajuste Mês Ant.;Desconto;Total";
+    const header = "Área;Empregado;Cargo;VT Diário;Dias;VT Bruto;Ajuste Mês Ant.;Ajuda de Custo;Desconto;Total";
     const csvRows = [];
     activeAreas.forEach(area => {
       const areaRows = byArea[area];
-      areaRows.forEach(r => { csvRows.push(`${area};${r.emp.name};${r.role?.name??"—"};${fmtBR(r.dailyRate)};${r.plannedDays};${fmtBR(r.grossVT)};${fmtBR(r.autoAdjust)};${fmtBR(r.manualDiscount)};${fmtBR(Math.max(0,r.totalPaid))}`); });
+      areaRows.forEach(r => { csvRows.push(`${area};${r.emp.name};${r.role?.name??"—"};${fmtBR(r.dailyRate)};${r.plannedDays};${fmtBR(r.grossVT)};${fmtBR(r.autoAdjust)};${fmtBR(r.manualBonus ?? 0)};${fmtBR(r.manualDiscount)};${fmtBR(Math.max(0,r.totalPaid))}`); });
       const sub = areaRows.reduce((s,r) => s + Math.max(0, r.totalPaid), 0);
-      csvRows.push(`${area};;;;;;;Subtotal;${fmtBR(sub)}`);
+      csvRows.push(`${area};;;;;;;;Subtotal;${fmtBR(sub)}`);
     });
-    csvRows.push(`;;;;;;;;TOTAL;${fmtBR(grandTotal)}`);
+    csvRows.push(`;;;;;;;;;TOTAL;${fmtBR(grandTotal)}`);
     const blob = new Blob(["\uFEFF" + header + "\n" + csvRows.join("\n")], { type: "text/csv;charset=utf-8;" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a"); a.href = url; a.download = `VT_${mk}.csv`; a.click(); URL.revokeObjectURL(url);
@@ -6815,15 +6840,16 @@ function ValeTransporteTab({ restaurantId, employees, roles, workSchedules, sche
     let tableBody = "";
     activeAreas.forEach(area => {
       const color = AREA_COLORS[area] ?? "#666";
-      tableBody += `<tr><td colspan="8" style="background:${color}18;color:${color};font-weight:700;padding:10px 12px;font-size:14px;border-left:4px solid ${color}">${area}</td></tr>`;
+      tableBody += `<tr><td colspan="9" style="background:${color}18;color:${color};font-weight:700;padding:10px 12px;font-size:14px;border-left:4px solid ${color}">${area}</td></tr>`;
       byArea[area].forEach(r => {
-        tableBody += `<tr><td>${r.emp.name}</td><td>${r.role?.name??"—"}</td><td style="text-align:right">${fmt(r.dailyRate)}</td><td style="text-align:center">${r.plannedDays}</td><td style="text-align:right">${fmt(r.grossVT)}</td><td style="text-align:right;color:${r.autoAdjust>=0?"green":"#b45309"}">${r.autoAdjust>=0?"+":""}${fmt(r.autoAdjust)}</td><td style="text-align:right;color:#b45309">${r.manualDiscount?"-"+fmt(r.manualDiscount):"—"}</td><td style="text-align:right;font-weight:700">${fmt(Math.max(0,r.totalPaid))}</td></tr>`;
+        const bonusVal = r.manualBonus ?? 0;
+        tableBody += `<tr><td>${r.emp.name}</td><td>${r.role?.name??"—"}</td><td style="text-align:right">${fmt(r.dailyRate)}</td><td style="text-align:center">${r.plannedDays}</td><td style="text-align:right">${fmt(r.grossVT)}</td><td style="text-align:right;color:${r.autoAdjust>=0?"green":"#b45309"}">${r.autoAdjust>=0?"+":""}${fmt(r.autoAdjust)}</td><td style="text-align:right;color:${bonusVal?"green":"#999"}">${bonusVal?"+"+fmt(bonusVal):"—"}</td><td style="text-align:right;color:#b45309">${r.manualDiscount?"-"+fmt(r.manualDiscount):"—"}</td><td style="text-align:right;font-weight:700">${fmt(Math.max(0,r.totalPaid))}</td></tr>`;
       });
       const sub = byArea[area].reduce((s,r) => s + Math.max(0, r.totalPaid), 0);
-      tableBody += `<tr style="background:#f9f9f9"><td colspan="7" style="text-align:right;font-weight:600;font-size:12px;color:${color}">Subtotal ${area}</td><td style="text-align:right;font-weight:700;color:${color}">${fmt(sub)}</td></tr>`;
+      tableBody += `<tr style="background:#f9f9f9"><td colspan="8" style="text-align:right;font-weight:600;font-size:12px;color:${color}">Subtotal ${area}</td><td style="text-align:right;font-weight:700;color:${color}">${fmt(sub)}</td></tr>`;
     });
-    tableBody += `<tr style="font-weight:700;background:#e8e8e8"><td colspan="7" style="text-align:right;font-size:15px">TOTAL GERAL</td><td style="text-align:right;font-size:15px">${fmt(grandTotal)}</td></tr>`;
-    w.document.write(`<!DOCTYPE html><html><head><title>VT ${mk}</title><style>body{font-family:Arial,sans-serif;margin:24px}table{border-collapse:collapse;width:100%}th,td{border:1px solid #ccc;padding:8px 12px;font-size:13px}th{background:#f5f5f5;font-weight:700}h1{font-size:20px}</style></head><body><h1>🚌 Vale Transporte — ${monthLabel(year,month)}</h1>${paidInfo}<table><thead><tr><th>Empregado</th><th>Cargo</th><th>VT Diário</th><th>Dias</th><th>VT Bruto</th><th>Ajuste Mês Ant.</th><th>Desconto</th><th>Total</th></tr></thead><tbody>${tableBody}</tbody></table><p style="font-size:11px;color:#999;margin-top:24px">Gerado por AppTip em ${new Date().toLocaleString("pt-BR")}</p></body></html>`);
+    tableBody += `<tr style="font-weight:700;background:#e8e8e8"><td colspan="8" style="text-align:right;font-size:15px">TOTAL GERAL</td><td style="text-align:right;font-size:15px">${fmt(grandTotal)}</td></tr>`;
+    w.document.write(`<!DOCTYPE html><html><head><title>VT ${mk}</title><style>body{font-family:Arial,sans-serif;margin:24px}table{border-collapse:collapse;width:100%}th,td{border:1px solid #ccc;padding:8px 12px;font-size:13px}th{background:#f5f5f5;font-weight:700}h1{font-size:20px}</style></head><body><h1>🚌 Vale Transporte — ${monthLabel(year,month)}</h1>${paidInfo}<table><thead><tr><th>Empregado</th><th>Cargo</th><th>VT Diário</th><th>Dias</th><th>VT Bruto</th><th>Ajuste Mês Ant.</th><th>Ajuda de Custo</th><th>Desconto</th><th>Total</th></tr></thead><tbody>${tableBody}</tbody></table><p style="font-size:11px;color:#999;margin-top:24px">Gerado por AppTip em ${new Date().toLocaleString("pt-BR")}</p></body></html>`);
     w.document.close();
     setTimeout(() => w.print(), 500);
     onUpdate("_toast", "🖨️ PDF pronto para impressão");
@@ -6841,6 +6867,7 @@ function ValeTransporteTab({ restaurantId, employees, roles, workSchedules, sche
     if (field === "rate") { setter(prev => ({ ...prev, [empId]: raw })); }
     else if (field === "adjust") { setter(prev => ({ ...prev, [empId]: { ...(prev[empId] ?? {}), adjustOverride: fromBR(raw), adjustDisplay: raw } })); }
     else if (field === "discount") { setter(prev => ({ ...prev, [empId]: { ...(prev[empId] ?? {}), manualDiscount: fromBR(raw), discountDisplay: raw } })); }
+    else if (field === "bonus") { setter(prev => ({ ...prev, [empId]: { ...(prev[empId] ?? {}), manualBonus: fromBR(raw), bonusDisplay: raw } })); }
     setDirty(true);
   };
   const moneyOnBlur = (e, setter, empId, field) => {
@@ -6849,6 +6876,7 @@ function ValeTransporteTab({ restaurantId, employees, roles, workSchedules, sche
     if (field === "rate") { setter(prev => ({ ...prev, [empId]: formatted })); }
     else if (field === "adjust") { setter(prev => ({ ...prev, [empId]: { ...(prev[empId] ?? {}), adjustOverride: n || null, adjustDisplay: formatted } })); }
     else if (field === "discount") { setter(prev => ({ ...prev, [empId]: { ...(prev[empId] ?? {}), manualDiscount: n || 0, discountDisplay: formatted } })); }
+    else if (field === "bonus") { setter(prev => ({ ...prev, [empId]: { ...(prev[empId] ?? {}), manualBonus: n || 0, bonusDisplay: formatted } })); }
     if (dirty) persistAll();
   };
 
@@ -6878,7 +6906,7 @@ function ValeTransporteTab({ restaurantId, employees, roles, workSchedules, sche
                   </div>
                   <div style={{ color: "var(--text)", fontWeight: 700, fontSize: 15, fontFamily: "'DM Mono',monospace" }}>{fmt(Math.max(0, r.totalPaid))}</div>
                 </div>
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 6 }}>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
                   <div>
                     <div style={{ color: "var(--text3)", fontSize: 9, marginBottom: 3 }}>VT Diário</div>
                     <input type="text" inputMode="decimal" placeholder="0,00" value={localRates[r.emp.id] ?? ""} onChange={e => moneyOnChange(e, setLocalRates, r.emp.id, "rate")} onBlur={e => moneyOnBlur(e, setLocalRates, r.emp.id, "rate")} style={{ ...inputStyle, width: "100%", padding: "5px 7px", fontSize: 12 }} />
@@ -6886,6 +6914,10 @@ function ValeTransporteTab({ restaurantId, employees, roles, workSchedules, sche
                   <div>
                     <div style={{ color: "var(--text3)", fontSize: 9, marginBottom: 3 }}>Ajuste {r.suggestedAdjust !== 0 && <span style={{ color: adjustColor }}>({r.suggestedAdjust > 0 ? "+" : ""}{fmtBR(r.suggestedAdjust)})</span>}</div>
                     <input type="text" inputMode="decimal" placeholder="0,00" value={localOverrides[r.emp.id]?.adjustDisplay ?? toBR(r.autoAdjust)} onChange={e => moneyOnChange(e, setLocalOverrides, r.emp.id, "adjust")} onBlur={e => moneyOnBlur(e, setLocalOverrides, r.emp.id, "adjust")} style={{ ...inputStyle, width: "100%", padding: "5px 7px", fontSize: 12, color: adjustColor }} />
+                  </div>
+                  <div>
+                    <div style={{ color: "var(--text3)", fontSize: 9, marginBottom: 3 }}>Ajuda de Custo</div>
+                    <input type="text" inputMode="decimal" placeholder="0,00" value={localOverrides[r.emp.id]?.bonusDisplay ?? toBR(r.manualBonus)} onChange={e => moneyOnChange(e, setLocalOverrides, r.emp.id, "bonus")} onBlur={e => moneyOnBlur(e, setLocalOverrides, r.emp.id, "bonus")} style={{ ...inputStyle, width: "100%", padding: "5px 7px", fontSize: 12, color: (r.manualBonus ?? 0) > 0 ? "#047857" : "var(--text)" }} />
                   </div>
                   <div>
                     <div style={{ color: "var(--text3)", fontSize: 9, marginBottom: 3 }}>Desconto</div>
@@ -6908,6 +6940,7 @@ function ValeTransporteTab({ restaurantId, employees, roles, workSchedules, sche
                   <th style={{ padding: cellPad, textAlign: "right", color: "var(--text3)", fontWeight: 600, borderBottom: "2px solid var(--border)", width: 110 }}>VT Bruto</th>
                   <th style={{ padding: cellPad, textAlign: "center", color: "var(--text3)", fontWeight: 600, borderBottom: "2px solid var(--border)", width: 80 }}>Real (mês ant.)</th>
                   <th style={{ padding: cellPad, textAlign: "right", color: "var(--text3)", fontWeight: 600, borderBottom: "2px solid var(--border)", width: 140 }}>Ajuste Mês Ant.</th>
+                  <th style={{ padding: cellPad, textAlign: "right", color: "var(--text3)", fontWeight: 600, borderBottom: "2px solid var(--border)", width: 120 }} title="Pré-preenchido com o valor do mês anterior">Ajuda de Custo</th>
                   <th style={{ padding: cellPad, textAlign: "right", color: "var(--text3)", fontWeight: 600, borderBottom: "2px solid var(--border)", width: 110 }}>Desconto</th>
                   <th style={{ padding: cellPad, textAlign: "right", color: "var(--text)", fontWeight: 700, borderBottom: "2px solid var(--border)", width: 120 }}>Total</th>
                 </tr>
@@ -6930,6 +6963,9 @@ function ValeTransporteTab({ restaurantId, employees, roles, workSchedules, sche
                           {r.suggestedAdjust !== 0 && <span style={{ fontSize: 10, color: "var(--text3)" }} title="Sugerido pelo sistema">({r.suggestedAdjust > 0 ? "+" : ""}{fmtBR(r.suggestedAdjust)})</span>}
                           <input type="text" inputMode="decimal" placeholder="0,00" value={localOverrides[r.emp.id]?.adjustDisplay ?? toBR(r.autoAdjust)} onChange={e => moneyOnChange(e, setLocalOverrides, r.emp.id, "adjust")} onBlur={e => moneyOnBlur(e, setLocalOverrides, r.emp.id, "adjust")} style={{ ...inputStyle, color: adjustColor }} />
                         </div>
+                      </td>
+                      <td style={{ padding: cellPad, textAlign: "right" }}>
+                        <input type="text" inputMode="decimal" placeholder="0,00" value={localOverrides[r.emp.id]?.bonusDisplay ?? toBR(r.manualBonus)} onChange={e => moneyOnChange(e, setLocalOverrides, r.emp.id, "bonus")} onBlur={e => moneyOnBlur(e, setLocalOverrides, r.emp.id, "bonus")} style={{ ...inputStyle, color: (r.manualBonus ?? 0) > 0 ? "#047857" : "var(--text)" }} title="Pré-preenchido com o valor do mês anterior — edite se necessário" />
                       </td>
                       <td style={{ padding: cellPad, textAlign: "right" }}>
                         <input type="text" inputMode="decimal" placeholder="0,00" value={localOverrides[r.emp.id]?.discountDisplay ?? toBR(r.manualDiscount)} onChange={e => moneyOnChange(e, setLocalOverrides, r.emp.id, "discount")} onBlur={e => moneyOnBlur(e, setLocalOverrides, r.emp.id, "discount")} style={inputStyle} />
