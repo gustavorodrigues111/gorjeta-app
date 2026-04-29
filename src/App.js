@@ -3,7 +3,7 @@ import React, { useState, useEffect, useMemo, useRef, Component } from "react";
 import { db } from "./firebase";
 import { doc, getDoc, setDoc } from "firebase/firestore";
 
-const APP_VERSION = "7.5.0";
+const APP_VERSION = "7.6.0";
 
 const DEFAULT_ADMISSION = () => `${new Date().getFullYear()}-01-01`;
 const round2 = (v) => Math.round(v * 100) / 100;
@@ -4262,7 +4262,7 @@ function DpManagerTab({ restaurantId, dpMessages, onUpdate, isOwner }) {
   );
 }
 
-function EmployeePortal({ employees, roles, tips, schedules, splits, restaurants, communications, commAcks, faq, dpMessages, workSchedules, incidents, feedbacks, devChecklists, onBack, onUpdateEmployee, onUpdate, toggleTheme, theme, onSwitchToManager, onSwitchToOperational, employeeGoals, tipApprovals, delays, meetingPlans, inbox, inboxFolders, hideHeader, hideTabNav, forceTab, forceEmpId }) {
+function EmployeePortal({ employees, roles, tips, schedules, splits, restaurants, communications, commAcks, faq, dpMessages, workSchedules, incidents, feedbacks, devChecklists, onBack, onUpdateEmployee, onUpdate, toggleTheme, theme, onSwitchToManager, onSwitchToOperational, employeeGoals, tipApprovals, delays, meetingPlans, inbox, inboxFolders, hideHeader, hideTabNav, forceTab, forceEmpId, pessoas, managers }) {
   const [empId, setEmpId] = useState(() => forceEmpId || localStorage.getItem("apptip_empid") || null);
   // Sincroniza forceEmpId vindo do shell
   useEffect(() => {
@@ -4293,8 +4293,11 @@ function EmployeePortal({ employees, roles, tips, schedules, splits, restaurants
   const emp = employees.find(e => e.id === empId);
   const role = emp ? roles.find(r => r.id === emp.roleId) : null;
   const restaurant = emp ? restaurants.find(r => r.id === emp.restaurantId) : null;
-  const empNumericPin = (emp?.empCode ?? "").replace(/\D/g, "").padStart(4, "0");
-  const isFirstAccess = emp && (emp.mustChangePin || String(emp.pin) === empNumericPin || String(emp.pin) === String(emp.empCode));
+  const empNumericPin = (emp?.empCode ?? "").replace(/\D/g, "").padStart(4, "0"); // eslint-disable-line no-unused-vars
+  // v7.6: só dispara primeiro-acesso pelo flag mustChangePin. Os triggers antigos por
+  // "pin == empCode" causavam loop de pedir PIN novo em cada portal porque os 3 records
+  // (pessoa/employee/manager) ficavam dessincronizados.
+  const isFirstAccess = emp && emp.mustChangePin === true;
   const needsCpf = emp && !emp.cpf;
 
   // Verificação em tempo real — empregado inativado ou não encontrado → logout
@@ -4353,8 +4356,24 @@ function EmployeePortal({ employees, roles, tips, schedules, splits, restaurants
     if (needsCpf && !firstCpf.trim()) { setFirstErr("Informe seu CPF."); return; }
     if (firstPin.length !== 4 || !/^\d{4}$/.test(firstPin)) { setFirstErr("PIN deve ter exatamente 4 dígitos numéricos."); return; }
     if (firstPin !== firstPin2) { setFirstErr("PINs não coincidem."); return; }
-    const updated = { ...emp, pin: firstPin, cpf: firstCpf.trim() || emp.cpf, mustChangePin: false };
+    const newCpf = firstCpf.trim() || emp.cpf;
+    // v7.6: além de atualizar o employee, sincroniza pessoa/manager linkados
+    const updated = { ...emp, pin: firstPin, cpf: newCpf, mustChangePin: false };
     onUpdateEmployee(updated);
+    // Sincroniza os 3 records (pessoa/employee/manager) — usa CPF como chave de identidade
+    const linkedPessoa = (pessoas || []).find(p =>
+      p.linkedEmployeeId === emp.id ||
+      ((p.cpf || "").replace(/\D/g, "") === (newCpf || "").replace(/\D/g, "") && (newCpf || "").replace(/\D/g, "").length > 0)
+    );
+    syncPinAcrossLinkedRecords({
+      newPin: firstPin,
+      identityCpf: newCpf,
+      pessoa: linkedPessoa,
+      pessoas: pessoas || [],
+      employees: employees || [],
+      managers: managers || [],
+      onUpdate,
+    });
   }
 
   // Se não tem empId — redireciona para login unificado
@@ -20004,6 +20023,8 @@ function AppShell({ pessoa, data, activeRestaurantId, setActiveRestaurantId, use
           meetingPlans={data?.meetingPlans || []}
           inbox={data?.inbox || []}
           inboxFolders={data?.inboxFolders || {}}
+          pessoas={data?.pessoas || []}
+          managers={data?.managers || []}
           onBack={()=>{}}
           onUpdateEmployee={(emp)=>{
             const next = (data?.employees || []).map(e => e.id === emp.id ? emp : e);
@@ -29659,7 +29680,7 @@ function ManagerPinChange({ manager, onDone, onBack }) {
 //
 // LOGIN
 //
-function UnifiedLogin({ owners, managers, employees, restaurants, pessoas, onLoginOwner, onLoginManager, onLoginEmployee, onLoginOperational, onLoginShell, onSetupFirst, onGoHome, onUpdatePessoas, toggleTheme, theme, dataLoaded }) {
+function UnifiedLogin({ owners, managers, employees, restaurants, pessoas, onLoginOwner, onLoginManager, onLoginEmployee, onLoginOperational, onLoginShell, onSetupFirst, onGoHome, onUpdatePessoas, onUpdate, toggleTheme, theme, dataLoaded }) {
   const [credential, setCredential] = useState("");
   const [pin, setPin] = useState("");
   const [err, setErr] = useState("");
@@ -29771,12 +29792,21 @@ function UnifiedLogin({ owners, managers, employees, restaurants, pessoas, onLog
     const cpfDigits = (pinChangePessoa.cpf || "").replace(/\D/g, "");
     if (newPin1 === cpfDigits.slice(0, 4)) { setPinChangeErr("O novo PIN não pode ser igual aos 4 primeiros dígitos do seu CPF (ainda é o inicial)."); return; }
 
-    // Atualiza pessoa
-    const updated = pessoas.map(p => p.id === pinChangePessoa.id ? { ...p, pin: newPin1, mustChangePin: false } : p);
-    onUpdatePessoas(updated);
-    // Sincroniza no legado
-    if (pinChangePessoa.linkedEmployeeId) {
-      // App() vai se virar; aqui só atualizamos pessoa pra a UI continuar
+    // v7.6: sincroniza PIN nos 3 records (pessoa, employee, manager) usando o helper
+    if (typeof onUpdate === "function") {
+      syncPinAcrossLinkedRecords({
+        newPin: newPin1,
+        identityCpf: pinChangePessoa.cpf,
+        pessoa: pinChangePessoa,
+        pessoas: pessoas || [],
+        employees: employees || [],
+        managers: managers || [],
+        onUpdate,
+      });
+    } else {
+      // Fallback (deveria nunca acontecer): atualiza só pessoas via callback dedicado
+      const updated = pessoas.map(p => p.id === pinChangePessoa.id ? { ...p, pin: newPin1, mustChangePin: false } : p);
+      onUpdatePessoas(updated);
     }
     // Prossegue com o login
     const updatedPessoa = { ...pinChangePessoa, pin: newPin1, mustChangePin: false };
@@ -31164,6 +31194,44 @@ links.forEach(l=>{l.addEventListener('click',e=>{e.preventDefault();const id=l.g
   );
 }
 
+// v7.6 — Helper: ao trocar PIN, sincroniza nos 3 records linkados (pessoa, employee, manager)
+// Garante que o PIN funciona em qualquer tela (Empregado, Líder, Gestor) sem disparar
+// "primeiro acesso" de novo. Usa pessoa como fonte de verdade; sincroniza por linkedXId
+// e por CPF (cobre legacy não migrado).
+function syncPinAcrossLinkedRecords({ newPin, identityCpf, pessoa, pessoas, employees, managers, onUpdate }) {
+  const cpfDigits = (identityCpf || pessoa?.cpf || "").replace(/\D/g, "");
+  const update = { pin: newPin, mustChangePin: false };
+  // Atualiza pessoa-alvo (se passada) + qualquer outra com mesmo CPF
+  if ((pessoas || []).length > 0) {
+    const nextPessoas = pessoas.map(p => {
+      if (pessoa && p.id === pessoa.id) return { ...p, ...update };
+      if (cpfDigits && (p.cpf || "").replace(/\D/g, "") === cpfDigits) return { ...p, ...update };
+      return p;
+    });
+    onUpdate("pessoas", nextPessoas);
+  }
+  // Atualiza employee linked (por linkedEmployeeId OU CPF)
+  const linkedEmpIds = new Set();
+  if (pessoa?.linkedEmployeeId) linkedEmpIds.add(pessoa.linkedEmployeeId);
+  (employees || []).forEach(e => {
+    if (cpfDigits && (e.cpf || "").replace(/\D/g, "") === cpfDigits) linkedEmpIds.add(e.id);
+  });
+  if (linkedEmpIds.size > 0) {
+    const nextEmployees = employees.map(e => linkedEmpIds.has(e.id) ? { ...e, ...update } : e);
+    onUpdate("employees", nextEmployees);
+  }
+  // Atualiza manager linked (por linkedManagerId OU CPF)
+  const linkedMgrIds = new Set();
+  if (pessoa?.linkedManagerId) linkedMgrIds.add(pessoa.linkedManagerId);
+  (managers || []).forEach(m => {
+    if (cpfDigits && (m.cpf || "").replace(/\D/g, "") === cpfDigits) linkedMgrIds.add(m.id);
+  });
+  if (linkedMgrIds.size > 0) {
+    const nextManagers = managers.map(m => linkedMgrIds.has(m.id) ? { ...m, ...update } : m);
+    onUpdate("managers", nextManagers);
+  }
+}
+
 //
 // APP ROOT
 //
@@ -31854,6 +31922,7 @@ export default function App() {
             setView("shell");
           }}
           onUpdatePessoas={next=>handleUpdate("pessoas", next)}
+          onUpdate={handleUpdate}
           onGoHome={()=>setView("home")}
           toggleTheme={toggleTheme} theme={theme}
         />
@@ -31875,8 +31944,21 @@ export default function App() {
       {view === "manager" && currentUser && (currentUser.mustChangePin ? (
         <ManagerPinChange manager={currentUser} onDone={newPin=>{
           const updated = {...currentUser, pin:newPin, mustChangePin:false};
-          const next = managers.map(m=>m.id===updated.id?updated:m);
-          handleUpdate("managers",next);
+          // v7.6: sincroniza PIN nos 3 records (pessoa, employee, manager) pra evitar
+          // pedir PIN novo de novo quando trocar de portal.
+          const linkedPessoa = (pessoas || []).find(p =>
+            p.linkedManagerId === currentUser.id ||
+            ((p.cpf || "").replace(/\D/g,"") === (currentUser.cpf || "").replace(/\D/g,"") && (currentUser.cpf || "").length > 0)
+          );
+          syncPinAcrossLinkedRecords({
+            newPin,
+            identityCpf: currentUser.cpf,
+            pessoa: linkedPessoa,
+            pessoas: pessoas || [],
+            employees: employees || [],
+            managers: managers || [],
+            onUpdate: handleUpdate,
+          });
           setCurrentUser(updated);
         }} onBack={doLogout} />
       ) : (
@@ -31895,7 +31977,7 @@ export default function App() {
             return () => { setCurrentUser(emp); setUserRole("employee"); localStorage.setItem("apptip_role","employee"); localStorage.setItem("apptip_userid",emp.id); localStorage.setItem("apptip_empid",emp.id); setView("employee"); };
           })()} />
       ))}
-      {view === "employee" && <EmployeePortal employees={employees} roles={roles} tips={tips} schedules={schedules} splits={splits} restaurants={restaurants} communications={communications} commAcks={commAcks} faq={faq} dpMessages={dpMessages} workSchedules={workSchedules} incidents={incidents} feedbacks={feedbacks} devChecklists={devChecklists} employeeGoals={employeeGoals} tipApprovals={tipApprovals} delays={delays} meetingPlans={meetingPlans} inbox={inbox} inboxFolders={inboxFolders} onBack={doLogout} onUpdateEmployee={emp=>{const next=employees.map(e=>e.id===emp.id?emp:e);handleUpdate("employees",next);}} onUpdate={handleUpdate} toggleTheme={toggleTheme} theme={theme}
+      {view === "employee" && <EmployeePortal employees={employees} roles={roles} tips={tips} schedules={schedules} splits={splits} restaurants={restaurants} communications={communications} commAcks={commAcks} faq={faq} dpMessages={dpMessages} workSchedules={workSchedules} incidents={incidents} feedbacks={feedbacks} devChecklists={devChecklists} employeeGoals={employeeGoals} tipApprovals={tipApprovals} delays={delays} meetingPlans={meetingPlans} inbox={inbox} inboxFolders={inboxFolders} pessoas={pessoas} managers={managers} onBack={doLogout} onUpdateEmployee={emp=>{const next=employees.map(e=>e.id===emp.id?emp:e);handleUpdate("employees",next);}} onUpdate={handleUpdate} toggleTheme={toggleTheme} theme={theme}
         onSwitchToManager={(() => {
           const cpf = currentUser?.cpf?.replace(/\D/g,"");
           let mgr = cpf ? managers.find(m => m.cpf?.replace(/\D/g,"") === cpf) : null;
