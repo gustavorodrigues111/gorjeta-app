@@ -3,7 +3,7 @@ import React, { useState, useEffect, useMemo, useRef, Component } from "react";
 import { db } from "./firebase";
 import { doc, getDoc, setDoc } from "firebase/firestore";
 
-const APP_VERSION = "7.2.0";
+const APP_VERSION = "7.3.0";
 
 const DEFAULT_ADMISSION = () => `${new Date().getFullYear()}-01-01`;
 const round2 = (v) => Math.round(v * 100) / 100;
@@ -6887,9 +6887,9 @@ function ValeTransporteTab({ restaurantId, employees, roles, workSchedules, sche
     const areaSubtotal = areaRows.reduce((s,r) => s + Math.max(0, r.totalPaid), 0);
 
     return (
-      <div key={area} style={{ marginBottom: mobileOnly ? 12 : 20 }}>
+      <div key={area} style={{ marginBottom: mobileOnly ? 12 : 20, marginRight: mobileOnly ? 0 : 8 }}>
         {/* Area header */}
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8, padding: mobileOnly ? "8px 12px" : "10px 16px", background: `${areaColor}12`, borderRadius: 12, borderLeft: `4px solid ${areaColor}` }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8, padding: mobileOnly ? "8px 12px" : "10px 24px", background: `${areaColor}12`, borderRadius: 12, borderLeft: `4px solid ${areaColor}` }}>
           <span style={{ color: areaColor, fontWeight: 700, fontSize: mobileOnly ? 14 : 16 }}>{area}</span>
           <span style={{ color: areaColor, fontWeight: 700, fontSize: mobileOnly ? 14 : 16, fontFamily: "'DM Mono',monospace" }}>{fmt(areaSubtotal)}</span>
         </div>
@@ -6930,7 +6930,7 @@ function ValeTransporteTab({ restaurantId, employees, roles, workSchedules, sche
           })
         ) : (
           /* ── DESKTOP: table section ── */
-          <div style={{ ...S.card, padding: "0 12px", overflow: "hidden", marginBottom: 4 }}>
+          <div style={{ ...S.card, padding: "0 28px", overflow: "hidden", marginBottom: 4 }}>
             <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13, tableLayout: "fixed" }}>
               <thead>
                 <tr style={{ background: "var(--bg1)" }}>
@@ -19486,7 +19486,8 @@ function hasAnyAdminRole(ad, sp, isOwner) {
 }
 
 // Define estrutura da sidebar derivada de permissões da pessoa
-function buildShellSections({ pessoa, restaurantId, isOwner }) {
+// v7.3: aceita employees pra check defensivo de isTeam
+function buildShellSections({ pessoa, restaurantId, isOwner, employees }) {
   // Owner tem acesso implícito total — simula permissões completas
   let perms, isTeam;
   if (isOwner) {
@@ -19498,7 +19499,19 @@ function buildShellSections({ pessoa, restaurantId, isOwner }) {
     isTeam = false; // Owner não é equipe do restaurante — "Meu Dia" não aplica
   } else {
     perms = pessoa?.permissions?.[restaurantId] || { operational: {}, admin: {}, special: {} };
-    isTeam = !!pessoa?.isTeam?.[restaurantId];
+    // v7.3 defensivo: isTeam=true se a flag existe OU se há linkedEmployeeId apontando pra
+    // employee ATIVO desse restaurante. Cobre casos onde a flag isTeam[rid] não foi setada
+    // mas a pessoa de fato tem registro de empregada (caso comum em migrations parciais).
+    const flag = !!pessoa?.isTeam?.[restaurantId];
+    let linked = false;
+    if (!flag && pessoa?.linkedEmployeeId && Array.isArray(employees)) {
+      const emp = employees.find(e => e.id === pessoa.linkedEmployeeId);
+      if (emp && emp.restaurantId === restaurantId) {
+        const isInactive = emp.inactive && emp.inactiveFrom && emp.inactiveFrom <= new Date().toISOString().slice(0,10);
+        linked = !isInactive;
+      }
+    }
+    isTeam = flag || linked;
   }
   const op = perms.operational || {};
   const ad = perms.admin || {};
@@ -19686,7 +19699,7 @@ function AppShell({ pessoa, data, activeRestaurantId, setActiveRestaurantId, use
   const isOwner = isRealOwnerLocal && !impersonatedPessoa;
   const accessibleRestaurants = isRealOwnerLocal ? restaurants : (pessoa?.restaurantIds || []).map(rid => restaurants.find(r => r.id === rid)).filter(Boolean);
   const activeRest = restaurants.find(r => r.id === activeRestaurantId);
-  const sections = buildShellSections({ pessoa, restaurantId: activeRestaurantId, isOwner });
+  const sections = buildShellSections({ pessoa, restaurantId: activeRestaurantId, isOwner, employees: data?.employees ?? [] });
   const allItems = sections.flatMap(s => s.items);
 
   // Seção ativa do shell (persistida em localStorage)
@@ -31572,6 +31585,62 @@ export default function App() {
       handleUpdate("pessoasMigratedAt", new Date().toISOString());
     }
   }, [loaded, employees.length, managers.length]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // v7.3 — Migração auto-corretiva isTeam[rid]
+  // Pessoas com linkedEmployeeId apontando pra employee ATIVO de um rid devem ter isTeam[rid]=true.
+  // Isso conserta casos onde a pessoa ganhou employee record (via togglePerm operational ou outro)
+  // mas isTeam[rid] ficou como false/undefined, escondendo "Meu Dia" no AppShell.
+  // Idempotente: só faz update se algo mudou.
+  useEffect(() => {
+    if (!loaded) return;
+    if (!pessoas || pessoas.length === 0) return;
+    if (!employees || employees.length === 0) return;
+    let changedCount = 0;
+    const fixed = pessoas.map(p => {
+      if (!p.linkedEmployeeId) return p;
+      const emp = employees.find(e => e.id === p.linkedEmployeeId);
+      if (!emp) return p;
+      const isInactive = emp.inactive && emp.inactiveFrom && emp.inactiveFrom <= today();
+      if (isInactive) return p;
+      const rid = emp.restaurantId;
+      if (!rid) return p;
+      const currentIsTeam = !!p.isTeam?.[rid];
+      if (currentIsTeam) return p;
+      changedCount++;
+      return { ...p, isTeam: { ...(p.isTeam || {}), [rid]: true } };
+    });
+    if (changedCount > 0) {
+      console.log(`[pessoas] Auto-fix isTeam: ${changedCount} pessoa(s) marcada(s) como equipe (linkedEmployeeId apontando pra employee ativo)`);
+      handleUpdate("pessoas", fixed);
+    }
+  }, [loaded, pessoas?.length, employees?.length]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // v7.3 — Redirect view='employee' → view='shell' quando há pessoa correspondente.
+  // Faz com que TODO acesso de empregado (login direto OU botão "👤 Empregado") use o
+  // AppShell unificado em vez do EmployeePortal legado. Fallback: se não há pessoa pra
+  // o currentUser, mantém a rota legada (pra empregados ainda não migrados).
+  useEffect(() => {
+    if (view !== "employee") return;
+    if (!loaded) return;
+    if (!currentUser) return;
+    const cpfDigits = (currentUser.cpf || "").replace(/\D/g, "");
+    let pessoa = null;
+    if (currentUser.id) {
+      pessoa = (pessoas || []).find(p => p.linkedEmployeeId === currentUser.id);
+    }
+    if (!pessoa && cpfDigits) {
+      pessoa = (pessoas || []).find(p => (p.cpf || "").replace(/\D/g, "") === cpfDigits);
+    }
+    if (!pessoa) return; // fallback: continua no EmployeePortal legacy
+    // Determina rid ativo: 1º o do employee atual, senão o primeiro restaurantId da pessoa
+    const rid = currentUser.restaurantId || (pessoa.restaurantIds || [])[0] || null;
+    if (!rid) return;
+    console.log(`[v7.3] Redirect employee→shell: pessoa=${pessoa.name} rid=${rid}`);
+    localStorage.setItem("apptip_role", "shell");
+    setShellActiveRest(rid);
+    setUserRole("shell");
+    setView("shell");
+  }, [view, loaded, currentUser?.id, pessoas?.length]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const data = { owners, managers, restaurants, employees, roles, tips, splits, schedules, communications, commAcks, faq, dpMessages, workSchedules, notifications, noTipDays, trash, schedTemplates, schedDrafts, scheduleVersions, tipVersions, vtConfig, vtMonthly, vtPayments, incidents, feedbacks, devChecklists, scheduleAdjustments, scheduleStatus, schedulePrevista, employeeGoals, delays, tipApprovals, meetingPlans, meetingIdeas, meetingAgendas, meetingActions, meetingOccurrences, meetingPendencias, inbox, inboxFolders, miseCategories, miseStocks, miseAssignments, miseItems, miseCycles, miseCounts, miseSuppliers, miseProductSuppliers, miseSupplierOrders, miseChecklistTemplates, miseChecklistRuns, miseFtInsumos, miseFtEquipamentos, miseFtDishes, pessoas, pessoasMigratedAt, tuyaLinks, tempSensors, tempReadings, tempAlerts, tempBackfillState, permProfiles, freelaShifts, freelaPagamentos };
 
