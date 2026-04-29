@@ -3,7 +3,7 @@ import React, { useState, useEffect, useMemo, useRef, Component } from "react";
 import { db } from "./firebase";
 import { doc, getDoc, setDoc } from "firebase/firestore";
 
-const APP_VERSION = "7.0.0";
+const APP_VERSION = "7.1.0";
 
 const DEFAULT_ADMISSION = () => `${new Date().getFullYear()}-01-01`;
 const round2 = (v) => Math.round(v * 100) / 100;
@@ -19437,6 +19437,8 @@ function pessoaHasAnyOperationalArea(pessoa, restaurantId) {
 // ──  APPSHELL — sidebar unificada + header + content            ──
 // ═══════════════════════════════════════════════════════════════
 // Helper: pessoa tem ao menos 1 perm admin, especial ou é owner?
+// Mantido por possível uso futuro — Inbox v7.1 vive embarcado no Início.
+// eslint-disable-next-line no-unused-vars
 function hasAnyAdminRole(ad, sp, isOwner) {
   if (isOwner) return true;
   if (Object.values(ad || {}).some(v => v === true)) return true;
@@ -19468,18 +19470,21 @@ function buildShellSections({ pessoa, restaurantId, isOwner }) {
 
   const sections = [];
 
-  // 0) INÍCIO — saudação + dashboard geral. Não aparece na sidebar:
-  // o atalho fica ao lado do nome do restaurante no header (botão 🏠).
+  // ──────────────────────────────────────────────────────────────────────
+  // v7.1 IA — 5 seções: Início, Operação, Planejamento, Escritório, Ajustes
+  // ──────────────────────────────────────────────────────────────────────
+
+  // 0) INÍCIO — saudação + Caixa de entrada (Inbox embarcado) + widgets opcionais
+  // É a primeira entrada do menu. Sempre visível.
   sections.push({
-    group: "",
-    hidden: true,
+    group: "Início",
     color: "#7c3aed",
     items: [
-      { id: "mod_inicio", label: "Início", icon: "🏠", kind: "manager", tab: "inicio" },
+      { id: "mod_inicio", label: "Caixa de entrada", icon: "🏠", kind: "manager", tab: "inicio" },
     ],
   });
 
-  // 1) MEU DIA — área pessoal do membro da equipe
+  // 1) MEU DIA — área pessoal do membro da equipe (não some, mantida abaixo de Início)
   if (isTeam) {
     sections.push({
       group: "Meu Dia",
@@ -19495,60 +19500,13 @@ function buildShellSections({ pessoa, restaurantId, isOwner }) {
     });
   }
 
-  // 2) PESSOAS — tudo que envolve quadro humano: cadastro, equipe, escalas, reuniões, trilhas
-  const peopleItems = [];
-  if (ad.pessoas || isOwner) {
-    peopleItems.push({
-      id: "mod_pessoas", label: "Pessoas", icon: "👤",
-      subtabs: [
-        { id: "cadastro",   label: "Cadastro",   kind: "manager", tab: "pessoas" },
-        { id: "permissoes", label: "Permissões", kind: "manager", tab: "permissoes" },
-      ],
-    });
-  }
-  const equipeSubs = st(
-    (ad.employees || isOwner) && { id: "membros", label: "Membros",       kind: "manager", tab: "employees" },
-    (ad.roles     || isOwner) && { id: "cargos",  label: "Cargos",        kind: "manager", tab: "roles" },
-    (ad.vt        || isOwner) && { id: "vt",      label: "Vale Transp.",  kind: "manager", tab: "vt" },
-  );
-  if (equipeSubs.length > 0) {
-    peopleItems.push({ id: "mod_equipe", label: "Equipe", icon: "👥", subtabs: equipeSubs });
-  }
-  // Freelas — visível pra Owner (qualquer rest), DP (gestão completa) e Líder (lança shifts)
-  if (isOwner || sp.isDP || sp.isLider) {
-    peopleItems.push({ id: "mod_freelas", label: "Freelas", icon: "🎒", kind: "manager", tab: "freelas" });
-  }
-  if (op.escalas || ad.schedule) {
-    // Entrada única — sem subtabs "Ver"/"Fechar" (eram redundantes, apontavam pra mesma tela).
-    // Os botões internos (salvar, fechar mês, etc) já se autoajustam pela permissão.
-    peopleItems.push({ id: "mod_escalas", label: "Escalas", icon: "📅", kind: "manager", tab: "schedule" });
-  }
-  if (op.reunioes) {
-    peopleItems.push({ id: "mod_reunioes", label: "Reuniões", icon: "🗣️", kind: "manager", tab: "reunioes" });
-  }
-  if (op.trilhas) {
-    peopleItems.push({ id: "mod_trilhas", label: "Trilhas", icon: "🎯", kind: "manager", tab: "employees" });
-  }
-  if (peopleItems.length > 0) {
-    sections.push({ group: "Pessoas", color: "#0284c7", items: peopleItems });
-  }
-
-  // 3) OPERAÇÃO — dia-a-dia de rotina: gorjetas, checklists, contagens, temperaturas, compras
+  // 2) OPERAÇÃO — Ocorrências, CheckLists, Contagens, Temperaturas, Fichas Técnicas
   const opItems = [];
-  if (op.gorjetas || ad.tips) {
-    opItems.push({
-      id: "mod_gorjetas", label: "Gorjetas", icon: "💰",
-      subtabs: st(
-        op.gorjetas && { id: "dashboard", label: "Dashboard",   kind: "operational", tab: "gorjetas" },
-        ad.tips     && { id: "lancar",    label: "Lançamentos", kind: "manager",     tab: "tips" },
-        // Regra de divisão — só pra owner do restaurante (que aqui = isOwner do AppTip ou ad.tips)
-        ad.tips     && { id: "regra",     label: "Regra",       kind: "manager",     tab: "regra_divisao" },
-      ),
-    });
+  // Ocorrências (extraído de Reuniões na v7.0)
+  if (op.reunioes || ad.employees || isOwner) {
+    opItems.push({ id: "mod_ocorrencias", label: "Ocorrências", icon: "🚨", kind: "manager", tab: "ocorrencias" });
   }
-  // Configurar templates Mise (checklists, contagens, temperaturas, fichas) é gateway de admin
-  // master do restaurante — não derivado de "gestor de pessoas". Antes usava ad.employees, o que
-  // dava acesso indevido a quem só gerenciava equipe.
+  // Checklists, Contagens, Temperaturas — operacional executa, admin (ad.tips) configura templates
   if (op.checklists || ad.tips) {
     opItems.push({
       id: "mod_mise_checklists", label: "Checklists", icon: "✅",
@@ -19576,17 +19534,9 @@ function buildShellSections({ pessoa, restaurantId, isOwner }) {
       ),
     });
   }
-  if (op.compras) {
-    opItems.push({ id: "mod_mise_compras", label: "Compras", icon: "🛒", kind: "operational", tab: "compras" });
-  }
-  if (opItems.length > 0) {
-    sections.push({ group: "Operação", color: "#d4a017", items: opItems });
-  }
-
-  // 4) PRODUÇÃO — receitas, custos, planejamento (por enquanto só Fichas Técnicas)
-  const prodItems = [];
+  // Fichas Técnicas movida de "Produção" pra Operação (spec v7)
   if (op.fichasTecnicas || ad.tips) {
-    prodItems.push({
+    opItems.push({
       id: "mod_mise_fichas", label: "Fichas Técnicas", icon: "📋",
       subtabs: st(
         op.fichasTecnicas && { id: "consultar", label: "Consultar", kind: "operational", tab: "fichasTecnicas" },
@@ -19594,23 +19544,81 @@ function buildShellSections({ pessoa, restaurantId, isOwner }) {
       ),
     });
   }
-  if (prodItems.length > 0) {
-    sections.push({ group: "Produção", color: "#7c9e5e", items: prodItems });
+  if (opItems.length > 0) {
+    sections.push({ group: "Operação", color: "#d4a017", items: opItems });
   }
 
-  // 5) COMUNICAÇÃO — Comunicados, FAQ, Fale com DP, Caixa de Entrada
-  const commItems = st(
-    (ad.comunicados || isOwner) && { id: "mod_comunicados", label: "Comunicados",  icon: "📢", kind: "manager", tab: "comunicados" },
-    (ad.faq         || isOwner) && { id: "mod_faq",         label: "FAQ",          icon: "❓", kind: "manager", tab: "faq" },
-    (sp.isDP        || isOwner) && { id: "mod_dp",          label: "Fale com DP",  icon: "💬", kind: "manager", tab: "dp" },
-    // Caixa de entrada aparece se tem algum papel admin (recebe mensagens/notificações do sistema)
-    (hasAnyAdminRole(ad, sp, isOwner)) && { id: "mod_inbox", label: "Caixa de entrada", icon: "📬", kind: "manager", tab: "notificacoes" },
+  // 3) PLANEJAMENTO — Escalas, Freelas, Reuniões, Trilhas, Ideias
+  const planItems = [];
+  if (op.escalas || ad.schedule) {
+    planItems.push({ id: "mod_escalas", label: "Escalas", icon: "📅", kind: "manager", tab: "schedule" });
+  }
+  if (isOwner || sp.isDP || sp.isLider) {
+    planItems.push({ id: "mod_freelas", label: "Freelas", icon: "🎒", kind: "manager", tab: "freelas" });
+  }
+  if (op.reunioes) {
+    planItems.push({ id: "mod_reunioes", label: "Reuniões", icon: "🗣️", kind: "manager", tab: "reunioes" });
+  }
+  if (op.trilhas || ad.tips) {
+    // v7.0 admin Trilhas: lista de equipe + drilldown no EmpTrilhaView
+    planItems.push({ id: "mod_trilhas", label: "Trilhas", icon: "🎯", kind: "manager", tab: "trilhas" });
+  }
+  // Ideias (extraída de Reuniões na v7.0)
+  if (op.reunioes || ad.employees || isOwner) {
+    planItems.push({ id: "mod_ideias", label: "Ideias", icon: "💡", kind: "manager", tab: "ideias" });
+  }
+  if (planItems.length > 0) {
+    sections.push({ group: "Planejamento", color: "var(--ac)", items: planItems });
+  }
+
+  // 4) ESCRITÓRIO — Pessoas, Equipe, VT, Cargos, Compras, Gorjetas, Comunicados, FAQ, Fale com DP
+  const officeItems = [];
+  if (ad.pessoas || isOwner) {
+    officeItems.push({
+      id: "mod_pessoas", label: "Pessoas", icon: "👤",
+      subtabs: [
+        { id: "cadastro",   label: "Cadastro",   kind: "manager", tab: "pessoas" },
+        { id: "permissoes", label: "Permissões", kind: "manager", tab: "permissoes" },
+      ],
+    });
+  }
+  // Equipe agrupa Membros + VT + Cargos como sub-tabs (mantém UX existente)
+  const equipeSubs = st(
+    (ad.employees || isOwner) && { id: "membros", label: "Membros",      kind: "manager", tab: "employees" },
+    (ad.vt        || isOwner) && { id: "vt",      label: "Vale Transp.", kind: "manager", tab: "vt" },
+    (ad.roles     || isOwner) && { id: "cargos",  label: "Cargos",       kind: "manager", tab: "roles" },
   );
-  if (commItems.length > 0) {
-    sections.push({ group: "Comunicação", color: "#8b5cf6", items: commItems });
+  if (equipeSubs.length > 0) {
+    officeItems.push({ id: "mod_equipe", label: "Equipe", icon: "👥", subtabs: equipeSubs });
+  }
+  // Compras movida de Operação pra Escritório (spec v7)
+  if (op.compras || ad.tips) {
+    officeItems.push({ id: "mod_mise_compras", label: "Compras", icon: "🛒", kind: "operational", tab: "compras" });
+  }
+  if (op.gorjetas || ad.tips) {
+    officeItems.push({
+      id: "mod_gorjetas", label: "Gorjetas", icon: "💰",
+      subtabs: st(
+        op.gorjetas && { id: "dashboard", label: "Dashboard",   kind: "operational", tab: "gorjetas" },
+        ad.tips     && { id: "lancar",    label: "Lançamentos", kind: "manager",     tab: "tips" },
+        ad.tips     && { id: "regra",     label: "Regra",       kind: "manager",     tab: "regra_divisao" },
+      ),
+    });
+  }
+  if (ad.comunicados || isOwner) {
+    officeItems.push({ id: "mod_comunicados", label: "Comunicados", icon: "📢", kind: "manager", tab: "comunicados" });
+  }
+  if (ad.faq || isOwner) {
+    officeItems.push({ id: "mod_faq", label: "FAQ", icon: "❓", kind: "manager", tab: "faq" });
+  }
+  if (sp.isDP || isOwner) {
+    officeItems.push({ id: "mod_dp", label: "Fale com DP", icon: "💬", kind: "manager", tab: "dp" });
+  }
+  if (officeItems.length > 0) {
+    sections.push({ group: "Escritório", color: "#0284c7", items: officeItems });
   }
 
-  // 6) AJUSTES — config geral do restaurante (nome, logo, regras globais)
+  // 5) AJUSTES — Configurações do restaurante (separado de Escritório por escolha do produto)
   if (ad.config || isOwner) {
     sections.push({
       group: "Ajustes",
