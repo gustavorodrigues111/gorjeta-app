@@ -3,7 +3,7 @@ import React, { useState, useEffect, useMemo, useRef, Component } from "react";
 import { db } from "./firebase";
 import { doc, getDoc, setDoc } from "firebase/firestore";
 
-const APP_VERSION = "8.2.0";
+const APP_VERSION = "8.3.0";
 
 const DEFAULT_ADMISSION = () => `${new Date().getFullYear()}-01-01`;
 const round2 = (v) => Math.round(v * 100) / 100;
@@ -283,10 +283,12 @@ const STATUS_SHORT = {
   [DAY_OFF]:"F",[DAY_FREELA]:"FL",[DAY_COMP]:"FC",[DAY_COMP_TRAB]:"TC",
   [DAY_VACATION]:"Fér",[DAY_FAULT_J]:"FJ",[DAY_FAULT_U]:"FI",
 };
+// v8.3 — paleta alinhada ao redesign do v8.2 (CalendarGrid). Cores distintas pra
+// pares conflitantes (Folga vs Falta Injust; FC vs TC; Freela vs TC).
 const STATUS_COLORS = {
-  [DAY_OFF]:"var(--red)",[DAY_FREELA]:"#06b6d4",[DAY_COMP]:"#3b82f6",
-  [DAY_COMP_TRAB]:"#0ea5e9",[DAY_VACATION]:"#8b5cf6",
-  [DAY_FAULT_J]:"#f59e0b",[DAY_FAULT_U]:"var(--red)",
+  [DAY_OFF]:"#dc2626",[DAY_FREELA]:"#14b8a6",[DAY_COMP]:"#2563eb",
+  [DAY_COMP_TRAB]:"#06b6d4",[DAY_VACATION]:"#7c3aed",
+  [DAY_FAULT_J]:"#f59e0b",[DAY_FAULT_U]:"#7f1d1d",
 };
 
 // Division mode constants
@@ -4706,13 +4708,14 @@ function EmployeePortal({ employees, roles, tips, schedules, splits, restaurants
                                 return (
                                   <td key={d} title={delayMin > 0 ? `⏰ ${delayMin}min atraso` : undefined} style={{
                                     textAlign:"center",padding:"3px 1px",
-                                    background:isToday?"var(--ac)11":status?color+"22":(isWe?"var(--bg1)":"transparent"),
+                                    // v8.3: bg sólido em exceções, neutro em work
+                                    background: status ? color : (isToday ? "var(--ac)11" : (isWe ? "var(--bg1)" : "transparent")),
                                     borderRight:`1px solid ${delayMin > 0 ? "#f59e0b" : "var(--border)"}`,
                                     borderBottom: delayMin > 0 ? "2px solid #f59e0b" : undefined,
                                     width:22,outline:isToday?`1px solid ${ac}44`:undefined
                                   }}>
-                                    <span style={{color:color,fontSize:status?8:9,fontWeight:status?700:300}}>{label}</span>
-                                    {delayMin > 0 && <div style={{fontSize:6,color:"#f59e0b",lineHeight:1}}>⏰</div>}
+                                    <span style={{color: status ? "#fff" : color, fontSize: status?8:9, fontWeight:700}}>{label}</span>
+                                    {delayMin > 0 && <div style={{fontSize:6,color:status?"#fff":"#f59e0b",lineHeight:1}}>⏰</div>}
                                   </td>
                                 );
                               })}
@@ -13113,10 +13116,24 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                               const delayMin = dayNum ? (empDelays[dayNum] || 0) : 0;
                               return (
                                 <div key={di} onClick={()=>!locked && cycleStatus(emp.id, slot.date)}
-                                  title={delayMin > 0 ? `Atraso: ${delayMin} min` : undefined}
-                                  style={{display:"flex",alignItems:"center",justifyContent:"center",minHeight:36,borderRadius:6,cursor:locked?"not-allowed":"pointer",background:isDem?"#6b728022":(status?color+"22":"transparent"),border:`1px solid ${isDem?"#6b728044":(delayMin>0?"#f59e0b":(status?color+"44":"var(--border)"))}`,opacity:locked?0.35:1,position:"relative"}}>
-                                  <span style={{color:locked?"var(--text3)":color,fontSize:isDem?9:11,fontWeight:700}}>{restaurant.serviceStartDate && !isDem && slot.date < restaurant.serviceStartDate?"🔒":label}</span>
-                                  {delayMin > 0 && <span style={{position:"absolute",top:0,right:1,fontSize:6,color:"#f59e0b",fontWeight:800}}>⏰</span>}
+                                  title={`${label === "T" ? "Trabalho" : (label === "DEM" ? "Demitido" : label)}${delayMin > 0 ? ` · Atraso ${delayMin} min` : ""}`}
+                                  style={{
+                                    display:"flex", alignItems:"center", justifyContent:"center",
+                                    minHeight:36, borderRadius:6,
+                                    cursor: locked ? "not-allowed" : "pointer",
+                                    // v8.3: bg sólido em exceções, neutro em work
+                                    background: isDem ? "#6b7280" : (status ? color : "transparent"),
+                                    border: `1px solid ${isDem ? "#6b728088" : (delayMin>0 ? "#f59e0b" : (status ? color : "var(--border)"))}`,
+                                    opacity: locked ? 0.55 : 1,
+                                    position: "relative"
+                                  }}>
+                                  <span style={{
+                                    color: status || isDem ? "#fff" : (locked ? "var(--text3)" : color),
+                                    fontSize: isDem ? 9 : 11,
+                                    fontWeight: 700,
+                                    letterSpacing: 0.3,
+                                  }}>{restaurant.serviceStartDate && !isDem && slot.date < restaurant.serviceStartDate?"🔒":label}</span>
+                                  {delayMin > 0 && <span style={{position:"absolute",top:0,right:1,fontSize:6,color:status||isDem?"#fff":"#f59e0b",fontWeight:800}}>⏰</span>}
                                 </div>
                               );
                             })}
@@ -13213,10 +13230,23 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                               const dDelayMin = empDelaysD[String(d)] || 0;
                               return (
                                 <td key={d} onClick={()=>!isDem && cycleStatus(emp.id, date)}
-                                  title={dDelayMin > 0 ? `Atraso: ${dDelayMin} min` : undefined}
-                                  style={{textAlign:"center",padding:"2px 0",cursor:locked?"not-allowed":"pointer",background:isDem?"#6b728022":(locked?"var(--bg3)":(status?color+"22":(isWe?"var(--bg3)":"transparent"))),borderRight:`1px solid ${dDelayMin>0?"#f59e0b":"var(--border)"}`,opacity:locked?0.35:1,position:"relative"}}>
-                                  <span style={{color:locked?"var(--text3)":color,fontSize:isDem?7:(status?8:10),fontWeight:isDem||status?700:400}}>{!isDem&&restaurant.serviceStartDate&&date<restaurant.serviceStartDate?"🔒":label}</span>
-                                  {dDelayMin > 0 && <span style={{position:"absolute",bottom:0,right:0,fontSize:5,color:"#f59e0b",lineHeight:1}}>⏰</span>}
+                                  title={`${label === "•" ? "Trabalho" : (label === "D" ? "Demitido" : label)}${dDelayMin > 0 ? ` · Atraso: ${dDelayMin} min` : ""}`}
+                                  style={{
+                                    textAlign:"center", padding:"2px 0",
+                                    cursor: locked ? "not-allowed" : "pointer",
+                                    // v8.3: bg sólido em exceções (status definido); work day fica neutro
+                                    background: isDem ? "#6b7280" : (status ? color : (locked ? "var(--bg3)" : (isWe ? "var(--bg3)" : "transparent"))),
+                                    borderRight: `1px solid ${dDelayMin>0?"#f59e0b":"var(--border)"}`,
+                                    opacity: locked ? 0.5 : 1,
+                                    position: "relative"
+                                  }}>
+                                  <span style={{
+                                    color: status || isDem ? "#fff" : (locked ? "var(--text3)" : color),
+                                    fontSize: isDem ? 8 : (status ? 9 : 10),
+                                    fontWeight: 700,
+                                    letterSpacing: 0.2,
+                                  }}>{!isDem&&restaurant.serviceStartDate&&date<restaurant.serviceStartDate?"🔒":label}</span>
+                                  {dDelayMin > 0 && <span style={{position:"absolute",bottom:0,right:0,fontSize:5,color:status||isDem?"#fff":"#f59e0b",lineHeight:1}}>⏰</span>}
                                 </td>
                               );
                             })}
