@@ -3,7 +3,7 @@ import React, { useState, useEffect, useMemo, useRef, Component } from "react";
 import { db } from "./firebase";
 import { doc, getDoc, setDoc } from "firebase/firestore";
 
-const APP_VERSION = "7.8.0";
+const APP_VERSION = "7.9.0";
 
 const DEFAULT_ADMISSION = () => `${new Date().getFullYear()}-01-01`;
 const round2 = (v) => Math.round(v * 100) / 100;
@@ -1153,7 +1153,7 @@ function ComunicadosTab({ empId, restaurantId, communications, commAcks, onUpdat
 //
 // FAQ TAB (employee view)
 //
-function FaqTab({ restaurantId, faq, emp, roles, restaurants, splits }) {
+function FaqTab({ restaurantId, faq, emp, roles, restaurants, splits, employees }) {
   const items = (faq?.[restaurantId] ?? []).filter(item => item.visible !== false);
   const [openSys, setOpenSys] = useState(null);
   const [openRest, setOpenRest] = useState(null);
@@ -1168,8 +1168,23 @@ function FaqTab({ restaurantId, faq, emp, roles, restaurants, splits }) {
   const ac = "var(--ac)";
 
   const now = new Date();
-  const mk = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,"0")}`;
-  const curSplit = splits?.[restaurantId]?.[mk] ?? DEFAULT_SPLIT;
+  // v7.9: lê a regra ativa via getSplitForDate (suporta formato versionado novo + legacy).
+  // Antes lia direto splits[rid][mk], que só funcionava no legacy → caía no DEFAULT_SPLIT
+  // ignorando a regra configurada no Wizard de Regra de Divisão.
+  const todayStr = now.toISOString().slice(0, 10);
+  const activeSplitVersion = getSplitForDate(splits?.[restaurantId], todayStr);
+  // Normaliza percentages — cobre tipo "perEmployee" usando contagem real de empregados ativos.
+  const empsPerAreaForFaq = {};
+  (employees || [])
+    .filter(e => e.restaurantId === restaurantId && !(e.inactive && e.inactiveFrom && e.inactiveFrom <= todayStr) && !e.isFreela)
+    .forEach(e => {
+      const r = (roles || []).find(x => x.id === e.roleId);
+      const area = r?.area;
+      if (area) empsPerAreaForFaq[area] = (empsPerAreaForFaq[area] || 0) + 1;
+    });
+  const curSplit = activeSplitVersion?.percentages
+    ? computeAreaPercentages(activeSplitVersion.percentages, empsPerAreaForFaq)
+    : DEFAULT_SPLIT;
 
   const pontosCargo = parseFloat(empRole?.points) || 0;
   const totalPontos = restRolesComGorjeta.reduce((s,r) => s+(parseFloat(r.points)||0), 0);
@@ -4457,7 +4472,7 @@ function EmployeePortal({ employees, roles, tips, schedules, splits, restaurants
       )}
 
       {/* Content */}
-      <div style={{ padding: hideHeader?"0":"16px 16px", maxWidth: hideHeader?"none":600, margin: hideHeader?"0":"0 auto" }}>
+      <div style={{ padding: hideHeader?"0 8px":"16px 16px", maxWidth: hideHeader?780:600, margin: "0 auto" }}>
 
         {tab === "extrato" && (
           <div>
@@ -4681,7 +4696,7 @@ function EmployeePortal({ employees, roles, tips, schedules, splits, restaurants
         )}
 
         {tab === "faq" && (
-          <FaqTab restaurantId={emp?.restaurantId} faq={faq} emp={emp} roles={roles} restaurants={restaurants} splits={splits} />
+          <FaqTab restaurantId={emp?.restaurantId} faq={faq} emp={emp} roles={roles} restaurants={restaurants} splits={splits} employees={employees} />
         )}
 
         {tab === "trilha" && emp && (
