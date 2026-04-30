@@ -3,7 +3,7 @@ import React, { useState, useEffect, useMemo, useRef, Component } from "react";
 import { db } from "./firebase";
 import { doc, getDoc, setDoc } from "firebase/firestore";
 
-const APP_VERSION = "8.6.0";
+const APP_VERSION = "8.6.1";
 
 const DEFAULT_ADMISSION = () => `${new Date().getFullYear()}-01-01`;
 const round2 = (v) => Math.round(v * 100) / 100;
@@ -21776,9 +21776,9 @@ function FechaShiftRow({ shift: s, pessoa, updateShift, mobileOnly, ac, onUpdate
     onUpdate && onUpdate("_toast", `💰 Valor de ${pessoa?.name} lançado`);
   }
   return (
-    <div style={{ background: "var(--card-bg)", border: "1px solid var(--border)", borderRadius: 10, padding: 12 }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10, flexWrap: "wrap", gap: 6 }}>
-        <div>
+    <div style={{ background: "#dbeafe", border: "1px solid #3b82f655", borderRadius: 12, padding: 12 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 10, flexWrap: "wrap", gap: 6 }}>
+        <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ fontWeight: 700, color: "var(--text)", fontSize: 14 }}>{pessoa?.name || "(removido)"}</div>
           <div style={{ fontSize: 11, color: "var(--text3)", marginTop: 2 }}>
             📅 {fmtDate(s.date)} · ⏱️ {s.entrada || "?"} → {s.saida || "?"}
@@ -21788,6 +21788,7 @@ function FechaShiftRow({ shift: s, pessoa, updateShift, mobileOnly, ac, onUpdate
           </div>
           {s.observacao && <div style={{ fontSize: 11, color: "var(--text3)", fontStyle: "italic", marginTop: 2 }}>💬 {s.observacao}</div>}
         </div>
+        <span style={{ padding: "3px 8px", background: "#3b82f622", color: "#1e40af", borderRadius: 6, fontSize: 10, fontWeight: 700, whiteSpace: "nowrap" }}>💰 Aguardando DP</span>
       </div>
       {/* Dropdown de nível pré-cadastrado */}
       <div style={{ marginBottom: 8 }}>
@@ -22026,13 +22027,13 @@ function FreelaFechamentoTab({ restaurantId, restPessoas, shifts, lotes, shiftPr
         </div>
       )}
 
-      {/* v8.5.1 — Aguardando precificação (turno fechado pelo Líder, sem valor) */}
+      {/* v8.6 — Aguardando precificação em GRID de cards (consistência com Lançamento) */}
       {incompletos.length > 0 && (
         <div style={{ marginBottom: 18 }}>
           <div style={{ fontSize: 11, color: "var(--text3)", fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.4, marginBottom: 8 }}>
             💰 Aguardando precificação ({incompletos.length})
           </div>
-          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          <div style={{ display: "grid", gridTemplateColumns: mobileOnly ? "1fr" : "repeat(auto-fill, minmax(340px, 1fr))", gap: 10 }}>
             {incompletos.map(s => {
               const pessoa = restPessoas.find(p => p.id === s.pessoaId);
               return (
