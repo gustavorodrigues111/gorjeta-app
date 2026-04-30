@@ -3,7 +3,7 @@ import React, { useState, useEffect, useMemo, useRef, Component } from "react";
 import { db } from "./firebase";
 import { doc, getDoc, setDoc } from "firebase/firestore";
 
-const APP_VERSION = "8.8.0";
+const APP_VERSION = "8.9.0";
 
 const DEFAULT_ADMISSION = () => `${new Date().getFullYear()}-01-01`;
 const round2 = (v) => Math.round(v * 100) / 100;
@@ -17603,7 +17603,7 @@ function miseParsePlanilhaXLSX(file) {
 // Aplica os dados parseados: merge por nome (ftNrm). Retorna estatísticas pra exibir no preview.
 // Não chama onUpdate — só monta os next-states e retorna pro caller.
 function miseBuildImportPlan(parsed, ctx) {
-  const { restaurantId, miseSuppliers, miseStocks, miseCategories, miseItems } = ctx;
+  const { restaurantId, miseSuppliers, miseStocks, miseCategories, miseItems, miseProductSuppliers } = ctx;
   const restSup = (miseSuppliers || []).filter(s => s.restaurantId === restaurantId);
   const restStock = (miseStocks || []).filter(s => s.restaurantId === restaurantId);
   const restCat = (miseCategories || []).filter(c => c.restaurantId === restaurantId);
@@ -17762,13 +17762,64 @@ function miseBuildImportPlan(parsed, ctx) {
     }
   });
 
+  // 5. v8.9 — miseProductSuppliers (tabela N:N que a UI lê)
+  // Reconstrói baseado nos suppliers que cada produto referencia, mergendo com existing
+  // (preserva entries de outros produtos não importados; substitui as do produto importado).
+  const productSuppliersNext = [...(miseProductSuppliers || [])];
+  let psAdded = 0, psUpdated = 0;
+  parsed.produtos.forEach(p => {
+    const productId = itemByName[ftNrm(p.name)]?.id;
+    if (!productId) return;
+    // Lista de supplierIds com preferred flag, derivada do parsed
+    const desiredLinks = [];
+    if (p.fornecedorPreferencial) {
+      const sid = supByName[ftNrm(p.fornecedorPreferencial)]?.id;
+      if (sid) desiredLinks.push({ supplierId: sid, preferred: true });
+    }
+    (p.fornecedoresAlternativos || []).slice(0, 3).forEach(altName => {
+      const sid = supByName[ftNrm(altName)]?.id;
+      if (sid && !desiredLinks.some(l => l.supplierId === sid)) {
+        desiredLinks.push({ supplierId: sid, preferred: false });
+      }
+    });
+    if (desiredLinks.length === 0) return;
+    desiredLinks.forEach(link => {
+      const existingIdx = productSuppliersNext.findIndex(ps =>
+        ps.restaurantId === restaurantId &&
+        ps.productId === productId &&
+        ps.supplierId === link.supplierId
+      );
+      if (existingIdx >= 0) {
+        // Atualiza preferred se mudou
+        const ex = productSuppliersNext[existingIdx];
+        if (ex.preferred !== link.preferred) {
+          productSuppliersNext[existingIdx] = { ...ex, preferred: link.preferred };
+          psUpdated++;
+        }
+      } else {
+        productSuppliersNext.push({
+          id: ftUid(),
+          restaurantId,
+          productId,
+          supplierId: link.supplierId,
+          conversionFactor: 1,
+          price: null,
+          preferred: link.preferred,
+        });
+        psAdded++;
+      }
+    });
+  });
+
   return {
     suppliersNext, stocksNext, categoriesNext, itemsNext,
+    productSuppliersNext,
     stats: {
       supAdded, supUpdated,
       stockAdded,
       catAdded,
       itemAdded, itemUpdated,
+      psAdded, psUpdated,
       totalProdutos: parsed.produtos.length,
       totalFornecedores: parsed.fornecedores.length,
     },
@@ -18314,7 +18365,7 @@ function MiseContagensAdmin({ restaurantId, restaurantName = "", employees, mise
       }
       const plan = miseBuildImportPlan(parsed, {
         restaurantId,
-        miseSuppliers, miseStocks, miseCategories, miseItems,
+        miseSuppliers, miseStocks, miseCategories, miseItems, miseProductSuppliers,
       });
       setImportPreview({ plan, fileName: file.name });
     } catch (err) {
@@ -18331,6 +18382,8 @@ function MiseContagensAdmin({ restaurantId, restaurantName = "", employees, mise
     onUpdate("miseStocks", plan.stocksNext);
     onUpdate("miseCategories", plan.categoriesNext);
     onUpdate("miseItems", plan.itemsNext);
+    // v8.9: também atualiza miseProductSuppliers (tabela N:N que a UI lê pra Compras/Fornecedores)
+    if (plan.productSuppliersNext) onUpdate("miseProductSuppliers", plan.productSuppliersNext);
     setImportPreview(null);
     const s = plan.stats;
     alert(
@@ -18338,7 +18391,9 @@ function MiseContagensAdmin({ restaurantId, restaurantName = "", employees, mise
       `  • Fornecedores: +${s.supAdded} novos · ${s.supUpdated} atualizado(s)\n` +
       `  • Estoques: +${s.stockAdded} novo(s)\n` +
       `  • Categorias: +${s.catAdded} nova(s)\n` +
-      `  • Produtos: +${s.itemAdded} novo(s) · ${s.itemUpdated} atualizado(s)\n\n` +
+      `  • Produtos: +${s.itemAdded} novo(s) · ${s.itemUpdated} atualizado(s)\n` +
+      (s.psAdded || s.psUpdated ? `  • Vínculos produto-fornecedor: +${s.psAdded || 0} novo(s) · ${s.psUpdated || 0} atualizado(s)\n` : "") +
+      `\n` +
       (plan.warnings.length ? `⚠ ${plan.warnings.length} aviso(s):\n${plan.warnings.slice(0,5).join("\n")}` : `Tudo certo.`)
     );
   }
