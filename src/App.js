@@ -3,7 +3,7 @@ import React, { useState, useEffect, useMemo, useRef, Component } from "react";
 import { db } from "./firebase";
 import { doc, getDoc, setDoc, onSnapshot } from "firebase/firestore";
 
-const APP_VERSION = "8.12.0";
+const APP_VERSION = "8.12.1";
 
 // v8.11.1: comparação de versão semver-like (8.11.1 > 8.10.7 > 8.9.4)
 function compareVersions(a, b) {
@@ -13870,6 +13870,69 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
             <details style={{marginTop:18,padding:"12px 14px",background:"var(--bg2)",borderRadius:10,border:"1px solid var(--border)"}}>
               <summary style={{cursor:"pointer",fontSize:12,fontWeight:600,color:"var(--text2)",padding:"4px 0"}}>⋯ Mais ações</summary>
               <div style={{marginTop:12,display:"flex",flexDirection:"column",gap:10}}>
+                {/* v8.12.1 (one-shot): Inferir refDate de abril/2026 a partir dos schedules existentes — Owner only */}
+                {isOwner && (() => {
+                  const targetMk = "2026-04";
+                  // Pré-cálculo
+                  const candidatos = [];
+                  schedEmps.forEach(emp => {
+                    const empWS = data?.workSchedules?.[rid]?.[emp.id] ?? [];
+                    const cur = empWS[empWS.length - 1];
+                    if (!cur) return;
+                    // Domingo precisa estar ativo no horário
+                    const sundayActive = cur.type === "alternating"
+                      ? (cur.weeks?.A?.days?.[0]?.in || cur.weeks?.B?.days?.[0]?.in)
+                      : (cur.days?.[0]?.in || cur.days?.[0]?.active === true);
+                    if (!sundayActive) return;
+                    // Já tem ciclo/refDate? skip
+                    if (cur.sundayCycle?.refDate) return;
+                    // Procura 1º domingo de folga em abril/2026
+                    const sched = data?.schedules?.[rid]?.[targetMk]?.[emp.id] ?? {};
+                    const folgaSundays = Object.entries(sched)
+                      .filter(([dt, st]) => st === DAY_OFF && new Date(dt+"T12:00:00").getDay() === 0)
+                      .map(([dt]) => dt)
+                      .sort();
+                    if (folgaSundays.length === 0) return;
+                    candidatos.push({ emp, refDate: folgaSundays[0] });
+                  });
+                  if (candidatos.length === 0) return null;
+                  return (
+                    <div style={{padding:"10px 12px",background:"var(--card-bg)",border:"1px solid #f59e0b44",borderRadius:8}}>
+                      <div style={{fontSize:12,fontWeight:700,color:"#f59e0b",marginBottom:6}}>🎯 Inferir refDate de domingo a partir de abril/2026</div>
+                      <div style={{fontSize:11,color:"var(--text3)",marginBottom:10,lineHeight:1.5}}>
+                        Pra cada empregado com domingo trabalhado mas sem ciclo cadastrado: pega o 1º domingo marcado como folga em abril/2026 da escala atual e usa como referência (ciclo padrão 3:1). <strong>{candidatos.length} empregado(s) elegível(eis).</strong>
+                      </div>
+                      <button onClick={async ()=>{
+                        const linhas = ["🎯 INFERIR refDate DE DOMINGO\n", `Vai aplicar em ${candidatos.length} empregado(s) deste restaurante:\n`];
+                        candidatos.slice(0, 12).forEach(c => {
+                          linhas.push(`  • ${c.emp.name} → 1º folga: ${new Date(c.refDate+"T12:00:00").toLocaleDateString("pt-BR")}`);
+                        });
+                        if (candidatos.length > 12) linhas.push(`  ... e mais ${candidatos.length - 12}`);
+                        linhas.push("\nCiclo padrão: trabalha 3 domingos, folga 1.");
+                        linhas.push("Atualiza a versão vigente do horário in-place (não cria nova versão).");
+                        if (!await appConfirm(linhas.join("\n"))) return;
+                        // Aplica
+                        const wsAll = { ...(data?.workSchedules ?? {}) };
+                        const restWs = { ...(wsAll[rid] ?? {}) };
+                        candidatos.forEach(({emp, refDate}) => {
+                          const empArr = [...(restWs[emp.id] ?? [])];
+                          if (empArr.length === 0) return;
+                          const lastIdx = empArr.length - 1;
+                          empArr[lastIdx] = {
+                            ...empArr[lastIdx],
+                            sundayCycle: { workCount: 3, offCount: 1, refDate },
+                          };
+                          restWs[emp.id] = empArr;
+                        });
+                        wsAll[rid] = restWs;
+                        onUpdate("workSchedules", wsAll);
+                        onUpdate("_toast", `🎯 ${candidatos.length} ciclo(s) inferido(s) — empregados receberam refDate baseado em abril/2026`);
+                      }} style={{...S.btnPrimary,fontSize:12,padding:"8px 16px",background:"#f59e0b",borderColor:"#f59e0b"}}>
+                        Aplicar pra {candidatos.length} empregado(s)
+                      </button>
+                    </div>
+                  );
+                })()}
                 {/* v8.11.0: Inversões registradas neste mês */}
                 {(() => {
                   const monthSwaps = (data?.scheduleSwaps ?? []).filter(s => s.restaurantId === rid && s.date && s.date.slice(0,7) === mk);
