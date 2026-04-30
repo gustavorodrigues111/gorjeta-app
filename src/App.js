@@ -3,7 +3,7 @@ import React, { useState, useEffect, useMemo, useRef, Component } from "react";
 import { db } from "./firebase";
 import { doc, getDoc, setDoc } from "firebase/firestore";
 
-const APP_VERSION = "8.4.0";
+const APP_VERSION = "8.4.1";
 
 const DEFAULT_ADMISSION = () => `${new Date().getFullYear()}-01-01`;
 const round2 = (v) => Math.round(v * 100) / 100;
@@ -10080,10 +10080,11 @@ function SaveIndicator({ mode = "auto", pending = false, savedAt = null, compact
 function MonthPickerGate({ contextLabel, year, month, onPick, scheduleStatus, restaurantId }) {
   // Smart default
   const sd = smartDefaultMonth();
-  // Gera 5 opções: 2 anteriores, atual, 2 próximos
+  // v8.4.1 — Gera 6 opções: 2 anteriores, atual, 3 próximos
+  // (favorece planejamento futuro que é o caso mais comum em escala/VT)
   const today = new Date();
   const options = [];
-  for (let delta = -2; delta <= 2; delta++) {
+  for (let delta = -2; delta <= 3; delta++) {
     const d = new Date(today.getFullYear(), today.getMonth() + delta, 1);
     const y = d.getFullYear(), m = d.getMonth();
     let context = "";
