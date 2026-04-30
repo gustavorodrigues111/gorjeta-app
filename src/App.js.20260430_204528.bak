@@ -3,7 +3,7 @@ import React, { useState, useEffect, useMemo, useRef, Component } from "react";
 import { db } from "./firebase";
 import { doc, getDoc, setDoc, onSnapshot } from "firebase/firestore";
 
-const APP_VERSION = "8.13.0";
+const APP_VERSION = "8.12.6";
 
 // v8.11.1: comparação de versão semver-like (8.11.1 > 8.10.7 > 8.9.4)
 function compareVersions(a, b) {
@@ -10302,13 +10302,11 @@ function SaveIndicator({ mode = "auto", pending = false, savedAt = null, compact
 function MonthPickerGate({ contextLabel, year, month, onPick, scheduleStatus, restaurantId }) {
   // Smart default
   const sd = smartDefaultMonth();
+  // v8.4.1 — Gera 6 opções: 2 anteriores, atual, 3 próximos
+  // (favorece planejamento futuro que é o caso mais comum em escala/VT)
   const today = new Date();
-  // v8.13.0: navegação livre — offset desloca a janela de 6 meses
-  const [offset, setOffset] = useState(0);
-  const startDelta = -2 + offset; // delta inicial relativo a hoje
   const options = [];
-  for (let i = 0; i < 6; i++) {
-    const delta = startDelta + i;
+  for (let delta = -2; delta <= 3; delta++) {
     const d = new Date(today.getFullYear(), today.getMonth() + delta, 1);
     const y = d.getFullYear(), m = d.getMonth();
     let context = "";
@@ -10320,11 +10318,8 @@ function MonthPickerGate({ contextLabel, year, month, onPick, scheduleStatus, re
     const mk = monthKey(y, m);
     const isClosed = !!scheduleStatus?.[restaurantId]?.[mk] && scheduleStatus[restaurantId][mk].status === "closed";
     if (isClosed) { context = "Mês fechado 🔒"; bg = "#dc262615"; color = "#dc2626"; border = "#dc262644"; }
-    options.push({ y, m, label: monthLabel(y, m), context, bg, color, border, isSmart, mk, isClosed });
+    options.push({ y, m, label: monthLabel(y, m), context, bg, color, border, isSmart, mk });
   }
-  // Range label: "março 2026 – agosto 2026"
-  const firstM = options[0], lastM = options[options.length - 1];
-  const rangeLabel = `${monthLabel(firstM.y, firstM.m).replace(" de ","/")} → ${monthLabel(lastM.y, lastM.m).replace(" de ","/")}`;
   return (
     <div style={{
       position: "fixed", inset: 0, background: "rgba(0,0,0,0.55)", zIndex: 10000,
@@ -10335,7 +10330,7 @@ function MonthPickerGate({ contextLabel, year, month, onPick, scheduleStatus, re
         background: "var(--bg)", borderRadius: 16, padding: 28, maxWidth: 560, width: "100%",
         border: "1px solid var(--border)", boxShadow: "0 16px 48px rgba(0,0,0,0.25)",
       }}>
-        <div style={{ textAlign: "center", marginBottom: 14 }}>
+        <div style={{ textAlign: "center", marginBottom: 18 }}>
           <div style={{ fontSize: 36, marginBottom: 8 }}>📅</div>
           <h2 style={{ color: "var(--text)", margin: "0 0 6px", fontSize: 20, fontWeight: 800 }}>
             Qual mês você vai trabalhar em <span style={{ color: "var(--ac)" }}>{contextLabel}</span>?
@@ -10344,22 +10339,11 @@ function MonthPickerGate({ contextLabel, year, month, onPick, scheduleStatus, re
             Confirme o mês antes de visualizar ou editar — evita alterações em mês errado.
           </p>
         </div>
-
-        {/* v8.13.0: Navegação por janela */}
-        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:12,gap:8}}>
-          <button onClick={()=>setOffset(o => o - 6)} style={{...S.btnSecondary, fontSize:12, padding:"6px 12px", whiteSpace:"nowrap"}} title="6 meses anteriores">◀ Anteriores</button>
-          <div style={{flex:1, textAlign:"center"}}>
-            <div style={{fontSize:11,color:"var(--text3)",fontFamily:"'DM Mono',monospace",textTransform:"capitalize"}}>{rangeLabel}</div>
-            {offset !== 0 && (
-              <button onClick={()=>setOffset(0)} style={{marginTop:4,fontSize:10,padding:"3px 10px",border:"1px solid var(--ac)44",background:"var(--ac)11",color:"var(--ac)",borderRadius:14,cursor:"pointer",fontFamily:"'DM Sans',sans-serif",fontWeight:600}}>📍 Voltar pra hoje</button>
-            )}
-          </div>
-          <button onClick={()=>setOffset(o => o + 6)} style={{...S.btnSecondary, fontSize:12, padding:"6px 12px", whiteSpace:"nowrap"}} title="6 meses seguintes">Próximos ▶</button>
-        </div>
-
         <div style={{
           display: "grid",
+          // v8.4.2: grid fixo pra evitar última linha com botões esticados
           gridTemplateColumns: typeof window !== "undefined" && window.innerWidth < 600 ? "repeat(2, 1fr)" : "repeat(3, 1fr)",
+          // v8.4.4: linhas com altura igual pra todos os botões mesmo se label quebra (ex: "fevereiro de 2026" 2 linhas)
           gridAutoRows: "1fr",
           gap: 10,
         }}>
@@ -10377,7 +10361,7 @@ function MonthPickerGate({ contextLabel, year, month, onPick, scheduleStatus, re
               {o.isSmart && (
                 <span style={{ position: "absolute", top: 6, right: 6, fontSize: 9, padding: "2px 8px", borderRadius: 999, background: "var(--ac)", color: "#fff", fontWeight: 800, letterSpacing: 0.3 }}>SUGERIDO</span>
               )}
-              <div style={{ fontSize: 14, fontWeight: 800, color: "var(--text)", lineHeight: 1.2, textAlign: "center", textTransform: "capitalize" }}>{o.label}</div>
+              <div style={{ fontSize: 14, fontWeight: 800, color: "var(--text)", lineHeight: 1.2, textAlign: "center" }}>{o.label}</div>
               <div style={{ fontSize: 11, color: o.color, fontWeight: 600, textAlign: "center" }}>{o.context}</div>
             </button>
           ))}
@@ -12738,26 +12722,15 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                 <h3 style={{color:"var(--text)",margin:0,fontSize:mobileOnly?16:20}}>📅 Escala — {monthLabel(year,month)}</h3>
                 <SaveIndicator mode="manual" pending={schedDirty} compact />
                 <button onClick={()=>setScheduleMonthConfirmed(false)} style={{...S.btnSecondary,fontSize:11,padding:"3px 10px"}} title="Voltar pra seleção de mês">↺ Trocar mês</button>
-                {monthClosed && <span style={{fontSize:11,padding:"3px 10px",borderRadius:6,background:"var(--red)22",color:"var(--red)",fontWeight:700}}>🔒 Mês fechado</span>}
-                {/* v8.13.0: Reabrir destacado no header — Owner/DP */}
-                {monthClosed && (isOwner || isDP) && (
-                  <button onClick={()=>setShowReopenConfirm(true)} style={{fontSize:11,padding:"3px 10px",border:"1px solid #f59e0b",background:"#f59e0b15",color:"#f59e0b",fontWeight:700,borderRadius:6,cursor:"pointer",fontFamily:"'DM Sans',sans-serif"}} title="Reabrir mês para edição">
-                    🔓 Reabrir
-                  </button>
-                )}
+                {monthClosed && <span style={{fontSize:11,padding:"3px 10px",borderRadius:6,background:"var(--red)22",color:"var(--red)",fontWeight:700}}>Mes fechado</span>}
                 {(() => { const vtPaidInfo = data?.vtPayments?.[rid]?.[mk]; return vtPaidInfo ? <span style={{fontSize:11,padding:"3px 10px",borderRadius:6,background:"#10b98122",color:"var(--green)",fontWeight:700}}>VT pago em {new Date(vtPaidInfo.paidAt).toLocaleDateString("pt-BR")}</span> : null; })()}
-                {/* v8.13.0: Toggle — Vigente vira Fechada quando mês está fechado */}
                 <div style={{display:"flex",borderRadius:6,overflow:"hidden",border:"1px solid var(--border)"}}>
-                  {["vigente","prevista"].map(mode => {
-                    const label = mode === "vigente" ? (monthClosed ? "🔒 Fechada" : "Vigente") : "Prevista";
-                    return (
-                      <button key={mode} onClick={()=>setSchedViewMode(mode)}
-                        style={{padding:"4px 12px",fontSize:11,fontWeight:schedViewMode===mode?700:500,border:"none",background:schedViewMode===mode?(monthClosed&&mode==="vigente"?"#dc262622":"var(--ac)22"):"transparent",color:schedViewMode===mode?(monthClosed&&mode==="vigente"?"#dc2626":"var(--ac)"):"var(--text3)",cursor:"pointer",fontFamily:"'DM Sans',sans-serif"}}
-                        title={mode === "vigente" ? (monthClosed ? "Estado da escala quando foi fechada (read-only)" : "Estado atual da escala (editável)") : "Snapshot da escala original (antes da primeira edição ou pagamento de VT)"}>
-                        {label}
-                      </button>
-                    );
-                  })}
+                  {["vigente","prevista"].map(mode => (
+                    <button key={mode} onClick={()=>setSchedViewMode(mode)}
+                      style={{padding:"4px 12px",fontSize:11,fontWeight:schedViewMode===mode?700:500,border:"none",background:schedViewMode===mode?"var(--ac)22":"transparent",color:schedViewMode===mode?"var(--ac)":"var(--text3)",cursor:"pointer",fontFamily:"'DM Sans',sans-serif"}}>
+                      {mode === "vigente" ? "Vigente" : "Prevista"}
+                    </button>
+                  ))}
                 </div>
                 {/* v8.11.0: Registrar inversão informal */}
                 {(canSched || isOwner) && !monthClosed && (
