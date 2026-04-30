@@ -3,7 +3,7 @@ import React, { useState, useEffect, useMemo, useRef, Component } from "react";
 import { db } from "./firebase";
 import { doc, getDoc, setDoc } from "firebase/firestore";
 
-const APP_VERSION = "8.10.0";
+const APP_VERSION = "8.10.1";
 
 const DEFAULT_ADMISSION = () => `${new Date().getFullYear()}-01-01`;
 const round2 = (v) => Math.round(v * 100) / 100;
@@ -10593,16 +10593,16 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
     { id:"planejamento", label:"📅 Planejamento", icon:"📅", tabs: [
       canSched && ["schedule","Escalas"],
       (isOwner || isDP || isLider) && ["freelas","🎒 Freelas"],
-      (isOwner || canTips || tabVisible("employees")) && ["reunioes","Reuniões"],
+      (isOwner || canTips || perms.employees !== false) && ["reunioes","Reuniões"],
       (canTips || isOwner) && ["trilhas","Trilhas"],
       (canTips || isOwner) && ["ideias","💡 Ideias"],
     ].filter(Boolean) },
     { id:"escritorio", label:"🏢 Escritório", icon:"🏢", tabs: [
       (isOwner || canTips) && ["pessoas","Pessoas"],
       (isOwner || canTips) && ["permissoes","Permissões"],
-      (isOwner || canTips || tabVisible("employees")) && ["employees","Equipe"],
-      (isOwner || (perms.vt !== false && tabVisible("vt"))) && ["vt","Vale Transporte"],
-      (isOwner || tabVisible("roles")) && ["roles","Cargos"],
+      (isOwner || canTips || perms.employees !== false) && ["employees","Equipe"],
+      (isOwner || perms.vt !== false) && ["vt","Vale Transporte"],
+      (isOwner || perms.roles !== false) && ["roles","Cargos"],
       (canTips || isOwner) && ["mise_compras","🛒 Compras"],
       canTips && ["tips","Gorjetas"],
       canTips && ["dashboard","Dashboard"],
@@ -13955,29 +13955,8 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                 </div>
               </div>
             )}
-            {/* v8.10: Owner-only — abas do painel admin (cargos / equipe) */}
-            {isOwner && (
-              <div style={{...S.card,marginBottom:20}}>
-                <p style={{color:ac,fontSize:14,fontWeight:700,margin:"0 0 4px"}}>📊 Abas do painel do gestor admin</p>
-                <p style={{color:"var(--text3)",fontSize:12,marginBottom:14}}>Quais abas o gestor admin deste restaurante pode acessar.</p>
-                <div style={{display:"flex",flexDirection:"column",gap:10}}>
-                  {[
-                    ["roles",     "🏷️ Cargos"],
-                    ["employees", "👥 Equipe"],
-                  ].map(([key, label]) => {
-                    const isOn = getTabsConfig(key);
-                    return (
-                      <div key={key} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"10px 14px",background:"var(--bg1)",borderRadius:10,border:`1px solid ${isOn?"#10b98133":"var(--border)"}`}}>
-                        <span style={{color:isOn?"var(--text)":"var(--text3)",fontSize:13,fontWeight:isOn?600:400}}>{label}</span>
-                        <button onClick={()=>toggleAdminTab(key)} style={{padding:"5px 14px",borderRadius:20,border:"none",background:isOn?"var(--green)":"var(--border)",color:isOn?"#fff":"#555",fontWeight:700,cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:12}}>
-                          {isOn?"Autorizada":"Bloqueada"}
-                        </button>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
+            {/* v8.10.1: card "Abas do painel admin" removido — Cargos/Equipe agora vão pelo
+                 controle por pessoa em Pessoas → Permissões (perms.roles / perms.employees). */}
 
             {/* v8.10: Portal do empregado — Abas + FAQ unificados num só lugar */}
             <div style={{...S.card,marginBottom:20}}>
@@ -20086,9 +20065,10 @@ function buildShellSections({ pessoa, restaurantId, isOwner, employees, restaura
     const restaurantObj = (restaurants || []).find(r => r.id === restaurantId);
     const empTabVisivel = (key) =>
       restaurantObj?.tabsConfig?.[key] !== false && restaurantObj?.tabsGestor?.[key] !== false;
+    // v8.10.1: extrato gateado por showTipsToEmployee; escala/trilha/horarios via tabs config.
     const jornadaItems = [
-      { id: "me_extrato", label: "Meu extrato",    icon: "💰", kind: "employee", tab: "extrato" },
-      { id: "me_escala",  label: "Minha escala",   icon: "📅", kind: "employee", tab: "escala"  },
+      (restaurantObj?.showTipsToEmployee === true) && { id: "me_extrato", label: "Meu extrato",    icon: "💰", kind: "employee", tab: "extrato" },
+      empTabVisivel("escala")   && { id: "me_escala",  label: "Minha escala",   icon: "📅", kind: "employee", tab: "escala"  },
       empTabVisivel("trilha")   && { id: "me_trilha",   label: "Minhas trilhas",  icon: "🎯", kind: "employee", tab: "trilha"   },
       empTabVisivel("horarios") && { id: "me_horarios", label: "Meus horários",   icon: "🕐", kind: "employee", tab: "horarios" },
     ].filter(Boolean);
@@ -20210,18 +20190,27 @@ function buildShellSections({ pessoa, restaurantId, isOwner, employees, restaura
 
   // 4.5) COMUNICAÇÃO — Comunicados, FAQ, Fale com DP (TODOS, v7.5)
   // kind dinâmico: admin renderiza UI de gestão (criar/editar); empregado renderiza UI de leitura.
-  // Visível pra qualquer pessoa logada (todo mundo precisa de canais de comunicação interna).
+  // v8.10.1: empregados respeitam tabsConfig/tabsGestor; admins/owner sempre veem (gestão).
   const commItems = [];
-  const commKind = (ad.comunicados || isOwner) ? "manager" : "employee";
-  commItems.push({ id: "mod_comunicados", label: "Comunicados", icon: "📢", kind: commKind, tab: "comunicados" });
+  const _restObj = (restaurants || []).find(r => r.id === restaurantId);
+  const _empVis = (key) => _restObj?.tabsConfig?.[key] !== false && _restObj?.tabsGestor?.[key] !== false;
+  const isAdminCom = ad.comunicados || isOwner;
+  if (isAdminCom || (isTeam && _empVis("comunicados"))) {
+    commItems.push({ id: "mod_comunicados", label: "Comunicados", icon: "📢", kind: isAdminCom ? "manager" : "employee", tab: "comunicados" });
+  }
   if (ad.faq || isOwner) {
     commItems.push({ id: "mod_faq", label: "FAQ", icon: "❓", kind: "manager", tab: "faq" });
-  } else if (isTeam) {
+  } else if (isTeam && _empVis("faq")) {
     commItems.push({ id: "mod_faq", label: "FAQ", icon: "❓", kind: "employee", tab: "faq" });
   }
   // Fale com DP: empregado envia / admin DP responde
-  commItems.push({ id: "mod_dp", label: "Fale com DP", icon: "💬", kind: (sp.isDP || isOwner) ? "manager" : "employee", tab: "dp" });
-  sections.push({ group: "Comunicação", color: "#8b5cf6", items: commItems });
+  const isAdminDp = sp.isDP || isOwner;
+  if (isAdminDp || (isTeam && _empVis("dp"))) {
+    commItems.push({ id: "mod_dp", label: "Fale com DP", icon: "💬", kind: isAdminDp ? "manager" : "employee", tab: "dp" });
+  }
+  if (commItems.length > 0) {
+    sections.push({ group: "Comunicação", color: "#8b5cf6", items: commItems });
+  }
 
   // 5) AJUSTES — Configurações do restaurante (separado de Escritório por escolha do produto)
   if (ad.config || isOwner) {
