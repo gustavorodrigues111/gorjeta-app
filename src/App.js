@@ -3,7 +3,7 @@ import React, { useState, useEffect, useMemo, useRef, Component } from "react";
 import { db } from "./firebase";
 import { doc, getDoc, setDoc, onSnapshot } from "firebase/firestore";
 
-const APP_VERSION = "8.12.3";
+const APP_VERSION = "8.12.4";
 
 // v8.11.1: comparação de versão semver-like (8.11.1 > 8.10.7 > 8.9.4)
 function compareVersions(a, b) {
@@ -13940,7 +13940,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                                     letterSpacing: 0.3,
                                   }}>{restaurant.serviceStartDate && !isDem && slot.date < restaurant.serviceStartDate?"🔒":label}</span>
                                   {delayMin > 0 && <span style={{position:"absolute",top:0,right:1,fontSize:6,color:status||isDem?"#fff":"#f59e0b",fontWeight:800}}>⏰</span>}
-                                  {swapInfo && <span style={{position:"absolute",bottom:1,right:1,fontSize:8,lineHeight:1,background:"#7c3aed",color:"#fff",borderRadius:3,padding:"0 2px",fontWeight:700}}>↔</span>}
+                                  {swapInfo && <span style={{position:"absolute",top:-3,right:-3,fontSize:11,lineHeight:1,background:"#7c3aed",color:"#fff",borderRadius:"50%",width:16,height:16,display:"flex",alignItems:"center",justifyContent:"center",fontWeight:800,boxShadow:"0 2px 4px rgba(0,0,0,0.3)",border:"2px solid var(--card-bg)"}}>↔</span>}
                                 </div>
                               );
                             })}
@@ -14056,7 +14056,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                                     letterSpacing: 0.2,
                                   }}>{!isDem&&restaurant.serviceStartDate&&date<restaurant.serviceStartDate?"🔒":label}</span>
                                   {dDelayMin > 0 && <span style={{position:"absolute",bottom:0,right:0,fontSize:5,color:status||isDem?"#fff":"#f59e0b",lineHeight:1}}>⏰</span>}
-                                  {swapInfo && <span style={{position:"absolute",top:0,right:0,fontSize:6,lineHeight:1,background:"#7c3aed",color:"#fff",borderRadius:2,padding:"0 1px",fontWeight:700}}>↔</span>}
+                                  {swapInfo && <span style={{position:"absolute",top:-2,right:-2,fontSize:9,lineHeight:1,background:"#7c3aed",color:"#fff",borderRadius:"50%",width:13,height:13,display:"flex",alignItems:"center",justifyContent:"center",fontWeight:800,boxShadow:"0 1px 3px rgba(0,0,0,0.4)",border:"1.5px solid var(--card-bg)",zIndex:2}}>↔</span>}
                                 </td>
                               );
                             })}
