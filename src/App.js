@@ -3,7 +3,7 @@ import React, { useState, useEffect, useMemo, useRef, Component } from "react";
 import { db } from "./firebase";
 import { doc, getDoc, setDoc, onSnapshot } from "firebase/firestore";
 
-const APP_VERSION = "8.11.3";
+const APP_VERSION = "8.11.4";
 
 // v8.11.1: comparação de versão semver-like (8.11.1 > 8.10.7 > 8.9.4)
 function compareVersions(a, b) {
@@ -2446,8 +2446,11 @@ function WorkScheduleManagerTab({ restaurantId, employees, roles, workSchedules,
   const setDays = isAlternating && editWeek === "B" ? setEditDaysB : setEditDays;
 
   // Sincroniza com forcedEmpId externo (modo embutido em detalhe do empregado)
+  // v8.11.4: SEMPRE chama loadEmp quando forcedEmpId muda (ou no mount inicial), pra popular
+  // editDays/sundayCycle a partir do horário vigente. Antes só setSelEmpId era chamado, deixando
+  // o form vazio mesmo com forcedEmpId já setado no useState inicial.
   useEffect(() => {
-    if (forcedEmpId && forcedEmpId !== selEmpId) setSelEmpId(forcedEmpId);
+    if (forcedEmpId) loadEmp(forcedEmpId);
   }, [forcedEmpId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Helpers: convert between internal format (with active flag) and storage format ──
