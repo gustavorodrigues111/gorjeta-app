@@ -3,7 +3,7 @@ import React, { useState, useEffect, useMemo, useRef, Component } from "react";
 import { db } from "./firebase";
 import { doc, getDoc, setDoc } from "firebase/firestore";
 
-const APP_VERSION = "8.10.2";
+const APP_VERSION = "8.10.4";
 
 const DEFAULT_ADMISSION = () => `${new Date().getFullYear()}-01-01`;
 const round2 = (v) => Math.round(v * 100) / 100;
@@ -5483,37 +5483,7 @@ function EmployeeSpreadsheet({ restEmps, restRoles, rid, employees, pessoas, onU
     onUpdate("employees", employees.filter(x => x.id !== emp.id));
   }
 
-  async function resetPin(emp) {
-    const numericPin = (emp.empCode ?? "").replace(/\D/g, "").padStart(4, "0"); // sempre 4 dígitos ex: "0005"
-    if (!await appConfirm(`Resetar PIN de "${emp.name}"?\n\nO PIN voltará para ${numericPin} e ele será obrigado a trocar no próximo acesso.`)) return;
-    // v7.7: sincroniza reset nos 3 records (pessoa + employee + manager) com mustChangePin=true
-    // pra forçar troca no próximo login em qualquer portal.
-    const cpfDigits = (emp.cpf || "").replace(/\D/g, "");
-    const linkedPessoa = (pessoas || []).find(p =>
-      p.linkedEmployeeId === emp.id ||
-      (cpfDigits && (p.cpf || "").replace(/\D/g, "") === cpfDigits)
-    );
-    onUpdate("employees", (employees || []).map(x => {
-      if (x.id === emp.id) return { ...x, pin: numericPin, mustChangePin: true };
-      if (cpfDigits && (x.cpf || "").replace(/\D/g, "") === cpfDigits) return { ...x, pin: numericPin, mustChangePin: true };
-      return x;
-    }));
-    if ((pessoas || []).length > 0) {
-      onUpdate("pessoas", pessoas.map(p => {
-        if (linkedPessoa && p.id === linkedPessoa.id) return { ...p, pin: numericPin, mustChangePin: true };
-        if (cpfDigits && (p.cpf || "").replace(/\D/g, "") === cpfDigits) return { ...p, pin: numericPin, mustChangePin: true };
-        return p;
-      }));
-    }
-    if ((managers || []).length > 0) {
-      onUpdate("managers", managers.map(m => {
-        if (linkedPessoa?.linkedManagerId && m.id === linkedPessoa.linkedManagerId) return { ...m, pin: numericPin, mustChangePin: true };
-        if (cpfDigits && (m.cpf || "").replace(/\D/g, "") === cpfDigits) return { ...m, pin: numericPin, mustChangePin: true };
-        return m;
-      }));
-    }
-    onUpdate("_toast", `🔐 PIN de ${emp.name} resetado para ${numericPin}`);
-  }
+  // v8.10.4: resetPin movido para PessoasAdmin. Função aqui foi removida.
 
   const detailEmpObj = detailEmp ? restEmps.find(e => e.id === detailEmp) : null;
   const detailRole = detailEmpObj ? restRoles.find(r => r.id === detailEmpObj.roleId) : null;
@@ -5808,11 +5778,7 @@ function EmployeeSpreadsheet({ restEmps, restRoles, rid, employees, pessoas, onU
                       <div><div style={{fontWeight:700,color:isInactive?"var(--green)":"#f59e0b"}}>{isInactive ? "Reativar empregado" : "Inativar empregado"}</div><div style={{fontSize:11,color:"var(--text3)",marginTop:2}}>{isInactive ? "Mover de volta para ativos" : "Mover para inativos temporariamente"}</div></div>
                     </button>
                   )}
-                  {/* Reset PIN */}
-                  <button onClick={()=>resetPin(emp)} style={{display:"flex",alignItems:"center",gap:8,padding:"12px 16px",borderRadius:10,border:"1px solid #f59e0b33",background:"#f59e0b09",color:"var(--text)",cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:13,textAlign:"left"}}>
-                    <span style={{fontSize:18}}>🔑</span>
-                    <div><div style={{fontWeight:700,color:"#f59e0b"}}>Resetar PIN</div><div style={{fontSize:11,color:"var(--text3)",marginTop:2}}>PIN volta para código do empregado, troca obrigatória no próximo acesso</div></div>
-                  </button>
+                  {/* v8.10.4: Reset PIN saiu da Equipe — agora é exclusivo da aba Pessoas. */}
                   {/* Excluir */}
                   {isOwner && isInactive && (
                     <button onClick={()=>deleteEmp(emp)} style={{display:"flex",alignItems:"center",gap:8,padding:"12px 16px",borderRadius:10,border:"1px solid #e74c3c33",background:"#e74c3c09",color:"var(--text)",cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:13,textAlign:"left"}}>
@@ -12122,6 +12088,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
             roles={roles}
             owners={data?.owners ?? []}
             employees={employees}
+            managers={data?.managers ?? []}
             restCode={restaurant.shortCode}
             onUpdate={onUpdate}
             mobileOnly={mobileOnly}
@@ -20832,7 +20799,12 @@ function InicioModule({ currentUser, restaurant, isOwner, isDP, isLider, mobileO
   const dataExt = now.toLocaleDateString("pt-BR", { day: "numeric", month: "long", year: "numeric" });
   // Capitaliza primeira letra (pt-BR vem minúsculo)
   const cap = (s) => s ? s.charAt(0).toUpperCase() + s.slice(1) : s;
-  const papel = isOwner ? "Gestor AppTip" : isDP ? "Departamento Pessoal" : isLider ? "Líder de Área" : "Gestor";
+  // v8.10.3: empregado puro (sem nenhuma permissão admin/líder/DP) só vê saudação + caixa de entrada.
+  const hasAnyAdmin = isOwner || isDP || isLider
+    || perms?.tips || perms?.schedule || perms?.config
+    || perms?.employees || perms?.roles || perms?.vt
+    || perms?.comunicados || perms?.faq;
+  const papel = isOwner ? "Gestor AppTip" : isDP ? "Departamento Pessoal" : isLider ? "Líder de Área" : hasAnyAdmin ? "Gestor" : "Equipe";
 
   return (
     <div style={{maxWidth:760,margin:"0 auto",padding:mobileOnly?"8px 4px":"16px 8px"}}>
@@ -20860,46 +20832,48 @@ function InicioModule({ currentUser, restaurant, isOwner, isDP, isLider, mobileO
         )}
       </div>
 
-      {/* Placeholder amigável do dashboard futuro */}
-      <div style={{
-        background:"var(--card-bg)",
-        border:"1px dashed var(--border)",
-        borderRadius:12,
-        padding:mobileOnly?"22px 18px":"28px 24px",
-        textAlign:"center",
-      }}>
-        <div style={{fontSize:36,marginBottom:10,opacity:0.6}}>📊</div>
-        <div style={{fontWeight:600,color:"var(--text)",fontSize:14,marginBottom:6}}>Seu painel está chegando</div>
-        <p style={{fontSize:12,color:"var(--text3)",lineHeight:1.6,maxWidth:440,margin:"0 auto"}}>
-          Em breve você vai ver aqui os números do dia, pendências, atalhos e um feed das últimas atividades do restaurante.
-        </p>
-        {!mobileOnly && (() => {
-          // v8.4.5 — gate atalhos por permissão. Usuário sem acesso à feature não vê o atalho.
-          // Owner sempre vê todos. Demais dependem de perms.
-          const canFreelas  = isOwner || isDP || isLider;
-          const canSchedule = isOwner || perms?.operational?.escalas === true || perms?.admin?.schedule === true;
-          const canTips     = isOwner || perms?.operational?.gorjetas === true || perms?.admin?.tips === true;
-          const shortcuts = [
-            canFreelas  && { tab: "freelas",   label: "🎒 Ir pra Freelas",  highlight: true },
-            canSchedule && { tab: "schedule",  label: "📅 Ver Escala",      highlight: false },
-            canTips     && { tab: "dashboard", label: "💰 Ver Gorjetas",    highlight: false },
-          ].filter(Boolean);
-          if (shortcuts.length === 0) return null;
-          return (
-            <div style={{marginTop:16,display:"flex",gap:8,justifyContent:"center",flexWrap:"wrap"}}>
-              {shortcuts.map(s => (
-                <button key={s.tab} onClick={()=>setTab && setTab(s.tab)}
-                  style={{
-                    background:"transparent",
-                    color: s.highlight ? ac : "var(--text2)",
-                    border: `1px solid ${s.highlight ? ac+"55" : "var(--border)"}`,
-                    borderRadius:8, padding:"6px 14px", fontSize:12, fontWeight:600, cursor:"pointer",
-                  }}>{s.label}</button>
-              ))}
-            </div>
-          );
-        })()}
-      </div>
+      {/* v8.10.3: painel "chegando" só para gestores. Empregado vai direto pra Caixa de entrada. */}
+      {hasAnyAdmin && (
+        <div style={{
+          background:"var(--card-bg)",
+          border:"1px dashed var(--border)",
+          borderRadius:12,
+          padding:mobileOnly?"22px 18px":"28px 24px",
+          textAlign:"center",
+        }}>
+          <div style={{fontSize:36,marginBottom:10,opacity:0.6}}>📊</div>
+          <div style={{fontWeight:600,color:"var(--text)",fontSize:14,marginBottom:6}}>Seu painel está chegando</div>
+          <p style={{fontSize:12,color:"var(--text3)",lineHeight:1.6,maxWidth:440,margin:"0 auto"}}>
+            Em breve você vai ver aqui os números do dia, pendências, atalhos e um feed das últimas atividades do restaurante.
+          </p>
+          {!mobileOnly && (() => {
+            // v8.4.5 — gate atalhos por permissão. Usuário sem acesso à feature não vê o atalho.
+            // Owner sempre vê todos. Demais dependem de perms.
+            const canFreelas  = isOwner || isDP || isLider;
+            const canSchedule = isOwner || perms?.operational?.escalas === true || perms?.admin?.schedule === true;
+            const canTips     = isOwner || perms?.operational?.gorjetas === true || perms?.admin?.tips === true;
+            const shortcuts = [
+              canFreelas  && { tab: "freelas",   label: "🎒 Ir pra Freelas",  highlight: true },
+              canSchedule && { tab: "schedule",  label: "📅 Ver Escala",      highlight: false },
+              canTips     && { tab: "dashboard", label: "💰 Ver Gorjetas",    highlight: false },
+            ].filter(Boolean);
+            if (shortcuts.length === 0) return null;
+            return (
+              <div style={{marginTop:16,display:"flex",gap:8,justifyContent:"center",flexWrap:"wrap"}}>
+                {shortcuts.map(s => (
+                  <button key={s.tab} onClick={()=>setTab && setTab(s.tab)}
+                    style={{
+                      background:"transparent",
+                      color: s.highlight ? ac : "var(--text2)",
+                      border: `1px solid ${s.highlight ? ac+"55" : "var(--border)"}`,
+                      borderRadius:8, padding:"6px 14px", fontSize:12, fontWeight:600, cursor:"pointer",
+                    }}>{s.label}</button>
+                ))}
+              </div>
+            );
+          })()}
+        </div>
+      )}
     </div>
   );
 }
@@ -22747,7 +22721,7 @@ function FreelaHistoricoTab({ restaurantId, restPessoas, shifts, lotes, fmtHoras
   );
 }
 
-function PessoasAdmin({ restaurantId, pessoas, roles, owners, employees, restCode, onUpdate, mobileOnly, realIsOwner, onStartImpersonate }) {
+function PessoasAdmin({ restaurantId, pessoas, roles, owners, employees, managers, restCode, onUpdate, mobileOnly, realIsOwner, onStartImpersonate }) {
   // Filtra owners do AppTip — eles têm acesso implícito, não constam como pessoa do restaurante
   const ownerCpfSet = new Set((owners || []).map(o => (o.cpf || "").replace(/\D/g, "")).filter(Boolean));
   const restPessoas = (pessoas || []).filter(p => {
@@ -22803,6 +22777,36 @@ function PessoasAdmin({ restaurantId, pessoas, roles, owners, employees, restCod
     onUpdate("_toast", `✅ ${p.name} vinculada a este restaurante`);
     setVincularOpen(false);
     setVincularFilter("");
+  }
+
+  // v8.10.4: reset PIN da pessoa (sincroniza nos 3 records). Default = 4 primeiros do CPF.
+  async function resetPessoaPin(pessoa) {
+    const cpfDigits = (pessoa.cpf || "").replace(/\D/g, "");
+    if (cpfDigits.length < 4) {
+      onUpdate("_toast", "⚠️ CPF inválido — não foi possível gerar PIN automático");
+      return;
+    }
+    const newPin = cpfDigits.slice(0, 4);
+    if (!await appConfirm(`Resetar PIN de "${pessoa.name}"?\n\nO PIN voltará para ${newPin} (4 primeiros dígitos do CPF) e ${pessoa.name.split(" ")[0]} será obrigado(a) a trocar no próximo acesso.`)) return;
+    onUpdate("pessoas", (pessoas || []).map(p =>
+      p.id === pessoa.id || (cpfDigits && (p.cpf || "").replace(/\D/g, "") === cpfDigits)
+        ? { ...p, pin: newPin, mustChangePin: true } : p
+    ));
+    if ((employees || []).length > 0) {
+      onUpdate("employees", employees.map(e =>
+        (pessoa.linkedEmployeeId && e.id === pessoa.linkedEmployeeId) ||
+        (cpfDigits && (e.cpf || "").replace(/\D/g, "") === cpfDigits)
+          ? { ...e, pin: newPin, mustChangePin: true } : e
+      ));
+    }
+    if ((managers || []).length > 0) {
+      onUpdate("managers", managers.map(m =>
+        (pessoa.linkedManagerId && m.id === pessoa.linkedManagerId) ||
+        (cpfDigits && (m.cpf || "").replace(/\D/g, "") === cpfDigits)
+          ? { ...m, pin: newPin, mustChangePin: true } : m
+      ));
+    }
+    onUpdate("_toast", `🔐 PIN de ${pessoa.name} resetado para ${newPin}`);
   }
 
   // ── Bulk add via IA ──
@@ -23308,7 +23312,7 @@ Regras:
       <div style={{padding:"14px 16px",background:"var(--card-bg)",border:"1px solid var(--border)",borderRadius:10,marginBottom:16}}>
         {/* SEÇÃO: Dados pessoais (globais) */}
         <div style={{fontSize:10,color:"var(--text3)",fontWeight:700,textTransform:"uppercase",letterSpacing:0.4,marginBottom:8}}>Dados pessoais</div>
-        <div style={{display:"grid",gridTemplateColumns:mobileOnly?"1fr":"2fr 1.4fr 0.8fr",gap:8,marginBottom:10}}>
+        <div style={{display:"grid",gridTemplateColumns:mobileOnly?"1fr":"2fr 1.4fr",gap:8,marginBottom:10}}>
           <div>
             <label style={{...S.label,fontSize:11}}>Nome completo *</label>
             <input value={form.name} onChange={e=>setForm({...form,name:e.target.value})} placeholder="ex: João Silva" style={S.input} />
@@ -23317,11 +23321,9 @@ Regras:
             <label style={{...S.label,fontSize:11}}>CPF *</label>
             <input value={form.cpf} onChange={e=>setForm({...form,cpf:maskCpf(e.target.value),pin: form.pin || pinFromCpf(e.target.value)})} placeholder="000.000.000-00" style={{...S.input,fontFamily:"'DM Mono',monospace"}} />
           </div>
-          <div>
-            <label style={{...S.label,fontSize:11}}>PIN <span style={{color:"var(--text3)",fontWeight:400,fontSize:10}}>(auto)</span></label>
-            <input maxLength={4} value={form.pin} onChange={e=>setForm({...form,pin:e.target.value.replace(/\D/g,"").slice(0,4)})} placeholder="0000" style={{...S.input,fontFamily:"'DM Mono',monospace",textAlign:"center",letterSpacing:4}} />
-          </div>
         </div>
+        {/* v8.10.4: PIN não exposto na UI — auto-gerado pelos 4 primeiros dígitos do CPF.
+             A pessoa troca no primeiro acesso. Reset é via botão na edição. */}
 
         {/* SEÇÃO: Contato */}
         <div style={{fontSize:10,color:"var(--text3)",fontWeight:700,textTransform:"uppercase",letterSpacing:0.4,marginBottom:8,marginTop:6}}>Contato</div>
@@ -23446,8 +23448,9 @@ Regras:
                       <input value={maskCpf(editForm.cpf)} onChange={e=>setEditForm({...editForm,cpf:maskCpf(e.target.value)})} style={{...S.input,fontFamily:"'DM Mono',monospace"}} />
                     </div>
                     <div>
+                      {/* v8.10.4: PIN não exibido — botão "Resetar" volta o PIN para os 4 primeiros do CPF e força troca. */}
                       <label style={{...S.label,fontSize:11}}>PIN</label>
-                      <input maxLength={4} value={editForm.pin} onChange={e=>setEditForm({...editForm,pin:e.target.value.replace(/\D/g,"").slice(0,4)})} style={{...S.input,fontFamily:"'DM Mono',monospace",textAlign:"center",letterSpacing:4}} />
+                      <button type="button" onClick={()=>resetPessoaPin(p)} style={{width:"100%",padding:"8px 10px",borderRadius:8,border:"1px solid #f59e0b66",background:"#f59e0b11",color:"#f59e0b",cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:11,fontWeight:700,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}} title="Resetar PIN para os 4 primeiros dígitos do CPF">🔑 Resetar PIN</button>
                     </div>
                   </div>
                   <div style={{display:"grid",gridTemplateColumns:mobileOnly?"1fr":"1fr 1fr 1fr",gap:8,marginBottom:10}}>
