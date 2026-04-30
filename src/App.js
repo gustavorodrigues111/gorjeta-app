@@ -3,7 +3,7 @@ import React, { useState, useEffect, useMemo, useRef, Component } from "react";
 import { db } from "./firebase";
 import { doc, getDoc, setDoc } from "firebase/firestore";
 
-const APP_VERSION = "8.10.5";
+const APP_VERSION = "8.10.6";
 
 const DEFAULT_ADMISSION = () => `${new Date().getFullYear()}-01-01`;
 const round2 = (v) => Math.round(v * 100) / 100;
@@ -17899,6 +17899,9 @@ function MiseContagensAdmin({ restaurantId, restaurantName = "", employees, mise
     onUpdate("miseCategories", miseCategories.map(c => c.id === catId ? { ...c, type } : c));
   }
   function toggleCatStock(catId, stockId) {
+    const cat = restCategories.find(c => c.id === catId);
+    const wasLinked = cat?.stockIds?.includes(stockId) === true;
+    // 1) Atualiza category.stockIds
     onUpdate("miseCategories", miseCategories.map(c => {
       if (c.id !== catId) return c;
       const current = c.stockIds || [];
@@ -17907,9 +17910,23 @@ function MiseContagensAdmin({ restaurantId, restaurantName = "", employees, mise
         : [...current, stockId];
       return { ...c, stockIds: next };
     }));
-    // Remove assignments referentes a (categoria, estoque-removido)
-    const cat = restCategories.find(c => c.id === catId);
-    if (cat?.stockIds?.includes(stockId)) {
+    // 2) v8.10.6: propaga pros itens — Atribuições deriva de items.stockIds, então sem isso
+    //    a categoria não aparecia no estoque.
+    onUpdate("miseItems", miseItems.map(i => {
+      if (i.categoryId !== catId || i.restaurantId !== restaurantId) return i;
+      const cur = i.stockIds || [];
+      if (wasLinked) {
+        // Removendo o vínculo: tira o estoque dos itens também
+        if (!cur.includes(stockId)) return i;
+        return { ...i, stockIds: cur.filter(s => s !== stockId) };
+      } else {
+        // Adicionando o vínculo: garante que o estoque está nos itens
+        if (cur.includes(stockId)) return i;
+        return { ...i, stockIds: [...cur, stockId] };
+      }
+    }));
+    // 3) Se desvinculou, limpa as atribuições daquele par (categoria, estoque)
+    if (wasLinked) {
       onUpdate("miseAssignments", miseAssignments.filter(a => !(a.categoryId === catId && a.stockId === stockId)));
     }
   }
