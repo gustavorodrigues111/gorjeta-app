@@ -3,7 +3,7 @@ import React, { useState, useEffect, useMemo, useRef, Component } from "react";
 import { db } from "./firebase";
 import { doc, getDoc, setDoc, onSnapshot } from "firebase/firestore";
 
-const APP_VERSION = "8.12.2";
+const APP_VERSION = "8.12.3";
 
 // v8.11.1: comparação de versão semver-like (8.11.1 > 8.10.7 > 8.9.4)
 function compareVersions(a, b) {
@@ -12773,29 +12773,61 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                   return !status || status === DAY_COMP_TRAB;
                 }).sort((a,b) => a.name.localeCompare(b.name));
               })();
-              // Step 4: lista domingos onde empA está de folga (e empB está trabalhando) — pra ser a recíproca
+              // Step 4: v8.12.3 — escaneia 3 meses (anterior, atual, próximo) procurando folgas de domingo de empA
               const empAObj = ctx.empAId ? schedEmps.find(e => e.id === ctx.empAId) : null;
               const empBObj = ctx.empBId ? schedEmps.find(e => e.id === ctx.empBId) : null;
-              const reciprocSundays = (() => {
-                if (!ctx.empAId || !ctx.empBId) return [];
-                return sundays.filter(s => {
-                  if (s.date === ctx.date1) return false;
-                  const aSt = displayedMonth?.[ctx.empAId]?.[s.date];
-                  const bSt = displayedMonth?.[ctx.empBId]?.[s.date];
-                  // empA folgando + empB trabalhando = candidato perfeito
-                  const aIsOff = aSt === DAY_OFF || aSt === DAY_COMP;
-                  const bIsWork = !bSt || bSt === DAY_COMP_TRAB;
-                  return aIsOff && bIsWork;
-                });
-              })();
-              // Lista alternativa: qualquer domingo do mês onde empA está folgando (caso recíproca não bata exato)
-              const fallbackReciprocSundays = (() => {
+              // Coleta domingos de 3 meses, marca o status de empA (saved + derived) e empB pra cada um
+              const reciprocCandidates = (() => {
                 if (!ctx.empAId) return [];
-                return sundays.filter(s => {
-                  if (s.date === ctx.date1) return false;
-                  const aSt = displayedMonth?.[ctx.empAId]?.[s.date];
-                  return aSt === DAY_OFF || aSt === DAY_COMP;
+                const months = [
+                  { y: month === 0 ? year - 1 : year, m: month === 0 ? 11 : month - 1, label: "Mês anterior" },
+                  { y: year, m: month, label: "Este mês" },
+                  { y: month === 11 ? year + 1 : year, m: month === 11 ? 0 : month + 1, label: "Próximo mês" },
+                ];
+                const result = [];
+                const empAWS = data?.workSchedules?.[rid]?.[ctx.empAId] ?? [];
+                months.forEach(({y, m, label}) => {
+                  const dim = new Date(y, m + 1, 0).getDate();
+                  const monthMk = monthKey(y, m);
+                  for (let d = 1; d <= dim; d++) {
+                    const dt = `${y}-${String(m+1).padStart(2,"0")}-${String(d).padStart(2,"0")}`;
+                    if (new Date(dt+"T12:00:00").getDay() !== 0) continue;
+                    if (dt === ctx.date1) continue;
+                    // Saved status (override) > derived from cycle
+                    const savedA = data?.schedules?.[rid]?.[monthMk]?.[ctx.empAId]?.[dt];
+                    const savedB = ctx.empBId ? data?.schedules?.[rid]?.[monthMk]?.[ctx.empBId]?.[dt] : null;
+                    let aIsOff = savedA === DAY_OFF || savedA === DAY_COMP;
+                    if (!savedA) {
+                      // Derive from cycle
+                      const ws = getActiveWorkSchedule(empAWS, dt);
+                      const cycle = ws ? getSundayCycleFromSchedule(ws, dt) : null;
+                      if (cycle && cycle.refDate && isSundayOffByCycle(cycle, dt)) aIsOff = true;
+                      // Folga fixa? domingo é dia desligado no horário?
+                      if (ws) {
+                        const days = getEffectiveDays(ws, dt);
+                        const dow0 = days?.[0];
+                        if (!dow0 || dow0.active === false) aIsOff = true;
+                      }
+                    }
+                    if (!aIsOff) continue;
+                    // Status de empB no mesmo dia (pra info)
+                    let bIsWork = !savedB || savedB === DAY_COMP_TRAB;
+                    if (ctx.empBId && !savedB) {
+                      // empB working by default unless cycle says folga
+                      const empBWS = data?.workSchedules?.[rid]?.[ctx.empBId] ?? [];
+                      const wsB = getActiveWorkSchedule(empBWS, dt);
+                      if (wsB) {
+                        const daysB = getEffectiveDays(wsB, dt);
+                        const dow0B = daysB?.[0];
+                        if (!dow0B || dow0B.active === false) bIsWork = false;
+                        const cycleB = getSundayCycleFromSchedule(wsB, dt);
+                        if (cycleB && cycleB.refDate && isSundayOffByCycle(cycleB, dt)) bIsWork = false;
+                      }
+                    }
+                    result.push({ date: dt, monthLabel: label, perfect: bIsWork });
+                  }
                 });
+                return result.sort((a,b) => a.date.localeCompare(b.date));
               })();
               const ac = "var(--ac)";
               const date1Label = ctx.date1 ? new Date(ctx.date1+"T12:00:00").toLocaleDateString("pt-BR") : "";
@@ -12909,44 +12941,57 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                       </div>
                     )}
 
-                    {/* STEP 4: date2 (folga recíproca de empA) */}
+                    {/* STEP 4: date2 (folga recíproca de empA) — v8.12.3: 3 meses */}
                     {step === 4 && (
                       <div>
                         <p style={{color:"var(--text2)",fontSize:13,margin:"0 0 6px"}}>
                           Em qual domingo <strong>{empAObj?.name}</strong> folgaria — e <strong>{empBObj?.name}</strong> vai cobrir?
                         </p>
-                        <p style={{color:"var(--text3)",fontSize:11,margin:"0 0 12px"}}>Esse é o domingo da recíproca: a troca de volta.</p>
-                        {reciprocSundays.length > 0 ? (
-                          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(140px,1fr))",gap:8}}>
-                            {reciprocSundays.map(s => (
-                              <button key={s.date} onClick={()=>setSwapModalContext({...ctx,date2:s.date})}
-                                style={{padding:"12px 8px",borderRadius:10,border:`1px solid ${ac}66`,background:"var(--bg2)",color:"var(--text)",cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:13,fontWeight:600,textAlign:"center",transition:"all 0.15s"}}
-                                onMouseEnter={e=>{e.currentTarget.style.background=ac+"22";e.currentTarget.style.borderColor=ac;}}
-                                onMouseLeave={e=>{e.currentTarget.style.background="var(--bg2)";e.currentTarget.style.borderColor=ac+"66";}}>
-                                <div style={{fontSize:18,fontWeight:800,color:ac}}>{String(s.day).padStart(2,"0")}</div>
-                                <div style={{fontSize:10,color:"var(--text3)",marginTop:2}}>A folga · B trab</div>
-                              </button>
-                            ))}
-                          </div>
-                        ) : fallbackReciprocSundays.length > 0 ? (
-                          <div>
-                            <div style={{padding:"10px 12px",background:"#f59e0b15",border:"1px solid #f59e0b44",borderRadius:8,fontSize:11,color:"var(--text2)",marginBottom:10,lineHeight:1.5}}>
-                              ℹ️ Nenhum domingo perfeito (A folga + B trab) neste mês. Mostrando todos onde {empAObj?.name} está de folga.
-                            </div>
-                            <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(140px,1fr))",gap:8}}>
-                              {fallbackReciprocSundays.map(s => (
-                                <button key={s.date} onClick={()=>setSwapModalContext({...ctx,date2:s.date})}
-                                  style={{padding:"12px 8px",borderRadius:10,border:"1px solid var(--border)",background:"var(--bg2)",color:"var(--text)",cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:13,fontWeight:600,textAlign:"center"}}>
-                                  <div style={{fontSize:18,fontWeight:800}}>{String(s.day).padStart(2,"0")}</div>
-                                  <div style={{fontSize:10,color:"var(--text3)",marginTop:2}}>A folga</div>
-                                </button>
-                              ))}
-                            </div>
-                          </div>
+                        <p style={{color:"var(--text3)",fontSize:11,margin:"0 0 12px"}}>Folgas de domingo do {empAObj?.name?.split(" ")[0]} (mês anterior, atual e próximo).</p>
+                        {reciprocCandidates.length > 0 ? (
+                          (() => {
+                            // Agrupa por mês pra ficar mais claro
+                            const grouped = {};
+                            reciprocCandidates.forEach(c => {
+                              if (!grouped[c.monthLabel]) grouped[c.monthLabel] = [];
+                              grouped[c.monthLabel].push(c);
+                            });
+                            return (
+                              <div style={{display:"flex",flexDirection:"column",gap:14,maxHeight:380,overflow:"auto"}}>
+                                {["Mês anterior","Este mês","Próximo mês"].map(label => {
+                                  const items = grouped[label];
+                                  if (!items || items.length === 0) return null;
+                                  return (
+                                    <div key={label}>
+                                      <div style={{fontSize:10,fontWeight:700,color:"var(--text3)",letterSpacing:0.6,textTransform:"uppercase",marginBottom:6}}>{label}</div>
+                                      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(160px,1fr))",gap:8}}>
+                                        {items.map(c => {
+                                          const d = new Date(c.date+"T12:00:00");
+                                          const day = d.getDate();
+                                          const monShort = d.toLocaleDateString("pt-BR",{month:"short"}).replace(".","");
+                                          return (
+                                            <button key={c.date} onClick={()=>setSwapModalContext({...ctx,date2:c.date})}
+                                              style={{padding:"12px 8px",borderRadius:10,border:`1px solid ${c.perfect?ac+"66":"var(--border)"}`,background:c.perfect?ac+"08":"var(--bg2)",color:"var(--text)",cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:13,fontWeight:600,textAlign:"center",transition:"all 0.15s"}}
+                                              onMouseEnter={e=>{e.currentTarget.style.background=ac+"22";e.currentTarget.style.borderColor=ac;}}
+                                              onMouseLeave={e=>{e.currentTarget.style.background=c.perfect?ac+"08":"var(--bg2)";e.currentTarget.style.borderColor=c.perfect?ac+"66":"var(--border)";}}>
+                                              <div style={{fontSize:18,fontWeight:800,color:c.perfect?ac:"var(--text2)"}}>{String(day).padStart(2,"0")}/{monShort}</div>
+                                              <div style={{fontSize:9,color:"var(--text3)",marginTop:2}}>
+                                                {c.perfect ? `A folga · B trab ✓` : "A folga"}
+                                              </div>
+                                            </button>
+                                          );
+                                        })}
+                                      </div>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            );
+                          })()
                         ) : (
                           <div style={{padding:"20px",textAlign:"center",color:"var(--text3)",fontSize:12,background:"var(--bg2)",borderRadius:10,marginBottom:12}}>
-                            {empAObj?.name} não tem folga marcada em outro domingo deste mês.
-                            <br/><span style={{fontSize:11,marginTop:8,display:"block"}}>Marque a folga primeiro na escala (ou ajuste o ciclo de domingo no horário) e volte aqui.</span>
+                            {empAObj?.name} não tem folga marcada em nenhum domingo nos 3 meses (anterior, atual, próximo).
+                            <br/><span style={{fontSize:11,marginTop:8,display:"block"}}>Marque a folga na escala ou cadastre o ciclo de domingo no horário e volte aqui.</span>
                           </div>
                         )}
                         <button onClick={()=>setSwapModalContext({...ctx,empAId:""})} style={{...S.btnSecondary,fontSize:11,padding:"6px 12px",marginTop:12}}>← Voltar</button>
@@ -13463,6 +13508,40 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                     curY = drawTable(body, curY, empsForArea) + 4;
                   });
 
+                  // v8.12.3: Lista de inversões do mês ao final do PDF
+                  const monthSwapsForPDF = (data?.scheduleSwaps ?? []).filter(s => {
+                    if (s.restaurantId !== rid) return false;
+                    const dates = [s.date1, s.date2, s.date].filter(Boolean);
+                    return dates.some(d => d.slice(0,7) === mk);
+                  });
+                  if (monthSwapsForPDF.length > 0) {
+                    if (curY > 170) { doc.addPage(); curY = 12; }
+                    doc.setFontSize(9);
+                    doc.setTextColor(124,58,237);
+                    doc.text(`↔ INVERSÕES INFORMAIS REGISTRADAS (${monthSwapsForPDF.length})`, 14, curY + 4);
+                    curY += 7;
+                    const empNamePDF = {};
+                    schedEmps.forEach(e => { empNamePDF[e.id] = e.name; });
+                    const swapBody = monthSwapsForPDF
+                      .sort((a,b) => (a.date1||a.date||"").localeCompare(b.date1||b.date||""))
+                      .map(sw => {
+                        const d1 = sw.date1 || sw.date || "";
+                        const d2 = sw.date2 || "";
+                        const fmtD = (d) => d ? new Date(d+"T12:00:00").toLocaleDateString("pt-BR",{day:"2-digit",month:"2-digit"}) : "—";
+                        const datesStr = d2 ? `${fmtD(d1)} ↔ ${fmtD(d2)}` : fmtD(d1);
+                        return [datesStr, empNamePDF[sw.empAId] || "—", empNamePDF[sw.empBId] || "—", sw.note || "", sw.registeredBy || ""];
+                      });
+                    doc.autoTable({
+                      head: [["Domingos", "Empregado A (trab. na escala)", "Empregado B (folga na escala)", "Obs.", "Por"]],
+                      body: swapBody,
+                      startY: curY,
+                      styles: { fontSize: 7, cellPadding: 1.4, textColor:[40,40,40], lineColor:[200,200,200], lineWidth:0.1 },
+                      headStyles: { fillColor:[124,58,237], textColor:[255,255,255], fontStyle:"bold", fontSize:7 },
+                      columnStyles: { 0: { cellWidth: 36, fontStyle:"bold", textColor:[124,58,237] }, 1: { cellWidth: 50 }, 2: { cellWidth: 50 }, 3: { cellWidth: 60 } },
+                      theme: "grid",
+                    });
+                  }
+
                   setPreviewDoc(doc); setPreviewFileName(`escala_${schedArea}_${year}_${String(month+1).padStart(2,"0")}.pdf`);
                 }} style={{padding:"8px 12px",borderRadius:10,border:"1px solid var(--border)",background:"transparent",color:"var(--text2)",cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:12,whiteSpace:"nowrap"}}>
                 📄 Exportar PDF
@@ -13488,7 +13567,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                 </div>
               </details>
             ) : (
-              <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:12}}>
+              <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:12,alignItems:"center"}}>
                 {[["var(--green)","T","Trabalho"],["var(--red)","F","Folga"],["#06b6d4","FL","Freela"],["#3b82f6","FC","Folga Comp."],["#0ea5e9","TC","Trab. Comp."],["#8b5cf6","Fér","Férias"],["#f59e0b","FJ","F.Just."],["var(--red)","FI","F.Inj."]].map(([c,s,l])=>(
                   <div key={s} style={{display:"flex",alignItems:"center",gap:3,flexShrink:0}}>
                     <div style={{width:20,height:16,borderRadius:3,background:c+"33",border:`1px solid ${c}`,display:"flex",alignItems:"center",justifyContent:"center"}}>
@@ -13497,8 +13576,48 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                     <span style={{color:"var(--text3)",fontSize:10,fontFamily:"'DM Mono',monospace"}}>{l}</span>
                   </div>
                 ))}
+                {/* v8.12.3: badge ↔ na legenda */}
+                <div style={{display:"flex",alignItems:"center",gap:3,flexShrink:0}}>
+                  <div style={{width:20,height:16,borderRadius:3,background:"#7c3aed22",border:"1px solid #7c3aed",display:"flex",alignItems:"center",justifyContent:"center"}}>
+                    <span style={{color:"#7c3aed",fontSize:9,fontWeight:700}}>↔</span>
+                  </div>
+                  <span style={{color:"var(--text3)",fontSize:10,fontFamily:"'DM Mono',monospace"}}>Inversão</span>
+                </div>
               </div>
             )}
+            {/* v8.12.3: Lista compacta de inversões do mês — fica logo abaixo da legenda */}
+            {(() => {
+              const monthSwapsAll = (data?.scheduleSwaps ?? []).filter(s => {
+                if (s.restaurantId !== rid) return false;
+                const dates = [s.date1, s.date2, s.date].filter(Boolean);
+                return dates.some(d => d.slice(0,7) === mk);
+              });
+              if (monthSwapsAll.length === 0) return null;
+              const empNameMap2 = {};
+              schedEmps.forEach(e => { empNameMap2[e.id] = e.name; });
+              const fmtSwapPair = (sw) => {
+                const fmt1 = sw.date1 ? new Date(sw.date1+"T12:00:00").toLocaleDateString("pt-BR",{day:"2-digit",month:"2-digit"}) : (sw.date ? new Date(sw.date+"T12:00:00").toLocaleDateString("pt-BR",{day:"2-digit",month:"2-digit"}) : "—");
+                const fmt2 = sw.date2 ? new Date(sw.date2+"T12:00:00").toLocaleDateString("pt-BR",{day:"2-digit",month:"2-digit"}) : null;
+                return fmt2 ? `${fmt1} ↔ ${fmt2}` : fmt1;
+              };
+              return (
+                <details style={{marginBottom:12}} open={!mobileOnly && monthSwapsAll.length <= 4}>
+                  <summary style={{cursor:"pointer",listStyle:"none",display:"flex",alignItems:"center",gap:8,padding:"6px 10px",background:"#7c3aed11",border:"1px solid #7c3aed44",borderRadius:8,fontSize:11,fontWeight:600,color:"#7c3aed"}}>
+                    <span>↔️ Inversões registradas neste mês ({monthSwapsAll.length})</span>
+                    <span style={{marginLeft:"auto",fontSize:10,opacity:0.6}}>{mobileOnly?"toque":"clique"} pra ver</span>
+                  </summary>
+                  <div style={{display:"flex",flexDirection:"column",gap:4,marginTop:8,padding:"0 4px"}}>
+                    {monthSwapsAll.sort((a,b) => (a.date1||a.date||"").localeCompare(b.date1||b.date||"")).map(sw => (
+                      <div key={sw.id} style={{fontSize:11,padding:"4px 10px",borderLeft:"3px solid #7c3aed",background:"var(--bg2)",borderRadius:4,fontFamily:"'DM Sans',sans-serif",color:"var(--text2)"}}>
+                        <strong style={{color:"#7c3aed",fontFamily:"'DM Mono',monospace"}}>{fmtSwapPair(sw)}</strong>
+                        {" · "}{empNameMap2[sw.empAId] || "—"} ↔ {empNameMap2[sw.empBId] || "—"}
+                        {sw.note && <span style={{color:"var(--text3)",marginLeft:6,fontStyle:"italic"}}>· {sw.note}</span>}
+                      </div>
+                    ))}
+                  </div>
+                </details>
+              );
+            })()}
 
             {/* Formulário de atrasos em lote */}
             {showDelayForm && (
