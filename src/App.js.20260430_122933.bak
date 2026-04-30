@@ -3,7 +3,7 @@ import React, { useState, useEffect, useMemo, useRef, Component } from "react";
 import { db } from "./firebase";
 import { doc, getDoc, setDoc } from "firebase/firestore";
 
-const APP_VERSION = "8.10.0";
+const APP_VERSION = "8.9.4";
 
 const DEFAULT_ADMISSION = () => `${new Date().getFullYear()}-01-01`;
 const round2 = (v) => Math.round(v * 100) / 100;
@@ -4481,16 +4481,15 @@ function EmployeePortal({ employees, roles, tips, schedules, splits, restaurants
   // Bottom nav config: icon + short label
   const empInbox = getInboxForUser({ inbox: inbox ?? [], userId: empId, userRole: "employee", restaurantId: emp?.restaurantId, includeRead: false });
   const empInboxCount = empInbox.length;
-  // v8.10: TODAS as abas do empregado respeitam empTabVisible (gorjeta combina com showTipsToEmployee).
   const NAV = [
-    empTabVisible("comunicados") && ["comunicados","📢","Avisos"],
-    empTabVisible("escala")      && ["escala","📅","Escala"],
-    (restaurant?.showTipsToEmployee) && ["extrato","💸","Gorjeta"],
-    empTabVisible("trilha")   && ["trilha","📈","Trilha"],
+    ["comunicados","📢","Avisos"],
+    ["escala","📅","Escala"],
+    restaurant?.showTipsToEmployee && ["extrato","💸","Gorjeta"],
+    ["trilha","📈","Trilha"],
     empTabVisible("horarios") && ["horarios","🕐","Horários"],
     empTabVisible("faq")      && ["faq","❓","FAQ"],
     empTabVisible("dp")       && ["dp","💬","Fale DP"],
-    empTabVisible("empInbox") && ["empInbox","📬",empInboxCount > 0 ? `Caixa (${empInboxCount})` : "Caixa"],
+    ["empInbox","📬",empInboxCount > 0 ? `Caixa (${empInboxCount})` : "Caixa"],
   ].filter(Boolean);
 
   return (
@@ -13574,23 +13573,31 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                       <span style={{color:"var(--ac-text)",fontWeight:700,fontSize:13}}>FAQs automáticas do sistema</span>
                     </div>
                     <p style={{color:"var(--text2)",fontSize:12,margin:"0 0 12px",lineHeight:1.5}}>
-                      Geradas automaticamente com as regras do restaurante. Aparecem na seção "Regras do sistema" do FAQ do empregado.
-                      <br/>
-                      <span style={{color:"var(--text3)",fontSize:11}}>💡 Para ocultar perguntas individualmente, vá em <strong>Configurações → 👁️ O que o empregado vê</strong>.</span>
+                      Geradas automaticamente com as regras do restaurante. Aparecem na seção "Regras do sistema" do FAQ do empregado. Use o toggle para mostrar ou ocultar cada uma.
                     </p>
                     <div style={{display:"flex",flexDirection:"column",gap:6}}>
                       {FAQS_AUTO.map((item) => {
-                        // v8.10: aqui só pré-visualização do conteúdo — toggle vive em Configurações.
+                        // v8.9.4: visibilidade do FAQ é INDEPENDENTE da aba relacionada.
+                        // Aba oculta? FAQ continua aparecendo se você quiser. Aba visível? FAQ pode ser ocultado individualmente.
+                        const adminBloqueou = item.tabKey ? restaurant?.tabsConfig?.[item.tabKey] === false : false;
+                        const gestorOcultou = item.tabKey ? restaurant?.tabsGestor?.[item.tabKey] === false : false;
                         const faqAutoOk = restaurant?.tabsGestor?.faqAuto?.[safeFaqKey(item.id)] !== false;
-                        const visivel = faqAutoOk;
+                        const visivel = faqAutoOk; // <- só depende do toggle deste FAQ
                         return (
-                          <details key={item.id} style={{borderRadius:10,background:"var(--card-bg)",border:`1px solid ${visivel?"var(--ac)22":"var(--border)"}`,overflow:"hidden",opacity:visivel?1:0.55}}>
+                          <details key={item.id} style={{borderRadius:10,background:"var(--card-bg)",border:`1px solid ${visivel?"var(--ac)22":"var(--border)"}`,overflow:"hidden",opacity:visivel?1:0.6}}>
                             <summary style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"10px 12px",cursor:"pointer",listStyle:"none",gap:8}}>
                               <span style={{fontSize:13,fontWeight:600,color:visivel?"var(--text)":"var(--text3)",flex:1}}>{item.q}</span>
                               <div style={{display:"flex",alignItems:"center",gap:6,flexShrink:0}}>
-                                <span style={{fontSize:10,fontWeight:700,padding:"3px 9px",borderRadius:20,background:visivel?"#10b98122":"var(--bg2)",color:visivel?"var(--green)":"var(--text3)",border:`1px solid ${visivel?"#10b98144":"var(--border)"}`,fontFamily:"'DM Sans',sans-serif",whiteSpace:"nowrap"}}>
+                                {adminBloqueou && <span title="A aba relacionada está bloqueada — esse FAQ ainda pode ser exibido normalmente" style={{fontSize:10,color:"var(--text3)",background:"var(--bg2)",padding:"2px 7px",borderRadius:10,border:"1px solid var(--border)"}}>ℹ️ aba bloqueada</span>}
+                                {!adminBloqueou && gestorOcultou && <span title="A aba relacionada está oculta — esse FAQ ainda pode ser exibido normalmente" style={{fontSize:10,color:"var(--text3)",background:"var(--bg2)",padding:"2px 7px",borderRadius:10,border:"1px solid var(--border)"}}>ℹ️ aba oculta</span>}
+                                <button onClick={e=>{
+                                  e.preventDefault(); e.stopPropagation();
+                                  const cur = restaurant?.tabsGestor?.faqAuto ?? {};
+                                  const updated = restaurants.map(r=>r.id===rid?{...r,tabsGestor:{...(r.tabsGestor??{}),faqAuto:{...cur,[safeFaqKey(item.id)]:!faqAutoOk}}}:r);
+                                  onUpdate("restaurants",updated);
+                                }} style={{padding:"3px 10px",borderRadius:20,border:"none",background:visivel?"var(--green)":"var(--border)",color:visivel?"#fff":"var(--text3)",fontWeight:700,cursor:"pointer",fontFamily:"'DM Sans',sans-serif",fontSize:11,whiteSpace:"nowrap"}}>
                                   {visivel?"👁 Exibindo":"🚫 Oculto"}
-                                </span>
+                                </button>
                                 <span style={{color:"var(--text3)",fontSize:12}}>▾</span>
                               </div>
                             </summary>
@@ -13955,15 +13962,20 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                 </div>
               </div>
             )}
-            {/* v8.10: Owner-only — abas do painel admin (cargos / equipe) */}
+            {/* Abas opcionais — só supergestor */}
             {isOwner && (
               <div style={{...S.card,marginBottom:20}}>
-                <p style={{color:ac,fontSize:14,fontWeight:700,margin:"0 0 4px"}}>📊 Abas do painel do gestor admin</p>
-                <p style={{color:"var(--text3)",fontSize:12,marginBottom:14}}>Quais abas o gestor admin deste restaurante pode acessar.</p>
+                <p style={{color:ac,fontSize:14,fontWeight:700,margin:"0 0 4px"}}>📋 Abas autorizadas pelo Admin</p>
+                <p style={{color:"var(--text3)",fontSize:12,marginBottom:14}}>Define quais abas o restaurante pode usar. O gestor pode escolher quais exibir dentro das autorizadas.</p>
                 <div style={{display:"flex",flexDirection:"column",gap:10}}>
                   {[
-                    ["roles",     "🏷️ Cargos"],
-                    ["employees", "👥 Equipe"],
+                    ["roles",       "🏷️ Cargos"],
+                    ["employees",   "👥 Equipe"],
+                    ["horarios",    "🕐 Horários"],
+                    ["trilha",      "🎯 Trilhas"],
+                    ["faq",         "❓ FAQ"],
+                    ["comunicados", "📢 Comunicados"],
+                    ["dp",          "💬 Fale com DP"],
                   ].map(([key, label]) => {
                     const isOn = getTabsConfig(key);
                     return (
@@ -13979,57 +13991,25 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
               </div>
             )}
 
-            {/* v8.10: Portal do empregado — Abas + FAQ unificados num só lugar */}
-            <div style={{...S.card,marginBottom:20}}>
-              <p style={{color:ac,fontSize:14,fontWeight:700,margin:"0 0 4px"}}>👁️ O que o empregado vê</p>
-              <p style={{color:"var(--text3)",fontSize:12,marginBottom:14}}>Tudo que aparece no portal do empregado deste restaurante — abas do app e perguntas do FAQ.</p>
-
-              {/* Bloco A: Abas do app */}
-              <div style={{marginBottom:18}}>
-                <p style={{color:"var(--text2)",fontSize:11,fontWeight:700,margin:"0 0 8px",textTransform:"uppercase",letterSpacing:0.6,fontFamily:"'DM Mono',monospace"}}>📱 Abas do app · 8 abas</p>
-                <div style={{display:"flex",flexDirection:"column",gap:8}}>
+            {/* Abas visíveis — gestor escolhe dentro das autorizadas */}
+            {!isOwner && (
+              <div style={{...S.card,marginBottom:20}}>
+                <p style={{color:ac,fontSize:14,fontWeight:700,margin:"0 0 4px"}}>📋 Abas visíveis</p>
+                <p style={{color:"var(--text3)",fontSize:12,marginBottom:14}}>Escolha quais abas aparecem para você e para os empregados. Só é possível ativar abas autorizadas pelo administrador.</p>
+                <div style={{display:"flex",flexDirection:"column",gap:10}}>
                   {[
-                    ["comunicados","📢 Avisos"],
-                    ["escala",     "📅 Escala"],
-                    ["gorjeta",    "💸 Gorjeta"],
-                    ["trilha",     "📈 Trilha"],
-                    ["horarios",   "🕐 Horários"],
-                    ["faq",        "❓ FAQ"],
-                    ["dp",         "💬 Fale com DP"],
-                    ["empInbox",   "📬 Caixa"],
-                  ].map(([key, label]) => {
-                    // Gorjeta: fonte da verdade é o flag legado showTipsToEmployee (default off / opt-in)
-                    if (key === "gorjeta") {
-                      const isOn = localRest.showTipsToEmployee === true;
-                      return (
-                        <div key={key} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"10px 14px",background:"var(--bg1)",borderRadius:10,border:`1px solid ${isOn?"#10b98133":"var(--border)"}`}}>
-                          <div style={{display:"flex",flexDirection:"column",gap:2}}>
-                            <span style={{color:isOn?"var(--text)":"var(--text3)",fontSize:13,fontWeight:isOn?600:400}}>{label}</span>
-                            <span style={{color:"var(--text3)",fontSize:10}}>Opt-in. Ative apenas após confirmação semanal pelo DP estar funcionando.</span>
-                          </div>
-                          <button onClick={()=>patchConfig({ showTipsToEmployee: !localRest.showTipsToEmployee })} style={{padding:"5px 14px",borderRadius:20,border:"none",background:isOn?"var(--green)":"var(--border)",color:isOn?"#fff":"#555",fontWeight:700,cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:12}}>
-                            {isOn?"Visível":"Oculta"}
-                          </button>
-                        </div>
-                      );
-                    }
-                    // Default: dual-tier (admin authorize + gestor escolhe)
-                    const adminOk  = getTabsConfig(key);
-                    const gestorOk = getTabsGestor(key);
-                    const isOn = adminOk && gestorOk;
-                    const adminBlocked = !isOwner && !adminOk;
-                    const onClick = () => {
-                      if (adminBlocked) return;
-                      if (isOwner) toggleAdminTab(key);
-                      else toggleGestorTab(key);
-                    };
+                    ["horarios",    "🕐 Horários"],
+                    ["trilha",      "🎯 Trilhas"],
+                    ["faq",         "❓ FAQ"],
+                    ["comunicados", "📢 Comunicados"],
+                    ["dp",          "💬 Fale com DP"],
+                  ].filter(([key]) => restaurant.tabsConfig?.[key] !== false)
+                  .map(([key, label]) => {
+                    const isOn = getTabsGestor(key);
                     return (
-                      <div key={key} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"10px 14px",background:"var(--bg1)",borderRadius:10,border:`1px solid ${isOn?"#10b98133":"var(--border)"}`,opacity:adminBlocked?0.55:1}}>
-                        <div style={{display:"flex",flexDirection:"column",gap:2}}>
-                          <span style={{color:isOn?"var(--text)":"var(--text3)",fontSize:13,fontWeight:isOn?600:400}}>{label}</span>
-                          {adminBlocked && <span style={{fontSize:10,color:"var(--text3)"}}>🔒 Bloqueado pelo admin</span>}
-                        </div>
-                        <button disabled={adminBlocked} onClick={onClick} style={{padding:"5px 14px",borderRadius:20,border:"none",background:isOn?"var(--green)":"var(--border)",color:isOn?"#fff":"#555",fontWeight:700,cursor:adminBlocked?"not-allowed":"pointer",fontFamily:"'DM Mono',monospace",fontSize:12}}>
+                      <div key={key} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"10px 14px",background:"var(--bg1)",borderRadius:10,border:`1px solid ${isOn?"#10b98133":"var(--border)"}`}}>
+                        <span style={{color:isOn?"var(--text)":"var(--text3)",fontSize:13,fontWeight:isOn?600:400}}>{label}</span>
+                        <button onClick={()=>toggleGestorTab(key)} style={{padding:"5px 14px",borderRadius:20,border:"none",background:isOn?"var(--green)":"var(--border)",color:isOn?"#fff":"#555",fontWeight:700,cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:12}}>
                           {isOn?"Visível":"Oculta"}
                         </button>
                       </div>
@@ -14037,40 +14017,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                   })}
                 </div>
               </div>
-
-              {/* Bloco B: Perguntas do FAQ */}
-              <div>
-                <p style={{color:"var(--text2)",fontSize:11,fontWeight:700,margin:"0 0 4px",textTransform:"uppercase",letterSpacing:0.6,fontFamily:"'DM Mono',monospace"}}>❓ Perguntas do FAQ · 8 perguntas</p>
-                <p style={{color:"var(--text3)",fontSize:11,margin:"0 0 8px"}}>Aparecem na seção "Regras do sistema" do FAQ do empregado. Independente das abas — pode esconder o FAQ-aba e manter perguntas, ou vice-versa.</p>
-                <div style={{display:"flex",flexDirection:"column",gap:6}}>
-                  {[
-                    {id:"__gorjeta__",    label:"💸 Como é calculada a gorjeta?"},
-                    {id:"__sistema__",    label:"🏢 Como funciona a divisão (área / pontos)?"},
-                    {id:"__escala__",     label:"📅 Como funciona a escala?"},
-                    {id:"__producao__",   label:"🏭 O que é empregado de produção?"},
-                    {id:"__freela__",     label:"🎯 O que é empregado freela?"},
-                    {id:"__dp__",         label:"💬 Para que serve o Fale com DP?"},
-                    {id:"__comunicados__",label:"📢 Como funcionam os comunicados?"},
-                    {id:"__pin__",        label:"🔐 O que é o PIN e como trocar?"},
-                  ].map(({id,label}) => {
-                    const visivel = restaurant?.tabsGestor?.faqAuto?.[safeFaqKey(id)] !== false;
-                    return (
-                      <div key={id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"8px 12px",background:"var(--bg1)",borderRadius:10,border:`1px solid ${visivel?"#10b98133":"var(--border)"}`,gap:8}}>
-                        <span style={{color:visivel?"var(--text)":"var(--text3)",fontSize:12,fontWeight:visivel?500:400,flex:1}}>{label}</span>
-                        <button onClick={()=>{
-                          const cur = restaurant?.tabsGestor?.faqAuto ?? {};
-                          const newVal = !visivel;
-                          const updated = restaurants.map(r=>r.id===rid?{...r,tabsGestor:{...(r.tabsGestor??{}),faqAuto:{...cur,[safeFaqKey(id)]:newVal}}}:r);
-                          onUpdate("restaurants",updated);
-                        }} style={{padding:"4px 10px",borderRadius:20,border:"none",background:visivel?"var(--green)":"var(--border)",color:visivel?"#fff":"#555",fontWeight:700,cursor:"pointer",fontFamily:"'DM Sans',sans-serif",fontSize:11,whiteSpace:"nowrap"}}>
-                          {visivel?"👁 Exibindo":"🚫 Oculto"}
-                        </button>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            </div>
+            )}
 
             <div style={{...S.card,marginBottom:20}}>
               <p style={{color:ac,fontSize:14,fontWeight:700,margin:"0 0 4px"}}>Retenção Fiscal sobre Gorjeta</p>
@@ -14181,7 +14128,17 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                 })}
               </div>
             </div>
-            {/* v8.10: showTipsToEmployee migrado para o card "O que o empregado vê" — bloco Abas → Gorjeta */}
+            {/* Exibir gorjeta para empregados */}
+            <div style={{...S.card,marginBottom:20}}>
+              <p style={{color:ac,fontSize:14,fontWeight:700,margin:"0 0 8px"}}>👁️ Exibir Gorjeta para Empregados</p>
+              <p style={{color:"var(--text3)",fontSize:12,marginBottom:14}}>Quando ativo, o empregado consegue ver a aba de gorjeta no aplicativo. Os valores só aparecem após confirmação semanal pelo DP. Se desativado, a aba de gorjeta fica completamente oculta para os empregados deste restaurante.</p>
+              <label style={{display:"flex",alignItems:"center",gap:12,cursor:"pointer"}}>
+                <div onClick={()=>patchConfig({ showTipsToEmployee: !localRest.showTipsToEmployee })} style={{width:48,height:26,borderRadius:13,background:localRest.showTipsToEmployee?ac:"var(--border)",position:"relative",cursor:"pointer",transition:"background 0.2s"}}>
+                  <div style={{width:22,height:22,borderRadius:11,background:"#fff",position:"absolute",top:2,left:localRest.showTipsToEmployee?24:2,transition:"left 0.2s",boxShadow:"0 1px 3px rgba(0,0,0,0.2)"}}/>
+                </div>
+                <span style={{color:"var(--text)",fontSize:14,fontWeight:600}}>{localRest.showTipsToEmployee ? "Ativo — empregado vê gorjeta" : "Desativado — gorjeta oculta"}</span>
+              </label>
+            </div>
             {/* Privacidade */}
             <div style={{...S.card,marginBottom:20}}>
               <p style={{color:ac,fontSize:14,fontWeight:700,margin:"0 0 8px"}}>🔒 Privacidade</p>
