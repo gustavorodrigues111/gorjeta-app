@@ -3,7 +3,7 @@ import React, { useState, useEffect, useMemo, useRef, Component } from "react";
 import { db } from "./firebase";
 import { doc, getDoc, setDoc } from "firebase/firestore";
 
-const APP_VERSION = "8.11.0";
+const APP_VERSION = "8.10.7";
 
 const DEFAULT_ADMISSION = () => `${new Date().getFullYear()}-01-01`;
 const round2 = (v) => Math.round(v * 100) / 100;
@@ -269,45 +269,6 @@ function getEffectiveTotalContract(schedule, dateStr) {
 // Expõe helpers pra acesso nas próximas fases (escala mensal, VT, gorjeta) — silencia eslint
 // eslint-disable-next-line no-unused-expressions
 [getEffectiveDays, getEffectiveTotalContract];
-
-// ─────────── HELPERS DE CICLO DE DOMINGOS (v8.11.0) ───────────
-// sundayCycle = { workCount: N, offCount: M, refDate: "YYYY-MM-DD" }  → trabalha N domingos, folga M, ciclo (N+M).
-// refDate é o PRIMEIRO domingo de FOLGA da sequência. A função retorna se uma data específica
-// (que precisa ser domingo) cai como folga no ciclo. Datas que não são domingo retornam false.
-function getSundayCycleFromSchedule(schedule, dateStr) {
-  // schedule pode ser single (sundayCycle no topo) ou alternating (sundayCycle por semana A/B).
-  if (!schedule) return null;
-  if (schedule.type !== "alternating") return schedule.sundayCycle || null;
-  const wk = weekTypeForDate(schedule, dateStr || today());
-  return schedule.weeks?.[wk]?.sundayCycle || schedule.sundayCycle || null;
-}
-function isSundayOffByCycle(cycle, dateStr) {
-  if (!cycle || !cycle.refDate || !dateStr) return false;
-  const work = parseInt(cycle.workCount, 10);
-  const off = parseInt(cycle.offCount, 10);
-  if (!Number.isFinite(work) || work < 0) return false;
-  if (!Number.isFinite(off) || off <= 0) return false;
-  // Ambos devem ser domingo
-  const d = new Date(dateStr + "T12:00:00");
-  if (d.getDay() !== 0) return false;
-  const ref = new Date(cycle.refDate + "T12:00:00");
-  if (ref.getDay() !== 0) return false;
-  const diffMs = d.getTime() - ref.getTime();
-  const diffWeeks = Math.round(diffMs / (7 * 24 * 60 * 60 * 1000));
-  // Posição no ciclo. Refdate é a 1ª folga (pos 0). Posições 0..off-1 = folga, off..off+work-1 = trabalho.
-  const cycleLen = work + off;
-  const pos = ((diffWeeks % cycleLen) + cycleLen) % cycleLen;
-  return pos < off;
-}
-// Retorna a versão de workSchedule vigente em uma data — pega a entry com maior validFrom <= date.
-function getActiveWorkSchedule(empSchedules, dateStr) {
-  if (!Array.isArray(empSchedules) || empSchedules.length === 0) return null;
-  const sorted = [...empSchedules].filter(s => !s.validFrom || s.validFrom <= dateStr)
-    .sort((a, b) => (a.validFrom || "").localeCompare(b.validFrom || ""));
-  return sorted[sorted.length - 1] || null;
-}
-// eslint-disable-next-line no-unused-expressions
-[getSundayCycleFromSchedule, isSundayOffByCycle, getActiveWorkSchedule];
 const getWeeksInMonth = (y, m) => { const daysInM = new Date(y, m + 1, 0).getDate(); const weeks = new Map(); for (let d = 1; d <= daysInM; d++) { const ds = `${y}-${String(m+1).padStart(2,"0")}-${String(d).padStart(2,"0")}`; const mon = getWeekMonday(ds); if (!weeks.has(mon)) { const sunD = new Date(mon + "T12:00:00"); sunD.setDate(sunD.getDate() + 6); weeks.set(mon, { monday: mon, sunday: sunD.toISOString().slice(0,10), daysInMonth: [] }); } weeks.get(mon).daysInMonth.push(d); } return [...weeks.values()]; };
 const WEEKDAYS = ["Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb"];
 const AREAS = ["Bar", "Cozinha", "Salão", "Limpeza"];
@@ -494,7 +455,6 @@ const K = {
   scheduleAdjustments: "v4:scheduleAdjustments", // {[rid]: {[mk]: [{id, empId, date, from, to, author, timestamp}]}}
   scheduleStatus:      "v4:scheduleStatus",      // {[rid]: {[mk]: {status:"open"|"review"|"closed", closedAt, closedBy, lastPontoImport, pontoSystem, missingFromPonto:[], importHistory:[], lastImportSummary}}}
   schedulePrevista:    "v4:schedulePrevista",     // {[rid]: {[mk]: frozen snapshot of schedules at first edit/VT payment}}
-  scheduleSwaps:       "v4:scheduleSwaps",        // [{id, restaurantId, date, empAId, empBId, note?, registeredAt, registeredBy}] — inversões informais (v8.11.0)
   employeeGoals:       "v4:employeeGoals",        // {[empId]: [{id, type, title, targetRoleId?, topic?, materials:[], metas:[], createdAt, createdBy, status:"active"|"completed"|"cancelled"}]}
   delays:              "v4:delays",               // {[rid]: {[mk]: {[empId]: {[day]: minutes}}}}
   tipApprovals:        "v4:tipApprovals",         // {[rid]: {[weekMonday]: {approvedAt, approvedBy, approvedByName}}}
@@ -2417,8 +2377,6 @@ function WorkScheduleManagerTab({ restaurantId, employees, roles, workSchedules,
   // Modal de inversão de semana (só faz sentido pra schedules alternating)
   const [invertingMonday, setInvertingMonday] = useState(null); // segunda da semana sendo invertida ou null
   const [invertScope, setInvertScope]       = useState("once");  // "once" (override) | "forever" (re-anchor)
-  // v8.11.0: ciclo de domingos pra empregado que não folga aos domingos
-  const [sundayCycle, setSundayCycle]       = useState({ workCount: 3, offCount: 1, refDate: "" });
 
   const selEmp = restEmps.find(e => e.id === selEmpId);
   const empSchedules = workSchedules?.[restaurantId]?.[selEmpId] ?? [];
@@ -2518,16 +2476,6 @@ function WorkScheduleManagerTab({ restaurantId, employees, roles, workSchedules,
       setAnchorDate(getWeekMonday(today()));
       setAnchorWeek("A");
     }
-    // v8.11.0: carrega ciclo de domingos da versão atual (se houver)
-    if (cur?.sundayCycle) {
-      setSundayCycle({
-        workCount: cur.sundayCycle.workCount ?? 3,
-        offCount: cur.sundayCycle.offCount ?? 1,
-        refDate: cur.sundayCycle.refDate ?? "",
-      });
-    } else {
-      setSundayCycle({ workCount: 3, offCount: 1, refDate: "" });
-    }
   }
 
   // ── Toggle work/folga ──
@@ -2609,27 +2557,11 @@ function WorkScheduleManagerTab({ restaurantId, employees, roles, workSchedules,
 
     let newEntry;
     let storageDaysForNotif; // pra mensagem de notificação (no alternating, usa Semana A como representativa)
-    // v8.11.0: ciclo de domingos só vale se domingo for ativo em alguma semana E o usuário preencheu refDate.
-    function cleanSundayCycle(daysObj, daysObjB) {
-      const sundayActiveA = daysObj?.[0]?.active === true;
-      const sundayActiveB = daysObjB ? daysObjB?.[0]?.active === true : false;
-      if (!sundayActiveA && !sundayActiveB) return null;
-      const work = parseInt(sundayCycle.workCount, 10);
-      const off  = parseInt(sundayCycle.offCount, 10);
-      if (!Number.isFinite(work) || work < 0) return null;
-      if (!Number.isFinite(off) || off <= 0) return null;
-      if (!sundayCycle.refDate) return null;
-      // Valida que refDate é domingo
-      const ref = new Date(sundayCycle.refDate + "T12:00:00");
-      if (ref.getDay() !== 0) return null;
-      return { workCount: work, offCount: off, refDate: sundayCycle.refDate };
-    }
     if (isAlternating) {
       const a = validateAndCalc(editDays, "Semana A");
       const b = validateAndCalc(editDaysB, "Semana B");
       const allErrs = [...a.errors, ...b.errors];
       if (allErrs.length > 0) { setErrors(allErrs); return; }
-      const cycle = cleanSundayCycle(editDays, editDaysB);
       newEntry = {
         id: `${Date.now()}-${Math.random().toString(36).slice(2,5)}`,
         type: "alternating",
@@ -2650,14 +2582,12 @@ function WorkScheduleManagerTab({ restaurantId, employees, roles, workSchedules,
         // totalContract: média das duas (pra compatibilidade com código legado que lê esse campo)
         totalContract: Math.round((a.totalContract + b.totalContract) / 2),
         hoursComplete: true,
-        ...(cycle ? { sundayCycle: cycle } : {}),
         ...(isFreela ? { freela: true } : {}),
       };
       storageDaysForNotif = a.storageDays;
     } else {
       const r = validateAndCalc(editDays, "");
       if (r.errors.length > 0) { setErrors(r.errors); return; }
-      const cycle = cleanSundayCycle(editDays, null);
       newEntry = {
         id: `${Date.now()}-${Math.random().toString(36).slice(2,5)}`,
         type: "single",
@@ -2667,7 +2597,6 @@ function WorkScheduleManagerTab({ restaurantId, employees, roles, workSchedules,
         createdAt: new Date().toISOString(),
         totalContract: r.totalContract,
         hoursComplete: true,
-        ...(cycle ? { sundayCycle: cycle } : {}),
         ...(isFreela ? { freela: true } : {}),
       };
       storageDaysForNotif = r.storageDays;
@@ -4058,59 +3987,6 @@ function WorkScheduleManagerTab({ restaurantId, employees, roles, workSchedules,
           </div>
         </div>
       )}
-
-      {/* v8.11.0: Ciclo de domingos — só aparece se domingo for dia de trabalho em alguma semana */}
-      {(() => {
-        const sundayActiveSingle = !isAlternating && editDays?.[0]?.active === true;
-        const sundayActiveAlt    = isAlternating && (editDays?.[0]?.active === true || editDaysB?.[0]?.active === true);
-        const showCycle = !isEmpFreela && (sundayActiveSingle || sundayActiveAlt);
-        if (!showCycle) return null;
-        // Sugere refDate automático: primeiro domingo a partir do validFrom
-        const suggestRef = () => {
-          const base = new Date((validFrom || today()) + "T12:00:00");
-          while (base.getDay() !== 0) base.setDate(base.getDate() + 1);
-          return base.toISOString().slice(0, 10);
-        };
-        const refIsValid = sundayCycle.refDate && new Date(sundayCycle.refDate + "T12:00:00").getDay() === 0;
-        const work = parseInt(sundayCycle.workCount, 10);
-        const off  = parseInt(sundayCycle.offCount, 10);
-        const cycleLen = (Number.isFinite(work) && Number.isFinite(off)) ? (work + off) : 0;
-        return (
-          <div style={{...cardS,borderColor:"#f59e0b44",background:"#f59e0b08",padding:mobileOnly?"14px 16px":"18px 22px",marginBottom:12}}>
-            <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:8}}>
-              <span style={{fontSize:mobileOnly?18:22}}>🌞</span>
-              <div>
-                <div style={{color:"var(--text)",fontWeight:700,fontSize:mobileOnly?13:14}}>Ciclo de domingos</div>
-                <div style={{color:"var(--text3)",fontSize:mobileOnly?10:11,marginTop:2}}>Define quantos domingos seguidos trabalha antes de folgar 1. Aplicado pelo botão "Sugerir folgas de domingo" na Escala.</div>
-              </div>
-            </div>
-            <div style={{display:"grid",gridTemplateColumns:mobileOnly?"1fr":"1fr 1fr 1.5fr",gap:10,marginTop:8}}>
-              <div>
-                <label style={{...S.label,fontSize:11}}>Trabalha (domingos)</label>
-                <input type="number" min="0" value={sundayCycle.workCount} onChange={e=>setSundayCycle({...sundayCycle,workCount:e.target.value})} style={{...S.input,fontFamily:"'DM Mono',monospace",textAlign:"center"}} />
-              </div>
-              <div>
-                <label style={{...S.label,fontSize:11}}>Folga (domingos)</label>
-                <input type="number" min="1" value={sundayCycle.offCount} onChange={e=>setSundayCycle({...sundayCycle,offCount:e.target.value})} style={{...S.input,fontFamily:"'DM Mono',monospace",textAlign:"center"}} />
-              </div>
-              <div>
-                <label style={{...S.label,fontSize:11}}>1º domingo de folga (referência)</label>
-                <div style={{display:"flex",gap:6}}>
-                  <input type="date" value={sundayCycle.refDate} onChange={e=>setSundayCycle({...sundayCycle,refDate:e.target.value})} style={{...S.input,flex:1}} />
-                  {!sundayCycle.refDate && <button type="button" onClick={()=>setSundayCycle({...sundayCycle,refDate:suggestRef()})} style={{...S.btnSecondary,fontSize:11,padding:"6px 10px",whiteSpace:"nowrap"}} title="Próximo domingo a partir da vigência">Sugerir</button>}
-                </div>
-                {sundayCycle.refDate && !refIsValid && <div style={{color:"var(--red)",fontSize:10,marginTop:4}}>⚠️ A data precisa ser um domingo</div>}
-              </div>
-            </div>
-            {cycleLen > 0 && refIsValid && (
-              <div style={{marginTop:10,padding:"8px 12px",background:"var(--bg2)",borderRadius:8,fontSize:mobileOnly?11:12,color:"var(--text2)",lineHeight:1.5}}>
-                💡 {work === 1 && off === 1 ? "Domingos alternados (sim/não)." : `Folga ${off} a cada ${cycleLen} domingos. Trabalha ${work} seguidos, folga ${off}.`}
-                {" "}Próxima folga: <strong>{new Date(sundayCycle.refDate+"T12:00:00").toLocaleDateString("pt-BR")}</strong>.
-              </div>
-            )}
-          </div>
-        );
-      })()}
 
       {/* Validation errors */}
       {errors.length > 0 && (
@@ -10370,10 +10246,6 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
   const [delayInputs, setDelayInputs] = useState({}); // { "day": minutes }
   // Schedule view mode: "vigente" shows effective (with local edits), "prevista" shows saved only
   const [schedViewMode, setSchedViewMode] = useState("vigente");
-  // v8.11.0: preview de sugestão de folgas de domingo
-  const [sundaySuggestionPreview, setSundaySuggestionPreview] = useState(null);
-  // v8.11.0: modal de inversão informal de domingo (Feature 2) — empAId + date pré-selecionados
-  const [swapModalContext, setSwapModalContext] = useState(null); // { empAId, date } | null
   // Month close / reopen confirmation
   const [showCloseConfirm, setShowCloseConfirm] = useState(false);
   const [showReopenConfirm, setShowReopenConfirm] = useState(false);
@@ -12549,172 +12421,9 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                     </button>
                   ))}
                 </div>
-                {/* v8.11.0: Registrar inversão informal */}
-                {(canSched || isOwner) && !monthClosed && (
-                  <button onClick={()=>setSwapModalContext({ empAId: "", date: "" })} style={{...S.btnSecondary,fontSize:11,padding:"3px 10px"}} title="Registrar inversão de turno entre dois empregados (não muda a escala — só registra a troca)">↔️ Registrar inversão</button>
-                )}
-                {/* v8.11.0: Sugerir folgas de domingo */}
-                {(canSched || isOwner) && !monthClosed && (
-                  <button onClick={()=>{
-                    // Computa sugestões pra cada empregado com sundayCycle configurado
-                    const dim = new Date(year, month + 1, 0).getDate();
-                    const sundays = [];
-                    for (let d = 1; d <= dim; d++) {
-                      const dt = new Date(year, month, d);
-                      if (dt.getDay() === 0) sundays.push(`${year}-${String(month+1).padStart(2,"0")}-${String(d).padStart(2,"0")}`);
-                    }
-                    const previewByEmp = [];
-                    schedEmps.forEach(emp => {
-                      const empWS = (data?.workSchedules?.[rid]?.[emp.id]) ?? [];
-                      // Para cada domingo, pega a versão de horário vigente naquela data
-                      const folgas = [];
-                      sundays.forEach(date => {
-                        const ws = getActiveWorkSchedule(empWS, date);
-                        const cycle = getSundayCycleFromSchedule(ws, date);
-                        if (!cycle) return;
-                        if (!isSundayOffByCycle(cycle, date)) return;
-                        // Já tem marcação? só registra como "skip"
-                        const cur = effectiveMonth?.[emp.id]?.[date];
-                        if (cur) { folgas.push({ date, status: "skip", reason: cur }); return; }
-                        folgas.push({ date, status: "off" });
-                      });
-                      if (folgas.length > 0) previewByEmp.push({ emp, folgas });
-                    });
-                    setSundaySuggestionPreview(previewByEmp);
-                  }} style={{...S.btnSecondary,fontSize:11,padding:"3px 10px"}} title="Calcula folgas de domingo dos empregados com ciclo configurado no horário">🌞 Sugerir folgas de domingo</button>
-                )}
               </div>
               {/* Botão "Apagar todas as escalas" movido pra "Mais ações" no rodapé (Configurações avançadas) */}
             </div>
-            {/* v8.11.0: Modal de preview das sugestões de folga de domingo */}
-            {sundaySuggestionPreview && (
-              <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.45)",zIndex:1000,display:"flex",alignItems:"center",justifyContent:"center",padding:16}} onClick={()=>setSundaySuggestionPreview(null)}>
-                <div onClick={e=>e.stopPropagation()} style={{background:"var(--card-bg)",border:"1px solid var(--border)",borderRadius:14,maxWidth:560,width:"100%",maxHeight:"80vh",overflow:"auto",padding:24,boxShadow:"0 20px 50px rgba(0,0,0,0.3)"}}>
-                  <h3 style={{margin:"0 0 4px",color:"var(--text)",fontSize:16,fontWeight:700}}>🌞 Sugerir folgas de domingo</h3>
-                  <p style={{color:"var(--text3)",fontSize:12,margin:"0 0 14px",lineHeight:1.5}}>Baseado no ciclo cadastrado no horário de cada empregado. Só preenche domingos sem marcação.</p>
-                  {sundaySuggestionPreview.length === 0 ? (
-                    <div style={{padding:"20px",textAlign:"center",color:"var(--text3)",fontSize:13}}>
-                      Nenhum empregado com ciclo de domingos cadastrado tem folga prevista neste mês.
-                      <br/><span style={{fontSize:11,marginTop:8,display:"block"}}>Configure no horário do empregado: Equipe → empregado → Horário → "Ciclo de domingos".</span>
-                    </div>
-                  ) : (
-                    <div style={{display:"flex",flexDirection:"column",gap:10,marginBottom:14}}>
-                      {sundaySuggestionPreview.map(({emp, folgas}) => {
-                        const willMark = folgas.filter(f => f.status === "off");
-                        const skipped  = folgas.filter(f => f.status === "skip");
-                        return (
-                          <div key={emp.id} style={{padding:"10px 12px",background:"var(--bg2)",border:"1px solid var(--border)",borderRadius:10}}>
-                            <div style={{fontWeight:700,color:"var(--text)",fontSize:13,marginBottom:6}}>{emp.name}</div>
-                            {willMark.length > 0 && (
-                              <div style={{fontSize:11,color:"var(--text2)",marginBottom:4}}>
-                                ✅ Marcar folga: {willMark.map(f => new Date(f.date+"T12:00:00").toLocaleDateString("pt-BR",{day:"2-digit",month:"2-digit"})).join(", ")}
-                              </div>
-                            )}
-                            {skipped.length > 0 && (
-                              <div style={{fontSize:11,color:"var(--text3)"}}>
-                                ⏭ Já marcado (pulei): {skipped.map(f => new Date(f.date+"T12:00:00").toLocaleDateString("pt-BR",{day:"2-digit",month:"2-digit"})).join(", ")}
-                              </div>
-                            )}
-                          </div>
-                        );
-                      })}
-                    </div>
-                  )}
-                  <div style={{display:"flex",justifyContent:"flex-end",gap:10}}>
-                    <button onClick={()=>setSundaySuggestionPreview(null)} style={{...S.btnSecondary,padding:"8px 14px",fontSize:13}}>Cancelar</button>
-                    {sundaySuggestionPreview.some(p => p.folgas.some(f => f.status === "off")) && (
-                      <button onClick={()=>{
-                        const newEdits = { ...(schedLocalEdits || {}) };
-                        let count = 0;
-                        sundaySuggestionPreview.forEach(({emp, folgas}) => {
-                          folgas.filter(f => f.status === "off").forEach(f => {
-                            if (!newEdits[emp.id]) newEdits[emp.id] = {};
-                            newEdits[emp.id][f.date] = DAY_OFF;
-                            count++;
-                          });
-                        });
-                        setSchedLocalEdits(newEdits);
-                        setSundaySuggestionPreview(null);
-                        onUpdate("_toast", `🌞 ${count} folga(s) de domingo aplicada(s) — clique em Salvar pra confirmar`);
-                      }} style={{...S.btnPrimary,padding:"8px 14px",fontSize:13,fontWeight:700}}>Aplicar</button>
-                    )}
-                  </div>
-                </div>
-              </div>
-            )}
-            {/* v8.11.0: Modal de registro de inversão informal */}
-            {swapModalContext && (() => {
-              const ctx = swapModalContext;
-              const dim2 = new Date(year, month + 1, 0).getDate();
-              const allDays = [];
-              for (let d = 1; d <= dim2; d++) {
-                const dt = `${year}-${String(month+1).padStart(2,"0")}-${String(d).padStart(2,"0")}`;
-                allDays.push({ date: dt, day: d, wd: new Date(dt+"T12:00:00").getDay() });
-              }
-              const empOptions = [...schedEmps].sort((a,b) => a.name.localeCompare(b.name));
-              const canSave = ctx.empAId && ctx.empBId && ctx.date && ctx.empAId !== ctx.empBId;
-              return (
-                <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.45)",zIndex:1000,display:"flex",alignItems:"center",justifyContent:"center",padding:16}} onClick={()=>setSwapModalContext(null)}>
-                  <div onClick={e=>e.stopPropagation()} style={{background:"var(--card-bg)",border:"1px solid var(--border)",borderRadius:14,maxWidth:520,width:"100%",padding:24,boxShadow:"0 20px 50px rgba(0,0,0,0.3)"}}>
-                    <h3 style={{margin:"0 0 4px",color:"var(--text)",fontSize:16,fontWeight:700}}>↔️ Registrar inversão de turno</h3>
-                    <p style={{color:"var(--text3)",fontSize:12,margin:"0 0 14px",lineHeight:1.5}}>
-                      Registra que dois empregados trocaram informalmente o turno deste dia. <strong>A escala, gorjeta e VT continuam idênticos</strong> — só fica registrado quem trocou com quem.
-                    </p>
-                    <div style={{display:"flex",flexDirection:"column",gap:12}}>
-                      <div>
-                        <label style={{...S.label,fontSize:11}}>Data</label>
-                        <select value={ctx.date} onChange={e=>setSwapModalContext({...ctx,date:e.target.value})} style={{...S.input,width:"100%"}}>
-                          <option value="">— Selecione —</option>
-                          {allDays.map(d => (
-                            <option key={d.date} value={d.date}>
-                              {String(d.day).padStart(2,"0")}/{String(month+1).padStart(2,"0")} ({["Dom","Seg","Ter","Qua","Qui","Sex","Sáb"][d.wd]}){d.wd===0?" ⭐":""}
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-                      <div>
-                        <label style={{...S.label,fontSize:11}}>Empregado A (continua "trabalhando" na escala)</label>
-                        <select value={ctx.empAId} onChange={e=>setSwapModalContext({...ctx,empAId:e.target.value})} style={{...S.input,width:"100%"}}>
-                          <option value="">— Selecione —</option>
-                          {empOptions.map(e => <option key={e.id} value={e.id}>{e.name}</option>)}
-                        </select>
-                      </div>
-                      <div>
-                        <label style={{...S.label,fontSize:11}}>Empregado B (continua "folgando" na escala — mas trabalhou no lugar de A)</label>
-                        <select value={ctx.empBId || ""} onChange={e=>setSwapModalContext({...ctx,empBId:e.target.value})} style={{...S.input,width:"100%"}}>
-                          <option value="">— Selecione —</option>
-                          {empOptions.filter(e => e.id !== ctx.empAId).map(e => <option key={e.id} value={e.id}>{e.name}</option>)}
-                        </select>
-                      </div>
-                      <div>
-                        <label style={{...S.label,fontSize:11}}>Observação (opcional)</label>
-                        <input value={ctx.note || ""} onChange={e=>setSwapModalContext({...ctx,note:e.target.value})} placeholder="ex: aniversário do amigo" style={S.input} />
-                      </div>
-                    </div>
-                    <div style={{display:"flex",justifyContent:"flex-end",gap:10,marginTop:18}}>
-                      <button onClick={()=>setSwapModalContext(null)} style={{...S.btnSecondary,padding:"8px 14px",fontSize:13}}>Cancelar</button>
-                      <button disabled={!canSave} onClick={()=>{
-                        const newSwap = {
-                          id: `swap-${Date.now()}-${Math.random().toString(36).slice(2,5)}`,
-                          restaurantId: rid,
-                          date: ctx.date,
-                          empAId: ctx.empAId,
-                          empBId: ctx.empBId,
-                          note: ctx.note?.trim() || "",
-                          registeredAt: new Date().toISOString(),
-                          registeredBy: currentUser?.name || "—",
-                        };
-                        onUpdate("scheduleSwaps", [...(data?.scheduleSwaps ?? []), newSwap]);
-                        setSwapModalContext(null);
-                        const empA = empOptions.find(e => e.id === ctx.empAId);
-                        const empB = empOptions.find(e => e.id === ctx.empBId);
-                        onUpdate("_toast", `↔️ Inversão registrada: ${empA?.name} ↔ ${empB?.name} em ${new Date(ctx.date+"T12:00:00").toLocaleDateString("pt-BR")}`);
-                      }} style={{...S.btnPrimary,padding:"8px 14px",fontSize:13,fontWeight:700,opacity:canSave?1:0.5,cursor:canSave?"pointer":"not-allowed"}}>Registrar inversão</button>
-                    </div>
-                  </div>
-                </div>
-              );
-            })()}
             {/* Pending edits banner */}
             {schedDirty && (
               <div style={{background:"#f59e0b15",border:"1px solid #f59e0b44",borderRadius:10,padding:mobileOnly?"10px 12px":"12px 16px",marginBottom:12,display:"flex",alignItems:"center",justifyContent:"space-between",gap:10,flexWrap:"wrap"}}>
@@ -13387,27 +13096,6 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
 
             {areaEmps.length > 0 && (() => {
               const daysInMonth = dim;
-              // v8.11.0: índice de inversões por (empId, date) pra renderizar badge ↔️
-              const swapsByEmpDate = {};
-              const restSwaps = (data?.scheduleSwaps ?? []).filter(s => s.restaurantId === rid && s.date && s.date.slice(0,7) === mk);
-              const empNameById = {};
-              schedEmps.forEach(e => { empNameById[e.id] = e.name; });
-              restSwaps.forEach(sw => {
-                if (sw.empAId) {
-                  if (!swapsByEmpDate[sw.empAId]) swapsByEmpDate[sw.empAId] = {};
-                  swapsByEmpDate[sw.empAId][sw.date] = { ...sw, side: "A", otherName: empNameById[sw.empBId] || "—" };
-                }
-                if (sw.empBId) {
-                  if (!swapsByEmpDate[sw.empBId]) swapsByEmpDate[sw.empBId] = {};
-                  swapsByEmpDate[sw.empBId][sw.date] = { ...sw, side: "B", otherName: empNameById[sw.empAId] || "—" };
-                }
-              });
-              const swapTooltip = (empId, dateStr) => {
-                const sw = swapsByEmpDate[empId]?.[dateStr];
-                if (!sw) return null;
-                const dateBR = new Date(dateStr+"T12:00:00").toLocaleDateString("pt-BR");
-                return `↔️ Invertido com ${sw.otherName} em ${dateBR}${sw.note?` · ${sw.note}`:""} · registrado por ${sw.registeredBy}`;
-              };
 
               function cycleStatus(empId, dateStr) {
                 if (monthClosed) return; // Month is closed, no editing allowed
@@ -13518,11 +13206,9 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                               const locked = isDem || monthClosed || (restaurant.serviceStartDate && slot.date < restaurant.serviceStartDate);
                               const dayNum = slot.date ? String(parseInt(slot.date.slice(-2))) : null;
                               const delayMin = dayNum ? (empDelays[dayNum] || 0) : 0;
-                              const swapInfo = swapsByEmpDate[emp.id]?.[slot.date];
-                              const swapTip = swapInfo ? swapTooltip(emp.id, slot.date) : null;
                               return (
                                 <div key={di} onClick={()=>!locked && cycleStatus(emp.id, slot.date)}
-                                  title={`${label === "T" ? "Trabalho" : (label === "DEM" ? "Demitido" : label)}${delayMin > 0 ? ` · Atraso ${delayMin} min` : ""}${swapTip ? `\n${swapTip}` : ""}`}
+                                  title={`${label === "T" ? "Trabalho" : (label === "DEM" ? "Demitido" : label)}${delayMin > 0 ? ` · Atraso ${delayMin} min` : ""}`}
                                   style={{
                                     display:"flex", alignItems:"center", justifyContent:"center",
                                     minHeight:36, borderRadius:6,
@@ -13540,7 +13226,6 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                                     letterSpacing: 0.3,
                                   }}>{restaurant.serviceStartDate && !isDem && slot.date < restaurant.serviceStartDate?"🔒":label}</span>
                                   {delayMin > 0 && <span style={{position:"absolute",top:0,right:1,fontSize:6,color:status||isDem?"#fff":"#f59e0b",fontWeight:800}}>⏰</span>}
-                                  {swapInfo && <span style={{position:"absolute",bottom:1,right:1,fontSize:8,lineHeight:1,background:"#7c3aed",color:"#fff",borderRadius:3,padding:"0 2px",fontWeight:700}}>↔</span>}
                                 </div>
                               );
                             })}
@@ -13635,11 +13320,9 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                               const isWe = wd===0||wd===6;
                               const locked = isDem || monthClosed || (restaurant.serviceStartDate && date < restaurant.serviceStartDate);
                               const dDelayMin = empDelaysD[String(d)] || 0;
-                              const swapInfo = swapsByEmpDate[emp.id]?.[date];
-                              const swapTip = swapInfo ? swapTooltip(emp.id, date) : null;
                               return (
                                 <td key={d} onClick={()=>!isDem && cycleStatus(emp.id, date)}
-                                  title={`${label === "•" ? "Trabalho" : (label === "D" ? "Demitido" : label)}${dDelayMin > 0 ? ` · Atraso: ${dDelayMin} min` : ""}${swapTip ? `\n${swapTip}` : ""}`}
+                                  title={`${label === "•" ? "Trabalho" : (label === "D" ? "Demitido" : label)}${dDelayMin > 0 ? ` · Atraso: ${dDelayMin} min` : ""}`}
                                   style={{
                                     textAlign:"center", padding:"2px 0",
                                     cursor: locked ? "not-allowed" : "pointer",
@@ -13656,7 +13339,6 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                                     letterSpacing: 0.2,
                                   }}>{!isDem&&restaurant.serviceStartDate&&date<restaurant.serviceStartDate?"🔒":label}</span>
                                   {dDelayMin > 0 && <span style={{position:"absolute",bottom:0,right:0,fontSize:5,color:status||isDem?"#fff":"#f59e0b",lineHeight:1}}>⏰</span>}
-                                  {swapInfo && <span style={{position:"absolute",top:0,right:0,fontSize:6,lineHeight:1,background:"#7c3aed",color:"#fff",borderRadius:2,padding:"0 1px",fontWeight:700}}>↔</span>}
                                 </td>
                               );
                             })}
@@ -13676,37 +13358,6 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
             <details style={{marginTop:18,padding:"12px 14px",background:"var(--bg2)",borderRadius:10,border:"1px solid var(--border)"}}>
               <summary style={{cursor:"pointer",fontSize:12,fontWeight:600,color:"var(--text2)",padding:"4px 0"}}>⋯ Mais ações</summary>
               <div style={{marginTop:12,display:"flex",flexDirection:"column",gap:10}}>
-                {/* v8.11.0: Inversões registradas neste mês */}
-                {(() => {
-                  const monthSwaps = (data?.scheduleSwaps ?? []).filter(s => s.restaurantId === rid && s.date && s.date.slice(0,7) === mk);
-                  if (monthSwaps.length === 0) return null;
-                  const empNameMap = {};
-                  schedEmps.forEach(e => { empNameMap[e.id] = e.name; });
-                  return (
-                    <div style={{padding:"10px 12px",background:"var(--card-bg)",border:"1px solid #7c3aed44",borderRadius:8}}>
-                      <div style={{fontSize:12,fontWeight:700,color:"#7c3aed",marginBottom:8}}>↔️ Inversões registradas neste mês ({monthSwaps.length})</div>
-                      <div style={{display:"flex",flexDirection:"column",gap:6}}>
-                        {monthSwaps.sort((a,b) => (a.date || "").localeCompare(b.date || "")).map(sw => (
-                          <div key={sw.id} style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:8,padding:"6px 10px",background:"var(--bg2)",borderRadius:6,fontSize:11}}>
-                            <span style={{color:"var(--text2)"}}>
-                              <strong>{new Date(sw.date+"T12:00:00").toLocaleDateString("pt-BR")}</strong>
-                              {" "}· {empNameMap[sw.empAId] || "—"} ↔ {empNameMap[sw.empBId] || "—"}
-                              {sw.note && <span style={{color:"var(--text3)",marginLeft:6}}>· {sw.note}</span>}
-                              <span style={{color:"var(--text3)",marginLeft:6,fontSize:10}}>· por {sw.registeredBy}</span>
-                            </span>
-                            {!monthClosed && (canSched || isOwner) && (
-                              <button onClick={async ()=>{
-                                if (!await appConfirm("Remover este registro de inversão?\n\nA escala/gorjeta/VT não são afetados — só apaga o registro.")) return;
-                                onUpdate("scheduleSwaps", (data?.scheduleSwaps ?? []).filter(s => s.id !== sw.id));
-                                onUpdate("_toast", "↔️ Inversão removida");
-                              }} style={{...S.btnSecondary,fontSize:10,padding:"3px 8px",color:"var(--red)",borderColor:"var(--red)44",whiteSpace:"nowrap"}}>Remover</button>
-                            )}
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  );
-                })()}
                 {(isOwner || isDP) && (() => {
                   const vCount = (data?.scheduleVersions?.[rid]?.[mk] ?? []).length;
                   return (
