@@ -3,7 +3,7 @@ import React, { useState, useEffect, useMemo, useRef, Component } from "react";
 import { db } from "./firebase";
 import { doc, getDoc, setDoc } from "firebase/firestore";
 
-const APP_VERSION = "8.5.1";
+const APP_VERSION = "8.6.0";
 
 const DEFAULT_ADMISSION = () => `${new Date().getFullYear()}-01-01`;
 const round2 = (v) => Math.round(v * 100) / 100;
@@ -12306,6 +12306,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
             employees={employees}
             roles={roles}
             schedules={schedules}
+            restaurants={restaurants}
             currentUser={currentUser}
             isDP={isDP}
             isLider={isLider}
@@ -20737,7 +20738,7 @@ function InicioModule({ currentUser, restaurant, isOwner, isDP, isLider, mobileO
   );
 }
 
-function FreelasModule({ restaurantId, pessoas, freelaShifts, freelaPagamentos, employees, roles, schedules, currentUser, isDP, isLider, isOwner, onUpdate, mobileOnly }) {
+function FreelasModule({ restaurantId, pessoas, freelaShifts, freelaPagamentos, employees, roles, schedules, restaurants, currentUser, isDP, isLider, isOwner, onUpdate, mobileOnly }) {
   const [subTab, setSubTab] = useState("lancamento");
   const ac = "#7c3aed"; // roxo Freelas — distingue dos outros módulos
   const restPessoas = (pessoas || []).filter(p => (p.restaurantIds || []).includes(restaurantId));
@@ -21183,6 +21184,7 @@ function FreelasModule({ restaurantId, pessoas, freelaShifts, freelaPagamentos, 
           updateShift={updateShift}
           onUpdate={onUpdate}
           pessoas={pessoas}
+          restaurants={restaurants}
           isOwner={isOwner}
           mobileOnly={mobileOnly}
           ac={ac}
@@ -21743,14 +21745,27 @@ function FreelaShiftCard({ shift: s, pessoa, editable, shiftPrntoPronto, updateS
   );
 }
 
-// v8.5.1 — Row do Fechamento (DP): SAÍDA e INTERVALO já vêm preenchidos pelo Líder.
-// DP só lança o VALOR (e PIX da pessoa se faltar).
-function FechaShiftRow({ shift: s, pessoa, updateShift, mobileOnly, ac, onUpdate, pessoas, fmtHoras }) {
+// v8.6 — Row do Fechamento (DP) com dropdown de níveis pré-cadastrados.
+// DP pode escolher nível (Ajudante/Operacional/etc) ou "Personalizado" pra digitar livre.
+function FechaShiftRow({ shift: s, pessoa, updateShift, mobileOnly, ac, onUpdate, pessoas, fmtHoras, freelaRates, onOpenManageRates }) {
+  const [selectedRateId, setSelectedRateId] = useState(""); // "" = Personalizado
   const [valorTipo, setValorTipo] = useState(s.valorTipo || "hora");
   const [valorUnit, setValorUnit] = useState(s.valorUnit != null ? String(s.valorUnit).replace(".", ",") : "");
   const [pix, setPix] = useState(pessoa?.pix || "");
   const fromBR = (v) => parseFloat(String(v || "").replace(",", ".")) || 0;
   const missingPix = !pessoa?.pix;
+
+  function handleSelectRate(rateId) {
+    setSelectedRateId(rateId);
+    if (rateId === "__manage__") { onOpenManageRates && onOpenManageRates(); setSelectedRateId(""); return; }
+    if (!rateId) return; // Personalizado — mantém valores atuais
+    const rate = (freelaRates || []).find(r => r.id === rateId);
+    if (rate) {
+      setValorTipo(rate.valorTipo);
+      setValorUnit(String(rate.valor).replace(".", ","));
+    }
+  }
+
   function handleSalvar() {
     if (!valorUnit || fromBR(valorUnit) <= 0) { alert("Preencha o valor."); return; }
     updateShift(s.id, { valorTipo, valorUnit: fromBR(valorUnit) });
@@ -21774,17 +21789,34 @@ function FechaShiftRow({ shift: s, pessoa, updateShift, mobileOnly, ac, onUpdate
           {s.observacao && <div style={{ fontSize: 11, color: "var(--text3)", fontStyle: "italic", marginTop: 2 }}>💬 {s.observacao}</div>}
         </div>
       </div>
+      {/* Dropdown de nível pré-cadastrado */}
+      <div style={{ marginBottom: 8 }}>
+        <label style={{ ...S.label, fontSize: 10 }}>Nível / Valor pré-cadastrado</label>
+        <select value={selectedRateId} onChange={e => handleSelectRate(e.target.value)} style={{ ...S.input, fontSize: 12, padding: "7px 9px", cursor: "pointer" }}>
+          <option value="">— Personalizado (digite abaixo) —</option>
+          {(freelaRates || []).length > 0 && (
+            <optgroup label="Cadastrados">
+              {freelaRates.map(r => (
+                <option key={r.id} value={r.id}>
+                  {r.label} — R$ {r.valor.toFixed(2)} {r.valorTipo === "hora" ? "/hora" : "/diária"}
+                </option>
+              ))}
+            </optgroup>
+          )}
+          <option value="__manage__" style={{ fontWeight: 700 }}>⚙️ Gerenciar níveis...</option>
+        </select>
+      </div>
       <div style={{ display: "grid", gridTemplateColumns: mobileOnly ? "1fr 1fr" : "1.2fr 1fr", gap: 8, marginBottom: missingPix ? 8 : 0 }}>
         <div>
           <label style={{ ...S.label, fontSize: 10 }}>Tipo de valor</label>
-          <select value={valorTipo} onChange={e => setValorTipo(e.target.value)} style={{ ...S.input, fontSize: 12, padding: "7px 9px" }}>
+          <select value={valorTipo} onChange={e => { setValorTipo(e.target.value); setSelectedRateId(""); }} style={{ ...S.input, fontSize: 12, padding: "7px 9px" }}>
             <option value="hora">R$ por hora</option>
             <option value="diaria">Diária</option>
           </select>
         </div>
         <div>
           <label style={{ ...S.label, fontSize: 10 }}>Valor (R$)</label>
-          <input type="text" inputMode="decimal" value={valorUnit} onChange={e => setValorUnit(e.target.value)} placeholder="0,00" style={{ ...S.input, fontSize: 12, padding: "7px 9px" }} />
+          <input type="text" inputMode="decimal" value={valorUnit} onChange={e => { setValorUnit(e.target.value); setSelectedRateId(""); }} placeholder="0,00" style={{ ...S.input, fontSize: 12, padding: "7px 9px" }} />
         </div>
       </div>
       {missingPix && (
@@ -21800,7 +21832,105 @@ function FechaShiftRow({ shift: s, pessoa, updateShift, mobileOnly, ac, onUpdate
   );
 }
 
-function FreelaFechamentoTab({ restaurantId, restPessoas, shifts, lotes, shiftPrntoPronto, fmtHoras, criarLote, cancelarLote, marcarLotePago, gerarPDFLote, updateShift, onUpdate, pessoas, isOwner, mobileOnly, ac }) {
+// v8.6 — Modal de gerenciar níveis pré-cadastrados de freela.
+// DP pode adicionar / editar / excluir níveis (label, tipo, valor).
+function FreelaRatesManager({ rates, restaurantId, restaurants, onUpdate, onClose, ac }) {
+  const [list, setList] = useState(() => (rates || []).map(r => ({ ...r })));
+  const [newRate, setNewRate] = useState({ label: "", valorTipo: "hora", valor: "" });
+  const fromBR = (v) => parseFloat(String(v || "").replace(",", ".")) || 0;
+
+  function persist(nextList) {
+    const rest = (restaurants || []).find(r => r.id === restaurantId);
+    if (!rest) return;
+    const next = restaurants.map(r => r.id === restaurantId ? { ...r, freelaRates: nextList } : r);
+    onUpdate("restaurants", next);
+  }
+
+  function addRate() {
+    if (!newRate.label.trim()) { alert("Informe o nome do nível."); return; }
+    const v = fromBR(newRate.valor);
+    if (v <= 0) { alert("Informe um valor válido."); return; }
+    const next = [...list, { id: `rate_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 5)}`, label: newRate.label.trim(), valorTipo: newRate.valorTipo, valor: v }];
+    setList(next); persist(next);
+    setNewRate({ label: "", valorTipo: "hora", valor: "" });
+  }
+  function editRate(id, patch) {
+    const next = list.map(r => r.id === id ? { ...r, ...patch } : r);
+    setList(next); persist(next);
+  }
+  function delRate(id) {
+    if (!window.confirm("Excluir este nível?")) return;
+    const next = list.filter(r => r.id !== id);
+    setList(next); persist(next);
+  }
+
+  return (
+    <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.55)", zIndex: 10010, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
+      <div onClick={e => e.stopPropagation()} style={{ background: "var(--bg)", borderRadius: 14, padding: 22, maxWidth: 600, width: "100%", maxHeight: "85vh", overflowY: "auto", border: "1px solid var(--border)" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+          <div>
+            <h3 style={{ color: "var(--text)", margin: 0, fontSize: 18, fontWeight: 800 }}>⚙️ Gerenciar níveis</h3>
+            <p style={{ color: "var(--text3)", fontSize: 12, margin: "4px 0 0" }}>Valores pré-cadastrados que aparecem como atalho no Fechamento</p>
+          </div>
+          <button onClick={onClose} style={{ background: "none", border: "none", fontSize: 22, cursor: "pointer", color: "var(--text3)" }}>×</button>
+        </div>
+
+        {/* Lista de níveis existentes */}
+        {list.length > 0 ? (
+          <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 16 }}>
+            {list.map(r => (
+              <div key={r.id} style={{ display: "grid", gridTemplateColumns: "1.4fr 1fr 1fr auto", gap: 8, alignItems: "center", padding: "8px 10px", background: "var(--card-bg)", border: "1px solid var(--border)", borderRadius: 8 }}>
+                <input value={r.label} onChange={e => editRate(r.id, { label: e.target.value })} style={{ ...S.input, fontSize: 12, padding: "6px 9px" }} placeholder="Nome (ex: Ajudante)" />
+                <select value={r.valorTipo} onChange={e => editRate(r.id, { valorTipo: e.target.value })} style={{ ...S.input, fontSize: 12, padding: "6px 9px" }}>
+                  <option value="hora">R$/hora</option>
+                  <option value="diaria">Diária</option>
+                </select>
+                <input type="text" inputMode="decimal" value={String(r.valor).replace(".", ",")} onChange={e => editRate(r.id, { valor: fromBR(e.target.value) })} style={{ ...S.input, fontSize: 12, padding: "6px 9px", textAlign: "right" }} placeholder="0,00" />
+                <button onClick={() => delRate(r.id)} title="Excluir" style={{ background: "transparent", color: "var(--red)", border: "1px solid var(--red)55", borderRadius: 6, padding: "5px 10px", fontSize: 11, cursor: "pointer" }}>🗑️</button>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div style={{ padding: 16, color: "var(--text3)", fontSize: 12, textAlign: "center", background: "var(--card-bg)", border: "1px dashed var(--border)", borderRadius: 8, marginBottom: 16 }}>
+            Nenhum nível cadastrado ainda. Adicione abaixo.
+          </div>
+        )}
+
+        {/* Form de novo nível */}
+        <div style={{ background: `${ac}08`, border: `1px dashed ${ac}55`, borderRadius: 10, padding: 12 }}>
+          <div style={{ fontSize: 11, color: ac, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.4, marginBottom: 8 }}>+ Novo nível</div>
+          <div style={{ display: "grid", gridTemplateColumns: "1.4fr 1fr 1fr auto", gap: 8, alignItems: "end" }}>
+            <div>
+              <label style={{ ...S.label, fontSize: 10 }}>Nome</label>
+              <input value={newRate.label} onChange={e => setNewRate({ ...newRate, label: e.target.value })} placeholder="Ajudante, Operacional, Cozinheiro..." style={{ ...S.input, fontSize: 12, padding: "6px 9px" }} />
+            </div>
+            <div>
+              <label style={{ ...S.label, fontSize: 10 }}>Tipo</label>
+              <select value={newRate.valorTipo} onChange={e => setNewRate({ ...newRate, valorTipo: e.target.value })} style={{ ...S.input, fontSize: 12, padding: "6px 9px" }}>
+                <option value="hora">R$/hora</option>
+                <option value="diaria">Diária</option>
+              </select>
+            </div>
+            <div>
+              <label style={{ ...S.label, fontSize: 10 }}>Valor (R$)</label>
+              <input type="text" inputMode="decimal" value={newRate.valor} onChange={e => setNewRate({ ...newRate, valor: e.target.value })} placeholder="0,00" style={{ ...S.input, fontSize: 12, padding: "6px 9px", textAlign: "right" }} />
+            </div>
+            <button onClick={addRate} style={{ background: ac, color: "#fff", border: "none", borderRadius: 8, padding: "7px 14px", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>+ Adicionar</button>
+          </div>
+        </div>
+
+        <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 16 }}>
+          <button onClick={onClose} style={{ ...S.btnSecondary, fontSize: 12, padding: "7px 18px" }}>Fechar</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function FreelaFechamentoTab({ restaurantId, restPessoas, shifts, lotes, shiftPrntoPronto, fmtHoras, criarLote, cancelarLote, marcarLotePago, gerarPDFLote, updateShift, onUpdate, pessoas, isOwner, mobileOnly, ac, restaurants }) {
+  const restaurant = (restaurants || []).find(r => r.id === restaurantId);
+  const freelaRates = restaurant?.freelaRates || [];
+  const [showRatesManager, setShowRatesManager] = useState(false);
   const [selected, setSelected] = useState({}); // { shiftId: true }
   const [showLoteForm, setShowLoteForm] = useState(false);
   const [loteData, setLoteData] = useState({ numero: "", observacao: "" });
@@ -21866,6 +21996,10 @@ function FreelaFechamentoTab({ restaurantId, restPessoas, shifts, lotes, shiftPr
             📑 Gerar lote ({selShifts.length} · R$ {selTotal.toFixed(2)})
           </button>
         )}
+        <button onClick={() => setShowRatesManager(true)} title="Cadastrar/editar níveis pré-cadastrados de valor"
+          style={{ ...S.btnSecondary, fontSize: 11, padding: "7px 12px", marginLeft: selShifts.length > 0 ? 0 : "auto" }}>
+          ⚙️ Níveis ({freelaRates.length})
+        </button>
       </div>
 
       {/* Form de criar lote */}
@@ -21910,6 +22044,8 @@ function FreelaFechamentoTab({ restaurantId, restPessoas, shifts, lotes, shiftPr
                   onUpdate={onUpdate}
                   pessoas={pessoas}
                   fmtHoras={fmtHoras}
+                  freelaRates={freelaRates}
+                  onOpenManageRates={() => setShowRatesManager(true)}
                   mobileOnly={mobileOnly}
                   ac={ac}
                 />
@@ -22027,6 +22163,18 @@ function FreelaFechamentoTab({ restaurantId, restPessoas, shifts, lotes, shiftPr
             );
           })}
         </div>
+      )}
+
+      {/* v8.6 — Modal de gerenciar níveis pré-cadastrados */}
+      {showRatesManager && (
+        <FreelaRatesManager
+          rates={freelaRates}
+          restaurantId={restaurantId}
+          restaurants={restaurants}
+          onUpdate={onUpdate}
+          onClose={() => setShowRatesManager(false)}
+          ac={ac}
+        />
       )}
     </div>
   );
