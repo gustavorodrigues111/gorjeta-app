@@ -3,7 +3,7 @@ import React, { useState, useEffect, useMemo, useRef, Component } from "react";
 import { db } from "./firebase";
 import { doc, getDoc, setDoc } from "firebase/firestore";
 
-const APP_VERSION = "8.4.4";
+const APP_VERSION = "8.4.5";
 
 const DEFAULT_ADMISSION = () => `${new Date().getFullYear()}-01-01`;
 const round2 = (v) => Math.round(v * 100) / 100;
@@ -12136,6 +12136,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
               isLider={isLider}
               mobileOnly={mobileOnly}
               setTab={setTab}
+              perms={perms}
             />
             {/* Inbox direto na página inicial — antes ficava em "notificacoes" (separado) */}
             {!privacyMask && (
@@ -20653,7 +20654,7 @@ function buildVirtualEmpForPessoa(pessoa, restaurantId) {
 // ═══════════════════════════════════════════════════════════════
 // ──  INÍCIO — saudação amigável (V0, dashboard chega depois)    ──
 // ═══════════════════════════════════════════════════════════════
-function InicioModule({ currentUser, restaurant, isOwner, isDP, isLider, mobileOnly, setTab }) {
+function InicioModule({ currentUser, restaurant, isOwner, isDP, isLider, mobileOnly, setTab, perms }) {
   const ac = "#7c3aed";
   const now = new Date();
   const hora = now.getHours();
@@ -20705,16 +20706,32 @@ function InicioModule({ currentUser, restaurant, isOwner, isDP, isLider, mobileO
         <p style={{fontSize:12,color:"var(--text3)",lineHeight:1.6,maxWidth:440,margin:"0 auto"}}>
           Em breve você vai ver aqui os números do dia, pendências, atalhos e um feed das últimas atividades do restaurante.
         </p>
-        {!mobileOnly && (
-          <div style={{marginTop:16,display:"flex",gap:8,justifyContent:"center",flexWrap:"wrap"}}>
-            <button onClick={()=>setTab && setTab("freelas")}
-              style={{background:"transparent",color:ac,border:`1px solid ${ac}55`,borderRadius:8,padding:"6px 14px",fontSize:12,fontWeight:600,cursor:"pointer"}}>🎒 Ir pra Freelas</button>
-            <button onClick={()=>setTab && setTab("schedule")}
-              style={{background:"transparent",color:"var(--text2)",border:"1px solid var(--border)",borderRadius:8,padding:"6px 14px",fontSize:12,fontWeight:600,cursor:"pointer"}}>📅 Ver Escala</button>
-            <button onClick={()=>setTab && setTab("dashboard")}
-              style={{background:"transparent",color:"var(--text2)",border:"1px solid var(--border)",borderRadius:8,padding:"6px 14px",fontSize:12,fontWeight:600,cursor:"pointer"}}>💰 Ver Gorjetas</button>
-          </div>
-        )}
+        {!mobileOnly && (() => {
+          // v8.4.5 — gate atalhos por permissão. Usuário sem acesso à feature não vê o atalho.
+          // Owner sempre vê todos. Demais dependem de perms.
+          const canFreelas  = isOwner || isDP || isLider;
+          const canSchedule = isOwner || perms?.operational?.escalas === true || perms?.admin?.schedule === true;
+          const canTips     = isOwner || perms?.operational?.gorjetas === true || perms?.admin?.tips === true;
+          const shortcuts = [
+            canFreelas  && { tab: "freelas",   label: "🎒 Ir pra Freelas",  highlight: true },
+            canSchedule && { tab: "schedule",  label: "📅 Ver Escala",      highlight: false },
+            canTips     && { tab: "dashboard", label: "💰 Ver Gorjetas",    highlight: false },
+          ].filter(Boolean);
+          if (shortcuts.length === 0) return null;
+          return (
+            <div style={{marginTop:16,display:"flex",gap:8,justifyContent:"center",flexWrap:"wrap"}}>
+              {shortcuts.map(s => (
+                <button key={s.tab} onClick={()=>setTab && setTab(s.tab)}
+                  style={{
+                    background:"transparent",
+                    color: s.highlight ? ac : "var(--text2)",
+                    border: `1px solid ${s.highlight ? ac+"55" : "var(--border)"}`,
+                    borderRadius:8, padding:"6px 14px", fontSize:12, fontWeight:600, cursor:"pointer",
+                  }}>{s.label}</button>
+              ))}
+            </div>
+          );
+        })()}
       </div>
     </div>
   );
