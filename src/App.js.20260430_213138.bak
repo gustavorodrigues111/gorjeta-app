@@ -3,7 +3,7 @@ import React, { useState, useEffect, useMemo, useRef, Component } from "react";
 import { db } from "./firebase";
 import { doc, getDoc, setDoc, onSnapshot } from "firebase/firestore";
 
-const APP_VERSION = "8.15.0";
+const APP_VERSION = "8.14.1";
 
 // v8.11.1: comparação de versão semver-like (8.11.1 > 8.10.7 > 8.9.4)
 function compareVersions(a, b) {
@@ -539,9 +539,6 @@ const K = {
   scheduleStatus:      "v4:scheduleStatus",      // {[rid]: {[mk]: {status:"open"|"review"|"closed", closedAt, closedBy, lastPontoImport, pontoSystem, missingFromPonto:[], importHistory:[], lastImportSummary}}}
   schedulePrevista:    "v4:schedulePrevista",     // {[rid]: {[mk]: frozen snapshot of schedules at first edit/VT payment}}
   scheduleSwaps:       "v4:scheduleSwaps",        // [{id, restaurantId, date, empAId, empBId, note?, registeredAt, registeredBy}] — inversões informais (v8.11.0)
-  recursoFolders:      "v4:recursoFolders",       // [{id, restaurantId, name, icon, order, createdAt, createdBy, deletedAt?}]  (v8.15.0)
-  recursos:            "v4:recursos",             // [{id, restaurantId, folderId, name, type:"link"|"nota", url?, content?, responsavelId?, tags:[], visibility:{mode,sharedWith}, createdById, createdBy, createdAt, updatedAt?, updatedBy?, deletedAt?}]
-  recursosInitialized: "v4:recursosInitialized",  // {[restaurantId]: true} — evita recriar pastas exemplo
   employeeGoals:       "v4:employeeGoals",        // {[empId]: [{id, type, title, targetRoleId?, topic?, materials:[], metas:[], createdAt, createdBy, status:"active"|"completed"|"cancelled"}]}
   delays:              "v4:delays",               // {[rid]: {[mk]: {[empId]: {[day]: minutes}}}}
   tipApprovals:        "v4:tipApprovals",         // {[rid]: {[weekMonday]: {approvedAt, approvedBy, approvedByName}}}
@@ -11113,8 +11110,6 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
       canTips && ["tips","Gorjetas"],
       canTips && ["dashboard","Dashboard"],
       canTips && ["regra_divisao","Regra"],
-      // v8.15.0: Recursos — visível pra Owner/DP/Líder/admin (qualquer gestor)
-      (canTips || isOwner || isDP || isLider) && ["recursos","📚 Recursos"],
       (isOwner || tabVisible("comunicados")) && ["comunicados","Comunicados"],
       (isOwner || tabVisible("faq")) && ["faq","FAQ"],
       (isOwner || tabVisible("dp")) && ["dp","Fale com DP"],
@@ -11128,7 +11123,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
   const MOBILE_ALLOWED = [
     "inicio","ocorrencias","mise_checklists","mise_contagens","mise_temperaturas","mise_fichas",
     "schedule","freelas","reunioes","trilhas","ideias",
-    "pessoas","permissoes","employees","vt","roles","mise_compras","tips","dashboard","regra_divisao","recursos","comunicados","faq","dp",
+    "pessoas","permissoes","employees","vt","roles","mise_compras","tips","dashboard","regra_divisao","comunicados","faq","dp",
     "config","horarios","notificacoes","dp_gestores",
   ];
   // v7: se restrictToOperational, oculta seções "escritorio" e "ajustes" (modo Operação)
@@ -14690,25 +14685,6 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
             onUpdate={onUpdate}
             mobileOnly={mobileOnly}
             isOwner={isOwner}
-          />
-        )}
-
-        {/* v8.15.0: RECURSOS — hub de pastas + itens */}
-        {tab === "recursos" && (
-          <RecursosTab
-            restaurantId={rid}
-            recursoFolders={data?.recursoFolders ?? []}
-            recursos={data?.recursos ?? []}
-            recursosInitialized={data?.recursosInitialized ?? {}}
-            employees={employees}
-            pessoas={data?.pessoas ?? []}
-            managers={data?.managers ?? []}
-            currentUser={currentUser}
-            isOwner={isOwner}
-            isDP={isDP}
-            isLider={isLider}
-            mobileOnly={mobileOnly}
-            onUpdate={onUpdate}
           />
         )}
 
@@ -21254,11 +21230,6 @@ function buildShellSections({ pessoa, restaurantId, isOwner, employees, restaura
       ),
     });
   }
-  // v8.15.0: Recursos — visível pra qualquer gestor (admin/líder/DP/owner)
-  const _isAnyMgr = isOwner || ad.tips || sp.isDP || sp.isLider || sp.profile === "lider" || ad.employees || ad.schedule;
-  if (_isAnyMgr) {
-    officeItems.push({ id: "mod_recursos", label: "Recursos", icon: "📚", kind: "manager", tab: "recursos" });
-  }
   if (officeItems.length > 0) {
     sections.push({ group: "Escritório", color: "#0284c7", items: officeItems });
   }
@@ -21981,425 +21952,6 @@ function InicioModule({ currentUser, restaurant, isOwner, isDP, isLider, mobileO
               </div>
             );
           })()}
-        </div>
-      )}
-    </div>
-  );
-}
-
-// v8.15.0 — Recursos: hub de pastas + itens (links / notas) por restaurante.
-function RecursosTab({ restaurantId, recursoFolders, recursos, recursosInitialized, employees, pessoas, managers, currentUser, isOwner, isDP, isLider, mobileOnly, onUpdate }) {
-  const ac = "#0284c7"; // azul Escritório
-  // Pastas e itens deste restaurante
-  const restFolders = (recursoFolders ?? []).filter(f => f.restaurantId === restaurantId && !f.deletedAt).sort((a,b) => (a.order ?? 999) - (b.order ?? 999) || a.name.localeCompare(b.name));
-  const restItems = (recursos ?? []).filter(r => r.restaurantId === restaurantId && !r.deletedAt);
-  // Auto-init pastas exemplo no primeiro acesso (Owner only)
-  const initFlag = recursosInitialized?.[restaurantId];
-  const DEFAULT_FOLDERS = [
-    { name: "Compras",                          icon: "🛒" },
-    { name: "Departamento Pessoal",             icon: "👥" },
-    { name: "Financeiro",                       icon: "💰" },
-    { name: "Documentos, Contratos e Seguros",  icon: "📄" },
-    { name: "Comunicação e Marketing",          icon: "📣" },
-    { name: "Outros",                           icon: "🔧" },
-  ];
-  useEffect(() => {
-    if (!isOwner) return;
-    if (initFlag) return;
-    if (restFolders.length > 0) {
-      // Já tem pastas — só marca o flag pra não rodar de novo
-      onUpdate("recursosInitialized", { ...(recursosInitialized ?? {}), [restaurantId]: true });
-      return;
-    }
-    // Cria as 6 pastas exemplo
-    const now = new Date().toISOString();
-    const newFolders = DEFAULT_FOLDERS.map((f, idx) => ({
-      id: `folder-${Date.now()}-${idx}-${Math.random().toString(36).slice(2,5)}`,
-      restaurantId, name: f.name, icon: f.icon, order: idx,
-      createdAt: now, createdBy: currentUser?.name || "Owner", createdById: currentUser?.id,
-    }));
-    onUpdate("recursoFolders", [...(recursoFolders ?? []), ...newFolders]);
-    onUpdate("recursosInitialized", { ...(recursosInitialized ?? {}), [restaurantId]: true });
-  }, [restaurantId, isOwner, initFlag]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // State da UI
-  const [activeFolderId, setActiveFolderId] = useState(null);
-  const [search, setSearch] = useState("");
-  // Modal item
-  const [itemForm, setItemForm] = useState(null); // null | {id?, folderId, name, type, url, content, responsavelId, tags, visibility:{mode,sharedWith}}
-  // Modal pasta
-  const [folderForm, setFolderForm] = useState(null);
-  // Pasta selecionada (default = primeira)
-  useEffect(() => {
-    if (!activeFolderId && restFolders.length > 0) setActiveFolderId(restFolders[0].id);
-    if (activeFolderId && !restFolders.find(f => f.id === activeFolderId)) setActiveFolderId(restFolders[0]?.id ?? null);
-  }, [restFolders, activeFolderId]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // Helpers
-  const empNameById = {};
-  (employees ?? []).forEach(e => { empNameById[e.id] = e.name; });
-  const pessoaNameById = {};
-  (pessoas ?? []).forEach(p => { pessoaNameById[p.id] = p.name; });
-  const managerNameById = {};
-  (managers ?? []).forEach(m => { managerNameById[m.id] = m.name; });
-  const personNameById = (id) => pessoaNameById[id] || managerNameById[id] || empNameById[id] || "—";
-
-  // Lista de pessoas elegíveis pra "Responsável" — gestores/líderes do restaurante
-  const eligibleResponsaveis = (() => {
-    const seenIds = new Set(), seenCpfs = new Set(), result = [];
-    const cpfClean = s => (s || "").replace(/\D/g, "");
-    (pessoas ?? []).forEach(p => {
-      if (!(p.restaurantIds ?? []).includes(restaurantId)) return;
-      const perms = p.permissions?.[restaurantId];
-      if (!perms) return;
-      const hasAdmin = Object.values(perms.admin ?? {}).some(v => v === true);
-      const isLid = perms.special?.isLider === true || perms.special?.profile === "lider";
-      const isDpP = perms.special?.isDP === true;
-      if (!hasAdmin && !isLid && !isDpP) return;
-      seenIds.add(p.id);
-      if (p.linkedManagerId) seenIds.add(p.linkedManagerId);
-      if (p.cpf) seenCpfs.add(cpfClean(p.cpf));
-      result.push({ id: p.id, name: p.name });
-    });
-    (managers ?? []).forEach(m => {
-      if (!(m.restaurantIds ?? []).includes(restaurantId)) return;
-      if (seenIds.has(m.id)) return;
-      const mcpf = cpfClean(m.cpf);
-      if (mcpf && seenCpfs.has(mcpf)) return;
-      seenIds.add(m.id); if (mcpf) seenCpfs.add(mcpf);
-      result.push({ id: m.id, name: m.name });
-    });
-    return result.sort((a,b) => a.name.localeCompare(b.name));
-  })();
-
-  // Visibilidade
-  const isCreatorOf = (item) => item.createdById && item.createdById === currentUser?.id;
-  const canSeeItem = (item) => {
-    if (isOwner) return true;
-    if (isDP) return true;
-    const v = item.visibility || { mode: "default", sharedWith: [] };
-    if (v.mode === "private") return isCreatorOf(item);
-    if (v.mode === "shared") return isCreatorOf(item) || (Array.isArray(v.sharedWith) && v.sharedWith.includes(currentUser?.id));
-    return true; // default: todos os gestores que abrem essa aba
-  };
-  const canEditItem = (item) => isOwner || isDP || isCreatorOf(item);
-
-  // Itens da pasta ativa, filtrados por busca + visibilidade
-  const visibleItems = restItems
-    .filter(r => canSeeItem(r))
-    .filter(r => activeFolderId ? r.folderId === activeFolderId : true)
-    .filter(r => {
-      if (!search.trim()) return true;
-      const s = search.toLowerCase();
-      return (r.name || "").toLowerCase().includes(s)
-          || (r.url || "").toLowerCase().includes(s)
-          || (r.content || "").toLowerCase().includes(s)
-          || (r.tags || []).some(t => t.toLowerCase().includes(s));
-    })
-    .sort((a,b) => (b.updatedAt || b.createdAt || "").localeCompare(a.updatedAt || a.createdAt || ""));
-
-  // Folder actions
-  function startNewFolder() { setFolderForm({ name: "", icon: "🔧" }); }
-  function startEditFolder(f) { setFolderForm({ id: f.id, name: f.name, icon: f.icon || "🔧" }); }
-  function saveFolder() {
-    if (!folderForm.name.trim()) return;
-    const isEdit = !!folderForm.id;
-    const now = new Date().toISOString();
-    if (isEdit) {
-      const next = (recursoFolders ?? []).map(f => f.id === folderForm.id ? { ...f, name: folderForm.name.trim(), icon: folderForm.icon || "🔧" } : f);
-      onUpdate("recursoFolders", next);
-    } else {
-      const newF = {
-        id: `folder-${Date.now()}-${Math.random().toString(36).slice(2,5)}`,
-        restaurantId, name: folderForm.name.trim(), icon: folderForm.icon || "🔧",
-        order: (restFolders.at(-1)?.order ?? 0) + 1,
-        createdAt: now, createdBy: currentUser?.name || "—", createdById: currentUser?.id,
-      };
-      onUpdate("recursoFolders", [...(recursoFolders ?? []), newF]);
-      setActiveFolderId(newF.id);
-    }
-    setFolderForm(null);
-  }
-  async function delFolder(f) {
-    const itemsInside = restItems.filter(r => r.folderId === f.id).length;
-    if (!await appConfirm(`Excluir a pasta "${f.name}"?\n${itemsInside > 0 ? `${itemsInside} item(ns) dentro também vão pra lixeira.` : ""}`)) return;
-    const now = new Date().toISOString();
-    onUpdate("recursoFolders", (recursoFolders ?? []).map(x => x.id === f.id ? { ...x, deletedAt: now } : x));
-    if (itemsInside > 0) {
-      onUpdate("recursos", (recursos ?? []).map(r => r.folderId === f.id ? { ...r, deletedAt: now } : r));
-    }
-  }
-
-  // Item actions
-  function startNewItem(folderId) {
-    setItemForm({
-      folderId, name: "", type: "link", url: "", content: "",
-      responsavelId: currentUser?.id || "", tags: [],
-      visibility: { mode: "default", sharedWith: [] },
-    });
-  }
-  function startEditItem(r) {
-    setItemForm({
-      id: r.id, folderId: r.folderId, name: r.name || "", type: r.type || "link",
-      url: r.url || "", content: r.content || "",
-      responsavelId: r.responsavelId || "", tags: [...(r.tags || [])],
-      visibility: { mode: r.visibility?.mode || "default", sharedWith: [...(r.visibility?.sharedWith || [])] },
-    });
-  }
-  function saveItem() {
-    if (!itemForm.name.trim()) { window.alert("Informe o nome do recurso."); return; }
-    if (itemForm.type === "link" && !itemForm.url.trim()) { window.alert("Informe a URL."); return; }
-    const now = new Date().toISOString();
-    const isEdit = !!itemForm.id;
-    const existing = isEdit ? (recursos ?? []).find(r => r.id === itemForm.id) : null;
-    const item = {
-      id: existing?.id || `rec-${Date.now()}-${Math.random().toString(36).slice(2,5)}`,
-      restaurantId, folderId: itemForm.folderId,
-      name: itemForm.name.trim(),
-      type: itemForm.type,
-      ...(itemForm.type === "link" ? { url: itemForm.url.trim() } : { content: itemForm.content }),
-      responsavelId: itemForm.responsavelId || null,
-      tags: (itemForm.tags || []).filter(Boolean),
-      visibility: {
-        mode: itemForm.visibility.mode || "default",
-        sharedWith: itemForm.visibility.mode === "shared" ? [...(itemForm.visibility.sharedWith || [])] : [],
-      },
-      createdAt: existing?.createdAt || now,
-      createdBy: existing?.createdBy || (currentUser?.name || "—"),
-      createdById: existing?.createdById || currentUser?.id || null,
-      ...(isEdit ? { updatedAt: now, updatedBy: currentUser?.name || "—" } : {}),
-    };
-    if (isEdit) {
-      onUpdate("recursos", (recursos ?? []).map(r => r.id === itemForm.id ? item : r));
-    } else {
-      onUpdate("recursos", [...(recursos ?? []), item]);
-    }
-    setItemForm(null);
-  }
-  async function delItem(r) {
-    if (!await appConfirm(`Excluir "${r.name}"? Vai pra lixeira (30 dias).`)) return;
-    onUpdate("recursos", (recursos ?? []).map(x => x.id === r.id ? { ...x, deletedAt: new Date().toISOString() } : x));
-  }
-
-  // Lista pra "compartilhar com" no item
-  const shareableManagers = eligibleResponsaveis.filter(p => p.id !== currentUser?.id);
-
-  const activeFolder = restFolders.find(f => f.id === activeFolderId) || null;
-
-  return (
-    <div>
-      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:12,marginBottom:16}}>
-        <h3 style={{color:"var(--text)",margin:0,fontSize:mobileOnly?16:20}}>📚 Recursos</h3>
-        {isOwner && (
-          <button onClick={startNewFolder} style={{...S.btnSecondary,fontSize:12,padding:"6px 14px",color:ac,borderColor:ac+"44"}}>+ Nova pasta</button>
-        )}
-      </div>
-
-      {/* Pastas */}
-      {restFolders.length === 0 ? (
-        <div style={{...S.card,padding:24,textAlign:"center"}}>
-          <div style={{fontSize:36,marginBottom:8}}>📚</div>
-          <div style={{color:"var(--text)",fontWeight:700,fontSize:14,marginBottom:6}}>Sem pastas ainda</div>
-          <p style={{color:"var(--text3)",fontSize:12,marginBottom:14}}>Crie pastas pra organizar seus recursos (ex: Documentos, Contratos, Manuais).</p>
-          {isOwner && <button onClick={startNewFolder} style={{...S.btnPrimary,fontSize:13,padding:"8px 18px"}}>+ Criar primeira pasta</button>}
-        </div>
-      ) : (
-        <>
-          <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:14,padding:8,background:"var(--bg2)",borderRadius:10,border:"1px solid var(--border)"}}>
-            {restFolders.map(f => {
-              const count = restItems.filter(r => r.folderId === f.id && canSeeItem(r)).length;
-              const isActive = f.id === activeFolderId;
-              return (
-                <button key={f.id} onClick={()=>setActiveFolderId(f.id)}
-                  style={{padding:"8px 12px",borderRadius:8,border:`1px solid ${isActive?ac:"var(--border)"}`,background:isActive?ac+"15":"var(--card-bg)",color:isActive?ac:"var(--text2)",cursor:"pointer",fontFamily:"'DM Sans',sans-serif",fontSize:12,fontWeight:isActive?700:500,display:"flex",alignItems:"center",gap:6}}>
-                  <span style={{fontSize:14}}>{f.icon}</span>
-                  <span>{f.name}</span>
-                  <span style={{fontSize:10,padding:"1px 7px",borderRadius:10,background:isActive?ac+"22":"var(--bg2)",color:isActive?ac:"var(--text3)",fontWeight:700}}>{count}</span>
-                </button>
-              );
-            })}
-          </div>
-
-          {/* Header da pasta ativa + busca */}
-          {activeFolder && (
-            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:10,flexWrap:"wrap",marginBottom:12}}>
-              <div style={{display:"flex",alignItems:"center",gap:8}}>
-                <span style={{fontSize:18}}>{activeFolder.icon}</span>
-                <h4 style={{margin:0,color:"var(--text)",fontSize:15,fontWeight:700}}>{activeFolder.name}</h4>
-                {isOwner && <button onClick={()=>startEditFolder(activeFolder)} style={{...S.btnSecondary,fontSize:10,padding:"3px 9px"}}>✏️</button>}
-                {isOwner && <button onClick={()=>delFolder(activeFolder)} style={{...S.btnSecondary,fontSize:10,padding:"3px 9px",color:"var(--red)",borderColor:"var(--red)44"}}>🗑️</button>}
-              </div>
-              <div style={{display:"flex",gap:8,alignItems:"center"}}>
-                <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="🔍 Buscar..." style={{...S.input,fontSize:12,padding:"6px 10px",width:180}} />
-                <button onClick={()=>startNewItem(activeFolder.id)} style={{...S.btnPrimary,fontSize:12,padding:"7px 14px",background:ac,borderColor:ac}}>+ Novo recurso</button>
-              </div>
-            </div>
-          )}
-
-          {/* Lista de itens */}
-          {visibleItems.length === 0 ? (
-            <div style={{...S.card,padding:20,textAlign:"center",color:"var(--text3)",fontSize:13}}>
-              {search.trim() ? "Nenhum recurso bate com a busca." : "Nenhum recurso nesta pasta. Clique em + Novo recurso pra começar."}
-            </div>
-          ) : (
-            <div style={{display:"flex",flexDirection:"column",gap:8}}>
-              {visibleItems.map(r => {
-                const responsavel = r.responsavelId ? personNameById(r.responsavelId) : null;
-                const isLink = r.type === "link";
-                const visMode = r.visibility?.mode || "default";
-                const visBadge = visMode === "private" ? "🔒" : visMode === "shared" ? "👥" : null;
-                return (
-                  <div key={r.id} style={{...S.card,padding:"12px 14px",display:"flex",alignItems:"flex-start",gap:12}}>
-                    <span style={{fontSize:20,marginTop:1}}>{isLink ? "🔗" : "📝"}</span>
-                    <div style={{flex:1,minWidth:0}}>
-                      <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
-                        <span style={{color:"var(--text)",fontWeight:700,fontSize:14}}>{r.name}</span>
-                        {visBadge && <span title={visMode === "private" ? "Privado" : "Compartilhado"} style={{fontSize:11}}>{visBadge}</span>}
-                      </div>
-                      {isLink ? (
-                        <a href={r.url} target="_blank" rel="noopener noreferrer" style={{color:ac,fontSize:11,textDecoration:"underline",fontFamily:"'DM Mono',monospace",wordBreak:"break-all",display:"block",marginTop:3}}>{r.url}</a>
-                      ) : (
-                        r.content && <div style={{color:"var(--text2)",fontSize:12,marginTop:4,whiteSpace:"pre-wrap",lineHeight:1.5}}>{r.content}</div>
-                      )}
-                      <div style={{display:"flex",gap:10,flexWrap:"wrap",marginTop:6,fontSize:10,color:"var(--text3)"}}>
-                        {responsavel && <span>👤 {responsavel}</span>}
-                        {(r.tags || []).map(t => <span key={t} style={{padding:"1px 7px",borderRadius:10,background:"var(--bg2)",color:"var(--text2)"}}>#{t}</span>)}
-                        <span style={{marginLeft:"auto"}}>por {r.createdBy} · {new Date(r.createdAt).toLocaleDateString("pt-BR")}</span>
-                      </div>
-                    </div>
-                    {canEditItem(r) && (
-                      <div style={{display:"flex",flexDirection:"column",gap:4}}>
-                        <button onClick={()=>startEditItem(r)} style={{...S.btnSecondary,fontSize:10,padding:"3px 9px"}}>Editar</button>
-                        <button onClick={()=>delItem(r)} style={{...S.btnSecondary,fontSize:10,padding:"3px 9px",color:"var(--red)",borderColor:"var(--red)44"}}>×</button>
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </>
-      )}
-
-      {/* Modal: Pasta */}
-      {folderForm && (
-        <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.45)",zIndex:1000,display:"flex",alignItems:"center",justifyContent:"center",padding:16}} onClick={()=>setFolderForm(null)}>
-          <div onClick={e=>e.stopPropagation()} style={{background:"var(--card-bg)",border:"1px solid var(--border)",borderRadius:14,maxWidth:420,width:"100%",padding:24}}>
-            <h3 style={{margin:"0 0 12px",color:"var(--text)",fontSize:16,fontWeight:700}}>{folderForm.id ? "Editar pasta" : "Nova pasta"}</h3>
-            <div style={{display:"flex",flexDirection:"column",gap:10}}>
-              <div>
-                <label style={{...S.label,fontSize:11}}>Nome</label>
-                <input value={folderForm.name} onChange={e=>setFolderForm({...folderForm,name:e.target.value})} placeholder="ex: Manuais Operacionais" style={S.input} autoFocus/>
-              </div>
-              <div>
-                <label style={{...S.label,fontSize:11}}>Ícone (1 emoji)</label>
-                <input value={folderForm.icon} onChange={e=>setFolderForm({...folderForm,icon:e.target.value.slice(0,4)})} placeholder="🔧" maxLength={4} style={{...S.input,width:80,textAlign:"center",fontSize:18}}/>
-              </div>
-            </div>
-            <div style={{display:"flex",justifyContent:"flex-end",gap:10,marginTop:18}}>
-              <button onClick={()=>setFolderForm(null)} style={{...S.btnSecondary,padding:"8px 14px",fontSize:13}}>Cancelar</button>
-              <button onClick={saveFolder} style={{...S.btnPrimary,padding:"8px 14px",fontSize:13,fontWeight:700}}>{folderForm.id ? "Salvar" : "Criar pasta"}</button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Modal: Item (criar/editar) */}
-      {itemForm && (
-        <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.45)",zIndex:1000,display:"flex",alignItems:"center",justifyContent:"center",padding:16,overflow:"auto"}} onClick={()=>setItemForm(null)}>
-          <div onClick={e=>e.stopPropagation()} style={{background:"var(--card-bg)",border:"1px solid var(--border)",borderRadius:14,maxWidth:560,width:"100%",maxHeight:"90vh",overflow:"auto",padding:24}}>
-            <h3 style={{margin:"0 0 14px",color:"var(--text)",fontSize:16,fontWeight:700}}>{itemForm.id ? "Editar recurso" : "Novo recurso"}</h3>
-            <div style={{display:"flex",flexDirection:"column",gap:12}}>
-              <div>
-                <label style={{...S.label,fontSize:11}}>Nome</label>
-                <input value={itemForm.name} onChange={e=>setItemForm({...itemForm,name:e.target.value})} placeholder="ex: Apólice de Seguros" style={S.input} autoFocus/>
-              </div>
-              <div>
-                <label style={{...S.label,fontSize:11}}>Tipo</label>
-                <div style={{display:"flex",gap:8}}>
-                  {[["link","🔗 Link externo"],["nota","📝 Nota"]].map(([v,l]) => (
-                    <button key={v} type="button" onClick={()=>setItemForm({...itemForm,type:v})}
-                      style={{padding:"8px 14px",borderRadius:8,border:`1px solid ${itemForm.type===v?ac:"var(--border)"}`,background:itemForm.type===v?ac+"15":"transparent",color:itemForm.type===v?ac:"var(--text2)",cursor:"pointer",fontFamily:"'DM Sans',sans-serif",fontSize:12,fontWeight:itemForm.type===v?700:500}}>
-                      {l}
-                    </button>
-                  ))}
-                </div>
-              </div>
-              {itemForm.type === "link" ? (
-                <div>
-                  <label style={{...S.label,fontSize:11}}>URL</label>
-                  <input value={itemForm.url} onChange={e=>setItemForm({...itemForm,url:e.target.value})} placeholder="https://..." style={{...S.input,fontFamily:"'DM Mono',monospace",fontSize:12}}/>
-                </div>
-              ) : (
-                <div>
-                  <label style={{...S.label,fontSize:11}}>Conteúdo (markdown simples)</label>
-                  <textarea value={itemForm.content} onChange={e=>setItemForm({...itemForm,content:e.target.value})} rows={6} placeholder="Texto livre..." style={{...S.input,fontFamily:"'DM Mono',monospace",fontSize:12,resize:"vertical",minHeight:120}}/>
-                </div>
-              )}
-              <div style={{display:"grid",gridTemplateColumns:mobileOnly?"1fr":"1fr 1fr",gap:10}}>
-                <div>
-                  <label style={{...S.label,fontSize:11}}>Pasta</label>
-                  <select value={itemForm.folderId} onChange={e=>setItemForm({...itemForm,folderId:e.target.value})} style={S.input}>
-                    {restFolders.map(f => <option key={f.id} value={f.id}>{f.icon} {f.name}</option>)}
-                  </select>
-                </div>
-                <div>
-                  <label style={{...S.label,fontSize:11}}>Responsável</label>
-                  <select value={itemForm.responsavelId} onChange={e=>setItemForm({...itemForm,responsavelId:e.target.value})} style={S.input}>
-                    <option value="">— Sem responsável —</option>
-                    {eligibleResponsaveis.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
-                  </select>
-                </div>
-              </div>
-              <div>
-                <label style={{...S.label,fontSize:11}}>Tags (separadas por vírgula)</label>
-                <input value={(itemForm.tags || []).join(", ")} onChange={e=>setItemForm({...itemForm,tags:e.target.value.split(",").map(s=>s.trim()).filter(Boolean)})} placeholder="ex: fechamento, fiscal" style={S.input}/>
-              </div>
-
-              {/* Visibilidade */}
-              <div style={{padding:"10px 12px",background:"var(--bg2)",border:"1px solid var(--border)",borderRadius:8}}>
-                <div style={{fontSize:11,fontWeight:700,color:"var(--text2)",textTransform:"uppercase",letterSpacing:0.4,marginBottom:6}}>🔒 Quem pode ver</div>
-                <div style={{display:"flex",flexDirection:"column",gap:4}}>
-                  {[
-                    {value:"default", label:"🌐 Padrão", desc:"Todos os gestores que abrem Recursos"},
-                    {value:"shared",  label:"👥 Compartilhada", desc:"Eu + Owner + DP + pessoas que escolher"},
-                    {value:"private", label:"🔒 Privada", desc:"Só eu + Owner + DP"},
-                  ].map(opt => (
-                    <label key={opt.value} style={{display:"flex",alignItems:"flex-start",gap:8,padding:"6px 10px",borderRadius:8,cursor:"pointer",border:`1px solid ${itemForm.visibility.mode===opt.value?ac:"var(--border)"}`,background:itemForm.visibility.mode===opt.value?ac+"11":"transparent"}}>
-                      <input type="radio" checked={itemForm.visibility.mode===opt.value} onChange={()=>setItemForm({...itemForm,visibility:{...itemForm.visibility,mode:opt.value}})} style={{marginTop:2,accentColor:ac}}/>
-                      <div style={{flex:1}}>
-                        <div style={{fontSize:12,fontWeight:600,color:"var(--text)"}}>{opt.label}</div>
-                        <div style={{fontSize:10,color:"var(--text3)",marginTop:1}}>{opt.desc}</div>
-                      </div>
-                    </label>
-                  ))}
-                </div>
-                {itemForm.visibility.mode === "shared" && shareableManagers.length > 0 && (
-                  <div style={{marginTop:8,padding:"8px 10px",background:"var(--card-bg)",border:"1px solid var(--border)",borderRadius:6}}>
-                    <div style={{fontSize:10,color:"var(--text3)",marginBottom:6}}>Selecione quem mais pode ver:</div>
-                    <div style={{display:"flex",flexDirection:"column",gap:3,maxHeight:140,overflow:"auto"}}>
-                      {shareableManagers.map(m => {
-                        const checked = (itemForm.visibility.sharedWith || []).includes(m.id);
-                        return (
-                          <label key={m.id} style={{display:"flex",alignItems:"center",gap:7,padding:"3px 4px",fontSize:12,cursor:"pointer"}}>
-                            <input type="checkbox" checked={checked} onChange={()=>{
-                              const cur = itemForm.visibility.sharedWith || [];
-                              setItemForm({...itemForm,visibility:{...itemForm.visibility,sharedWith: checked ? cur.filter(x=>x!==m.id) : [...cur, m.id]}});
-                            }} style={{accentColor:ac}}/>
-                            <span style={{color:"var(--text)"}}>{m.name}</span>
-                          </label>
-                        );
-                      })}
-                    </div>
-                  </div>
-                )}
-              </div>
-            </div>
-            <div style={{display:"flex",justifyContent:"flex-end",gap:10,marginTop:18}}>
-              <button onClick={()=>setItemForm(null)} style={{...S.btnSecondary,padding:"8px 14px",fontSize:13}}>Cancelar</button>
-              <button onClick={saveItem} style={{...S.btnPrimary,padding:"8px 14px",fontSize:13,fontWeight:700,background:ac,borderColor:ac}}>{itemForm.id ? "Salvar" : "Criar recurso"}</button>
-            </div>
-          </div>
         </div>
       )}
     </div>
@@ -33976,9 +33528,6 @@ export default function App() {
   const [scheduleStatus,      setScheduleStatus]      = useState({});
   const [schedulePrevista,    setSchedulePrevista]    = useState({});
   const [scheduleSwaps,       setScheduleSwaps]       = useState([]); // v8.11.0 — inversões informais
-  const [recursoFolders,      setRecursoFolders]      = useState([]); // v8.15.0 — pastas de Recursos
-  const [recursos,            setRecursos]            = useState([]); // v8.15.0 — itens de Recursos
-  const [recursosInitialized, setRecursosInitialized] = useState({}); // v8.15.0 — flag por restaurante
   const [employeeGoals,       setEmployeeGoals]       = useState({});
   const [delays,              setDelays]              = useState({});
   const [tipApprovals,        setTipApprovals]        = useState({});
@@ -34044,7 +33593,7 @@ export default function App() {
       setLoadProgress("Preparando o sistema...");
 
       const keys = keyNames;
-      const map = { owners:setOwners, managers:setManagers, restaurants:setRestaurants, employees:setEmployees, roles:setRoles, tips:setTips, splits:setSplits, schedules:setSchedules, communications:setCommunications, commAcks:setCommAcks, faq:setFaq, dpMessages:setDpMessages, workSchedules:setWorkSchedules, notifications:setNotifications, noTipDays:setNoTipDays, trash:setTrash, schedTemplates:setSchedTemplates, schedDrafts:setSchedDrafts, scheduleVersions:setScheduleVersions, tipVersions:setTipVersions, vtConfig:setVtConfig, vtMonthly:setVtMonthly, vtPayments:setVtPayments, incidents:setIncidents, feedbacks:setFeedbacks, devChecklists:setDevChecklists, scheduleAdjustments:setScheduleAdjustments, scheduleStatus:setScheduleStatus, schedulePrevista:setSchedulePrevista, scheduleSwaps:setScheduleSwaps, recursoFolders:setRecursoFolders, recursos:setRecursos, recursosInitialized:setRecursosInitialized, employeeGoals:setEmployeeGoals, delays:setDelays, tipApprovals:setTipApprovals, meetingPlans:setMeetingPlans, meetingIdeas:setMeetingIdeas, meetingAgendas:setMeetingAgendas, meetingActions:setMeetingActions, meetingOccurrences:setMeetingOccurrences, meetingPendencias:setMeetingPendencias, inbox:setInbox, inboxFolders:setInboxFolders, miseCategories:setMiseCategories, miseStocks:setMiseStocks, miseAssignments:setMiseAssignments, miseItems:setMiseItems, miseCycles:setMiseCycles, miseCounts:setMiseCounts, miseSuppliers:setMiseSuppliers, miseProductSuppliers:setMiseProductSuppliers, miseSupplierOrders:setMiseSupplierOrders, miseChecklistTemplates:setMiseChecklistTemplates, miseChecklistRuns:setMiseChecklistRuns, miseFtInsumos:setMiseFtInsumos, miseFtEquipamentos:setMiseFtEquipamentos, miseFtDishes:setMiseFtDishes, pessoas:setPessoas, pessoasMigratedAt:setPessoasMigratedAt, tuyaLinks:setTuyaLinks, tempSensors:setTempSensors, tempReadings:setTempReadings, tempAlerts:setTempAlerts, tempBackfillState:setTempBackfillState, permProfiles:setPermProfiles, freelaShifts:setFreelaShifts, freelaPagamentos:setFreelaPagamentos };
+      const map = { owners:setOwners, managers:setManagers, restaurants:setRestaurants, employees:setEmployees, roles:setRoles, tips:setTips, splits:setSplits, schedules:setSchedules, communications:setCommunications, commAcks:setCommAcks, faq:setFaq, dpMessages:setDpMessages, workSchedules:setWorkSchedules, notifications:setNotifications, noTipDays:setNoTipDays, trash:setTrash, schedTemplates:setSchedTemplates, schedDrafts:setSchedDrafts, scheduleVersions:setScheduleVersions, tipVersions:setTipVersions, vtConfig:setVtConfig, vtMonthly:setVtMonthly, vtPayments:setVtPayments, incidents:setIncidents, feedbacks:setFeedbacks, devChecklists:setDevChecklists, scheduleAdjustments:setScheduleAdjustments, scheduleStatus:setScheduleStatus, schedulePrevista:setSchedulePrevista, scheduleSwaps:setScheduleSwaps, employeeGoals:setEmployeeGoals, delays:setDelays, tipApprovals:setTipApprovals, meetingPlans:setMeetingPlans, meetingIdeas:setMeetingIdeas, meetingAgendas:setMeetingAgendas, meetingActions:setMeetingActions, meetingOccurrences:setMeetingOccurrences, meetingPendencias:setMeetingPendencias, inbox:setInbox, inboxFolders:setInboxFolders, miseCategories:setMiseCategories, miseStocks:setMiseStocks, miseAssignments:setMiseAssignments, miseItems:setMiseItems, miseCycles:setMiseCycles, miseCounts:setMiseCounts, miseSuppliers:setMiseSuppliers, miseProductSuppliers:setMiseProductSuppliers, miseSupplierOrders:setMiseSupplierOrders, miseChecklistTemplates:setMiseChecklistTemplates, miseChecklistRuns:setMiseChecklistRuns, miseFtInsumos:setMiseFtInsumos, miseFtEquipamentos:setMiseFtEquipamentos, miseFtDishes:setMiseFtDishes, pessoas:setPessoas, pessoasMigratedAt:setPessoasMigratedAt, tuyaLinks:setTuyaLinks, tempSensors:setTempSensors, tempReadings:setTempReadings, tempAlerts:setTempAlerts, tempBackfillState:setTempBackfillState, permProfiles:setPermProfiles, freelaShifts:setFreelaShifts, freelaPagamentos:setFreelaPagamentos };
       const loaded_data = {};
       let successCount = 0;
       keys.forEach((k, i) => {
@@ -34410,7 +33959,7 @@ export default function App() {
     setView("shell");
   }, [view, loaded, currentUser?.id, pessoas?.length]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const data = { owners, managers, restaurants, employees, roles, tips, splits, schedules, communications, commAcks, faq, dpMessages, workSchedules, notifications, noTipDays, trash, schedTemplates, schedDrafts, scheduleVersions, tipVersions, vtConfig, vtMonthly, vtPayments, incidents, feedbacks, devChecklists, scheduleAdjustments, scheduleStatus, schedulePrevista, scheduleSwaps, recursoFolders, recursos, recursosInitialized, employeeGoals, delays, tipApprovals, meetingPlans, meetingIdeas, meetingAgendas, meetingActions, meetingOccurrences, meetingPendencias, inbox, inboxFolders, miseCategories, miseStocks, miseAssignments, miseItems, miseCycles, miseCounts, miseSuppliers, miseProductSuppliers, miseSupplierOrders, miseChecklistTemplates, miseChecklistRuns, miseFtInsumos, miseFtEquipamentos, miseFtDishes, pessoas, pessoasMigratedAt, tuyaLinks, tempSensors, tempReadings, tempAlerts, tempBackfillState, permProfiles, freelaShifts, freelaPagamentos };
+  const data = { owners, managers, restaurants, employees, roles, tips, splits, schedules, communications, commAcks, faq, dpMessages, workSchedules, notifications, noTipDays, trash, schedTemplates, schedDrafts, scheduleVersions, tipVersions, vtConfig, vtMonthly, vtPayments, incidents, feedbacks, devChecklists, scheduleAdjustments, scheduleStatus, schedulePrevista, scheduleSwaps, employeeGoals, delays, tipApprovals, meetingPlans, meetingIdeas, meetingAgendas, meetingActions, meetingOccurrences, meetingPendencias, inbox, inboxFolders, miseCategories, miseStocks, miseAssignments, miseItems, miseCycles, miseCounts, miseSuppliers, miseProductSuppliers, miseSupplierOrders, miseChecklistTemplates, miseChecklistRuns, miseFtInsumos, miseFtEquipamentos, miseFtDishes, pessoas, pessoasMigratedAt, tuyaLinks, tempSensors, tempReadings, tempAlerts, tempBackfillState, permProfiles, freelaShifts, freelaPagamentos };
 
   async function handleUpdate(field, value) {
     if (field === "_toast") { setToast(value); return; }
@@ -34419,8 +33968,8 @@ export default function App() {
       setToast("⚠️ Você está offline — conecte à internet para salvar alterações");
       return;
     }
-    const setters = { owners:setOwners, managers:setManagers, restaurants:setRestaurants, employees:setEmployees, roles:setRoles, tips:setTips, splits:setSplits, schedules:setSchedules, communications:setCommunications, commAcks:setCommAcks, faq:setFaq, dpMessages:setDpMessages, workSchedules:setWorkSchedules, notifications:setNotifications, noTipDays:setNoTipDays, trash:setTrash, schedTemplates:setSchedTemplates, schedDrafts:setSchedDrafts, scheduleVersions:setScheduleVersions, tipVersions:setTipVersions, vtConfig:setVtConfig, vtMonthly:setVtMonthly, vtPayments:setVtPayments, incidents:setIncidents, feedbacks:setFeedbacks, devChecklists:setDevChecklists, scheduleAdjustments:setScheduleAdjustments, scheduleStatus:setScheduleStatus, schedulePrevista:setSchedulePrevista, scheduleSwaps:setScheduleSwaps, recursoFolders:setRecursoFolders, recursos:setRecursos, recursosInitialized:setRecursosInitialized, employeeGoals:setEmployeeGoals, delays:setDelays, tipApprovals:setTipApprovals, meetingPlans:setMeetingPlans, meetingIdeas:setMeetingIdeas, meetingAgendas:setMeetingAgendas, meetingActions:setMeetingActions, meetingOccurrences:setMeetingOccurrences, meetingPendencias:setMeetingPendencias, inbox:setInbox, inboxFolders:setInboxFolders, miseCategories:setMiseCategories, miseStocks:setMiseStocks, miseAssignments:setMiseAssignments, miseItems:setMiseItems, miseCycles:setMiseCycles, miseCounts:setMiseCounts, miseSuppliers:setMiseSuppliers, miseProductSuppliers:setMiseProductSuppliers, miseSupplierOrders:setMiseSupplierOrders, miseChecklistTemplates:setMiseChecklistTemplates, miseChecklistRuns:setMiseChecklistRuns, miseFtInsumos:setMiseFtInsumos, miseFtEquipamentos:setMiseFtEquipamentos, miseFtDishes:setMiseFtDishes, pessoas:setPessoas, pessoasMigratedAt:setPessoasMigratedAt, tuyaLinks:setTuyaLinks, tempSensors:setTempSensors, tempReadings:setTempReadings, tempAlerts:setTempAlerts, tempBackfillState:setTempBackfillState, permProfiles:setPermProfiles, freelaShifts:setFreelaShifts, freelaPagamentos:setFreelaPagamentos };
-    const keys    = { owners:K.owners, managers:K.managers, restaurants:K.restaurants, employees:K.employees, roles:K.roles, tips:K.tips, splits:K.splits, schedules:K.schedules, communications:K.communications, commAcks:K.commAcks, faq:K.faq, dpMessages:K.dpMessages, workSchedules:K.workSchedules, notifications:K.notifications, noTipDays:K.noTipDays, trash:K.trash, schedTemplates:K.schedTemplates, schedDrafts:K.schedDrafts, scheduleVersions:K.scheduleVersions, tipVersions:K.tipVersions, vtConfig:K.vtConfig, vtMonthly:K.vtMonthly, vtPayments:K.vtPayments, incidents:K.incidents, feedbacks:K.feedbacks, devChecklists:K.devChecklists, scheduleAdjustments:K.scheduleAdjustments, scheduleStatus:K.scheduleStatus, schedulePrevista:K.schedulePrevista, scheduleSwaps:K.scheduleSwaps, recursoFolders:K.recursoFolders, recursos:K.recursos, recursosInitialized:K.recursosInitialized, employeeGoals:K.employeeGoals, delays:K.delays, tipApprovals:K.tipApprovals, meetingPlans:K.meetingPlans, meetingIdeas:K.meetingIdeas, meetingAgendas:K.meetingAgendas, meetingActions:K.meetingActions, inbox:K.inbox, inboxFolders:K.inboxFolders, miseCategories:K.miseCategories, miseStocks:K.miseStocks, miseAssignments:K.miseAssignments, miseItems:K.miseItems, miseCycles:K.miseCycles, miseCounts:K.miseCounts, miseSuppliers:K.miseSuppliers, miseProductSuppliers:K.miseProductSuppliers, miseSupplierOrders:K.miseSupplierOrders, miseChecklistTemplates:K.miseChecklistTemplates, miseChecklistRuns:K.miseChecklistRuns, miseFtInsumos:K.miseFtInsumos, miseFtEquipamentos:K.miseFtEquipamentos, miseFtDishes:K.miseFtDishes, pessoas:K.pessoas, pessoasMigratedAt:K.pessoasMigratedAt, tuyaLinks:K.tuyaLinks, tempSensors:K.tempSensors, tempReadings:K.tempReadings, tempAlerts:K.tempAlerts, tempBackfillState:K.tempBackfillState, permProfiles:K.permProfiles, freelaShifts:K.freelaShifts, freelaPagamentos:K.freelaPagamentos };
+    const setters = { owners:setOwners, managers:setManagers, restaurants:setRestaurants, employees:setEmployees, roles:setRoles, tips:setTips, splits:setSplits, schedules:setSchedules, communications:setCommunications, commAcks:setCommAcks, faq:setFaq, dpMessages:setDpMessages, workSchedules:setWorkSchedules, notifications:setNotifications, noTipDays:setNoTipDays, trash:setTrash, schedTemplates:setSchedTemplates, schedDrafts:setSchedDrafts, scheduleVersions:setScheduleVersions, tipVersions:setTipVersions, vtConfig:setVtConfig, vtMonthly:setVtMonthly, vtPayments:setVtPayments, incidents:setIncidents, feedbacks:setFeedbacks, devChecklists:setDevChecklists, scheduleAdjustments:setScheduleAdjustments, scheduleStatus:setScheduleStatus, schedulePrevista:setSchedulePrevista, scheduleSwaps:setScheduleSwaps, employeeGoals:setEmployeeGoals, delays:setDelays, tipApprovals:setTipApprovals, meetingPlans:setMeetingPlans, meetingIdeas:setMeetingIdeas, meetingAgendas:setMeetingAgendas, meetingActions:setMeetingActions, meetingOccurrences:setMeetingOccurrences, meetingPendencias:setMeetingPendencias, inbox:setInbox, inboxFolders:setInboxFolders, miseCategories:setMiseCategories, miseStocks:setMiseStocks, miseAssignments:setMiseAssignments, miseItems:setMiseItems, miseCycles:setMiseCycles, miseCounts:setMiseCounts, miseSuppliers:setMiseSuppliers, miseProductSuppliers:setMiseProductSuppliers, miseSupplierOrders:setMiseSupplierOrders, miseChecklistTemplates:setMiseChecklistTemplates, miseChecklistRuns:setMiseChecklistRuns, miseFtInsumos:setMiseFtInsumos, miseFtEquipamentos:setMiseFtEquipamentos, miseFtDishes:setMiseFtDishes, pessoas:setPessoas, pessoasMigratedAt:setPessoasMigratedAt, tuyaLinks:setTuyaLinks, tempSensors:setTempSensors, tempReadings:setTempReadings, tempAlerts:setTempAlerts, tempBackfillState:setTempBackfillState, permProfiles:setPermProfiles, freelaShifts:setFreelaShifts, freelaPagamentos:setFreelaPagamentos };
+    const keys    = { owners:K.owners, managers:K.managers, restaurants:K.restaurants, employees:K.employees, roles:K.roles, tips:K.tips, splits:K.splits, schedules:K.schedules, communications:K.communications, commAcks:K.commAcks, faq:K.faq, dpMessages:K.dpMessages, workSchedules:K.workSchedules, notifications:K.notifications, noTipDays:K.noTipDays, trash:K.trash, schedTemplates:K.schedTemplates, schedDrafts:K.schedDrafts, scheduleVersions:K.scheduleVersions, tipVersions:K.tipVersions, vtConfig:K.vtConfig, vtMonthly:K.vtMonthly, vtPayments:K.vtPayments, incidents:K.incidents, feedbacks:K.feedbacks, devChecklists:K.devChecklists, scheduleAdjustments:K.scheduleAdjustments, scheduleStatus:K.scheduleStatus, schedulePrevista:K.schedulePrevista, scheduleSwaps:K.scheduleSwaps, employeeGoals:K.employeeGoals, delays:K.delays, tipApprovals:K.tipApprovals, meetingPlans:K.meetingPlans, meetingIdeas:K.meetingIdeas, meetingAgendas:K.meetingAgendas, meetingActions:K.meetingActions, inbox:K.inbox, inboxFolders:K.inboxFolders, miseCategories:K.miseCategories, miseStocks:K.miseStocks, miseAssignments:K.miseAssignments, miseItems:K.miseItems, miseCycles:K.miseCycles, miseCounts:K.miseCounts, miseSuppliers:K.miseSuppliers, miseProductSuppliers:K.miseProductSuppliers, miseSupplierOrders:K.miseSupplierOrders, miseChecklistTemplates:K.miseChecklistTemplates, miseChecklistRuns:K.miseChecklistRuns, miseFtInsumos:K.miseFtInsumos, miseFtEquipamentos:K.miseFtEquipamentos, miseFtDishes:K.miseFtDishes, pessoas:K.pessoas, pessoasMigratedAt:K.pessoasMigratedAt, tuyaLinks:K.tuyaLinks, tempSensors:K.tempSensors, tempReadings:K.tempReadings, tempAlerts:K.tempAlerts, tempBackfillState:K.tempBackfillState, permProfiles:K.permProfiles, freelaShifts:K.freelaShifts, freelaPagamentos:K.freelaPagamentos };
     // Support functional updates to prevent stale-state race conditions:
     // When value is a function, it receives the latest state (like setState(prev => ...))
     // IMPORTANTE: o callback do setState pode rodar de forma assíncrona em React 18,
