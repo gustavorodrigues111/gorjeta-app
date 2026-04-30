@@ -3,7 +3,7 @@ import React, { useState, useEffect, useMemo, useRef, Component } from "react";
 import { db } from "./firebase";
 import { doc, getDoc, setDoc } from "firebase/firestore";
 
-const APP_VERSION = "8.10.6";
+const APP_VERSION = "8.10.7";
 
 const DEFAULT_ADMISSION = () => `${new Date().getFullYear()}-01-01`;
 const round2 = (v) => Math.round(v * 100) / 100;
@@ -6675,7 +6675,18 @@ function ValeTransporteTab({ restaurantId, employees, roles, workSchedules, sche
   const [versionWarning, setVersionWarning] = useState(null);
   const [vtSavedAt, setVtSavedAt] = useState(null); // v8.1 — timestamp do último auto-save
 
-  const restEmps = (employees ?? []).filter(e => e.restaurantId === restaurantId && !e.isFreela && !(e.inactive && e.inactiveFrom && e.inactiveFrom <= today()));
+  // v8.10.7: filtro alinhado com a Escala — demitido em mês anterior ao visualizado some,
+  // demitido NESTE mês continua aparecendo (pra fechar VT do mês de saída). Inativo sem
+  // demissão sai se inactiveFrom <= today.
+  const restEmps = (employees ?? []).filter(e => {
+    if (e.restaurantId !== restaurantId) return false;
+    if (e.isFreela) return false;
+    const demMonth = e.demitidoEm ? e.demitidoEm.slice(0, 7) : null;
+    if (demMonth && demMonth < mk) return false; // demitido antes deste mês — fora sempre
+    const isInactiveNow = !!(e.inactive && e.inactiveFrom && e.inactiveFrom <= today());
+    if (isInactiveNow && demMonth !== mk) return false; // inativo e não demitido neste mês — fora
+    return true;
+  });
   const restRoles = (roles ?? []).filter(r => r.restaurantId === restaurantId);
 
   // ── BR currency input helpers ──
