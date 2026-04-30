@@ -3,7 +3,7 @@ import React, { useState, useEffect, useMemo, useRef, Component } from "react";
 import { db } from "./firebase";
 import { doc, getDoc, setDoc } from "firebase/firestore";
 
-const APP_VERSION = "8.6.1";
+const APP_VERSION = "8.7.0";
 
 const DEFAULT_ADMISSION = () => `${new Date().getFullYear()}-01-01`;
 const round2 = (v) => Math.round(v * 100) / 100;
@@ -22056,30 +22056,34 @@ function FreelaFechamentoTab({ restaurantId, restPessoas, shifts, lotes, shiftPr
         </div>
       )}
 
-      {/* Lotes pendentes (já criados, aguardando pagamento) */}
+      {/* v8.7 — Lotes pendentes em grid de cards roxos */}
       {pendentesLotes.length > 0 && (
         <div style={{marginBottom:18}}>
-          <div style={{fontSize:11,color:"var(--text3)",fontWeight:700,textTransform:"uppercase",letterSpacing:0.4,marginBottom:8}}>Lotes pendentes de pagamento</div>
-          <div style={{display:"flex",flexDirection:"column",gap:8}}>
+          <div style={{fontSize:11,color:"var(--text3)",fontWeight:700,textTransform:"uppercase",letterSpacing:0.4,marginBottom:8}}>📑 Lotes pendentes de pagamento ({pendentesLotes.length})</div>
+          <div style={{ display: "grid", gridTemplateColumns: mobileOnly ? "1fr" : "repeat(auto-fill, minmax(320px, 1fr))", gap: 10 }}>
             {pendentesLotes.map(l => (
-              <div key={l.id} style={{background:"var(--card-bg)",border:`1px solid ${ac}55`,borderRadius:10,padding:12}}>
-                <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:10,flexWrap:"wrap"}}>
-                  <div style={{flex:1,minWidth:200}}>
+              <div key={l.id} style={{ background: `${ac}10`, border: `2px solid ${ac}66`, borderRadius: 12, padding: 12 }}>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:10,marginBottom:8}}>
+                  <div style={{flex:1,minWidth:0}}>
                     <div style={{fontWeight:700,fontSize:14,color:"var(--text)"}}>{l.numero}</div>
                     <div style={{fontSize:11,color:"var(--text3)",marginTop:3}}>
-                      {l.qtdShifts} shift(s) · {l.qtdPessoas} pessoa(s) · criado por {l.criadoPor} em {fmtDate(l.criadoEm.slice(0,10))}
+                      {l.qtdShifts} shift(s) · {l.qtdPessoas} pessoa(s)
                     </div>
-                    {l.observacao && <div style={{fontSize:11,color:"var(--text2)",marginTop:3,fontStyle:"italic"}}>“{l.observacao}”</div>}
+                    <div style={{fontSize:10,color:"var(--text3)",marginTop:2}}>
+                      criado por {l.criadoPor} em {fmtDate(l.criadoEm.slice(0,10))}
+                    </div>
+                    {l.observacao && <div style={{fontSize:11,color:"var(--text2)",marginTop:6,fontStyle:"italic",padding:"4px 8px",background:"rgba(255,255,255,0.5)",borderRadius:6}}>“{l.observacao}”</div>}
                   </div>
-                  <div style={{textAlign:"right"}}>
-                    <div style={{fontFamily:"'DM Mono',monospace",fontWeight:800,fontSize:18,color:ac}}>R$ {l.totalGeral.toFixed(2)}</div>
-                  </div>
+                  <span style={{ padding: "3px 8px", background: `${ac}33`, color: ac, borderRadius: 6, fontSize: 10, fontWeight: 700, whiteSpace: "nowrap" }}>📑 Pendente</span>
                 </div>
-                <div style={{display:"flex",gap:6,marginTop:10,flexWrap:"wrap"}}>
+                <div style={{ paddingTop: 8, borderTop: `1px solid ${ac}33`, marginBottom: 10, textAlign: "right" }}>
+                  <div style={{fontFamily:"'DM Mono',monospace",fontWeight:800,fontSize:20,color:ac}}>R$ {l.totalGeral.toFixed(2)}</div>
+                </div>
+                <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
                   <button onClick={()=>gerarPDFLote(l.id)} style={{background:"transparent",color:ac,border:`1px solid ${ac}`,borderRadius:6,padding:"5px 12px",fontSize:11,fontWeight:600,cursor:"pointer"}}>📄 PDF</button>
                   <button onClick={()=>{setPayingLoteId(l.id); setPayData({data:today(),forma:"PIX"});}}
                     style={{background:"#10b981",color:"#fff",border:"none",borderRadius:6,padding:"5px 12px",fontSize:11,fontWeight:700,cursor:"pointer"}}>💸 Marcar pago</button>
-                  <button onClick={()=>cancelarLote(l.id)} style={{background:"transparent",color:"var(--red)",border:"1px solid var(--red)",borderRadius:6,padding:"5px 12px",fontSize:11,fontWeight:600,cursor:"pointer"}}>✕ Cancelar lote</button>
+                  <button onClick={()=>cancelarLote(l.id)} style={{background:"transparent",color:"var(--red)",border:"1px solid var(--red)",borderRadius:6,padding:"5px 12px",fontSize:11,fontWeight:600,cursor:"pointer"}}>✕ Cancelar</button>
                 </div>
 
                 {/* Modal inline pra marcar como pago */}
@@ -22118,51 +22122,62 @@ function FreelaFechamentoTab({ restaurantId, restPessoas, shifts, lotes, shiftPr
           </button>
         )}
       </div>
-      {prontos.length === 0 ? (
+      {/* v8.7 — Prontos pra fechar: grid de cards verdes individuais com checkbox */}
+      {prontos.length === 0 && incompletos.length === 0 && aguardandoLider.length === 0 && pendentesLotes.length === 0 ? (
         <div style={{padding:"30px 20px",textAlign:"center",color:"var(--text3)",fontSize:13,background:"var(--card-bg)",border:"1px dashed var(--border)",borderRadius:10}}>
           <div style={{fontSize:32,marginBottom:8}}>📭</div>
-          Nenhum shift pronto pra fechar. Vá em <strong>Lançamento</strong> pra preencher valores e cadastrar PIX das pessoas.
+          Nenhum shift no momento. Os shifts abertos pelos Líderes em <strong>Lançamento</strong> aparecerão aqui pra precificar e fechar.
         </div>
-      ) : (
-        <div style={{display:"flex",flexDirection:"column",gap:10}}>
-          {Object.entries(prontosByPessoa).map(([pessoaId, sList]) => {
-            const p = restPessoas.find(x => x.id === pessoaId) || {};
-            const subTotal = sList.reduce((s,x)=>s+(x.totalCalc||0),0);
-            const allSel = sList.every(s => selected[s.id]);
-            return (
-              <div key={pessoaId} style={{background:"var(--card-bg)",border:"1px solid var(--border)",borderRadius:10,overflow:"hidden"}}>
-                <div style={{display:"flex",alignItems:"center",gap:10,padding:"8px 12px",background:"var(--bg2)",borderBottom:"1px solid var(--border)"}}>
-                  <input type="checkbox" checked={allSel} onChange={()=>{
-                    const next = {...selected};
-                    sList.forEach(s => { next[s.id] = !allSel; });
-                    setSelected(next);
-                  }} style={{cursor:"pointer"}}/>
-                  <div style={{flex:1,fontWeight:700,fontSize:13,color:"var(--text)"}}>{p.name || "(removido)"}</div>
-                  <div style={{fontSize:11,color:"var(--text3)"}}>{sList.length} shift(s)</div>
-                  <div style={{fontFamily:"'DM Mono',monospace",fontWeight:700,color:ac,fontSize:13,minWidth:90,textAlign:"right"}}>R$ {subTotal.toFixed(2)}</div>
+      ) : prontos.length > 0 && (
+        <div style={{ marginBottom: 18 }}>
+          <div style={{ fontSize: 11, color: "var(--text3)", fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.4, marginBottom: 8 }}>
+            ✅ Prontos pra entrar em lote ({prontos.length})
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: mobileOnly ? "1fr" : "repeat(auto-fill, minmax(300px, 1fr))", gap: 10 }}>
+            {prontos.sort((a,b) => (a.date||"").localeCompare(b.date||"")).map(s => {
+              const p = restPessoas.find(x => x.id === s.pessoaId) || {};
+              const isSel = !!selected[s.id];
+              return (
+                <div key={s.id}
+                  onClick={()=>setSelected({...selected,[s.id]:!isSel})}
+                  style={{
+                    background: isSel ? "#10b98122" : "#10b98112",
+                    border: `2px solid ${isSel ? "#16a34a" : "#10b98155"}`,
+                    borderRadius: 12, padding: 12, cursor: "pointer",
+                    transition: "all .12s",
+                  }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 8, gap: 8 }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8, flex: 1, minWidth: 0 }}>
+                      <input type="checkbox" checked={isSel} onChange={()=>setSelected({...selected,[s.id]:!isSel})} onClick={e=>e.stopPropagation()} style={{ cursor: "pointer", width: 16, height: 16, accentColor: "#16a34a" }}/>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontWeight: 700, color: "var(--text)", fontSize: 14 }}>{p.name || "(removido)"}</div>
+                        <div style={{ fontSize: 11, color: "var(--text3)", marginTop: 2 }}>📅 {fmtDate(s.date)}{s.area ? ` · ${s.area}` : ""}</div>
+                      </div>
+                    </div>
+                    <span style={{ padding: "3px 8px", background: "#16a34a22", color: "#15803d", borderRadius: 6, fontSize: 10, fontWeight: 700, whiteSpace: "nowrap" }}>✅ Pronto</span>
+                  </div>
+                  <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 8 }}>
+                    <div style={{ background: "rgba(255,255,255,0.6)", padding: "4px 8px", borderRadius: 6, fontSize: 11 }}>
+                      <span style={{ color: "var(--text3)", fontSize: 9, marginRight: 3 }}>⏱️</span>
+                      <strong style={{ fontFamily: "'DM Mono',monospace", color: "var(--text)" }}>{s.entrada}→{s.saida}</strong>
+                      {s.intervalo > 0 && <span style={{ color: "var(--text3)", fontSize: 10 }}> ({s.intervalo}min)</span>}
+                    </div>
+                    <div style={{ background: "rgba(255,255,255,0.6)", padding: "4px 8px", borderRadius: 6, fontSize: 11 }}>
+                      <strong style={{ fontFamily: "'DM Mono',monospace", color: "var(--text)" }}>{fmtHoras(s.horas)}</strong>
+                    </div>
+                    <div style={{ background: "rgba(255,255,255,0.6)", padding: "4px 8px", borderRadius: 6, fontSize: 11 }}>
+                      <span style={{ color: "var(--text3)", fontSize: 10, marginRight: 3 }}>{s.valorTipo === "hora" ? "R$/h" : "Diária"}:</span>
+                      <strong style={{ fontFamily: "'DM Mono',monospace", color: "var(--text)" }}>R$ {(s.valorUnit||0).toFixed(2)}</strong>
+                    </div>
+                  </div>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", paddingTop: 8, borderTop: "1px solid #16a34a33" }}>
+                    <span style={{ fontSize: 11, color: "var(--text3)" }}>Total</span>
+                    <span style={{ fontFamily: "'DM Mono',monospace", fontWeight: 800, fontSize: 16, color: "#15803d" }}>R$ {(s.totalCalc||0).toFixed(2)}</span>
+                  </div>
                 </div>
-                <table style={{width:"100%",borderCollapse:"collapse",fontSize:11}}>
-                  <tbody>
-                    {sList.sort((a,b)=>(a.date||"").localeCompare(b.date||"")).map(s => (
-                      <tr key={s.id} style={{borderTop:"1px solid var(--border)"}}>
-                        <td style={{padding:"5px 12px 5px 36px",width:30}}>
-                          <input type="checkbox" checked={!!selected[s.id]} onChange={()=>setSelected({...selected,[s.id]:!selected[s.id]})} style={{cursor:"pointer"}}/>
-                        </td>
-                        <td style={{padding:"5px 8px",color:"var(--text2)",whiteSpace:"nowrap"}}>{fmtDate(s.date)}</td>
-                        <td style={{padding:"5px 8px",color:"var(--text3)"}}>{s.area || "—"}</td>
-                        <td style={{padding:"5px 8px",fontFamily:"'DM Mono',monospace",color:"var(--text2)"}}>{s.entrada || "—"}–{s.saida || "—"}</td>
-                        <td style={{padding:"5px 8px",fontFamily:"'DM Mono',monospace",color:"var(--text)",fontWeight:600}}>{fmtHoras(s.horas)}</td>
-                        <td style={{padding:"5px 8px",fontFamily:"'DM Mono',monospace",color:"var(--text3)",fontSize:10}}>
-                          {s.valorTipo === "hora" ? `R$${(s.valorUnit||0).toFixed(2)}/h` : `R$${(s.valorUnit||0).toFixed(2)} diária`}
-                        </td>
-                        <td style={{padding:"5px 12px",textAlign:"right",fontFamily:"'DM Mono',monospace",fontWeight:700,color:"var(--text)"}}>R$ {(s.totalCalc||0).toFixed(2)}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            );
-          })}
+              );
+            })}
+          </div>
         </div>
       )}
 
