@@ -3,7 +3,7 @@ import React, { useState, useEffect, useMemo, useRef, Component } from "react";
 import { db } from "./firebase";
 import { doc, getDoc, setDoc } from "firebase/firestore";
 
-const APP_VERSION = "8.3.0";
+const APP_VERSION = "8.4.0";
 
 const DEFAULT_ADMISSION = () => `${new Date().getFullYear()}-01-01`;
 const round2 = (v) => Math.round(v * 100) / 100;
@@ -6695,6 +6695,8 @@ function ValeTransporteTab({ restaurantId, employees, roles, workSchedules, sche
   const _smartDefVT = smartDefaultMonth();
   const [year, setYear] = useState(_smartDefVT.year);
   const [month, setMonth] = useState(_smartDefVT.month);
+  // v8.4 — gate de seleção de mês
+  const [vtMonthConfirmed, setVtMonthConfirmed] = useState(false);
   const mk = monthKey(year, month);
   const ac = "var(--accent)";
   const [showPayDateModal, setShowPayDateModal] = useState(false);
@@ -7091,6 +7093,19 @@ function ValeTransporteTab({ restaurantId, employees, roles, workSchedules, sche
     );
   };
 
+  // v8.4 — gate de mês: força confirmar antes de ver os dados
+  if (!vtMonthConfirmed) {
+    return (
+      <MonthPickerGate
+        contextLabel="Vale Transporte"
+        year={year} month={month}
+        scheduleStatus={scheduleStatus}
+        restaurantId={restaurantId}
+        onPick={(y, m) => { setYear(y); setMonth(m); setVtMonthConfirmed(true); onUpdate("_toast", `🚌 VT: trabalhando em ${monthLabel(y, m)}`); }}
+      />
+    );
+  }
+
   return (
     <div>
       {/* Header */}
@@ -7098,6 +7113,7 @@ function ValeTransporteTab({ restaurantId, employees, roles, workSchedules, sche
         <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
           <h3 style={{ color: "var(--text)", margin: 0, fontSize: mobileOnly ? 16 : 20 }}>🚌 Vale Transporte</h3>
           <SaveIndicator mode="auto" pending={dirty} savedAt={vtSavedAt} compact />
+          <button onClick={()=>setVtMonthConfirmed(false)} style={{ ...S.btnSecondary, fontSize: 11, padding: "3px 10px" }} title="Voltar pra seleção de mês">↺ Trocar mês</button>
         </div>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
           <button onClick={exportCSV} style={{ ...S.btnSecondary, fontSize: 12, padding: "6px 14px" }}>📊 CSV</button>
@@ -10057,12 +10073,80 @@ function SaveIndicator({ mode = "auto", pending = false, savedAt = null, compact
   );
 }
 
+// v8.4 — Modal bloqueante de seleção de mês.
+// Aparece na 1ª entrada de telas com mês contextual (Escala, VT).
+// Força usuário a escolher antes de ver/editar dados — elimina edição em mês errado.
+//   props: contextLabel ("Escala" | "Vale Transporte"), year, month, onPick(year,month), scheduleStatus
+function MonthPickerGate({ contextLabel, year, month, onPick, scheduleStatus, restaurantId }) {
+  // Smart default
+  const sd = smartDefaultMonth();
+  // Gera 5 opções: 2 anteriores, atual, 2 próximos
+  const today = new Date();
+  const options = [];
+  for (let delta = -2; delta <= 2; delta++) {
+    const d = new Date(today.getFullYear(), today.getMonth() + delta, 1);
+    const y = d.getFullYear(), m = d.getMonth();
+    let context = "";
+    let bg = "var(--bg2)", color = "var(--text)", border = "var(--border)";
+    if (delta < 0) { context = "Mês passado"; bg = "#64748b15"; color = "#64748b"; border = "#64748b44"; }
+    else if (delta === 0) { context = "Mês atual"; bg = "#d4a01715"; color = "#d4a017"; border = "#d4a01744"; }
+    else { context = "Mês futuro"; bg = "#16a34a15"; color = "#16a34a"; border = "#16a34a44"; }
+    const isSmart = (y === sd.year && m === sd.month);
+    const mk = monthKey(y, m);
+    const isClosed = !!scheduleStatus?.[restaurantId]?.[mk] && scheduleStatus[restaurantId][mk].status === "closed";
+    if (isClosed) { context = "Mês fechado 🔒"; bg = "#dc262615"; color = "#dc2626"; border = "#dc262644"; }
+    options.push({ y, m, label: monthLabel(y, m), context, bg, color, border, isSmart, mk });
+  }
+  return (
+    <div style={{
+      position: "fixed", inset: 0, background: "rgba(0,0,0,0.55)", zIndex: 10000,
+      display: "flex", alignItems: "center", justifyContent: "center", padding: 16,
+      animation: "fadeIn .15s ease-out",
+    }}>
+      <div style={{
+        background: "var(--bg)", borderRadius: 16, padding: 28, maxWidth: 560, width: "100%",
+        border: "1px solid var(--border)", boxShadow: "0 16px 48px rgba(0,0,0,0.25)",
+      }}>
+        <div style={{ textAlign: "center", marginBottom: 18 }}>
+          <div style={{ fontSize: 36, marginBottom: 8 }}>📅</div>
+          <h2 style={{ color: "var(--text)", margin: "0 0 6px", fontSize: 20, fontWeight: 800 }}>
+            Qual mês você vai trabalhar em <span style={{ color: "var(--ac)" }}>{contextLabel}</span>?
+          </h2>
+          <p style={{ color: "var(--text3)", fontSize: 13, lineHeight: 1.5, margin: 0 }}>
+            Confirme o mês antes de visualizar ou editar — evita alterações em mês errado.
+          </p>
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: 10 }}>
+          {options.map(o => (
+            <button key={`${o.y}-${o.m}`} onClick={() => onPick(o.y, o.m)}
+              style={{
+                background: o.bg, border: `1px solid ${o.border}`, borderRadius: 12,
+                padding: "14px 12px", cursor: "pointer", fontFamily: "'DM Sans',sans-serif",
+                position: "relative", transition: "transform .12s, box-shadow .12s",
+              }}
+              onMouseEnter={e => { e.currentTarget.style.transform = "translateY(-2px)"; e.currentTarget.style.boxShadow = `0 4px 12px ${o.color}33`; }}
+              onMouseLeave={e => { e.currentTarget.style.transform = "translateY(0)"; e.currentTarget.style.boxShadow = "none"; }}>
+              {o.isSmart && (
+                <span style={{ position: "absolute", top: 6, right: 6, fontSize: 9, padding: "2px 8px", borderRadius: 999, background: "var(--ac)", color: "#fff", fontWeight: 800, letterSpacing: 0.3 }}>SUGERIDO</span>
+              )}
+              <div style={{ fontSize: 16, fontWeight: 800, color: "var(--text)", marginBottom: 4 }}>{o.label}</div>
+              <div style={{ fontSize: 11, color: o.color, fontWeight: 600 }}>{o.context}</div>
+            </button>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, splits, schedules, onUpdate, perms, isOwner, data, currentUser, privacyMask, mobileOnly, onEnterOperational, hideTabNav, forceTab, realIsOwner, onStartImpersonate, restrictToOperational }) {
   const now = new Date();
   // v8.0 — default inteligente: dia ≥ 20 → próximo mês (planejamento)
   const _smartDef = smartDefaultMonth();
   const [year, setYear] = useState(_smartDef.year);
   const [month, setMonth] = useState(_smartDef.month);
+  // v8.4 — gate de seleção de mês: força usuário a confirmar antes de editar
+  const [scheduleMonthConfirmed, setScheduleMonthConfirmed] = useState(false);
   const mk = monthKey(year, month);
   const rid = restaurant.id;
 
@@ -12312,13 +12396,23 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
         )}
 
         {/* ESCALA */}
-        {tab === "schedule" && (
+        {tab === "schedule" && !scheduleMonthConfirmed && (
+          <MonthPickerGate
+            contextLabel="Escala"
+            year={year} month={month}
+            scheduleStatus={data?.scheduleStatus}
+            restaurantId={rid}
+            onPick={(y, m) => { setYear(y); setMonth(m); setScheduleMonthConfirmed(true); onUpdate("_toast", `📅 Trabalhando em ${monthLabel(y, m)}`); }}
+          />
+        )}
+        {tab === "schedule" && scheduleMonthConfirmed && (
           <div>
             {/* Header */}
             <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:12,marginBottom:schedDirty?8:16}}>
               <div style={{display:"flex",alignItems:"center",gap:10,flexWrap:"wrap"}}>
                 <h3 style={{color:"var(--text)",margin:0,fontSize:mobileOnly?16:20}}>📅 Escala — {monthLabel(year,month)}</h3>
                 <SaveIndicator mode="manual" pending={schedDirty} compact />
+                <button onClick={()=>setScheduleMonthConfirmed(false)} style={{...S.btnSecondary,fontSize:11,padding:"3px 10px"}} title="Voltar pra seleção de mês">↺ Trocar mês</button>
                 {monthClosed && <span style={{fontSize:11,padding:"3px 10px",borderRadius:6,background:"var(--red)22",color:"var(--red)",fontWeight:700}}>Mes fechado</span>}
                 {(() => { const vtPaidInfo = data?.vtPayments?.[rid]?.[mk]; return vtPaidInfo ? <span style={{fontSize:11,padding:"3px 10px",borderRadius:6,background:"#10b98122",color:"var(--green)",fontWeight:700}}>VT pago em {new Date(vtPaidInfo.paidAt).toLocaleDateString("pt-BR")}</span> : null; })()}
                 <div style={{display:"flex",borderRadius:6,overflow:"hidden",border:"1px solid var(--border)"}}>
