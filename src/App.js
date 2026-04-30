@@ -3,7 +3,7 @@ import React, { useState, useEffect, useMemo, useRef, Component } from "react";
 import { db } from "./firebase";
 import { doc, getDoc, setDoc, onSnapshot } from "firebase/firestore";
 
-const APP_VERSION = "8.11.1";
+const APP_VERSION = "8.11.2";
 
 // v8.11.1: comparação de versão semver-like (8.11.1 > 8.10.7 > 8.9.4)
 function compareVersions(a, b) {
@@ -7881,6 +7881,9 @@ function MeetingPlannerSection({ restaurantId, employees, roles, areas, meetingP
   const [pautaNewItem, setPautaNewItem] = useState("");
   const [pautaPickIdeas, setPautaPickIdeas] = useState([]);
   const [activePautaId, setActivePautaId] = useState(null);
+  // v8.11.2: edição de plan/pauta — null quando criando, id quando editando
+  const [editingPlanId, setEditingPlanId] = useState(null);
+  const [editingPautaId, setEditingPautaId] = useState(null);
   // Ações pós-reunião
   // Relatório
   const [relFrom, setRelFrom] = useState("");
@@ -7949,41 +7952,87 @@ function MeetingPlannerSection({ restaurantId, employees, roles, areas, meetingP
     if (!planDate) { window.alert("Informe a data prevista."); return; }
     if (planType === "avaliação" && selectedEmps.length !== 1) { window.alert("Selecione exatamente um empregado para avaliação individual."); return; }
     if (planType !== "avaliação" && selectedEmps.length === 0) { window.alert("Selecione ao menos um participante."); return; }
+    // v8.11.2: edição preserva id/createdBy/createdAt/completedFeedbackIds; criação gera novos
+    const isEdit = !!editingPlanId;
+    const existing = isEdit ? (allMeetingPlans ?? []).find(p => p.id === editingPlanId) : null;
     const plan = {
-      id: `${Date.now()}-${Math.random().toString(36).slice(2,6)}`,
+      id: existing?.id || `${Date.now()}-${Math.random().toString(36).slice(2,6)}`,
       restaurantId,
       type: planType,
       employeeIds: [...selectedEmps],
       plannedDate: planDate,
       note: planNote.trim(),
-      createdBy: isOwner ? "Gestor AppTip" : (currentUser?.name ?? "Gestor Adm."),
-      createdAt: new Date().toISOString(),
-      completedFeedbackIds: {},
-      // Avaliação: structured checklist
+      createdBy: existing?.createdBy || (isOwner ? "Gestor AppTip" : (currentUser?.name ?? "Gestor Adm.")),
+      createdAt: existing?.createdAt || new Date().toISOString(),
+      completedFeedbackIds: existing?.completedFeedbackIds || {},
+      ...(existing?.status ? { status: existing.status } : {}),
+      ...(existing?.meetingNotes ? { meetingNotes: existing.meetingNotes } : {}),
+      // Avaliação: preserva done de itens já marcados se forem os mesmos textos
       ...(planType === "avaliação" ? {
-        pontosFortes: avalPontosFortes.map(t => ({ text: t, done: false })),
-        pontosMelhorar: avalPontosMelhorar.map(t => ({ text: t, done: false })),
-        notasInternas: avalNotas.map(t => ({ text: t, done: false })),
+        pontosFortes: avalPontosFortes.map(t => {
+          const prev = (existing?.pontosFortes || []).find(p => p.text === t);
+          return prev || { text: t, done: false };
+        }),
+        pontosMelhorar: avalPontosMelhorar.map(t => {
+          const prev = (existing?.pontosMelhorar || []).find(p => p.text === t);
+          return prev || { text: t, done: false };
+        }),
+        notasInternas: avalNotas.map(t => {
+          const prev = (existing?.notasInternas || []).find(p => p.text === t);
+          return prev || { text: t, done: false };
+        }),
       } : {}),
-      // Alinhamento: topics checklist
+      // Alinhamento: preserva done de topics já marcados
       ...(planType === "alinhamento" ? {
-        topics: alinhTopics.map(t => ({ text: t, done: false })),
+        topics: alinhTopics.map(t => {
+          const prev = (existing?.topics || []).find(p => p.text === t);
+          return prev || { text: t, done: false };
+        }),
       } : {}),
+      ...(isEdit ? { editedBy: currentUser?.name ?? "Gestor", editedAt: new Date().toISOString() } : {}),
     };
-    onUpdate("meetingPlans", [...(allMeetingPlans ?? []), plan]);
-    // Etapa 6a: Notificar participantes sobre reunião agendada
-    if (plan.employeeIds?.length > 0 && plan.plannedDate) {
-      const createdByInfo = { id: currentUser?.id, nome: plan.createdBy, role: isOwner ? "owner" : "manager" };
-      const participants = plan.employeeIds.map(eid => ({ id: eid }));
-      const meetingType = plan.type === "alinhamento" ? "lideranca" : "equipe";
-      const newNotifs = createMeetingNotifications({ meetingType, meetingDate: plan.plannedDate, restaurantId, participants, createdBy: createdByInfo });
-      if (newNotifs.length > 0) {
-        onUpdate("inbox", [...(data?.inbox ?? []), ...newNotifs]);
+    if (isEdit) {
+      const all = (allMeetingPlans ?? []).map(p => p.id === editingPlanId ? plan : p);
+      onUpdate("meetingPlans", all);
+    } else {
+      onUpdate("meetingPlans", [...(allMeetingPlans ?? []), plan]);
+      // Etapa 6a: Notificar participantes sobre reunião agendada (só na criação)
+      if (plan.employeeIds?.length > 0 && plan.plannedDate) {
+        const createdByInfo = { id: currentUser?.id, nome: plan.createdBy, role: isOwner ? "owner" : "manager" };
+        const participants = plan.employeeIds.map(eid => ({ id: eid }));
+        const meetingType = plan.type === "alinhamento" ? "lideranca" : "equipe";
+        const newNotifs = createMeetingNotifications({ meetingType, meetingDate: plan.plannedDate, restaurantId, participants, createdBy: createdByInfo });
+        if (newNotifs.length > 0) {
+          onUpdate("inbox", [...(data?.inbox ?? []), ...newNotifs]);
+        }
       }
     }
     setPlanDate(""); setPlanNote(""); setSelectedAreas([]); setSelectedEmps([]); setShowForm(false);
     setAvalPontosFortes([]); setAvalPontosMelhorar([]); setAvalNotas([]); setAvalNewItem(""); setAvalSection("fortes");
     setAlinhTopics([]); setAlinhNewTopic("");
+    setEditingPlanId(null);
+  }
+
+  // v8.11.2: abre form de edição populado com dados do plan
+  function handleStartEditPlan(plan) {
+    setPlanType(plan.type || "alinhamento");
+    setPlanDate(plan.plannedDate || "");
+    setPlanNote(plan.note || "");
+    setSelectedEmps([...(plan.employeeIds || [])]);
+    // Áreas derivadas dos empregados selecionados
+    const areasFromEmps = new Set();
+    (plan.employeeIds || []).forEach(eid => {
+      const emp = employees.find(e => e.id === eid);
+      const r = emp ? roles.find(rl => rl.id === emp.roleId) : null;
+      if (r?.area) areasFromEmps.add(r.area);
+    });
+    setSelectedAreas([...areasFromEmps]);
+    setAvalPontosFortes((plan.pontosFortes || []).map(p => p.text));
+    setAvalPontosMelhorar((plan.pontosMelhorar || []).map(p => p.text));
+    setAvalNotas((plan.notasInternas || []).map(p => p.text));
+    setAlinhTopics((plan.topics || []).map(p => p.text));
+    setEditingPlanId(plan.id);
+    setShowForm("equipe");
   }
 
   async function handleDeletePlan(planId) {
@@ -8087,42 +8136,68 @@ function MeetingPlannerSection({ restaurantId, employees, roles, areas, meetingP
   function handleSavePauta() {
     if (!pautaTitle.trim()) { window.alert("Informe o título da pauta."); return; }
     if (pautaItems.length === 0) { window.alert("Adicione ao menos um item à pauta."); return; }
+    // v8.11.2: edição preserva id/createdBy/createdAt/status; criação gera novos
+    const isEdit = !!editingPautaId;
+    const existing = isEdit ? (data?.meetingAgendas ?? []).find(p => p.id === editingPautaId) : null;
     const pauta = {
-      id: `pauta-${Date.now()}-${Math.random().toString(36).slice(2,6)}`,
+      id: existing?.id || `pauta-${Date.now()}-${Math.random().toString(36).slice(2,6)}`,
       restaurantId,
       title: pautaTitle.trim(),
       templateType: pautaType,
       date: pautaDate || today(),
-      items: pautaItems.map(it => ({ ...it })),
+      // Preserva itens existentes (notes, decision, status) quando o texto bate
+      items: pautaItems.map(it => {
+        const prev = (existing?.items || []).find(p => p.id === it.id || p.text === it.text);
+        return prev ? { ...prev, ...it, id: prev.id, status: prev.status, notes: prev.notes, decision: prev.decision, reason: prev.reason } : { ...it };
+      }),
       participants: lidParticipants.length > 0 ? [...lidParticipants] : [],
-      createdBy: currentUser?.name ?? (isOwner ? "Gestor AppTip" : "Gestor Adm."),
-      createdAt: new Date().toISOString(),
-      status: "aberta", // aberta | em_andamento | encerrada
-      actions: [], // ações pós-reunião
+      createdBy: existing?.createdBy || (currentUser?.name ?? (isOwner ? "Gestor AppTip" : "Gestor Adm.")),
+      createdAt: existing?.createdAt || new Date().toISOString(),
+      status: existing?.status || "aberta",
+      actions: existing?.actions || [],
+      ...(isEdit ? { editedBy: currentUser?.name ?? "Gestor", editedAt: new Date().toISOString() } : {}),
     };
-    // Mark ideas as included
-    const ideaIds = pautaItems.filter(i => i.fromIdea).map(i => i.fromIdea);
-    if (ideaIds.length > 0) {
-      const allIdeasData = [...getData("meetingIdeas")];
-      ideaIds.forEach(iid => { const idx = allIdeasData.findIndex(i => i.id === iid); if (idx >= 0) allIdeasData[idx] = { ...allIdeasData[idx], status: "na_pauta" }; });
-      onUpdate("meetingIdeas", allIdeasData);
+    // Mark ideas as included (skip for edit — items já marcados antes)
+    if (!isEdit) {
+      const ideaIds = pautaItems.filter(i => i.fromIdea).map(i => i.fromIdea);
+      if (ideaIds.length > 0) {
+        const allIdeasData = [...getData("meetingIdeas")];
+        ideaIds.forEach(iid => { const idx = allIdeasData.findIndex(i => i.id === iid); if (idx >= 0) allIdeasData[idx] = { ...allIdeasData[idx], status: "na_pauta" }; });
+        onUpdate("meetingIdeas", allIdeasData);
+      }
+      const occIds = pautaItems.filter(i => i.fromOccurrence).map(i => i.fromOccurrence);
+      if (occIds.length > 0) {
+        const allOccData = [...getData("meetingOccurrences")];
+        occIds.forEach(oid => { const idx = allOccData.findIndex(o => o.id === oid); if (idx >= 0) allOccData[idx] = { ...allOccData[idx], status: "na_pauta" }; });
+        onUpdate("meetingOccurrences", allOccData);
+      }
+      const pendIds = pautaItems.filter(i => i.fromPendencia).map(i => i.fromPendencia);
+      if (pendIds.length > 0) {
+        const allPendData = [...getData("meetingPendencias")];
+        pendIds.forEach(pid => { const idx = allPendData.findIndex(p => p.id === pid); if (idx >= 0) allPendData[idx] = { ...allPendData[idx], status: "na_pauta" }; });
+        onUpdate("meetingPendencias", allPendData);
+      }
     }
-    // Mark occurrences as included
-    const occIds = pautaItems.filter(i => i.fromOccurrence).map(i => i.fromOccurrence);
-    if (occIds.length > 0) {
-      const allOccData = [...getData("meetingOccurrences")];
-      occIds.forEach(oid => { const idx = allOccData.findIndex(o => o.id === oid); if (idx >= 0) allOccData[idx] = { ...allOccData[idx], status: "na_pauta" }; });
-      onUpdate("meetingOccurrences", allOccData);
+    if (isEdit) {
+      const all = (data?.meetingAgendas ?? []).map(p => p.id === editingPautaId ? pauta : p);
+      onUpdate("meetingAgendas", all);
+    } else {
+      onUpdate("meetingAgendas", [...getData("meetingAgendas"), pauta]);
     }
-    // Mark pendências as included
-    const pendIds = pautaItems.filter(i => i.fromPendencia).map(i => i.fromPendencia);
-    if (pendIds.length > 0) {
-      const allPendData = [...getData("meetingPendencias")];
-      pendIds.forEach(pid => { const idx = allPendData.findIndex(p => p.id === pid); if (idx >= 0) allPendData[idx] = { ...allPendData[idx], status: "na_pauta" }; });
-      onUpdate("meetingPendencias", allPendData);
-    }
-    onUpdate("meetingAgendas", [...getData("meetingAgendas"), pauta]);
     setPautaTitle(""); setPautaType("semanal"); setPautaDate(""); setPautaItems([]); setPautaNewItem(""); setPautaPickIdeas([]); setLidParticipants([]); setShowForm(false);
+    setEditingPautaId(null);
+  }
+
+  // v8.11.2: abre form de edição populado com dados da pauta
+  function handleStartEditPauta(pauta) {
+    setPautaTitle(pauta.title || "");
+    setPautaType(pauta.templateType || "semanal");
+    setPautaDate(pauta.date || "");
+    setPautaItems((pauta.items || []).map(it => ({ ...it })));
+    setLidParticipants([...(pauta.participants || [])]);
+    setPautaPickIdeas((pauta.items || []).filter(i => i.fromIdea).map(i => i.fromIdea));
+    setEditingPautaId(pauta.id);
+    setShowForm("lideranca");
   }
 
   // Checklist ao vivo
@@ -8432,8 +8507,16 @@ function MeetingPlannerSection({ restaurantId, employees, roles, areas, meetingP
             </div>
           )}
           {showForm && (
-            <div style={{marginBottom:4}}>
-              <button onClick={()=>setShowForm(false)} style={{...S.btnSecondary,fontSize:12,padding:"6px 14px",color:"var(--red)",borderColor:"var(--red)44",marginBottom:12}}>✕ Cancelar</button>
+            <div style={{marginBottom:4,display:"flex",alignItems:"center",gap:10,flexWrap:"wrap"}}>
+              <button onClick={()=>{
+                setShowForm(false);
+                // v8.11.2: limpa estado de edição ao cancelar
+                setEditingPlanId(null);
+                setEditingPautaId(null);
+              }} style={{...S.btnSecondary,fontSize:12,padding:"6px 14px",color:"var(--red)",borderColor:"var(--red)44",marginBottom:12}}>✕ Cancelar</button>
+              {(editingPlanId || editingPautaId) && (
+                <span style={{fontSize:11,color:"var(--ac)",fontWeight:600,marginBottom:12}}>✏️ Editando — alterações substituem a reunião existente</span>
+              )}
             </div>
           )}
 
@@ -8566,7 +8649,7 @@ function MeetingPlannerSection({ restaurantId, employees, roles, areas, meetingP
                 </div>
               )}
 
-              <button onClick={handleCreatePlan} style={{...S.btnPrimary,width:"auto",padding:"10px 24px",background:typeColor,borderColor:typeColor}}>Criar reunião</button>
+              <button onClick={handleCreatePlan} style={{...S.btnPrimary,width:"auto",padding:"10px 24px",background:typeColor,borderColor:typeColor}}>{editingPlanId ? "Salvar alterações" : "Criar reunião"}</button>
             </div>
           )}
 
@@ -8704,7 +8787,7 @@ function MeetingPlannerSection({ restaurantId, employees, roles, areas, meetingP
                 </div>
               )}
 
-              <button onClick={handleSavePauta} style={{...S.btnPrimary,width:"auto",padding:"10px 24px",background:"#10b981",borderColor:"#10b981"}}>Salvar pauta</button>
+              <button onClick={handleSavePauta} style={{...S.btnPrimary,width:"auto",padding:"10px 24px",background:"#10b981",borderColor:"#10b981"}}>{editingPautaId ? "Salvar alterações" : "Salvar pauta"}</button>
             </div>
           )}
 
@@ -8792,6 +8875,12 @@ function MeetingPlannerSection({ restaurantId, employees, roles, areas, meetingP
                                 ▶ Iniciar conversa ao vivo
                               </button>
                             )}
+                            {/* v8.11.2: editar reunião antes de iniciar */}
+                            {(!plan.status || plan.status === "aberta") && (
+                              <button onClick={()=>handleStartEditPlan(plan)} style={{...S.btnSecondary,fontSize:11,padding:"6px 12px",color:pColor,borderColor:pColor+"44"}} title="Editar antes de iniciar">
+                                ✏️ Editar
+                              </button>
+                            )}
                             {plan.status === "em_andamento" && (
                               <button onClick={()=>{setLivePlanId(plan.id);setLivePlanNotes(plan.meetingNotes??"");}} style={{...S.btnPrimary,fontSize:11,padding:"6px 14px",background:"#f59e0b",borderColor:"#f59e0b"}}>
                                 ▶ Continuar conversa
@@ -8804,6 +8893,9 @@ function MeetingPlannerSection({ restaurantId, employees, roles, areas, meetingP
                             )}
                             {plan.status === "encerrada" && (
                               <span style={{fontSize:10,color:"#10b981",fontWeight:600,display:"flex",alignItems:"center",gap:4}}>✓ Encerrada{plan.endedAt ? ` em ${new Date(plan.endedAt).toLocaleDateString("pt-BR")}` : ""}</span>
+                            )}
+                            {plan.editedAt && (
+                              <span style={{fontSize:9,color:"var(--text3)",fontStyle:"italic",alignSelf:"center"}} title={`Editada por ${plan.editedBy} em ${new Date(plan.editedAt).toLocaleString("pt-BR")}`}>✏️ editada</span>
                             )}
                           </div>
                         </div>
@@ -9028,10 +9120,16 @@ function MeetingPlannerSection({ restaurantId, employees, roles, areas, meetingP
                         )}
 
                         {/* Start / status buttons */}
-                        <div style={{display:"flex",gap:6,marginBottom:14,flexWrap:"wrap"}}>
+                        <div style={{display:"flex",gap:6,marginBottom:14,flexWrap:"wrap",alignItems:"center"}}>
                           {pauta.status === "aberta" && (
                             <button onClick={()=>handleStartLiveMeeting(pauta.id)} style={{...S.btnPrimary,fontSize:12,padding:"8px 16px",background:"#f59e0b",borderColor:"#f59e0b"}}>
                               ▶ Iniciar reunião ao vivo
+                            </button>
+                          )}
+                          {/* v8.11.2: editar pauta antes de iniciar */}
+                          {pauta.status === "aberta" && (
+                            <button onClick={()=>handleStartEditPauta(pauta)} style={{...S.btnSecondary,fontSize:11,padding:"6px 12px",color:"#10b981",borderColor:"#10b98144"}} title="Editar antes de iniciar">
+                              ✏️ Editar
                             </button>
                           )}
                           {pauta.status === "em_andamento" && (
@@ -9048,6 +9146,9 @@ function MeetingPlannerSection({ restaurantId, employees, roles, areas, meetingP
                             <button onClick={()=>handleUpdatePautaStatus(pauta.id,"aberta")} style={{...S.btnSecondary,fontSize:11,padding:"6px 12px",color:"#3b82f6",borderColor:"#3b82f644"}}>
                               Reabrir
                             </button>
+                          )}
+                          {pauta.editedAt && (
+                            <span style={{fontSize:10,color:"var(--text3)",fontStyle:"italic"}} title={`Editada por ${pauta.editedBy} em ${new Date(pauta.editedAt).toLocaleString("pt-BR")}`}>✏️ editada</span>
                           )}
                         </div>
 
