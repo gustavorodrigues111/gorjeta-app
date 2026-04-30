@@ -1,9 +1,23 @@
 // AppTip — sistema de gestão de gorjetas e equipe para restaurantes
 import React, { useState, useEffect, useMemo, useRef, Component } from "react";
 import { db } from "./firebase";
-import { doc, getDoc, setDoc } from "firebase/firestore";
+import { doc, getDoc, setDoc, onSnapshot } from "firebase/firestore";
 
-const APP_VERSION = "8.11.0";
+const APP_VERSION = "8.11.1";
+
+// v8.11.1: comparação de versão semver-like (8.11.1 > 8.10.7 > 8.9.4)
+function compareVersions(a, b) {
+  const pa = String(a || "0").split(".").map(n => parseInt(n, 10) || 0);
+  const pb = String(b || "0").split(".").map(n => parseInt(n, 10) || 0);
+  const len = Math.max(pa.length, pb.length);
+  for (let i = 0; i < len; i++) {
+    const da = pa[i] || 0;
+    const db = pb[i] || 0;
+    if (da > db) return 1;
+    if (da < db) return -1;
+  }
+  return 0;
+}
 
 const DEFAULT_ADMISSION = () => `${new Date().getFullYear()}-01-01`;
 const round2 = (v) => Math.round(v * 100) / 100;
@@ -12642,74 +12656,187 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                 </div>
               </div>
             )}
-            {/* v8.11.0: Modal de registro de inversão informal */}
+            {/* v8.11.1: Wizard de inversão em 3 passos — só domingos, filtra por status */}
             {swapModalContext && (() => {
               const ctx = swapModalContext;
+              // Step 1: lista todos os domingos do mês
               const dim2 = new Date(year, month + 1, 0).getDate();
-              const allDays = [];
+              const sundays = [];
               for (let d = 1; d <= dim2; d++) {
                 const dt = `${year}-${String(month+1).padStart(2,"0")}-${String(d).padStart(2,"0")}`;
-                allDays.push({ date: dt, day: d, wd: new Date(dt+"T12:00:00").getDay() });
+                if (new Date(dt+"T12:00:00").getDay() === 0) sundays.push({ date: dt, day: d });
               }
-              const empOptions = [...schedEmps].sort((a,b) => a.name.localeCompare(b.name));
-              const canSave = ctx.empAId && ctx.empBId && ctx.date && ctx.empAId !== ctx.empBId;
+              // Determina o "step" pelo preenchimento dos campos
+              const step = !ctx.date ? 1 : (!ctx.empBId ? 2 : (!ctx.empAId ? 3 : 4));
+              // Pra step 2/3: lista empregados conforme status no dia escolhido
+              const empsFolgando = (() => {
+                if (!ctx.date) return [];
+                return [...schedEmps].filter(e => {
+                  const status = displayedMonth?.[e.id]?.[ctx.date];
+                  // Folga regular ou compensação (folgando) — exclui férias/falta/freela/demitido
+                  if (e.demitidoEm && ctx.date >= e.demitidoEm) return false;
+                  return status === DAY_OFF || status === DAY_COMP;
+                }).sort((a,b) => a.name.localeCompare(b.name));
+              })();
+              const empsTrabalhando = (() => {
+                if (!ctx.date) return [];
+                return [...schedEmps].filter(e => {
+                  if (e.id === ctx.empBId) return false;
+                  if (e.demitidoEm && ctx.date >= e.demitidoEm) return false;
+                  const status = displayedMonth?.[e.id]?.[ctx.date];
+                  // Trabalhando: sem status (default) ou compensação trabalhando
+                  return !status || status === DAY_COMP_TRAB;
+                }).sort((a,b) => a.name.localeCompare(b.name));
+              })();
+              const empBObj = ctx.empBId ? schedEmps.find(e => e.id === ctx.empBId) : null;
+              const empAObj = ctx.empAId ? schedEmps.find(e => e.id === ctx.empAId) : null;
+              const ac = "var(--ac)";
+              const dateLabel = ctx.date ? new Date(ctx.date+"T12:00:00").toLocaleDateString("pt-BR") : "";
               return (
                 <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.45)",zIndex:1000,display:"flex",alignItems:"center",justifyContent:"center",padding:16}} onClick={()=>setSwapModalContext(null)}>
-                  <div onClick={e=>e.stopPropagation()} style={{background:"var(--card-bg)",border:"1px solid var(--border)",borderRadius:14,maxWidth:520,width:"100%",padding:24,boxShadow:"0 20px 50px rgba(0,0,0,0.3)"}}>
-                    <h3 style={{margin:"0 0 4px",color:"var(--text)",fontSize:16,fontWeight:700}}>↔️ Registrar inversão de turno</h3>
+                  <div onClick={e=>e.stopPropagation()} style={{background:"var(--card-bg)",border:"1px solid var(--border)",borderRadius:14,maxWidth:540,width:"100%",maxHeight:"85vh",overflow:"auto",padding:24,boxShadow:"0 20px 50px rgba(0,0,0,0.3)"}}>
+                    <h3 style={{margin:"0 0 4px",color:"var(--text)",fontSize:16,fontWeight:700}}>↔️ Registrar inversão de domingo</h3>
                     <p style={{color:"var(--text3)",fontSize:12,margin:"0 0 14px",lineHeight:1.5}}>
-                      Registra que dois empregados trocaram informalmente o turno deste dia. <strong>A escala, gorjeta e VT continuam idênticos</strong> — só fica registrado quem trocou com quem.
+                      A escala, gorjeta e VT continuam idênticos — só registramos quem trocou com quem.
                     </p>
-                    <div style={{display:"flex",flexDirection:"column",gap:12}}>
-                      <div>
-                        <label style={{...S.label,fontSize:11}}>Data</label>
-                        <select value={ctx.date} onChange={e=>setSwapModalContext({...ctx,date:e.target.value})} style={{...S.input,width:"100%"}}>
-                          <option value="">— Selecione —</option>
-                          {allDays.map(d => (
-                            <option key={d.date} value={d.date}>
-                              {String(d.day).padStart(2,"0")}/{String(month+1).padStart(2,"0")} ({["Dom","Seg","Ter","Qua","Qui","Sex","Sáb"][d.wd]}){d.wd===0?" ⭐":""}
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-                      <div>
-                        <label style={{...S.label,fontSize:11}}>Empregado A (continua "trabalhando" na escala)</label>
-                        <select value={ctx.empAId} onChange={e=>setSwapModalContext({...ctx,empAId:e.target.value})} style={{...S.input,width:"100%"}}>
-                          <option value="">— Selecione —</option>
-                          {empOptions.map(e => <option key={e.id} value={e.id}>{e.name}</option>)}
-                        </select>
-                      </div>
-                      <div>
-                        <label style={{...S.label,fontSize:11}}>Empregado B (continua "folgando" na escala — mas trabalhou no lugar de A)</label>
-                        <select value={ctx.empBId || ""} onChange={e=>setSwapModalContext({...ctx,empBId:e.target.value})} style={{...S.input,width:"100%"}}>
-                          <option value="">— Selecione —</option>
-                          {empOptions.filter(e => e.id !== ctx.empAId).map(e => <option key={e.id} value={e.id}>{e.name}</option>)}
-                        </select>
-                      </div>
-                      <div>
-                        <label style={{...S.label,fontSize:11}}>Observação (opcional)</label>
-                        <input value={ctx.note || ""} onChange={e=>setSwapModalContext({...ctx,note:e.target.value})} placeholder="ex: aniversário do amigo" style={S.input} />
-                      </div>
+                    {/* Breadcrumb dos passos */}
+                    <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:14,fontSize:11,fontFamily:"'DM Mono',monospace",color:"var(--text3)",flexWrap:"wrap"}}>
+                      <span style={{color:step>=1?ac:"var(--text3)",fontWeight:step===1?700:500}}>1·Domingo</span>
+                      {ctx.date && <span style={{color:"var(--text2)"}}>{dateLabel}</span>}
+                      <span>›</span>
+                      <span style={{color:step>=2?ac:"var(--text3)",fontWeight:step===2?700:500}}>2·Quem está de folga</span>
+                      {empBObj && <span style={{color:"var(--text2)"}}>{empBObj.name.split(" ")[0]}</span>}
+                      <span>›</span>
+                      <span style={{color:step>=3?ac:"var(--text3)",fontWeight:step===3?700:500}}>3·Trocou com</span>
+                      {empAObj && <span style={{color:"var(--text2)"}}>{empAObj.name.split(" ")[0]}</span>}
                     </div>
-                    <div style={{display:"flex",justifyContent:"flex-end",gap:10,marginTop:18}}>
-                      <button onClick={()=>setSwapModalContext(null)} style={{...S.btnSecondary,padding:"8px 14px",fontSize:13}}>Cancelar</button>
-                      <button disabled={!canSave} onClick={()=>{
-                        const newSwap = {
-                          id: `swap-${Date.now()}-${Math.random().toString(36).slice(2,5)}`,
-                          restaurantId: rid,
-                          date: ctx.date,
-                          empAId: ctx.empAId,
-                          empBId: ctx.empBId,
-                          note: ctx.note?.trim() || "",
-                          registeredAt: new Date().toISOString(),
-                          registeredBy: currentUser?.name || "—",
-                        };
-                        onUpdate("scheduleSwaps", [...(data?.scheduleSwaps ?? []), newSwap]);
-                        setSwapModalContext(null);
-                        const empA = empOptions.find(e => e.id === ctx.empAId);
-                        const empB = empOptions.find(e => e.id === ctx.empBId);
-                        onUpdate("_toast", `↔️ Inversão registrada: ${empA?.name} ↔ ${empB?.name} em ${new Date(ctx.date+"T12:00:00").toLocaleDateString("pt-BR")}`);
-                      }} style={{...S.btnPrimary,padding:"8px 14px",fontSize:13,fontWeight:700,opacity:canSave?1:0.5,cursor:canSave?"pointer":"not-allowed"}}>Registrar inversão</button>
+
+                    {/* STEP 1: pick Sunday */}
+                    {step === 1 && (
+                      <div>
+                        <p style={{color:"var(--text2)",fontSize:13,margin:"0 0 12px"}}>Escolha o domingo:</p>
+                        {sundays.length === 0 ? (
+                          <div style={{padding:"20px",textAlign:"center",color:"var(--text3)",fontSize:12}}>Sem domingos neste mês.</div>
+                        ) : (
+                          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(120px,1fr))",gap:8}}>
+                            {sundays.map(s => (
+                              <button key={s.date} onClick={()=>setSwapModalContext({...ctx,date:s.date})}
+                                style={{padding:"12px 8px",borderRadius:10,border:`1px solid ${ac}66`,background:"var(--bg2)",color:"var(--text)",cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:13,fontWeight:600,textAlign:"center",transition:"all 0.15s"}}
+                                onMouseEnter={e=>{e.currentTarget.style.background=ac+"22";e.currentTarget.style.borderColor=ac;}}
+                                onMouseLeave={e=>{e.currentTarget.style.background="var(--bg2)";e.currentTarget.style.borderColor=ac+"66";}}>
+                                <div style={{fontSize:18,fontWeight:800,color:ac}}>{String(s.day).padStart(2,"0")}</div>
+                                <div style={{fontSize:10,color:"var(--text3)",marginTop:2}}>{monthLabel(year,month).split(" ")[0]}</div>
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    {/* STEP 2: pick employee on FOLGA */}
+                    {step === 2 && (
+                      <div>
+                        <p style={{color:"var(--text2)",fontSize:13,margin:"0 0 12px"}}>Quem está de <strong>folga</strong> em {dateLabel} e fez a troca:</p>
+                        {empsFolgando.length === 0 ? (
+                          <div style={{padding:"20px",textAlign:"center",color:"var(--text3)",fontSize:12,background:"var(--bg2)",borderRadius:10}}>
+                            Ninguém marcado como folga ou compensação neste domingo.
+                            <br/><span style={{fontSize:11}}>Verifique a escala — só dá pra registrar inversão entre quem está marcado como folga e quem está trabalhando.</span>
+                          </div>
+                        ) : (
+                          <div style={{display:"flex",flexDirection:"column",gap:6,maxHeight:320,overflow:"auto"}}>
+                            {empsFolgando.map(e => {
+                              const role = restRoles.find(r => r.id === e.roleId);
+                              const status = displayedMonth?.[e.id]?.[ctx.date];
+                              return (
+                                <button key={e.id} onClick={()=>setSwapModalContext({...ctx,empBId:e.id})}
+                                  style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"10px 14px",borderRadius:10,border:"1px solid var(--border)",background:"var(--bg2)",color:"var(--text)",cursor:"pointer",fontFamily:"'DM Sans',sans-serif",fontSize:13,textAlign:"left",transition:"all 0.15s"}}
+                                  onMouseEnter={ev=>{ev.currentTarget.style.background=ac+"15";ev.currentTarget.style.borderColor=ac;}}
+                                  onMouseLeave={ev=>{ev.currentTarget.style.background="var(--bg2)";ev.currentTarget.style.borderColor="var(--border)";}}>
+                                  <div>
+                                    <div style={{fontWeight:600}}>{e.name}</div>
+                                    <div style={{fontSize:11,color:"var(--text3)",marginTop:2}}>{role?.name ?? "—"} · {role?.area ?? ""}</div>
+                                  </div>
+                                  <span style={{fontSize:10,padding:"3px 8px",borderRadius:6,background:STATUS_COLORS[status]+"22",color:STATUS_COLORS[status],fontWeight:700,fontFamily:"'DM Mono',monospace"}}>{status === DAY_OFF ? "FOLGA" : "COMP"}</span>
+                                </button>
+                              );
+                            })}
+                          </div>
+                        )}
+                        <button onClick={()=>setSwapModalContext({...ctx,date:""})} style={{...S.btnSecondary,fontSize:11,padding:"6px 12px",marginTop:12}}>← Trocar domingo</button>
+                      </div>
+                    )}
+
+                    {/* STEP 3: pick employee TRABALHANDO who swaps with empB */}
+                    {step === 3 && (
+                      <div>
+                        <p style={{color:"var(--text2)",fontSize:13,margin:"0 0 12px"}}>
+                          <strong>{empBObj?.name}</strong> trocou com quem? (lista de quem está <strong>trabalhando</strong> em {dateLabel})
+                        </p>
+                        {empsTrabalhando.length === 0 ? (
+                          <div style={{padding:"20px",textAlign:"center",color:"var(--text3)",fontSize:12,background:"var(--bg2)",borderRadius:10}}>
+                            Ninguém trabalhando neste domingo.
+                          </div>
+                        ) : (
+                          <div style={{display:"flex",flexDirection:"column",gap:6,maxHeight:320,overflow:"auto"}}>
+                            {empsTrabalhando.map(e => {
+                              const role = restRoles.find(r => r.id === e.roleId);
+                              return (
+                                <button key={e.id} onClick={()=>setSwapModalContext({...ctx,empAId:e.id})}
+                                  style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"10px 14px",borderRadius:10,border:"1px solid var(--border)",background:"var(--bg2)",color:"var(--text)",cursor:"pointer",fontFamily:"'DM Sans',sans-serif",fontSize:13,textAlign:"left",transition:"all 0.15s"}}
+                                  onMouseEnter={ev=>{ev.currentTarget.style.background=ac+"15";ev.currentTarget.style.borderColor=ac;}}
+                                  onMouseLeave={ev=>{ev.currentTarget.style.background="var(--bg2)";ev.currentTarget.style.borderColor="var(--border)";}}>
+                                  <div>
+                                    <div style={{fontWeight:600}}>{e.name}</div>
+                                    <div style={{fontSize:11,color:"var(--text3)",marginTop:2}}>{role?.name ?? "—"} · {role?.area ?? ""}</div>
+                                  </div>
+                                  <span style={{fontSize:10,padding:"3px 8px",borderRadius:6,background:"#10b98122",color:"var(--green)",fontWeight:700,fontFamily:"'DM Mono',monospace"}}>TRAB</span>
+                                </button>
+                              );
+                            })}
+                          </div>
+                        )}
+                        <button onClick={()=>setSwapModalContext({...ctx,empBId:""})} style={{...S.btnSecondary,fontSize:11,padding:"6px 12px",marginTop:12}}>← Trocar empregado de folga</button>
+                      </div>
+                    )}
+
+                    {/* STEP 4: confirmação + nota */}
+                    {step === 4 && (
+                      <div>
+                        <div style={{padding:"14px 16px",background:ac+"15",border:`1px solid ${ac}55`,borderRadius:10,marginBottom:12}}>
+                          <div style={{fontSize:13,color:"var(--text)",lineHeight:1.6}}>
+                            <strong>{empBObj?.name}</strong> (folgaria) trocou com <strong>{empAObj?.name}</strong> (trabalharia) em <strong>{dateLabel}</strong>.
+                          </div>
+                          <div style={{fontSize:11,color:"var(--text3)",marginTop:6,lineHeight:1.5}}>
+                            Na escala continua: {empAObj?.name} trabalhando, {empBObj?.name} folga. Gorjeta e VT seguem o original. Só fica o registro.
+                          </div>
+                        </div>
+                        <div style={{marginBottom:12}}>
+                          <label style={{...S.label,fontSize:11}}>Observação (opcional)</label>
+                          <input value={ctx.note || ""} onChange={e=>setSwapModalContext({...ctx,note:e.target.value})} placeholder="ex: aniversário do amigo" style={S.input} />
+                        </div>
+                        <div style={{display:"flex",justifyContent:"space-between",gap:10}}>
+                          <button onClick={()=>setSwapModalContext({...ctx,empAId:""})} style={{...S.btnSecondary,fontSize:12,padding:"8px 14px"}}>← Voltar</button>
+                          <button onClick={()=>{
+                            const newSwap = {
+                              id: `swap-${Date.now()}-${Math.random().toString(36).slice(2,5)}`,
+                              restaurantId: rid,
+                              date: ctx.date,
+                              empAId: ctx.empAId,
+                              empBId: ctx.empBId,
+                              note: ctx.note?.trim() || "",
+                              registeredAt: new Date().toISOString(),
+                              registeredBy: currentUser?.name || "—",
+                            };
+                            onUpdate("scheduleSwaps", [...(data?.scheduleSwaps ?? []), newSwap]);
+                            setSwapModalContext(null);
+                            onUpdate("_toast", `↔️ Inversão registrada: ${empAObj?.name} ↔ ${empBObj?.name} em ${dateLabel}`);
+                          }} style={{...S.btnPrimary,fontSize:13,padding:"8px 16px",fontWeight:700}}>✓ Registrar inversão</button>
+                        </div>
+                      </div>
+                    )}
+
+                    <div style={{marginTop:14,paddingTop:12,borderTop:"1px solid var(--border)",display:"flex",justifyContent:"flex-end"}}>
+                      <button onClick={()=>setSwapModalContext(null)} style={{...S.btnSecondary,fontSize:11,padding:"5px 12px",color:"var(--text3)"}}>Fechar</button>
                     </div>
                   </div>
                 </div>
@@ -32760,6 +32887,44 @@ export default function App() {
     return () => { window.removeEventListener("online", goOnline); window.removeEventListener("offline", goOffline); };
   }, []);
 
+  // v8.11.1: Listener de versão — força recarregamento quando uma versão nova é deployada.
+  // Doc /appdata/_appConfig com { value: { latestVersion: "X.Y.Z", releasedAt: ISO } }.
+  // Self-updating: o primeiro user a abrir o build novo escreve o doc; demais clients vivos
+  // recebem o snapshot e mostram o banner.
+  const [latestRemoteVersion, setLatestRemoteVersion] = useState(null);
+  const [updateBannerDismissed, setUpdateBannerDismissed] = useState(() => {
+    try { return localStorage.getItem("apptip_update_dismissed") || ""; } catch { return ""; }
+  });
+  useEffect(() => {
+    let unsub = null;
+    try {
+      unsub = onSnapshot(doc(db, "appdata", "_appConfig"), async (snap) => {
+        const remote = snap.exists() ? snap.data().value : null;
+        const remoteVer = remote?.latestVersion;
+        // Primeiro a abrir build novo: grava no Firestore pra avisar os outros clients
+        if (!remoteVer || compareVersions(APP_VERSION, remoteVer) > 0) {
+          try {
+            await setDoc(doc(db, "appdata", "_appConfig"), {
+              value: {
+                latestVersion: APP_VERSION,
+                releasedAt: new Date().toISOString(),
+              },
+            });
+          } catch (e) { /* ignora — outro client pode ter escrito antes */ }
+          setLatestRemoteVersion(APP_VERSION);
+          return;
+        }
+        setLatestRemoteVersion(remoteVer);
+      }, (err) => {
+        console.warn("[appConfig] listener falhou:", err);
+      });
+    } catch (e) {
+      console.warn("[appConfig] não foi possível inscrever:", e);
+    }
+    return () => { if (unsub) unsub(); };
+  }, []);
+  const updateAvailable = latestRemoteVersion && compareVersions(latestRemoteVersion, APP_VERSION) > 0 && updateBannerDismissed !== latestRemoteVersion;
+
   const [owners, setOwners] = useState([]);
   const [managers,      setManagers]      = useState([]);
   const [restaurants,   setRestaurants]   = useState([]);
@@ -33575,6 +33740,29 @@ export default function App() {
       {currentUser?.isMaster === true && !isOnline && (
         <div style={{position:"fixed",top:0,left:0,right:0,zIndex:9999,background:"#ef4444",color:"#fff",textAlign:"center",padding:"6px 16px",fontSize:13,fontFamily:"'DM Sans',sans-serif",fontWeight:600,letterSpacing:0.3}}>
           📡 Sem conexão — modo somente leitura
+        </div>
+      )}
+      {/* v8.11.1: Banner de atualização disponível */}
+      {updateAvailable && (
+        <div style={{position:"fixed",top:0,left:0,right:0,zIndex:10000,background:"linear-gradient(90deg,#f59e0b,#fbbf24)",color:"#1f2937",padding:"10px 16px",fontSize:13,fontFamily:"'DM Sans',sans-serif",fontWeight:600,boxShadow:"0 2px 8px rgba(0,0,0,0.2)",display:"flex",alignItems:"center",justifyContent:"center",gap:14,flexWrap:"wrap"}}>
+          <span>🔄 Nova versão <strong>v{latestRemoteVersion}</strong> disponível.</span>
+          <button onClick={()=>{
+            // Limpa caches antes do reload pra garantir
+            try {
+              if ("caches" in window) {
+                window.caches.keys().then(keys => keys.forEach(k => window.caches.delete(k)));
+              }
+            } catch {}
+            window.location.reload();
+          }} style={{background:"#1f2937",color:"#fff",border:"none",borderRadius:6,padding:"6px 14px",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"'DM Sans',sans-serif"}}>
+            Recarregar agora
+          </button>
+          <button onClick={()=>{
+            setUpdateBannerDismissed(latestRemoteVersion);
+            try { localStorage.setItem("apptip_update_dismissed", latestRemoteVersion); } catch {}
+          }} style={{background:"transparent",color:"#1f2937",border:"1px solid #1f293744",borderRadius:6,padding:"6px 12px",fontSize:11,cursor:"pointer",fontFamily:"'DM Sans',sans-serif"}} title="Esconder até a próxima versão">
+            Mais tarde
+          </button>
         </div>
       )}
       <Toast msg={toast} onClose={()=>setToast("")} />
