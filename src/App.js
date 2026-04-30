@@ -3,7 +3,7 @@ import React, { useState, useEffect, useMemo, useRef, Component } from "react";
 import { db } from "./firebase";
 import { doc, getDoc, setDoc } from "firebase/firestore";
 
-const APP_VERSION = "8.4.2";
+const APP_VERSION = "8.4.3";
 
 const DEFAULT_ADMISSION = () => `${new Date().getFullYear()}-01-01`;
 const round2 = (v) => Math.round(v * 100) / 100;
@@ -10129,6 +10129,7 @@ function MonthPickerGate({ contextLabel, year, month, onPick, scheduleStatus, re
                 background: o.bg, border: `1px solid ${o.border}`, borderRadius: 12,
                 padding: "14px 12px", cursor: "pointer", fontFamily: "'DM Sans',sans-serif",
                 position: "relative", transition: "transform .12s, box-shadow .12s",
+                width: "100%", boxSizing: "border-box", minWidth: 0,
               }}
               onMouseEnter={e => { e.currentTarget.style.transform = "translateY(-2px)"; e.currentTarget.style.boxShadow = `0 4px 12px ${o.color}33`; }}
               onMouseLeave={e => { e.currentTarget.style.transform = "translateY(0)"; e.currentTarget.style.boxShadow = "none"; }}>
