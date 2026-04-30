@@ -3,7 +3,7 @@ import React, { useState, useEffect, useMemo, useRef, Component } from "react";
 import { db } from "./firebase";
 import { doc, getDoc, setDoc } from "firebase/firestore";
 
-const APP_VERSION = "8.9.0";
+const APP_VERSION = "8.9.1";
 
 const DEFAULT_ADMISSION = () => `${new Date().getFullYear()}-01-01`;
 const round2 = (v) => Math.round(v * 100) / 100;
@@ -197,6 +197,11 @@ const fmtDate = (d) => d ? new Date(d + "T12:00:00").toLocaleDateString("pt-BR")
 const today = () => new Date().toISOString().slice(0, 10);
 const maskCpf = (v) => { const d = (v ?? "").replace(/\D/g,"").slice(0,11); if(d.length<=3) return d; if(d.length<=6) return `${d.slice(0,3)}.${d.slice(3)}`; if(d.length<=9) return `${d.slice(0,3)}.${d.slice(3,6)}.${d.slice(6)}`; return `${d.slice(0,3)}.${d.slice(3,6)}.${d.slice(6,9)}-${d.slice(9,11)}`; };
 const monthKey = (y, m) => `${y}-${String(m + 1).padStart(2, "0")}`;
+
+// v8.9.1 — Sanitiza key pra Firestore (que rejeita campos com __ início+fim).
+// IDs do FAQ usam padrão __gorjeta__/__sistema__/etc. Convertemos pra "gorjeta", "sistema", etc.
+// Usado tanto em escrita quanto leitura no tabsGestor.faqAuto pra manter consistência.
+const safeFaqKey = (id) => String(id || "").replace(/^_+|_+$/g, "") || "_";
 
 // v8.0 — Default inteligente de mês pra telas que tipicamente envolvem planejamento/visualização forward.
 // Se hoje é dia ≥ 20, o usuário provavelmente quer ver o PRÓXIMO mês (estamos no fim do mês atual,
@@ -1368,10 +1373,10 @@ Exemplo (gorjeta R$${fmtR(EX)}, ${totalPontos}pt no total):
       a:"O PIN é sua senha de acesso ao AppTip — um código de 4 dígitos numéricos.\n\nPara fazer login use:\n• Seu ID de empregado (ex: LBZ0005) ou CPF\n• Seu PIN de 4 dígitos\n\nNo primeiro acesso o sistema pedirá que você crie um PIN pessoal.\n\nPara trocar o PIN depois: solicite ao seu gestor que faça o reset. Após o reset, você deverá criar um novo PIN no próximo acesso.\n\nNunca compartilhe seu PIN com ninguém.",
     },
   ].filter(item => {
-    if (!item.tabKey) return rest?.tabsGestor?.faqAuto?.[item.id] !== false;
+    if (!item.tabKey) return rest?.tabsGestor?.faqAuto?.[safeFaqKey(item.id)] !== false;
     if (rest?.tabsConfig?.[item.tabKey] === false) return false;
     if (rest?.tabsGestor?.[item.tabKey] === false) return false;
-    if (rest?.tabsGestor?.faqAuto?.[item.id] === false) return false;
+    if (rest?.tabsGestor?.faqAuto?.[safeFaqKey(item.id)] === false) return false;
     return true;
   });
 
@@ -10342,7 +10347,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
     const cur = { ...(localRest.tabsConfig ?? {}) };
     const novoValor = !(cur[key] !== false);
     cur[key] = novoValor;
-    const tabFaqMap = { dp:"__dp__", comunicados:"__comunicados__" };
+    const tabFaqMap = { dp:"dp", comunicados:"comunicados" }; // v8.9.1 sem __ — Firestore rejeita
     const faqId = tabFaqMap[key];
     const curGestor = { ...(localRest.tabsGestor ?? {}) };
     if (faqId) curGestor.faqAuto = { ...(curGestor.faqAuto ?? {}), [faqId]: novoValor };
@@ -10352,7 +10357,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
     const cur = { ...(localRest.tabsGestor ?? {}) };
     const novoValor = !(cur[key] !== false);
     cur[key] = novoValor;
-    const tabFaqMap = { dp:"__dp__", comunicados:"__comunicados__" };
+    const tabFaqMap = { dp:"dp", comunicados:"comunicados" }; // v8.9.1 sem __
     const faqId = tabFaqMap[key];
     if (faqId) cur.faqAuto = { ...(cur.faqAuto ?? {}), [faqId]: novoValor };
     patchConfig({ tabsGestor: cur });
@@ -13576,7 +13581,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                         // Admin controla via tabsConfig, Gestor via tabsGestor
                         const adminBloqueou = item.tabKey ? restaurant?.tabsConfig?.[item.tabKey] === false : false;
                         const gestorOcultou = item.tabKey ? restaurant?.tabsGestor?.[item.tabKey] === false : false;
-                        const faqAutoOk = restaurant?.tabsGestor?.faqAuto?.[item.id] !== false;
+                        const faqAutoOk = restaurant?.tabsGestor?.faqAuto?.[safeFaqKey(item.id)] !== false;
                         // Se admin bloqueou aba → sempre oculto, sem toggle
                         // Se gestor ocultou aba → oculto, sem toggle
                         // Caso contrário → segue faqAutoOk
@@ -13593,7 +13598,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                                   <button onClick={e=>{
                                     e.preventDefault(); e.stopPropagation();
                                     const cur = restaurant?.tabsGestor?.faqAuto ?? {};
-                                    const updated = restaurants.map(r=>r.id===rid?{...r,tabsGestor:{...(r.tabsGestor??{}),faqAuto:{...cur,[item.id]:!faqAutoOk}}}:r);
+                                    const updated = restaurants.map(r=>r.id===rid?{...r,tabsGestor:{...(r.tabsGestor??{}),faqAuto:{...cur,[safeFaqKey(item.id)]:!faqAutoOk}}}:r);
                                     onUpdate("restaurants",updated);
                                   }} style={{padding:"3px 10px",borderRadius:20,border:"none",background:visivel?"var(--green)":"var(--border)",color:visivel?"#fff":"var(--text3)",fontWeight:700,cursor:"pointer",fontFamily:"'DM Sans',sans-serif",fontSize:11,whiteSpace:"nowrap"}}>
                                     {visivel?"👁 Exibindo":"🚫 Oculto"}
