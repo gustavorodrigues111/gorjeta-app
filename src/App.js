@@ -3,7 +3,7 @@ import React, { useState, useEffect, useMemo, useRef, Component } from "react";
 import { db } from "./firebase";
 import { doc, getDoc, setDoc } from "firebase/firestore";
 
-const APP_VERSION = "8.9.3";
+const APP_VERSION = "8.9.4";
 
 const DEFAULT_ADMISSION = () => `${new Date().getFullYear()}-01-01`;
 const round2 = (v) => Math.round(v * 100) / 100;
@@ -1373,9 +1373,8 @@ Exemplo (gorjeta R$${fmtR(EX)}, ${totalPontos}pt no total):
       a:"O PIN é sua senha de acesso ao AppTip — um código de 4 dígitos numéricos.\n\nPara fazer login use:\n• Seu ID de empregado (ex: LBZ0005) ou CPF\n• Seu PIN de 4 dígitos\n\nNo primeiro acesso o sistema pedirá que você crie um PIN pessoal.\n\nPara trocar o PIN depois: solicite ao seu gestor que faça o reset. Após o reset, você deverá criar um novo PIN no próximo acesso.\n\nNunca compartilhe seu PIN com ninguém.",
     },
   ].filter(item => {
-    if (!item.tabKey) return rest?.tabsGestor?.faqAuto?.[safeFaqKey(item.id)] !== false;
-    if (rest?.tabsConfig?.[item.tabKey] === false) return false;
-    if (rest?.tabsGestor?.[item.tabKey] === false) return false;
+    // v8.9.4: visibilidade do item de FAQ é INDEPENDENTE da aba (tab pode estar oculta e o FAQ
+    // continuar visível, ou tab visível e o FAQ ocultado individualmente).
     if (rest?.tabsGestor?.faqAuto?.[safeFaqKey(item.id)] === false) return false;
     return true;
   });
@@ -13578,32 +13577,27 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                     </p>
                     <div style={{display:"flex",flexDirection:"column",gap:6}}>
                       {FAQS_AUTO.map((item) => {
-                        // Admin controla via tabsConfig, Gestor via tabsGestor
+                        // v8.9.4: visibilidade do FAQ é INDEPENDENTE da aba relacionada.
+                        // Aba oculta? FAQ continua aparecendo se você quiser. Aba visível? FAQ pode ser ocultado individualmente.
                         const adminBloqueou = item.tabKey ? restaurant?.tabsConfig?.[item.tabKey] === false : false;
                         const gestorOcultou = item.tabKey ? restaurant?.tabsGestor?.[item.tabKey] === false : false;
                         const faqAutoOk = restaurant?.tabsGestor?.faqAuto?.[safeFaqKey(item.id)] !== false;
-                        // Se admin bloqueou aba → sempre oculto, sem toggle
-                        // Se gestor ocultou aba → oculto, sem toggle
-                        // Caso contrário → segue faqAutoOk
-                        const abaOk = !adminBloqueou && !gestorOcultou;
-                        const visivel = abaOk && faqAutoOk;
+                        const visivel = faqAutoOk; // <- só depende do toggle deste FAQ
                         return (
                           <details key={item.id} style={{borderRadius:10,background:"var(--card-bg)",border:`1px solid ${visivel?"var(--ac)22":"var(--border)"}`,overflow:"hidden",opacity:visivel?1:0.6}}>
                             <summary style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"10px 12px",cursor:"pointer",listStyle:"none",gap:8}}>
                               <span style={{fontSize:13,fontWeight:600,color:visivel?"var(--text)":"var(--text3)",flex:1}}>{item.q}</span>
                               <div style={{display:"flex",alignItems:"center",gap:6,flexShrink:0}}>
-                                {adminBloqueou && <span style={{fontSize:10,color:"var(--text3)",background:"var(--bg2)",padding:"2px 7px",borderRadius:10,border:"1px solid var(--border)"}}>aba bloqueada pelo admin</span>}
-                                {!adminBloqueou && gestorOcultou && <span style={{fontSize:10,color:"var(--text3)",background:"var(--bg2)",padding:"2px 7px",borderRadius:10,border:"1px solid var(--border)"}}>aba oculta nas configurações</span>}
-                                {abaOk && (
-                                  <button onClick={e=>{
-                                    e.preventDefault(); e.stopPropagation();
-                                    const cur = restaurant?.tabsGestor?.faqAuto ?? {};
-                                    const updated = restaurants.map(r=>r.id===rid?{...r,tabsGestor:{...(r.tabsGestor??{}),faqAuto:{...cur,[safeFaqKey(item.id)]:!faqAutoOk}}}:r);
-                                    onUpdate("restaurants",updated);
-                                  }} style={{padding:"3px 10px",borderRadius:20,border:"none",background:visivel?"var(--green)":"var(--border)",color:visivel?"#fff":"var(--text3)",fontWeight:700,cursor:"pointer",fontFamily:"'DM Sans',sans-serif",fontSize:11,whiteSpace:"nowrap"}}>
-                                    {visivel?"👁 Exibindo":"🚫 Oculto"}
-                                  </button>
-                                )}
+                                {adminBloqueou && <span title="A aba relacionada está bloqueada — esse FAQ ainda pode ser exibido normalmente" style={{fontSize:10,color:"var(--text3)",background:"var(--bg2)",padding:"2px 7px",borderRadius:10,border:"1px solid var(--border)"}}>ℹ️ aba bloqueada</span>}
+                                {!adminBloqueou && gestorOcultou && <span title="A aba relacionada está oculta — esse FAQ ainda pode ser exibido normalmente" style={{fontSize:10,color:"var(--text3)",background:"var(--bg2)",padding:"2px 7px",borderRadius:10,border:"1px solid var(--border)"}}>ℹ️ aba oculta</span>}
+                                <button onClick={e=>{
+                                  e.preventDefault(); e.stopPropagation();
+                                  const cur = restaurant?.tabsGestor?.faqAuto ?? {};
+                                  const updated = restaurants.map(r=>r.id===rid?{...r,tabsGestor:{...(r.tabsGestor??{}),faqAuto:{...cur,[safeFaqKey(item.id)]:!faqAutoOk}}}:r);
+                                  onUpdate("restaurants",updated);
+                                }} style={{padding:"3px 10px",borderRadius:20,border:"none",background:visivel?"var(--green)":"var(--border)",color:visivel?"#fff":"var(--text3)",fontWeight:700,cursor:"pointer",fontFamily:"'DM Sans',sans-serif",fontSize:11,whiteSpace:"nowrap"}}>
+                                  {visivel?"👁 Exibindo":"🚫 Oculto"}
+                                </button>
                                 <span style={{color:"var(--text3)",fontSize:12}}>▾</span>
                               </div>
                             </summary>
