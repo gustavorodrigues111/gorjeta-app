@@ -3,7 +3,7 @@ import React, { useState, useEffect, useMemo, useRef, Component } from "react";
 import { db } from "./firebase";
 import { doc, getDoc, setDoc, onSnapshot } from "firebase/firestore";
 
-const APP_VERSION = "8.14.0";
+const APP_VERSION = "8.13.0";
 
 // v8.11.1: comparação de versão semver-like (8.11.1 > 8.10.7 > 8.9.4)
 function compareVersions(a, b) {
@@ -17,36 +17,6 @@ function compareVersions(a, b) {
     if (da < db) return -1;
   }
   return 0;
-}
-
-// v8.14.0: visibilidade de reuniões. Owner e DP sempre veem.
-// Default: comportamento atual (admin geral + líder com participante na sua área — filtro feito pelo chamador).
-// Shared: criador + sharedWith + Owner/DP + admin geral.
-// Private: só criador + Owner + DP.
-function canSeeMeeting({ item, currentUserId, isOwner, isDP, isAdminGeneral }) {
-  if (!item) return false;
-  if (isOwner) return true;
-  if (isDP) return true;
-  const v = item.visibility || { mode: "default", sharedWith: [] };
-  const isCreator = item.createdById && item.createdById === currentUserId;
-  if (v.mode === "private") return isCreator;
-  if (v.mode === "shared") {
-    if (isCreator) return true;
-    return Array.isArray(v.sharedWith) && v.sharedWith.includes(currentUserId);
-  }
-  // default — admin ou criador
-  return isAdminGeneral || isCreator;
-}
-
-// v8.14.0: ocorrências são privadas por natureza. Apenas criador + Owner + DP.
-// Legacy: ocorrências sem createdById (criadas antes de v8.14.0) ficam visíveis pra todos
-// para não esconder dados antigos de gestores.
-function canSeeOccurrence({ item, currentUserId, isOwner, isDP }) {
-  if (!item) return false;
-  if (isOwner) return true;
-  if (isDP) return true;
-  if (!item.createdById) return true; // legacy
-  return item.createdById === currentUserId;
 }
 
 const DEFAULT_ADMISSION = () => `${new Date().getFullYear()}-01-01`;
@@ -7862,7 +7832,7 @@ const AGENDA_TEMPLATES = [
   ]},
 ];
 
-function MeetingPlannerSection({ restaurantId, employees, roles, areas, meetingPlans, allMeetingPlans, feedbacks, onUpdate, currentUser, isOwner, isDP, mobileOnly, isLider, managerAreas, data, forceSubTab }) {
+function MeetingPlannerSection({ restaurantId, employees, roles, areas, meetingPlans, allMeetingPlans, feedbacks, onUpdate, currentUser, isOwner, mobileOnly, isLider, managerAreas, data, forceSubTab }) {
   // Sub-tab state
   const [subTab, setSubTab] = useState(forceSubTab || "reunioes"); // reunioes | ideias | ocorrencias | pendencias | relatorio
   // v7: se forceSubTab muda externamente (top-level tab "ideias"/"ocorrencias"), seguir
@@ -7918,11 +7888,6 @@ function MeetingPlannerSection({ restaurantId, employees, roles, areas, meetingP
   // v8.11.2: edição de plan/pauta — null quando criando, id quando editando
   const [editingPlanId, setEditingPlanId] = useState(null);
   const [editingPautaId, setEditingPautaId] = useState(null);
-  // v8.14.0: visibilidade da reunião sendo criada/editada
-  const [planVisibilityMode, setPlanVisibilityMode] = useState("default"); // "default" | "shared" | "private"
-  const [planSharedWith, setPlanSharedWith] = useState([]); // [pessoaId]
-  const [pautaVisibilityMode, setPautaVisibilityMode] = useState("default");
-  const [pautaSharedWith, setPautaSharedWith] = useState([]);
   // Ações pós-reunião
   // Relatório
   const [relFrom, setRelFrom] = useState("");
@@ -7934,10 +7899,8 @@ function MeetingPlannerSection({ restaurantId, employees, roles, areas, meetingP
   const allIdeas = (data?.meetingIdeas ?? []).filter(i => i.restaurantId === restaurantId);
   const TRASH_DAYS = 30;
   const allPautasRaw = (data?.meetingAgendas ?? []).filter(p => p.restaurantId === restaurantId);
-  // v8.14.0: aplica filtro de visibilidade nas pautas (helper canSeeMeeting)
-  const _isAdminGeneralForPautas = isOwner || isDP || (!isLider);
-  const allPautas = allPautasRaw.filter(p => !p.deletedAt && canSeeMeeting({ item: p, currentUserId: currentUser?.id, isOwner, isDP, isAdminGeneral: _isAdminGeneralForPautas }));
-  const trashedPautas = allPautasRaw.filter(p => p.deletedAt && (Date.now() - new Date(p.deletedAt).getTime()) < TRASH_DAYS * 86400000 && canSeeMeeting({ item: p, currentUserId: currentUser?.id, isOwner, isDP, isAdminGeneral: _isAdminGeneralForPautas }));
+  const allPautas = allPautasRaw.filter(p => !p.deletedAt);
+  const trashedPautas = allPautasRaw.filter(p => p.deletedAt && (Date.now() - new Date(p.deletedAt).getTime()) < TRASH_DAYS * 86400000);
   const allActions = (data?.meetingActions ?? []).filter(a => a.restaurantId === restaurantId);
   const allOccurrences = (data?.meetingOccurrences ?? []).filter(o => o.restaurantId === restaurantId);
   const allPendencias = (data?.meetingPendencias ?? []).filter(p => p.restaurantId === restaurantId);
@@ -7956,47 +7919,15 @@ function MeetingPlannerSection({ restaurantId, employees, roles, areas, meetingP
     : employees;
   const activePlans = meetingPlans.filter(p => !p.deletedAt);
   const trashedPlans = meetingPlans.filter(p => p.deletedAt && (Date.now() - new Date(p.deletedAt).getTime()) < TRASH_DAYS * 86400000);
-  // v8.14.0: filtro por área (existente) + filtro por visibilidade (novo)
-  const isAdminGeneralForVis = isOwner || isDP || (!isLider); // gestor admin geral (sem ser só líder de área)
-  const visiblePlans = activePlans.filter(p => canSeeMeeting({ item: p, currentUserId: currentUser?.id, isOwner, isDP, isAdminGeneral: isAdminGeneralForVis }));
   const filteredPlans = (isLider && !showAllAreas && managerAreas?.length > 0)
-    ? visiblePlans.filter(p => (p.employeeIds ?? []).some(eid => filteredEmployees.find(e => e.id === eid)))
-    : visiblePlans;
+    ? activePlans.filter(p => (p.employeeIds ?? []).some(eid => filteredEmployees.find(e => e.id === eid)))
+    : activePlans;
   const filteredIdeas = (isLider && !showAllAreas && managerAreas?.length > 0)
     ? allIdeas.filter(i => { const ia = i.areas ?? (i.area ? [i.area] : []); return ia.length === 0 || ia.some(a => managerAreas.includes(a)); })
     : allIdeas;
-  // v8.14.0: ocorrências privadas — só criador + Owner + DP
-  const visibleOccurrences = allOccurrences.filter(o => canSeeOccurrence({ item: o, currentUserId: currentUser?.id, isOwner, isDP }));
   const filteredOccurrences = (isLider && !showAllAreas && managerAreas?.length > 0)
-    ? visibleOccurrences.filter(o => { const oa = o.areas ?? []; return oa.length === 0 || oa.some(a => managerAreas.includes(a)); })
-    : visibleOccurrences;
-
-  // v8.14.0: lista de gestores/líderes do restaurante elegíveis pra compartilhar visibilidade
-  const shareableManagers = (() => {
-    const seen = new Set();
-    const result = [];
-    (data?.managers ?? []).forEach(m => {
-      if (!(m.restaurantIds ?? []).includes(restaurantId)) return;
-      if (m.id === currentUser?.id) return;
-      seen.add(m.id);
-      const role = m.profile === "lider" ? "Líder de Área" : (m.isDP ? "DP" : "Gestor");
-      result.push({ id: m.id, name: m.name, role });
-    });
-    (data?.pessoas ?? []).forEach(p => {
-      if (!(p.restaurantIds ?? []).includes(restaurantId)) return;
-      if (p.id === currentUser?.id) return;
-      if (seen.has(p.id)) return;
-      const perms = p.permissions?.[restaurantId];
-      if (!perms) return;
-      const hasAdmin = Object.values(perms.admin ?? {}).some(v => v === true);
-      const isLid = perms.special?.isLider === true || perms.special?.profile === "lider";
-      const isDpP = perms.special?.isDP === true;
-      if (!hasAdmin && !isLid && !isDpP) return;
-      const role = isLid ? "Líder de Área" : isDpP ? "DP" : "Gestor";
-      result.push({ id: p.id, name: p.name, role });
-    });
-    return result.sort((a,b) => a.name.localeCompare(b.name));
-  })();
+    ? allOccurrences.filter(o => { const oa = o.areas ?? []; return oa.length === 0 || oa.some(a => managerAreas.includes(a)); })
+    : allOccurrences;
 
   const toggleArea = (area) => {
     const areaEmps = employees.filter(e => { const r = roles.find(rl => rl.id === e.roleId); return r?.area === area; }).map(e => e.id);
@@ -8033,14 +7964,8 @@ function MeetingPlannerSection({ restaurantId, employees, roles, areas, meetingP
       plannedDate: planDate,
       note: planNote.trim(),
       createdBy: existing?.createdBy || (isOwner ? "Gestor AppTip" : (currentUser?.name ?? "Gestor Adm.")),
-      createdById: existing?.createdById || currentUser?.id || null, // v8.14.0
       createdAt: existing?.createdAt || new Date().toISOString(),
       completedFeedbackIds: existing?.completedFeedbackIds || {},
-      // v8.14.0: visibilidade
-      visibility: {
-        mode: planVisibilityMode || "default",
-        sharedWith: planVisibilityMode === "shared" ? [...planSharedWith] : [],
-      },
       ...(existing?.status ? { status: existing.status } : {}),
       ...(existing?.meetingNotes ? { meetingNotes: existing.meetingNotes } : {}),
       // Avaliação: preserva done de itens já marcados se forem os mesmos textos
@@ -8087,7 +8012,6 @@ function MeetingPlannerSection({ restaurantId, employees, roles, areas, meetingP
     setAvalPontosFortes([]); setAvalPontosMelhorar([]); setAvalNotas([]); setAvalNewItem(""); setAvalSection("fortes");
     setAlinhTopics([]); setAlinhNewTopic("");
     setEditingPlanId(null);
-    setPlanVisibilityMode("default"); setPlanSharedWith([]); // v8.14.0
   }
 
   // v8.11.2: abre form de edição populado com dados do plan
@@ -8108,9 +8032,6 @@ function MeetingPlannerSection({ restaurantId, employees, roles, areas, meetingP
     setAvalPontosMelhorar((plan.pontosMelhorar || []).map(p => p.text));
     setAvalNotas((plan.notasInternas || []).map(p => p.text));
     setAlinhTopics((plan.topics || []).map(p => p.text));
-    // v8.14.0: visibilidade — popula do existente
-    setPlanVisibilityMode(plan.visibility?.mode || "default");
-    setPlanSharedWith(Array.isArray(plan.visibility?.sharedWith) ? [...plan.visibility.sharedWith] : []);
     setEditingPlanId(plan.id);
     setShowForm("equipe");
   }
@@ -8232,15 +8153,9 @@ function MeetingPlannerSection({ restaurantId, employees, roles, areas, meetingP
       }),
       participants: lidParticipants.length > 0 ? [...lidParticipants] : [],
       createdBy: existing?.createdBy || (currentUser?.name ?? (isOwner ? "Gestor AppTip" : "Gestor Adm.")),
-      createdById: existing?.createdById || currentUser?.id || null, // v8.14.0
       createdAt: existing?.createdAt || new Date().toISOString(),
       status: existing?.status || "aberta",
       actions: existing?.actions || [],
-      // v8.14.0: visibilidade
-      visibility: {
-        mode: pautaVisibilityMode || "default",
-        sharedWith: pautaVisibilityMode === "shared" ? [...pautaSharedWith] : [],
-      },
       ...(isEdit ? { editedBy: currentUser?.name ?? "Gestor", editedAt: new Date().toISOString() } : {}),
     };
     // Mark ideas as included (skip for edit — items já marcados antes)
@@ -8272,7 +8187,6 @@ function MeetingPlannerSection({ restaurantId, employees, roles, areas, meetingP
     }
     setPautaTitle(""); setPautaType("semanal"); setPautaDate(""); setPautaItems([]); setPautaNewItem(""); setPautaPickIdeas([]); setLidParticipants([]); setShowForm(false);
     setEditingPautaId(null);
-    setPautaVisibilityMode("default"); setPautaSharedWith([]); // v8.14.0
   }
 
   // v8.11.2: abre form de edição populado com dados da pauta
@@ -8283,9 +8197,6 @@ function MeetingPlannerSection({ restaurantId, employees, roles, areas, meetingP
     setPautaItems((pauta.items || []).map(it => ({ ...it })));
     setLidParticipants([...(pauta.participants || [])]);
     setPautaPickIdeas((pauta.items || []).filter(i => i.fromIdea).map(i => i.fromIdea));
-    // v8.14.0: visibilidade
-    setPautaVisibilityMode(pauta.visibility?.mode || "default");
-    setPautaSharedWith(Array.isArray(pauta.visibility?.sharedWith) ? [...pauta.visibility.sharedWith] : []);
     setEditingPautaId(pauta.id);
     setShowForm("lideranca");
   }
@@ -8355,7 +8266,6 @@ function MeetingPlannerSection({ restaurantId, employees, roles, areas, meetingP
       areas: occAreas.length > 0 ? [...occAreas] : [],
       employeeIds: occEmployeeIds.length > 0 ? [...occEmployeeIds] : [],
       createdBy: currentUser?.name ?? (isOwner ? "Gestor AppTip" : "Gestor Adm."),
-      createdById: currentUser?.id ?? null, // v8.14.0: pra filtro de visibilidade
       createdAt: new Date().toISOString(),
       status: "nova", // nova | na_pauta | resolvida | descartada
     };
@@ -8604,9 +8514,6 @@ function MeetingPlannerSection({ restaurantId, employees, roles, areas, meetingP
                 // v8.11.2: limpa estado de edição ao cancelar
                 setEditingPlanId(null);
                 setEditingPautaId(null);
-                // v8.14.0: reset visibilidade
-                setPlanVisibilityMode("default"); setPlanSharedWith([]);
-                setPautaVisibilityMode("default"); setPautaSharedWith([]);
               }} style={{...S.btnSecondary,fontSize:12,padding:"6px 14px",color:"var(--red)",borderColor:"var(--red)44",marginBottom:12}}>✕ Cancelar</button>
               {(editingPlanId || editingPautaId) && (
                 <span style={{fontSize:11,color:"var(--ac)",fontWeight:600,marginBottom:12}}>✏️ Editando — alterações substituem a reunião existente</span>
@@ -8742,52 +8649,6 @@ function MeetingPlannerSection({ restaurantId, employees, roles, areas, meetingP
                   </div>
                 </div>
               )}
-
-              {/* v8.14.0: Bloco de visibilidade — quem pode ver esta reunião */}
-              <div style={{padding:"12px 14px",background:"var(--bg2)",border:"1px solid var(--border)",borderRadius:10,marginBottom:14,marginTop:12}}>
-                <div style={{fontSize:11,fontWeight:700,color:"var(--text2)",textTransform:"uppercase",letterSpacing:0.4,marginBottom:8}}>🔒 Quem pode ver esta reunião</div>
-                <div style={{display:"flex",flexDirection:"column",gap:6}}>
-                  {[
-                    {value:"default", label:"🌐 Padrão", desc:"Gestores admin + líderes da área dos participantes"},
-                    {value:"shared",  label:"👥 Compartilhada", desc:"Eu + Owner + DP + pessoas que eu escolher"},
-                    {value:"private", label:"🔒 Privada", desc:"Só eu + Owner + DP — outros gestores e líderes não veem"},
-                  ].map(opt => (
-                    <label key={opt.value} style={{display:"flex",alignItems:"flex-start",gap:8,padding:"8px 10px",borderRadius:8,cursor:"pointer",border:`1px solid ${planVisibilityMode===opt.value?"var(--ac)":"var(--border)"}`,background:planVisibilityMode===opt.value?"var(--ac)11":"transparent"}}>
-                      <input type="radio" checked={planVisibilityMode===opt.value} onChange={()=>setPlanVisibilityMode(opt.value)} style={{marginTop:2,accentColor:"var(--ac)"}}/>
-                      <div style={{flex:1}}>
-                        <div style={{fontSize:12,fontWeight:600,color:"var(--text)"}}>{opt.label}</div>
-                        <div style={{fontSize:11,color:"var(--text3)",marginTop:2}}>{opt.desc}</div>
-                      </div>
-                    </label>
-                  ))}
-                </div>
-                {planVisibilityMode === "shared" && (
-                  <div style={{marginTop:10,padding:"10px 12px",background:"var(--card-bg)",border:"1px solid var(--border)",borderRadius:8}}>
-                    <div style={{fontSize:11,color:"var(--text2)",fontWeight:600,marginBottom:8}}>Quem mais pode ver (além de mim, Owner e DP):</div>
-                    {shareableManagers.length === 0 ? (
-                      <div style={{fontSize:11,color:"var(--text3)",fontStyle:"italic"}}>Nenhum outro gestor disponível.</div>
-                    ) : (
-                      <div style={{display:"flex",flexDirection:"column",gap:4,maxHeight:180,overflow:"auto"}}>
-                        {shareableManagers.map(m => {
-                          const checked = planSharedWith.includes(m.id);
-                          return (
-                            <label key={m.id} style={{display:"flex",alignItems:"center",gap:8,padding:"4px 6px",borderRadius:6,cursor:"pointer",fontSize:12}}>
-                              <input type="checkbox" checked={checked} onChange={()=>{
-                                setPlanSharedWith(prev => checked ? prev.filter(x=>x!==m.id) : [...prev, m.id]);
-                              }} style={{accentColor:"var(--ac)"}}/>
-                              <span style={{color:"var(--text)"}}>{m.name}</span>
-                              <span style={{color:"var(--text3)",fontSize:10,marginLeft:"auto"}}>{m.role}</span>
-                            </label>
-                          );
-                        })}
-                      </div>
-                    )}
-                  </div>
-                )}
-                <div style={{fontSize:10,color:"var(--text3)",marginTop:8,fontStyle:"italic",lineHeight:1.4}}>
-                  ℹ️ Em qualquer modo, o empregado da reunião <strong>nunca</strong> vê pontos fortes, melhorias ou notas internas — só sabe que tem reunião naquela data.
-                </div>
-              </div>
 
               <button onClick={handleCreatePlan} style={{...S.btnPrimary,width:"auto",padding:"10px 24px",background:typeColor,borderColor:typeColor}}>{editingPlanId ? "Salvar alterações" : "Criar reunião"}</button>
             </div>
@@ -8926,49 +8787,6 @@ function MeetingPlannerSection({ restaurantId, employees, roles, areas, meetingP
                   </div>
                 </div>
               )}
-
-              {/* v8.14.0: Bloco de visibilidade da pauta */}
-              <div style={{padding:"12px 14px",background:"var(--bg2)",border:"1px solid var(--border)",borderRadius:10,marginBottom:14,marginTop:12}}>
-                <div style={{fontSize:11,fontWeight:700,color:"var(--text2)",textTransform:"uppercase",letterSpacing:0.4,marginBottom:8}}>🔒 Quem pode ver esta pauta</div>
-                <div style={{display:"flex",flexDirection:"column",gap:6}}>
-                  {[
-                    {value:"default", label:"🌐 Padrão", desc:"Todos os gestores admin e líderes"},
-                    {value:"shared",  label:"👥 Compartilhada", desc:"Eu + Owner + DP + pessoas que eu escolher"},
-                    {value:"private", label:"🔒 Privada", desc:"Só eu + Owner + DP"},
-                  ].map(opt => (
-                    <label key={opt.value} style={{display:"flex",alignItems:"flex-start",gap:8,padding:"8px 10px",borderRadius:8,cursor:"pointer",border:`1px solid ${pautaVisibilityMode===opt.value?"#10b981":"var(--border)"}`,background:pautaVisibilityMode===opt.value?"#10b98111":"transparent"}}>
-                      <input type="radio" checked={pautaVisibilityMode===opt.value} onChange={()=>setPautaVisibilityMode(opt.value)} style={{marginTop:2,accentColor:"#10b981"}}/>
-                      <div style={{flex:1}}>
-                        <div style={{fontSize:12,fontWeight:600,color:"var(--text)"}}>{opt.label}</div>
-                        <div style={{fontSize:11,color:"var(--text3)",marginTop:2}}>{opt.desc}</div>
-                      </div>
-                    </label>
-                  ))}
-                </div>
-                {pautaVisibilityMode === "shared" && (
-                  <div style={{marginTop:10,padding:"10px 12px",background:"var(--card-bg)",border:"1px solid var(--border)",borderRadius:8}}>
-                    <div style={{fontSize:11,color:"var(--text2)",fontWeight:600,marginBottom:8}}>Quem mais pode ver (além de mim, Owner e DP):</div>
-                    {shareableManagers.length === 0 ? (
-                      <div style={{fontSize:11,color:"var(--text3)",fontStyle:"italic"}}>Nenhum outro gestor disponível.</div>
-                    ) : (
-                      <div style={{display:"flex",flexDirection:"column",gap:4,maxHeight:180,overflow:"auto"}}>
-                        {shareableManagers.map(m => {
-                          const checked = pautaSharedWith.includes(m.id);
-                          return (
-                            <label key={m.id} style={{display:"flex",alignItems:"center",gap:8,padding:"4px 6px",borderRadius:6,cursor:"pointer",fontSize:12}}>
-                              <input type="checkbox" checked={checked} onChange={()=>{
-                                setPautaSharedWith(prev => checked ? prev.filter(x=>x!==m.id) : [...prev, m.id]);
-                              }} style={{accentColor:"#10b981"}}/>
-                              <span style={{color:"var(--text)"}}>{m.name}</span>
-                              <span style={{color:"var(--text3)",fontSize:10,marginLeft:"auto"}}>{m.role}</span>
-                            </label>
-                          );
-                        })}
-                      </div>
-                    )}
-                  </div>
-                )}
-              </div>
 
               <button onClick={handleSavePauta} style={{...S.btnPrimary,width:"auto",padding:"10px 24px",background:"#10b981",borderColor:"#10b981"}}>{editingPautaId ? "Salvar alterações" : "Salvar pauta"}</button>
             </div>
@@ -12574,7 +12392,6 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                 onUpdate={onUpdate}
                 currentUser={currentUser}
                 isOwner={isOwner}
-                isDP={isDP}
                 mobileOnly={mobileOnly}
                 isLider={isLider}
                 managerAreas={managerAreas}
@@ -12674,7 +12491,6 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                 onUpdate={onUpdate}
                 currentUser={currentUser}
                 isOwner={isOwner}
-                isDP={isDP}
                 mobileOnly={mobileOnly}
                 isLider={isLider}
                 managerAreas={managerAreas}
@@ -12706,7 +12522,6 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                 onUpdate={onUpdate}
                 currentUser={currentUser}
                 isOwner={isOwner}
-                isDP={isDP}
                 mobileOnly={mobileOnly}
                 isLider={isLider}
                 managerAreas={managerAreas}
