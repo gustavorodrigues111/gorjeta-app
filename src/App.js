@@ -3,7 +3,7 @@ import React, { useState, useEffect, useMemo, useRef, Component } from "react";
 import { db } from "./firebase";
 import { doc, getDoc, setDoc, onSnapshot } from "firebase/firestore";
 
-const APP_VERSION = "8.11.4";
+const APP_VERSION = "8.12.0";
 
 // v8.11.1: comparação de versão semver-like (8.11.1 > 8.10.7 > 8.9.4)
 function compareVersions(a, b) {
@@ -7943,11 +7943,8 @@ function MeetingPlannerSection({ restaurantId, employees, roles, areas, meetingP
         setSelectedEmps(prev => prev.filter(id => !areaEmps.includes(id)));
       }
     } else {
+      // v8.12.0: Não auto-seleciona empregados ao escolher área. Gestor pica quem participa manualmente.
       setSelectedAreas(prev => [...prev, area]);
-      // For avaliação, don't auto-select — user must pick one employee manually
-      if (planType !== "avaliação") {
-        setSelectedEmps(prev => [...new Set([...prev, ...areaEmps])]);
-      }
     }
   };
 
@@ -10492,10 +10489,11 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
   const [delayInputs, setDelayInputs] = useState({}); // { "day": minutes }
   // Schedule view mode: "vigente" shows effective (with local edits), "prevista" shows saved only
   const [schedViewMode, setSchedViewMode] = useState("vigente");
-  // v8.11.0: preview de sugestão de folgas de domingo
-  const [sundaySuggestionPreview, setSundaySuggestionPreview] = useState(null);
+  // v8.12.0: removido sundaySuggestionPreview (escala deriva automático)
   // v8.11.0: modal de inversão informal de domingo (Feature 2) — empAId + date pré-selecionados
   const [swapModalContext, setSwapModalContext] = useState(null); // { empAId, date } | null
+  // v8.12.0: confirmação do reset da escala
+  const [showResetSchedConfirm, setShowResetSchedConfirm] = useState(false);
   // Month close / reopen confirmation
   const [showCloseConfirm, setShowCloseConfirm] = useState(false);
   const [showReopenConfirm, setShowReopenConfirm] = useState(false);
@@ -10505,9 +10503,72 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
   // Local schedule edits — accumulated before saving as new version
   const [schedLocalEdits, setSchedLocalEdits] = useState(null); // null = no pending edits, object = pending edits overlay
   const schedDirty = schedLocalEdits !== null;
-  // Effective schedule month: saved data + local edits overlay
+
+  // v8.12.0: Escala derivada — folgas fixas do horário + ciclo de domingos.
+  // Aplicada APENAS aos empregados que ainda não têm dados salvos no mês.
+  // Empregados sem ciclo de domingo cadastrado: trabalham todos os domingos (sem alerta).
+  const derivedScheduleByEmp = useMemo(() => {
+    const out = {};
+    const dim = new Date(year, month + 1, 0).getDate();
+    allSchedEmps.forEach(emp => {
+      const empWS = data?.workSchedules?.[rid]?.[emp.id] ?? [];
+      if (empWS.length === 0) return;
+      const empMap = {};
+      for (let d = 1; d <= dim; d++) {
+        const dateStr = `${year}-${String(month+1).padStart(2,"0")}-${String(d).padStart(2,"0")}`;
+        // Skip pre-vigência do restaurante
+        if (restaurant.serviceStartDate && dateStr < restaurant.serviceStartDate) continue;
+        // Skip após demissão
+        if (emp.demitidoEm && dateStr >= emp.demitidoEm) continue;
+        const ws = getActiveWorkSchedule(empWS, dateStr);
+        if (!ws) continue;
+        if (ws.validFrom && dateStr < ws.validFrom) continue;
+        const days = getEffectiveDays(ws, dateStr);
+        if (!days) continue;
+        const dow = new Date(dateStr+"T12:00:00").getDay();
+        const dayCfg = days[dow];
+        // Folga fixa do horário
+        if (!dayCfg || dayCfg.active === false) {
+          empMap[dateStr] = DAY_OFF;
+          continue;
+        }
+        // Domingo + ciclo cadastrado → usa ciclo. Sem ciclo → trabalha (default).
+        if (dow === 0) {
+          const cycle = getSundayCycleFromSchedule(ws, dateStr);
+          if (cycle && cycle.refDate && isSundayOffByCycle(cycle, dateStr)) {
+            empMap[dateStr] = DAY_OFF;
+          }
+        }
+      }
+      if (Object.keys(empMap).length > 0) out[emp.id] = empMap;
+    });
+    return out;
+  }, [allSchedEmps, year, month, mk, rid, data?.workSchedules, restaurant.serviceStartDate]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Empregado é considerado "não editado" (=> aplica derivação) quando:
+  //  • não tem nenhuma entrada em schedules[rid][mk][empId] (mapa vazio)
+  // Se já tem qualquer entrada salva, mostra exatamente o salvo (sem derivar).
+  function applyDerivationToEmp(empId) {
+    const saved = schedules?.[rid]?.[mk]?.[empId];
+    return !saved || Object.keys(saved).length === 0;
+  }
+
+  // Effective schedule month: derivado (se sem saved) → saved → local edits
   const effectiveMonth = (() => {
-    const base = { ...(schedules?.[rid]?.[mk] ?? {}) };
+    const base = {};
+    const saved = schedules?.[rid]?.[mk] ?? {};
+    // Para cada empregado da escala: se tem saved, usa saved; senão usa derivado
+    allSchedEmps.forEach(emp => {
+      if (applyDerivationToEmp(emp.id)) {
+        base[emp.id] = { ...(derivedScheduleByEmp[emp.id] ?? {}) };
+      } else {
+        base[emp.id] = { ...saved[emp.id] };
+      }
+    });
+    // Outros empregados que estejam em saved mas não em allSchedEmps (ex.: já demitidos antes)
+    Object.entries(saved).forEach(([eid, dayMap]) => {
+      if (!base[eid]) base[eid] = { ...dayMap };
+    });
     if (schedLocalEdits) {
       Object.entries(schedLocalEdits).forEach(([eid, dayMap]) => {
         base[eid] = { ...(base[eid] ?? {}), ...dayMap };
@@ -10516,8 +10577,13 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
     }
     return base;
   })();
-  // The "prevista" view is the frozen snapshot, falling back to current schedules
-  const previstaMonth = data?.schedulePrevista?.[rid]?.[mk] ?? schedules?.[rid]?.[mk] ?? {};
+  // Prevista: frozen snapshot, com fallback pra effectiveMonth (que já inclui derivação)
+  const previstaMonth = (() => {
+    const frozen = data?.schedulePrevista?.[rid]?.[mk];
+    if (frozen) return frozen;
+    // Sem snapshot: usa effective (que já tem derivação aplicada onde cabe)
+    return effectiveMonth;
+  })();
   // Displayed schedule depends on view mode
   const displayedMonth = schedViewMode === "prevista" ? previstaMonth : effectiveMonth;
   // Month status from scheduleStatus
@@ -12675,95 +12741,10 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                 {(canSched || isOwner) && !monthClosed && (
                   <button onClick={()=>setSwapModalContext({ empAId: "", date: "" })} style={{...S.btnSecondary,fontSize:11,padding:"3px 10px"}} title="Registrar inversão de turno entre dois empregados (não muda a escala — só registra a troca)">↔️ Registrar inversão</button>
                 )}
-                {/* v8.11.0: Sugerir folgas de domingo */}
-                {(canSched || isOwner) && !monthClosed && (
-                  <button onClick={()=>{
-                    // Computa sugestões pra cada empregado com sundayCycle configurado
-                    const dim = new Date(year, month + 1, 0).getDate();
-                    const sundays = [];
-                    for (let d = 1; d <= dim; d++) {
-                      const dt = new Date(year, month, d);
-                      if (dt.getDay() === 0) sundays.push(`${year}-${String(month+1).padStart(2,"0")}-${String(d).padStart(2,"0")}`);
-                    }
-                    const previewByEmp = [];
-                    schedEmps.forEach(emp => {
-                      const empWS = (data?.workSchedules?.[rid]?.[emp.id]) ?? [];
-                      // Para cada domingo, pega a versão de horário vigente naquela data
-                      const folgas = [];
-                      sundays.forEach(date => {
-                        const ws = getActiveWorkSchedule(empWS, date);
-                        const cycle = getSundayCycleFromSchedule(ws, date);
-                        if (!cycle) return;
-                        if (!isSundayOffByCycle(cycle, date)) return;
-                        // Já tem marcação? só registra como "skip"
-                        const cur = effectiveMonth?.[emp.id]?.[date];
-                        if (cur) { folgas.push({ date, status: "skip", reason: cur }); return; }
-                        folgas.push({ date, status: "off" });
-                      });
-                      if (folgas.length > 0) previewByEmp.push({ emp, folgas });
-                    });
-                    setSundaySuggestionPreview(previewByEmp);
-                  }} style={{...S.btnSecondary,fontSize:11,padding:"3px 10px"}} title="Calcula folgas de domingo dos empregados com ciclo configurado no horário">🌞 Sugerir folgas de domingo</button>
-                )}
+                {/* v8.12.0: "Sugerir folgas de domingo" removido — escala deriva auto do horário+ciclo. */}
               </div>
               {/* Botão "Apagar todas as escalas" movido pra "Mais ações" no rodapé (Configurações avançadas) */}
             </div>
-            {/* v8.11.0: Modal de preview das sugestões de folga de domingo */}
-            {sundaySuggestionPreview && (
-              <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.45)",zIndex:1000,display:"flex",alignItems:"center",justifyContent:"center",padding:16}} onClick={()=>setSundaySuggestionPreview(null)}>
-                <div onClick={e=>e.stopPropagation()} style={{background:"var(--card-bg)",border:"1px solid var(--border)",borderRadius:14,maxWidth:560,width:"100%",maxHeight:"80vh",overflow:"auto",padding:24,boxShadow:"0 20px 50px rgba(0,0,0,0.3)"}}>
-                  <h3 style={{margin:"0 0 4px",color:"var(--text)",fontSize:16,fontWeight:700}}>🌞 Sugerir folgas de domingo</h3>
-                  <p style={{color:"var(--text3)",fontSize:12,margin:"0 0 14px",lineHeight:1.5}}>Baseado no ciclo cadastrado no horário de cada empregado. Só preenche domingos sem marcação.</p>
-                  {sundaySuggestionPreview.length === 0 ? (
-                    <div style={{padding:"20px",textAlign:"center",color:"var(--text3)",fontSize:13}}>
-                      Nenhum empregado com ciclo de domingos cadastrado tem folga prevista neste mês.
-                      <br/><span style={{fontSize:11,marginTop:8,display:"block"}}>Configure no horário do empregado: Equipe → empregado → Horário → "Ciclo de domingos".</span>
-                    </div>
-                  ) : (
-                    <div style={{display:"flex",flexDirection:"column",gap:10,marginBottom:14}}>
-                      {sundaySuggestionPreview.map(({emp, folgas}) => {
-                        const willMark = folgas.filter(f => f.status === "off");
-                        const skipped  = folgas.filter(f => f.status === "skip");
-                        return (
-                          <div key={emp.id} style={{padding:"10px 12px",background:"var(--bg2)",border:"1px solid var(--border)",borderRadius:10}}>
-                            <div style={{fontWeight:700,color:"var(--text)",fontSize:13,marginBottom:6}}>{emp.name}</div>
-                            {willMark.length > 0 && (
-                              <div style={{fontSize:11,color:"var(--text2)",marginBottom:4}}>
-                                ✅ Marcar folga: {willMark.map(f => new Date(f.date+"T12:00:00").toLocaleDateString("pt-BR",{day:"2-digit",month:"2-digit"})).join(", ")}
-                              </div>
-                            )}
-                            {skipped.length > 0 && (
-                              <div style={{fontSize:11,color:"var(--text3)"}}>
-                                ⏭ Já marcado (pulei): {skipped.map(f => new Date(f.date+"T12:00:00").toLocaleDateString("pt-BR",{day:"2-digit",month:"2-digit"})).join(", ")}
-                              </div>
-                            )}
-                          </div>
-                        );
-                      })}
-                    </div>
-                  )}
-                  <div style={{display:"flex",justifyContent:"flex-end",gap:10}}>
-                    <button onClick={()=>setSundaySuggestionPreview(null)} style={{...S.btnSecondary,padding:"8px 14px",fontSize:13}}>Cancelar</button>
-                    {sundaySuggestionPreview.some(p => p.folgas.some(f => f.status === "off")) && (
-                      <button onClick={()=>{
-                        const newEdits = { ...(schedLocalEdits || {}) };
-                        let count = 0;
-                        sundaySuggestionPreview.forEach(({emp, folgas}) => {
-                          folgas.filter(f => f.status === "off").forEach(f => {
-                            if (!newEdits[emp.id]) newEdits[emp.id] = {};
-                            newEdits[emp.id][f.date] = DAY_OFF;
-                            count++;
-                          });
-                        });
-                        setSchedLocalEdits(newEdits);
-                        setSundaySuggestionPreview(null);
-                        onUpdate("_toast", `🌞 ${count} folga(s) de domingo aplicada(s) — clique em Salvar pra confirmar`);
-                      }} style={{...S.btnPrimary,padding:"8px 14px",fontSize:13,fontWeight:700}}>Aplicar</button>
-                    )}
-                  </div>
-                </div>
-              </div>
-            )}
             {/* v8.11.1: Wizard de inversão em 3 passos — só domingos, filtra por status */}
             {swapModalContext && (() => {
               const ctx = swapModalContext;
@@ -13032,94 +13013,13 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                 </summary>
                 <div style={{display:"flex",gap:mobileOnly?4:8,flexWrap:"wrap"}}>
 
-                {/* Pre-fill contract days off — agora com PREVIEW */}
-                <button onClick={async ()=>{
-                  const emps = areaEmps;
-                  if (!emps.length) return;
-                  const mesNome = monthLabel(year, month);
-
-                  // 1) PRE-CÁLCULO: monta o bulkEdits + stats SEM aplicar nada ainda
-                  const daysInMonth = new Date(year, month+1, 0).getDate();
-                  let added = 0, removed = 0;
-                  const bulkEdits = {};
-                  const empsAfetados = []; // [{ name, addedCount, removedCount }]
-                  const empsSemHorario = [];
-                  emps.forEach(emp => {
-                    const empScheds = data?.workSchedules?.[rid]?.[emp.id] ?? [];
-                    const currentSched = empScheds[empScheds.length - 1];
-                    if (!currentSched) { empsSemHorario.push(emp.name); return; }
-                    const empDayMap = { ...(effectiveMonth[emp.id] ?? {}) };
-                    const empEdits = {};
-                    let empAdded = 0, empRemoved = 0;
-                    for (let d = 1; d <= daysInMonth; d++) {
-                      const date = `${year}-${String(month+1).padStart(2,"0")}-${String(d).padStart(2,"0")}`;
-                      const weekday = new Date(date+"T12:00:00").getDay();
-                      const effDays = getEffectiveDays(currentSched, date) || currentSched.days || {};
-                      const isFolga = !effDays[weekday];
-                      const current = empDayMap[date];
-                      if (isFolga) {
-                        if (!current) { empEdits[date] = DAY_OFF; empAdded++; }
-                      } else {
-                        if (current === DAY_OFF) { empEdits[date] = null; empRemoved++; }
-                      }
-                    }
-                    if (Object.keys(empEdits).length) {
-                      bulkEdits[emp.id] = empEdits;
-                      empsAfetados.push({ name: emp.name, addedCount: empAdded, removedCount: empRemoved });
-                      added += empAdded;
-                      removed += empRemoved;
-                    }
-                  });
-
-                  // 2) Caso especial: nada a fazer
-                  if (added === 0 && removed === 0) {
-                    onUpdate("_toast", "✅ Escala já está de acordo com o contrato");
-                    return;
-                  }
-
-                  // 3) Monta mensagem de preview
-                  const linhas = [];
-                  linhas.push(`📅 APLICAR FOLGAS DO CONTRATO — ${mesNome}\n`);
-                  linhas.push(`Empregados afetados: ${empsAfetados.length}${schedArea==="Todos"?"":` (área ${schedArea})`}`);
-                  if (added > 0) linhas.push(`✅ Vai marcar como Folga: ${added} dia(s)`);
-                  if (removed > 0) linhas.push(`🔄 Vai REMOVER folga de: ${removed} dia(s) (não são folga no contrato)`);
-                  linhas.push("");
-                  // Lista os primeiros empregados afetados
-                  const top = empsAfetados.slice(0, 8);
-                  top.forEach(e => {
-                    const parts = [];
-                    if (e.addedCount > 0) parts.push(`+${e.addedCount} folga(s)`);
-                    if (e.removedCount > 0) parts.push(`-${e.removedCount} folga(s) removida(s)`);
-                    linhas.push(`  • ${e.name}: ${parts.join(", ")}`);
-                  });
-                  if (empsAfetados.length > top.length) linhas.push(`  ... e mais ${empsAfetados.length - top.length}`);
-                  if (empsSemHorario.length > 0) {
-                    linhas.push("");
-                    linhas.push(`⚠️ Sem horário cadastrado (não afetados): ${empsSemHorario.length}`);
-                  }
-                  linhas.push("");
-                  linhas.push("ℹ️ Outros status (férias, faltas, freelas, compensações) NÃO serão alterados.");
-                  linhas.push("ℹ️ As alterações ficam pendentes — clique em Salvar pra confirmar no banco.");
-
-                  // 4) Confirmação
-                  if (!await appConfirm(linhas.join("\n"))) return;
-
-                  // 5) Aplica como edições locais (vão aparecer marcadas; user salva pra persistir)
-                  setSchedLocalEdits(prev => {
-                    const edits = prev ? { ...prev } : {};
-                    Object.entries(bulkEdits).forEach(([eid, dayMap]) => {
-                      edits[eid] = { ...(edits[eid] ?? {}), ...dayMap };
-                    });
-                    return edits;
-                  });
-                  const parts = [];
-                  if (added) parts.push(`${added} folga(s) adicionada(s)`);
-                  if (removed) parts.push(`${removed} folga(s) removida(s)`);
-                  onUpdate("_toast", `✅ ${parts.join(" · ")} — salve pra confirmar`);
-                }} style={{...S.btnSecondary,fontSize:mobileOnly?11:12,color:"var(--red)",borderColor:"var(--red)44",whiteSpace:"nowrap"}}>
-                  {mobileOnly?"📅 Folgas":"📅 Folgas do contrato"}
-                </button>
-                {/* "Limpar este mês" movido pra "Mais ações" no rodapé */}
+                {/* v8.12.0: "📅 Folgas do contrato" REMOVIDO — escala deriva auto. */}
+                {/* v8.12.0: Resetar escala — substitui dados salvos pela derivação (folgas do contrato + ciclo de domingos) */}
+                {(canSched || isOwner) && !monthClosed && (
+                  <button onClick={()=>setShowResetSchedConfirm(true)} style={{...S.btnSecondary,fontSize:mobileOnly?11:12,color:"var(--red)",borderColor:"var(--red)44",whiteSpace:"nowrap"}} title="Substitui a escala atual pela escala derivada do horário cadastrado + ciclo de domingos">
+                    {mobileOnly?"🔄 Reset":"🔄 Resetar escala"}
+                  </button>
+                )}
 
                 {/* Marcar férias */}
                 <button onClick={()=>{setShowVacForm(!showVacForm);setVacEmpId("");setVacFrom("");setVacTo("");}}
@@ -13206,6 +13106,65 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                 )}
               </div>
               </details>
+
+              {/* v8.12.0: Modal de confirmação do reset da escala */}
+              {showResetSchedConfirm && (() => {
+                // Pré-cálculo: quantos empregados serão afetados e o que vai mudar
+                let totalEmps = 0;
+                let totalFolgasNova = 0;
+                let totalFolgasAntiga = 0;
+                schedEmps.forEach(emp => {
+                  const saved = schedules?.[rid]?.[mk]?.[emp.id] ?? {};
+                  const derived = derivedScheduleByEmp[emp.id] ?? {};
+                  const savedKeys = Object.keys(saved).length;
+                  const derivedKeys = Object.keys(derived).length;
+                  if (savedKeys > 0 || derivedKeys > 0) {
+                    totalEmps++;
+                    totalFolgasAntiga += Object.values(saved).filter(s => s === DAY_OFF).length;
+                    totalFolgasNova += Object.values(derived).filter(s => s === DAY_OFF).length;
+                  }
+                });
+                return (
+                  <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.6)",zIndex:9999,display:"flex",alignItems:"center",justifyContent:"center",padding:16}} onClick={()=>setShowResetSchedConfirm(false)}>
+                    <div onClick={e=>e.stopPropagation()} style={{background:"var(--card-bg)",border:"1px solid var(--border)",borderRadius:14,maxWidth:520,width:"100%",padding:24,boxShadow:"0 20px 50px rgba(0,0,0,0.3)"}}>
+                      <h3 style={{margin:"0 0 8px",color:"var(--red)",fontSize:16,fontWeight:700}}>🔄 Resetar escala de {monthLabel(year, month)}?</h3>
+                      <p style={{color:"var(--text2)",fontSize:13,margin:"0 0 12px",lineHeight:1.6}}>
+                        Vai <strong>apagar todas as marcações atuais</strong> deste mês (folgas, freelas, compensações, faltas, férias) e substituir pela escala derivada do <strong>horário cadastrado</strong> de cada empregado + <strong>ciclo de domingos</strong>.
+                      </p>
+                      <div style={{padding:"10px 14px",background:"var(--bg2)",borderRadius:10,fontSize:12,color:"var(--text2)",lineHeight:1.6,marginBottom:14}}>
+                        Empregados na grade: <strong>{totalEmps}</strong><br/>
+                        Folgas na escala atual: <strong>{totalFolgasAntiga}</strong><br/>
+                        Folgas após o reset (derivadas): <strong>{totalFolgasNova}</strong>
+                      </div>
+                      <p style={{color:"var(--text3)",fontSize:11,margin:"0 0 14px",fontStyle:"italic"}}>
+                        ⚠️ A versão anterior fica no histórico. Empregados sem ciclo de domingo cadastrado vão trabalhar todos os domingos.
+                      </p>
+                      <div style={{display:"flex",justifyContent:"flex-end",gap:10}}>
+                        <button onClick={()=>setShowResetSchedConfirm(false)} style={{...S.btnSecondary,padding:"8px 14px",fontSize:13}}>Cancelar</button>
+                        <button onClick={()=>{
+                          // Snapshot antes
+                          const preSnap = snapshotSchedulesMonth(schedules, rid, mk);
+                          saveSchedulesSnapshot("Reset pra contrato + ciclo", preSnap);
+                          // Substitui pela derivação
+                          const newMonth = {};
+                          schedEmps.forEach(emp => {
+                            const derived = derivedScheduleByEmp[emp.id];
+                            if (derived && Object.keys(derived).length > 0) {
+                              newMonth[emp.id] = { ...derived };
+                            }
+                          });
+                          onUpdate("schedules", { ...schedules, [rid]: { ...(schedules?.[rid]??{}), [mk]: newMonth } });
+                          setSchedLocalEdits(null);
+                          setShowResetSchedConfirm(false);
+                          onUpdate("_toast", "🔄 Escala resetada para o contrato + ciclo");
+                        }} style={{...S.btnPrimary,padding:"8px 14px",fontSize:13,fontWeight:700,background:"var(--red)",borderColor:"var(--red)"}}>
+                          Resetar escala
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })()}
 
               {/* Month close confirmation modal — Phase 4 */}
               {showCloseConfirm && (
