@@ -3,7 +3,7 @@ import React, { useState, useEffect, useMemo, useRef, Component } from "react";
 import { db } from "./firebase";
 import { doc, getDoc, setDoc, onSnapshot } from "firebase/firestore";
 
-const APP_VERSION = "8.12.1";
+const APP_VERSION = "8.12.2";
 
 // v8.11.1: comparação de versão semver-like (8.11.1 > 8.10.7 > 8.9.4)
 function compareVersions(a, b) {
@@ -12739,77 +12739,99 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                 </div>
                 {/* v8.11.0: Registrar inversão informal */}
                 {(canSched || isOwner) && !monthClosed && (
-                  <button onClick={()=>setSwapModalContext({ empAId: "", date: "" })} style={{...S.btnSecondary,fontSize:11,padding:"3px 10px"}} title="Registrar inversão de turno entre dois empregados (não muda a escala — só registra a troca)">↔️ Registrar inversão</button>
+                  <button onClick={()=>setSwapModalContext({ empAId: "", empBId: "", date1: "", date2: "" })} style={{...S.btnSecondary,fontSize:11,padding:"3px 10px"}} title="Registrar inversão recíproca de turno entre dois empregados (não muda a escala — só registra)">↔️ Registrar inversão</button>
                 )}
                 {/* v8.12.0: "Sugerir folgas de domingo" removido — escala deriva auto do horário+ciclo. */}
               </div>
               {/* Botão "Apagar todas as escalas" movido pra "Mais ações" no rodapé (Configurações avançadas) */}
             </div>
-            {/* v8.11.1: Wizard de inversão em 3 passos — só domingos, filtra por status */}
+            {/* v8.12.2: Wizard de inversão em 4 passos + recíproca — domingo1, empB folgando, empA trab, domingo2 (folga recíproca de A) */}
             {swapModalContext && (() => {
               const ctx = swapModalContext;
-              // Step 1: lista todos os domingos do mês
               const dim2 = new Date(year, month + 1, 0).getDate();
               const sundays = [];
               for (let d = 1; d <= dim2; d++) {
                 const dt = `${year}-${String(month+1).padStart(2,"0")}-${String(d).padStart(2,"0")}`;
                 if (new Date(dt+"T12:00:00").getDay() === 0) sundays.push({ date: dt, day: d });
               }
-              // Determina o "step" pelo preenchimento dos campos
-              const step = !ctx.date ? 1 : (!ctx.empBId ? 2 : (!ctx.empAId ? 3 : 4));
-              // Pra step 2/3: lista empregados conforme status no dia escolhido
+              // Step calculation: 1=date1, 2=empB, 3=empA, 4=date2, 5=confirm
+              const step = !ctx.date1 ? 1 : (!ctx.empBId ? 2 : (!ctx.empAId ? 3 : (!ctx.date2 ? 4 : 5)));
               const empsFolgando = (() => {
-                if (!ctx.date) return [];
+                if (!ctx.date1) return [];
                 return [...schedEmps].filter(e => {
-                  const status = displayedMonth?.[e.id]?.[ctx.date];
-                  // Folga regular ou compensação (folgando) — exclui férias/falta/freela/demitido
-                  if (e.demitidoEm && ctx.date >= e.demitidoEm) return false;
+                  const status = displayedMonth?.[e.id]?.[ctx.date1];
+                  if (e.demitidoEm && ctx.date1 >= e.demitidoEm) return false;
                   return status === DAY_OFF || status === DAY_COMP;
                 }).sort((a,b) => a.name.localeCompare(b.name));
               })();
               const empsTrabalhando = (() => {
-                if (!ctx.date) return [];
+                if (!ctx.date1) return [];
                 return [...schedEmps].filter(e => {
                   if (e.id === ctx.empBId) return false;
-                  if (e.demitidoEm && ctx.date >= e.demitidoEm) return false;
-                  const status = displayedMonth?.[e.id]?.[ctx.date];
-                  // Trabalhando: sem status (default) ou compensação trabalhando
+                  if (e.demitidoEm && ctx.date1 >= e.demitidoEm) return false;
+                  const status = displayedMonth?.[e.id]?.[ctx.date1];
                   return !status || status === DAY_COMP_TRAB;
                 }).sort((a,b) => a.name.localeCompare(b.name));
               })();
-              const empBObj = ctx.empBId ? schedEmps.find(e => e.id === ctx.empBId) : null;
+              // Step 4: lista domingos onde empA está de folga (e empB está trabalhando) — pra ser a recíproca
               const empAObj = ctx.empAId ? schedEmps.find(e => e.id === ctx.empAId) : null;
+              const empBObj = ctx.empBId ? schedEmps.find(e => e.id === ctx.empBId) : null;
+              const reciprocSundays = (() => {
+                if (!ctx.empAId || !ctx.empBId) return [];
+                return sundays.filter(s => {
+                  if (s.date === ctx.date1) return false;
+                  const aSt = displayedMonth?.[ctx.empAId]?.[s.date];
+                  const bSt = displayedMonth?.[ctx.empBId]?.[s.date];
+                  // empA folgando + empB trabalhando = candidato perfeito
+                  const aIsOff = aSt === DAY_OFF || aSt === DAY_COMP;
+                  const bIsWork = !bSt || bSt === DAY_COMP_TRAB;
+                  return aIsOff && bIsWork;
+                });
+              })();
+              // Lista alternativa: qualquer domingo do mês onde empA está folgando (caso recíproca não bata exato)
+              const fallbackReciprocSundays = (() => {
+                if (!ctx.empAId) return [];
+                return sundays.filter(s => {
+                  if (s.date === ctx.date1) return false;
+                  const aSt = displayedMonth?.[ctx.empAId]?.[s.date];
+                  return aSt === DAY_OFF || aSt === DAY_COMP;
+                });
+              })();
               const ac = "var(--ac)";
-              const dateLabel = ctx.date ? new Date(ctx.date+"T12:00:00").toLocaleDateString("pt-BR") : "";
+              const date1Label = ctx.date1 ? new Date(ctx.date1+"T12:00:00").toLocaleDateString("pt-BR") : "";
+              const date2Label = ctx.date2 ? new Date(ctx.date2+"T12:00:00").toLocaleDateString("pt-BR") : "";
               return (
                 <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.45)",zIndex:1000,display:"flex",alignItems:"center",justifyContent:"center",padding:16}} onClick={()=>setSwapModalContext(null)}>
-                  <div onClick={e=>e.stopPropagation()} style={{background:"var(--card-bg)",border:"1px solid var(--border)",borderRadius:14,maxWidth:540,width:"100%",maxHeight:"85vh",overflow:"auto",padding:24,boxShadow:"0 20px 50px rgba(0,0,0,0.3)"}}>
+                  <div onClick={e=>e.stopPropagation()} style={{background:"var(--card-bg)",border:"1px solid var(--border)",borderRadius:14,maxWidth:560,width:"100%",maxHeight:"88vh",overflow:"auto",padding:24,boxShadow:"0 20px 50px rgba(0,0,0,0.3)"}}>
                     <h3 style={{margin:"0 0 4px",color:"var(--text)",fontSize:16,fontWeight:700}}>↔️ Registrar inversão de domingo</h3>
                     <p style={{color:"var(--text3)",fontSize:12,margin:"0 0 14px",lineHeight:1.5}}>
-                      A escala, gorjeta e VT continuam idênticos — só registramos quem trocou com quem.
+                      Inversão recíproca: registra os dois domingos da troca. Escala, gorjeta e VT continuam idênticos.
                     </p>
-                    {/* Breadcrumb dos passos */}
-                    <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:14,fontSize:11,fontFamily:"'DM Mono',monospace",color:"var(--text3)",flexWrap:"wrap"}}>
+                    {/* Breadcrumb */}
+                    <div style={{display:"flex",alignItems:"center",gap:5,marginBottom:14,fontSize:11,fontFamily:"'DM Mono',monospace",color:"var(--text3)",flexWrap:"wrap"}}>
                       <span style={{color:step>=1?ac:"var(--text3)",fontWeight:step===1?700:500}}>1·Domingo</span>
-                      {ctx.date && <span style={{color:"var(--text2)"}}>{dateLabel}</span>}
+                      {ctx.date1 && <span style={{color:"var(--text2)"}}>{date1Label}</span>}
                       <span>›</span>
-                      <span style={{color:step>=2?ac:"var(--text3)",fontWeight:step===2?700:500}}>2·Quem está de folga</span>
+                      <span style={{color:step>=2?ac:"var(--text3)",fontWeight:step===2?700:500}}>2·Folga</span>
                       {empBObj && <span style={{color:"var(--text2)"}}>{empBObj.name.split(" ")[0]}</span>}
                       <span>›</span>
-                      <span style={{color:step>=3?ac:"var(--text3)",fontWeight:step===3?700:500}}>3·Trocou com</span>
+                      <span style={{color:step>=3?ac:"var(--text3)",fontWeight:step===3?700:500}}>3·Trab</span>
                       {empAObj && <span style={{color:"var(--text2)"}}>{empAObj.name.split(" ")[0]}</span>}
+                      <span>›</span>
+                      <span style={{color:step>=4?ac:"var(--text3)",fontWeight:step===4?700:500}}>4·Recíproca</span>
+                      {ctx.date2 && <span style={{color:"var(--text2)"}}>{date2Label}</span>}
                     </div>
 
-                    {/* STEP 1: pick Sunday */}
+                    {/* STEP 1: pick Sunday (date1) */}
                     {step === 1 && (
                       <div>
-                        <p style={{color:"var(--text2)",fontSize:13,margin:"0 0 12px"}}>Escolha o domingo:</p>
+                        <p style={{color:"var(--text2)",fontSize:13,margin:"0 0 12px"}}>Escolha o domingo da troca:</p>
                         {sundays.length === 0 ? (
                           <div style={{padding:"20px",textAlign:"center",color:"var(--text3)",fontSize:12}}>Sem domingos neste mês.</div>
                         ) : (
                           <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(120px,1fr))",gap:8}}>
                             {sundays.map(s => (
-                              <button key={s.date} onClick={()=>setSwapModalContext({...ctx,date:s.date})}
+                              <button key={s.date} onClick={()=>setSwapModalContext({...ctx,date1:s.date})}
                                 style={{padding:"12px 8px",borderRadius:10,border:`1px solid ${ac}66`,background:"var(--bg2)",color:"var(--text)",cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:13,fontWeight:600,textAlign:"center",transition:"all 0.15s"}}
                                 onMouseEnter={e=>{e.currentTarget.style.background=ac+"22";e.currentTarget.style.borderColor=ac;}}
                                 onMouseLeave={e=>{e.currentTarget.style.background="var(--bg2)";e.currentTarget.style.borderColor=ac+"66";}}>
@@ -12822,20 +12844,19 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                       </div>
                     )}
 
-                    {/* STEP 2: pick employee on FOLGA */}
+                    {/* STEP 2: empB folga */}
                     {step === 2 && (
                       <div>
-                        <p style={{color:"var(--text2)",fontSize:13,margin:"0 0 12px"}}>Quem está de <strong>folga</strong> em {dateLabel} e fez a troca:</p>
+                        <p style={{color:"var(--text2)",fontSize:13,margin:"0 0 12px"}}>Quem está de <strong>folga</strong> em {date1Label} e fez a troca:</p>
                         {empsFolgando.length === 0 ? (
                           <div style={{padding:"20px",textAlign:"center",color:"var(--text3)",fontSize:12,background:"var(--bg2)",borderRadius:10}}>
-                            Ninguém marcado como folga ou compensação neste domingo.
-                            <br/><span style={{fontSize:11}}>Verifique a escala — só dá pra registrar inversão entre quem está marcado como folga e quem está trabalhando.</span>
+                            Ninguém marcado como folga neste domingo.
                           </div>
                         ) : (
                           <div style={{display:"flex",flexDirection:"column",gap:6,maxHeight:320,overflow:"auto"}}>
                             {empsFolgando.map(e => {
                               const role = restRoles.find(r => r.id === e.roleId);
-                              const status = displayedMonth?.[e.id]?.[ctx.date];
+                              const status = displayedMonth?.[e.id]?.[ctx.date1];
                               return (
                                 <button key={e.id} onClick={()=>setSwapModalContext({...ctx,empBId:e.id})}
                                   style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"10px 14px",borderRadius:10,border:"1px solid var(--border)",background:"var(--bg2)",color:"var(--text)",cursor:"pointer",fontFamily:"'DM Sans',sans-serif",fontSize:13,textAlign:"left",transition:"all 0.15s"}}
@@ -12851,15 +12872,15 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                             })}
                           </div>
                         )}
-                        <button onClick={()=>setSwapModalContext({...ctx,date:""})} style={{...S.btnSecondary,fontSize:11,padding:"6px 12px",marginTop:12}}>← Trocar domingo</button>
+                        <button onClick={()=>setSwapModalContext({...ctx,date1:""})} style={{...S.btnSecondary,fontSize:11,padding:"6px 12px",marginTop:12}}>← Trocar domingo</button>
                       </div>
                     )}
 
-                    {/* STEP 3: pick employee TRABALHANDO who swaps with empB */}
+                    {/* STEP 3: empA trabalhando */}
                     {step === 3 && (
                       <div>
                         <p style={{color:"var(--text2)",fontSize:13,margin:"0 0 12px"}}>
-                          <strong>{empBObj?.name}</strong> trocou com quem? (lista de quem está <strong>trabalhando</strong> em {dateLabel})
+                          <strong>{empBObj?.name}</strong> trocou com quem? (lista de quem está <strong>trabalhando</strong> em {date1Label})
                         </p>
                         {empsTrabalhando.length === 0 ? (
                           <div style={{padding:"20px",textAlign:"center",color:"var(--text3)",fontSize:12,background:"var(--bg2)",borderRadius:10}}>
@@ -12888,15 +12909,60 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                       </div>
                     )}
 
-                    {/* STEP 4: confirmação + nota */}
+                    {/* STEP 4: date2 (folga recíproca de empA) */}
                     {step === 4 && (
                       <div>
-                        <div style={{padding:"14px 16px",background:ac+"15",border:`1px solid ${ac}55`,borderRadius:10,marginBottom:12}}>
-                          <div style={{fontSize:13,color:"var(--text)",lineHeight:1.6}}>
-                            <strong>{empBObj?.name}</strong> (folgaria) trocou com <strong>{empAObj?.name}</strong> (trabalharia) em <strong>{dateLabel}</strong>.
+                        <p style={{color:"var(--text2)",fontSize:13,margin:"0 0 6px"}}>
+                          Em qual domingo <strong>{empAObj?.name}</strong> folgaria — e <strong>{empBObj?.name}</strong> vai cobrir?
+                        </p>
+                        <p style={{color:"var(--text3)",fontSize:11,margin:"0 0 12px"}}>Esse é o domingo da recíproca: a troca de volta.</p>
+                        {reciprocSundays.length > 0 ? (
+                          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(140px,1fr))",gap:8}}>
+                            {reciprocSundays.map(s => (
+                              <button key={s.date} onClick={()=>setSwapModalContext({...ctx,date2:s.date})}
+                                style={{padding:"12px 8px",borderRadius:10,border:`1px solid ${ac}66`,background:"var(--bg2)",color:"var(--text)",cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:13,fontWeight:600,textAlign:"center",transition:"all 0.15s"}}
+                                onMouseEnter={e=>{e.currentTarget.style.background=ac+"22";e.currentTarget.style.borderColor=ac;}}
+                                onMouseLeave={e=>{e.currentTarget.style.background="var(--bg2)";e.currentTarget.style.borderColor=ac+"66";}}>
+                                <div style={{fontSize:18,fontWeight:800,color:ac}}>{String(s.day).padStart(2,"0")}</div>
+                                <div style={{fontSize:10,color:"var(--text3)",marginTop:2}}>A folga · B trab</div>
+                              </button>
+                            ))}
                           </div>
-                          <div style={{fontSize:11,color:"var(--text3)",marginTop:6,lineHeight:1.5}}>
-                            Na escala continua: {empAObj?.name} trabalhando, {empBObj?.name} folga. Gorjeta e VT seguem o original. Só fica o registro.
+                        ) : fallbackReciprocSundays.length > 0 ? (
+                          <div>
+                            <div style={{padding:"10px 12px",background:"#f59e0b15",border:"1px solid #f59e0b44",borderRadius:8,fontSize:11,color:"var(--text2)",marginBottom:10,lineHeight:1.5}}>
+                              ℹ️ Nenhum domingo perfeito (A folga + B trab) neste mês. Mostrando todos onde {empAObj?.name} está de folga.
+                            </div>
+                            <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(140px,1fr))",gap:8}}>
+                              {fallbackReciprocSundays.map(s => (
+                                <button key={s.date} onClick={()=>setSwapModalContext({...ctx,date2:s.date})}
+                                  style={{padding:"12px 8px",borderRadius:10,border:"1px solid var(--border)",background:"var(--bg2)",color:"var(--text)",cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:13,fontWeight:600,textAlign:"center"}}>
+                                  <div style={{fontSize:18,fontWeight:800}}>{String(s.day).padStart(2,"0")}</div>
+                                  <div style={{fontSize:10,color:"var(--text3)",marginTop:2}}>A folga</div>
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                        ) : (
+                          <div style={{padding:"20px",textAlign:"center",color:"var(--text3)",fontSize:12,background:"var(--bg2)",borderRadius:10,marginBottom:12}}>
+                            {empAObj?.name} não tem folga marcada em outro domingo deste mês.
+                            <br/><span style={{fontSize:11,marginTop:8,display:"block"}}>Marque a folga primeiro na escala (ou ajuste o ciclo de domingo no horário) e volte aqui.</span>
+                          </div>
+                        )}
+                        <button onClick={()=>setSwapModalContext({...ctx,empAId:""})} style={{...S.btnSecondary,fontSize:11,padding:"6px 12px",marginTop:12}}>← Voltar</button>
+                      </div>
+                    )}
+
+                    {/* STEP 5: confirmação */}
+                    {step === 5 && (
+                      <div>
+                        <div style={{padding:"14px 16px",background:ac+"15",border:`1px solid ${ac}55`,borderRadius:10,marginBottom:12}}>
+                          <div style={{fontSize:13,color:"var(--text)",lineHeight:1.7,marginBottom:8}}>
+                            <div><strong>Domingo {date1Label}:</strong> {empAObj?.name} aparece trabalhando, {empBObj?.name} aparece de folga — mas {empBObj?.name} cobriu.</div>
+                            <div style={{marginTop:6}}><strong>Domingo {date2Label}:</strong> {empBObj?.name} aparece trabalhando, {empAObj?.name} aparece de folga — mas {empAObj?.name} cobriu.</div>
+                          </div>
+                          <div style={{fontSize:11,color:"var(--text3)",marginTop:6,lineHeight:1.5,paddingTop:8,borderTop:`1px dashed ${ac}55`}}>
+                            Escala, gorjeta e VT seguem o original. Só fica o registro nos 4 domingos (badge ↔).
                           </div>
                         </div>
                         <div style={{marginBottom:12}}>
@@ -12904,12 +12970,13 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                           <input value={ctx.note || ""} onChange={e=>setSwapModalContext({...ctx,note:e.target.value})} placeholder="ex: aniversário do amigo" style={S.input} />
                         </div>
                         <div style={{display:"flex",justifyContent:"space-between",gap:10}}>
-                          <button onClick={()=>setSwapModalContext({...ctx,empAId:""})} style={{...S.btnSecondary,fontSize:12,padding:"8px 14px"}}>← Voltar</button>
+                          <button onClick={()=>setSwapModalContext({...ctx,date2:""})} style={{...S.btnSecondary,fontSize:12,padding:"8px 14px"}}>← Voltar</button>
                           <button onClick={()=>{
                             const newSwap = {
                               id: `swap-${Date.now()}-${Math.random().toString(36).slice(2,5)}`,
                               restaurantId: rid,
-                              date: ctx.date,
+                              date1: ctx.date1,
+                              date2: ctx.date2,
                               empAId: ctx.empAId,
                               empBId: ctx.empBId,
                               note: ctx.note?.trim() || "",
@@ -12918,7 +12985,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                             };
                             onUpdate("scheduleSwaps", [...(data?.scheduleSwaps ?? []), newSwap]);
                             setSwapModalContext(null);
-                            onUpdate("_toast", `↔️ Inversão registrada: ${empAObj?.name} ↔ ${empBObj?.name} em ${dateLabel}`);
+                            onUpdate("_toast", `↔️ Inversão registrada: ${empAObj?.name} ↔ ${empBObj?.name} (${date1Label} ↔ ${date2Label})`);
                           }} style={{...S.btnPrimary,fontSize:13,padding:"8px 16px",fontWeight:700}}>✓ Registrar inversão</button>
                         </div>
                       </div>
@@ -13581,26 +13648,46 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
 
             {areaEmps.length > 0 && (() => {
               const daysInMonth = dim;
-              // v8.11.0: índice de inversões por (empId, date) pra renderizar badge ↔️
+              // v8.12.2: índice de inversões — agora suporta date1+date2 (recíproca). Cada swap marca 4 cells (empA@date1, empA@date2, empB@date1, empB@date2).
+              // Compat: entradas legadas com `date` (sem date2) — só marcam 2 cells.
               const swapsByEmpDate = {};
-              const restSwaps = (data?.scheduleSwaps ?? []).filter(s => s.restaurantId === rid && s.date && s.date.slice(0,7) === mk);
               const empNameById = {};
               schedEmps.forEach(e => { empNameById[e.id] = e.name; });
+              const restSwaps = (data?.scheduleSwaps ?? []).filter(s => {
+                if (s.restaurantId !== rid) return false;
+                const dates = [s.date1, s.date2, s.date].filter(Boolean);
+                return dates.some(d => d.slice(0,7) === mk);
+              });
+              const addEntry = (empId, dateStr, sw, partnerName, otherDateStr) => {
+                if (!empId || !dateStr) return;
+                if (dateStr.slice(0,7) !== mk) return;
+                if (!swapsByEmpDate[empId]) swapsByEmpDate[empId] = {};
+                swapsByEmpDate[empId][dateStr] = { ...sw, partnerName, otherDate: otherDateStr };
+              };
               restSwaps.forEach(sw => {
-                if (sw.empAId) {
-                  if (!swapsByEmpDate[sw.empAId]) swapsByEmpDate[sw.empAId] = {};
-                  swapsByEmpDate[sw.empAId][sw.date] = { ...sw, side: "A", otherName: empNameById[sw.empBId] || "—" };
-                }
-                if (sw.empBId) {
-                  if (!swapsByEmpDate[sw.empBId]) swapsByEmpDate[sw.empBId] = {};
-                  swapsByEmpDate[sw.empBId][sw.date] = { ...sw, side: "B", otherName: empNameById[sw.empAId] || "—" };
+                const aName = empNameById[sw.empAId] || "—";
+                const bName = empNameById[sw.empBId] || "—";
+                if (sw.date1 || sw.date2) {
+                  // Modelo novo recíproco
+                  if (sw.date1) {
+                    addEntry(sw.empAId, sw.date1, sw, bName, sw.date2);
+                    addEntry(sw.empBId, sw.date1, sw, aName, sw.date2);
+                  }
+                  if (sw.date2) {
+                    addEntry(sw.empAId, sw.date2, sw, bName, sw.date1);
+                    addEntry(sw.empBId, sw.date2, sw, aName, sw.date1);
+                  }
+                } else if (sw.date) {
+                  // Legado: 1 data só
+                  addEntry(sw.empAId, sw.date, sw, bName, null);
+                  addEntry(sw.empBId, sw.date, sw, aName, null);
                 }
               });
               const swapTooltip = (empId, dateStr) => {
                 const sw = swapsByEmpDate[empId]?.[dateStr];
                 if (!sw) return null;
-                const dateBR = new Date(dateStr+"T12:00:00").toLocaleDateString("pt-BR");
-                return `↔️ Invertido com ${sw.otherName} em ${dateBR}${sw.note?` · ${sw.note}`:""} · registrado por ${sw.registeredBy}`;
+                const otherBR = sw.otherDate ? ` · folga recíproca em ${new Date(sw.otherDate+"T12:00:00").toLocaleDateString("pt-BR")}` : "";
+                return `↔️ Invertido com ${sw.partnerName}${otherBR}${sw.note?` · ${sw.note}`:""} · registrado por ${sw.registeredBy}`;
               };
 
               function cycleStatus(empId, dateStr) {
@@ -13933,20 +14020,35 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                     </div>
                   );
                 })()}
-                {/* v8.11.0: Inversões registradas neste mês */}
+                {/* v8.12.2: Inversões registradas — agora mostra date1 ↔ date2 */}
                 {(() => {
-                  const monthSwaps = (data?.scheduleSwaps ?? []).filter(s => s.restaurantId === rid && s.date && s.date.slice(0,7) === mk);
+                  const monthSwaps = (data?.scheduleSwaps ?? []).filter(s => {
+                    if (s.restaurantId !== rid) return false;
+                    const dates = [s.date1, s.date2, s.date].filter(Boolean);
+                    return dates.some(d => d.slice(0,7) === mk);
+                  });
                   if (monthSwaps.length === 0) return null;
                   const empNameMap = {};
                   schedEmps.forEach(e => { empNameMap[e.id] = e.name; });
+                  const fmtSwapDates = (sw) => {
+                    if (sw.date1 && sw.date2) {
+                      const d1 = new Date(sw.date1+"T12:00:00").toLocaleDateString("pt-BR");
+                      const d2 = new Date(sw.date2+"T12:00:00").toLocaleDateString("pt-BR");
+                      return `${d1} ↔ ${d2}`;
+                    }
+                    if (sw.date) return new Date(sw.date+"T12:00:00").toLocaleDateString("pt-BR");
+                    if (sw.date1) return new Date(sw.date1+"T12:00:00").toLocaleDateString("pt-BR");
+                    return "—";
+                  };
+                  const swSortKey = (sw) => sw.date1 || sw.date || "";
                   return (
                     <div style={{padding:"10px 12px",background:"var(--card-bg)",border:"1px solid #7c3aed44",borderRadius:8}}>
                       <div style={{fontSize:12,fontWeight:700,color:"#7c3aed",marginBottom:8}}>↔️ Inversões registradas neste mês ({monthSwaps.length})</div>
                       <div style={{display:"flex",flexDirection:"column",gap:6}}>
-                        {monthSwaps.sort((a,b) => (a.date || "").localeCompare(b.date || "")).map(sw => (
+                        {monthSwaps.sort((a,b) => swSortKey(a).localeCompare(swSortKey(b))).map(sw => (
                           <div key={sw.id} style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:8,padding:"6px 10px",background:"var(--bg2)",borderRadius:6,fontSize:11}}>
                             <span style={{color:"var(--text2)"}}>
-                              <strong>{new Date(sw.date+"T12:00:00").toLocaleDateString("pt-BR")}</strong>
+                              <strong>{fmtSwapDates(sw)}</strong>
                               {" "}· {empNameMap[sw.empAId] || "—"} ↔ {empNameMap[sw.empBId] || "—"}
                               {sw.note && <span style={{color:"var(--text3)",marginLeft:6}}>· {sw.note}</span>}
                               <span style={{color:"var(--text3)",marginLeft:6,fontSize:10}}>· por {sw.registeredBy}</span>
