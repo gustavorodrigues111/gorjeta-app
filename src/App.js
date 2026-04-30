@@ -3,7 +3,7 @@ import React, { useState, useEffect, useMemo, useRef, Component } from "react";
 import { db } from "./firebase";
 import { doc, getDoc, setDoc } from "firebase/firestore";
 
-const APP_VERSION = "8.4.3";
+const APP_VERSION = "8.4.4";
 
 const DEFAULT_ADMISSION = () => `${new Date().getFullYear()}-01-01`;
 const round2 = (v) => Math.round(v * 100) / 100;
@@ -10121,23 +10121,26 @@ function MonthPickerGate({ contextLabel, year, month, onPick, scheduleStatus, re
           display: "grid",
           // v8.4.2: grid fixo pra evitar última linha com botões esticados
           gridTemplateColumns: typeof window !== "undefined" && window.innerWidth < 600 ? "repeat(2, 1fr)" : "repeat(3, 1fr)",
+          // v8.4.4: linhas com altura igual pra todos os botões mesmo se label quebra (ex: "fevereiro de 2026" 2 linhas)
+          gridAutoRows: "1fr",
           gap: 10,
         }}>
           {options.map(o => (
             <button key={`${o.y}-${o.m}`} onClick={() => onPick(o.y, o.m)}
               style={{
                 background: o.bg, border: `1px solid ${o.border}`, borderRadius: 12,
-                padding: "14px 12px", cursor: "pointer", fontFamily: "'DM Sans',sans-serif",
+                padding: "14px 10px", cursor: "pointer", fontFamily: "'DM Sans',sans-serif",
                 position: "relative", transition: "transform .12s, box-shadow .12s",
-                width: "100%", boxSizing: "border-box", minWidth: 0,
+                width: "100%", boxSizing: "border-box", minWidth: 0, minHeight: 88,
+                display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 4,
               }}
               onMouseEnter={e => { e.currentTarget.style.transform = "translateY(-2px)"; e.currentTarget.style.boxShadow = `0 4px 12px ${o.color}33`; }}
               onMouseLeave={e => { e.currentTarget.style.transform = "translateY(0)"; e.currentTarget.style.boxShadow = "none"; }}>
               {o.isSmart && (
                 <span style={{ position: "absolute", top: 6, right: 6, fontSize: 9, padding: "2px 8px", borderRadius: 999, background: "var(--ac)", color: "#fff", fontWeight: 800, letterSpacing: 0.3 }}>SUGERIDO</span>
               )}
-              <div style={{ fontSize: 16, fontWeight: 800, color: "var(--text)", marginBottom: 4 }}>{o.label}</div>
-              <div style={{ fontSize: 11, color: o.color, fontWeight: 600 }}>{o.context}</div>
+              <div style={{ fontSize: 14, fontWeight: 800, color: "var(--text)", lineHeight: 1.2, textAlign: "center" }}>{o.label}</div>
+              <div style={{ fontSize: 11, color: o.color, fontWeight: 600, textAlign: "center" }}>{o.context}</div>
             </button>
           ))}
         </div>
