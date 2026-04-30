@@ -3,7 +3,7 @@ import React, { useState, useEffect, useMemo, useRef, Component } from "react";
 import { db } from "./firebase";
 import { doc, getDoc, setDoc } from "firebase/firestore";
 
-const APP_VERSION = "8.9.2";
+const APP_VERSION = "8.9.3";
 
 const DEFAULT_ADMISSION = () => `${new Date().getFullYear()}-01-01`;
 const round2 = (v) => Math.round(v * 100) / 100;
@@ -13978,6 +13978,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                     ["roles",       "🏷️ Cargos"],
                     ["employees",   "👥 Equipe"],
                     ["horarios",    "🕐 Horários"],
+                    ["trilha",      "🎯 Trilhas"],
                     ["faq",         "❓ FAQ"],
                     ["comunicados", "📢 Comunicados"],
                     ["dp",          "💬 Fale com DP"],
@@ -14004,6 +14005,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                 <div style={{display:"flex",flexDirection:"column",gap:10}}>
                   {[
                     ["horarios",    "🕐 Horários"],
+                    ["trilha",      "🎯 Trilhas"],
                     ["faq",         "❓ FAQ"],
                     ["comunicados", "📢 Comunicados"],
                     ["dp",          "💬 Fale com DP"],
