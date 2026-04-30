@@ -3,7 +3,7 @@ import React, { useState, useEffect, useMemo, useRef, Component } from "react";
 import { db } from "./firebase";
 import { doc, getDoc, setDoc } from "firebase/firestore";
 
-const APP_VERSION = "8.5.0";
+const APP_VERSION = "8.5.1";
 
 const DEFAULT_ADMISSION = () => `${new Date().getFullYear()}-01-01`;
 const round2 = (v) => Math.round(v * 100) / 100;
@@ -21223,13 +21223,10 @@ function FreelaLancamentoTab({ restaurantId, allPessoas, restPessoas, restFreela
   const [filterPeriod, setFilterPeriod] = useState({ from: "", to: "" });
   const [filterPessoa, setFilterPessoa] = useState("");
 
-  // canEditAll = DP/Owner pode editar qualquer shift; senão só os próprios e só status aberto
-  const canEditAll = isDP || isOwner;
-  const canEditShift = (s) => {
-    if (s.status !== "aberto") return false; // travado
-    if (canEditAll) return true;
-    return s.lancadoPorId === currentUser?.id;
-  };
+  // v8.5.1: qualquer líder/DP/owner pode editar shifts em aberto (líder B fecha turno aberto pelo líder A)
+  // Travado se status != "aberto" (já em lote ou pago).
+  const canEditAll = isDP || isOwner; // eslint-disable-line no-unused-vars
+  const canEditShift = (s) => s.status === "aberto";
 
   // Filtros aplicados
   const filtered = shifts.filter(s => {
@@ -21241,11 +21238,6 @@ function FreelaLancamentoTab({ restaurantId, allPessoas, restPessoas, restFreela
     if (filterPeriod.to && s.date > filterPeriod.to) return false;
     return true;
   }).sort((a,b) => (b.date || "").localeCompare(a.date || "") || (b.lancadoEm || "").localeCompare(a.lancadoEm || ""));
-
-  function pessoaName(pessoaId) {
-    const p = restPessoas.find(x => x.id === pessoaId);
-    return p?.name || "(removido)";
-  }
 
   function handleAddSubmit() {
     if (!newShift.pessoaId) { alert("Selecione a pessoa."); return; }
@@ -21522,8 +21514,10 @@ function FreelaLancamentoTab({ restaurantId, allPessoas, restPessoas, restFreela
       {/* Form de adicionar shift */}
       {showAddForm && (
         <div style={{background:`${ac}08`,border:`1px solid ${ac}44`,borderRadius:10,padding:14,marginBottom:14}}>
-          <div style={{fontSize:11,color:ac,fontWeight:700,textTransform:"uppercase",letterSpacing:0.4,marginBottom:10}}>Novo shift</div>
-          <div style={{display:"grid",gridTemplateColumns:mobileOnly?"1fr":"2fr 1fr 1fr 1fr 0.8fr",gap:8,marginBottom:10}}>
+          <div style={{fontSize:11,color:ac,fontWeight:700,textTransform:"uppercase",letterSpacing:0.4,marginBottom:4}}>Abrir shift</div>
+          <div style={{fontSize:11,color:"var(--text3)",marginBottom:10}}>Saída, intervalo e valor são preenchidos pelo DP no <em>Fechamento</em>.</div>
+          {/* v8.5.1: form simplificado — só pede o que o líder precisa pra abrir */}
+          <div style={{display:"grid",gridTemplateColumns:mobileOnly?"1fr":"2fr 1fr 1fr 1fr",gap:8,marginBottom:10}}>
             <div>
               <label style={{...S.label,fontSize:11}}>Pessoa</label>
               <select value={newShift.pessoaId} onChange={e=>setNewShift({...newShift,pessoaId:e.target.value})} style={{...S.input,cursor:"pointer"}}>
@@ -21545,19 +21539,9 @@ function FreelaLancamentoTab({ restaurantId, allPessoas, restPessoas, restFreela
               <input type="date" value={newShift.date} onChange={e=>setNewShift({...newShift,date:e.target.value})} style={S.input}/>
             </div>
             <div>
-              <label style={{...S.label,fontSize:11}}>Entrada</label>
+              <label style={{...S.label,fontSize:11}}>Hora de entrada</label>
               <input type="time" value={newShift.entrada} onChange={e=>setNewShift({...newShift,entrada:e.target.value})} style={S.input}/>
             </div>
-            <div>
-              <label style={{...S.label,fontSize:11}}>Saída</label>
-              <input type="time" value={newShift.saida} onChange={e=>setNewShift({...newShift,saida:e.target.value})} style={S.input}/>
-            </div>
-            <div>
-              <label style={{...S.label,fontSize:11}}>Interv. (min)</label>
-              <input type="number" min="0" value={newShift.intervalo} onChange={e=>setNewShift({...newShift,intervalo:e.target.value})} style={S.input}/>
-            </div>
-          </div>
-          <div style={{display:"grid",gridTemplateColumns:mobileOnly?"1fr":"1fr 2fr",gap:8,marginBottom:10}}>
             <div>
               <label style={{...S.label,fontSize:11}}>Área</label>
               <select value={newShift.area} onChange={e=>setNewShift({...newShift,area:e.target.value})} style={{...S.input,cursor:"pointer"}}>
@@ -21565,20 +21549,14 @@ function FreelaLancamentoTab({ restaurantId, allPessoas, restPessoas, restFreela
                 {AREAS.map(a => <option key={a} value={a}>{a}</option>)}
               </select>
             </div>
-            <div>
-              <label style={{...S.label,fontSize:11}}>Observação (opcional)</label>
-              <input value={newShift.observacao} onChange={e=>setNewShift({...newShift,observacao:e.target.value})} placeholder="ex: chegou atrasado, cobriu evento, etc" style={S.input}/>
-            </div>
           </div>
-          {/* Preview de horas */}
-          {newShift.entrada && newShift.saida && (
-            <div style={{padding:"6px 10px",background:"var(--bg2)",borderRadius:6,marginBottom:10,fontSize:12,color:"var(--text2)"}}>
-              ⏱️ Horas trabalhadas: <strong>{fmtHoras(calcHoras(newShift.entrada, newShift.saida, newShift.intervalo))}</strong>
-            </div>
-          )}
+          <div style={{marginBottom:10}}>
+            <label style={{...S.label,fontSize:11}}>Observação (opcional)</label>
+            <input value={newShift.observacao} onChange={e=>setNewShift({...newShift,observacao:e.target.value})} placeholder="ex: chegou atrasado, cobriu evento, etc" style={S.input}/>
+          </div>
           <div style={{display:"flex",gap:8,justifyContent:"flex-end"}}>
             <button onClick={()=>setShowAddForm(false)} style={{...S.btnSecondary,fontSize:12,padding:"7px 14px"}}>Cancelar</button>
-            <button onClick={handleAddSubmit} style={{background:ac,color:"#fff",border:"none",borderRadius:8,padding:"7px 18px",fontSize:13,fontWeight:700,cursor:"pointer"}}>+ Lançar shift</button>
+            <button onClick={handleAddSubmit} style={{background:ac,color:"#fff",border:"none",borderRadius:8,padding:"7px 18px",fontSize:13,fontWeight:700,cursor:"pointer"}}>+ Abrir shift</button>
           </div>
         </div>
       )}
@@ -21595,114 +21573,32 @@ function FreelaLancamentoTab({ restaurantId, allPessoas, restPessoas, restFreela
           )}
         </div>
       ) : (
-        <div style={{background:"var(--card-bg)",border:"1px solid var(--border)",borderRadius:10,overflow:"hidden"}}>
-          <div style={{overflowX:"auto"}}>
-            <table style={{width:"100%",borderCollapse:"collapse",fontSize:12}}>
-              <thead>
-                <tr style={{background:"var(--bg2)",borderBottom:"1px solid var(--border)"}}>
-                  <th style={{padding:"8px 10px",textAlign:"left",color:"var(--text3)",fontWeight:700,fontSize:10,textTransform:"uppercase",letterSpacing:0.3}}>Pessoa</th>
-                  <th style={{padding:"8px 10px",textAlign:"left",color:"var(--text3)",fontWeight:700,fontSize:10,textTransform:"uppercase",letterSpacing:0.3,whiteSpace:"nowrap"}}>Data</th>
-                  <th style={{padding:"8px 10px",textAlign:"center",color:"var(--text3)",fontWeight:700,fontSize:10,textTransform:"uppercase",letterSpacing:0.3}}>Ent.</th>
-                  <th style={{padding:"8px 10px",textAlign:"center",color:"var(--text3)",fontWeight:700,fontSize:10,textTransform:"uppercase",letterSpacing:0.3}}>Saí.</th>
-                  <th style={{padding:"8px 10px",textAlign:"center",color:"var(--text3)",fontWeight:700,fontSize:10,textTransform:"uppercase",letterSpacing:0.3}}>Int.</th>
-                  <th style={{padding:"8px 10px",textAlign:"right",color:"var(--text3)",fontWeight:700,fontSize:10,textTransform:"uppercase",letterSpacing:0.3}}>Horas</th>
-                  <th style={{padding:"8px 10px",textAlign:"left",color:"var(--text3)",fontWeight:700,fontSize:10,textTransform:"uppercase",letterSpacing:0.3}}>Área</th>
-                  <th style={{padding:"8px 10px",textAlign:"center",color:"var(--text3)",fontWeight:700,fontSize:10,textTransform:"uppercase",letterSpacing:0.3,minWidth:140}}>Valor</th>
-                  <th style={{padding:"8px 10px",textAlign:"right",color:"var(--text3)",fontWeight:700,fontSize:10,textTransform:"uppercase",letterSpacing:0.3}}>Total</th>
-                  <th style={{padding:"8px 10px",textAlign:"center",color:"var(--text3)",fontWeight:700,fontSize:10,textTransform:"uppercase",letterSpacing:0.3}}>St.</th>
-                  <th style={{padding:"8px 10px",textAlign:"center",color:"var(--text3)",fontWeight:700,fontSize:10,textTransform:"uppercase",letterSpacing:0.3,width:30}}></th>
-                </tr>
-              </thead>
-              <tbody>
-                {filtered.map(s => {
-                  const editable = canEditShift(s);
-                  const pronto = s.status === "aberto" ? shiftPrntoPronto(s) : { ok: false };
-                  const statusBadge = s.status === "pago"
-                    ? { icon: "💸", color: "#15803d", bg: "#10b98122", label: "Pago" }
-                    : s.status === "fechamento"
-                      ? { icon: "🔒", color: "#92400e", bg: "#fef3c7", label: "Fechamento" }
-                      : pronto.ok
-                        ? { icon: "✅", color: "#15803d", bg: "#10b98122", label: "Pronto pra fechar" }
-                        : { icon: "⚠️", color: "#92400e", bg: "#fef3c7", label: "Aberto — " + (pronto.motivo || "incompleto") };
-                  return (
-                    <tr key={s.id} style={{borderTop:"1px solid var(--border)"}}>
-                      <td style={{padding:"6px 10px",color:"var(--text)",fontWeight:600}}>{pessoaName(s.pessoaId)}</td>
-                      <td style={{padding:"6px 10px",color:"var(--text2)",whiteSpace:"nowrap"}}>{fmtDate(s.date)}</td>
-                      <td style={{padding:"4px 6px",textAlign:"center"}}>
-                        {editable ? (
-                          <input type="time" value={s.entrada || ""} onChange={e=>updateShift(s.id, {entrada: e.target.value})} style={{...S.input,fontSize:11,padding:"3px 6px",width:80}}/>
-                        ) : <span style={{fontSize:11,color:"var(--text2)",fontFamily:"'DM Mono',monospace"}}>{s.entrada || "—"}</span>}
-                      </td>
-                      <td style={{padding:"4px 6px",textAlign:"center"}}>
-                        {editable ? (
-                          <input type="time" value={s.saida || ""} onChange={e=>updateShift(s.id, {saida: e.target.value})} style={{...S.input,fontSize:11,padding:"3px 6px",width:80}}/>
-                        ) : <span style={{fontSize:11,color:"var(--text2)",fontFamily:"'DM Mono',monospace"}}>{s.saida || "—"}</span>}
-                      </td>
-                      <td style={{padding:"4px 6px",textAlign:"center"}}>
-                        {editable ? (
-                          <input type="number" min="0" value={s.intervalo || 0} onChange={e=>updateShift(s.id, {intervalo: parseInt(e.target.value) || 0})} style={{...S.input,fontSize:11,padding:"3px 6px",width:50,textAlign:"center"}}/>
-                        ) : <span style={{fontSize:11,color:"var(--text2)"}}>{s.intervalo || 0}min</span>}
-                      </td>
-                      <td style={{padding:"6px 10px",textAlign:"right",fontFamily:"'DM Mono',monospace",fontWeight:700,color:"var(--text)"}}>{fmtHoras(s.horas)}</td>
-                      <td style={{padding:"4px 6px"}}>
-                        {editable ? (
-                          <select value={s.area || ""} onChange={e=>updateShift(s.id, {area: e.target.value || null})} style={{...S.input,fontSize:11,padding:"3px 6px"}}>
-                            <option value="">—</option>
-                            {AREAS.map(a => <option key={a} value={a}>{a}</option>)}
-                          </select>
-                        ) : <span style={{fontSize:11,color:"var(--text2)"}}>{s.area || "—"}</span>}
-                      </td>
-                      <td style={{padding:"4px 6px"}}>
-                        {canEditAll && s.status === "aberto" ? (
-                          <div style={{display:"flex",gap:3,alignItems:"center"}}>
-                            <select value={s.valorTipo || ""} onChange={e=>updateShift(s.id, {valorTipo: e.target.value || null, valorUnit: null, totalCalc: null})}
-                              style={{...S.input,fontSize:10,padding:"3px 4px",width:54,cursor:"pointer"}}>
-                              <option value="">—</option>
-                              <option value="hora">Hora</option>
-                              <option value="diaria">Diária</option>
-                            </select>
-                            {s.valorTipo && (
-                              <input type="number" step="0.01" min="0" placeholder="R$"
-                                value={s.valorUnit || ""}
-                                onChange={e=>updateShift(s.id, {valorUnit: parseFloat(e.target.value) || 0})}
-                                style={{...S.input,fontSize:11,padding:"3px 6px",width:70,textAlign:"right",fontFamily:"'DM Mono',monospace"}}/>
-                            )}
-                          </div>
-                        ) : (
-                          <span style={{fontSize:11,color:"var(--text3)"}}>
-                            {s.valorTipo === "hora" ? `R$${(s.valorUnit||0).toFixed(2)}/h` : s.valorTipo === "diaria" ? `R$${(s.valorUnit||0).toFixed(2)} diária` : "—"}
-                          </span>
-                        )}
-                      </td>
-                      <td style={{padding:"6px 10px",textAlign:"right",fontFamily:"'DM Mono',monospace",fontWeight:700,color: s.totalCalc != null ? ac : "var(--text3)"}}>
-                        {s.totalCalc != null ? `R$ ${s.totalCalc.toFixed(2)}` : "—"}
-                      </td>
-                      <td style={{padding:"4px 6px",textAlign:"center"}}>
-                        <span title={statusBadge.label}
-                          style={{display:"inline-block",padding:"2px 6px",background:statusBadge.bg,color:statusBadge.color,borderRadius:6,fontSize:10,fontWeight:700}}>
-                          {statusBadge.icon}
-                        </span>
-                      </td>
-                      <td style={{padding:"4px 6px",textAlign:"center"}}>
-                        {editable && (
-                          <button onClick={()=>deleteShift(s.id)} title="Apagar shift"
-                            style={{background:"none",border:"none",cursor:"pointer",color:"var(--red)",fontSize:14,padding:2}}>
-                            ✕
-                          </button>
-                        )}
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+        <div>
+          {/* v8.5.1: cards coloridos por completude. Líder pode fechar turno (preencher saída/intervalo) inline */}
+          <div style={{ display: "grid", gridTemplateColumns: mobileOnly ? "1fr" : "repeat(auto-fill, minmax(320px, 1fr))", gap: 10, marginBottom: 10 }}>
+            {filtered.map(s => (
+              <FreelaShiftCard
+                key={s.id}
+                shift={s}
+                pessoa={restPessoas.find(p => p.id === s.pessoaId)}
+                editable={canEditShift(s)}
+                shiftPrntoPronto={shiftPrntoPronto}
+                updateShift={updateShift}
+                deleteShift={deleteShift}
+                fmtHoras={fmtHoras}
+                mobileOnly={mobileOnly}
+                ac={ac}
+              />
+            ))}
           </div>
-          <div style={{padding:"8px 12px",borderTop:"1px solid var(--border)",fontSize:11,color:"var(--text3)",background:"var(--bg2)",display:"flex",gap:12,flexWrap:"wrap",justifyContent:"space-between"}}>
+
+          {/* Resumo */}
+          <div style={{ padding: "10px 14px", background: "var(--bg2)", border: "1px solid var(--border)", borderRadius: 10, fontSize: 11, color: "var(--text3)", display: "flex", gap: 12, flexWrap: "wrap", justifyContent: "space-between" }}>
             <div>
-              {filtered.length} shift{filtered.length===1?"":"s"} · {filtered.filter(s=>s.status==="aberto").length} abertos · {filtered.filter(s=>s.status==="aberto"&&shiftPrntoPronto(s).ok).length} prontos
+              {filtered.length} shift{filtered.length===1?"":"s"} · {filtered.filter(s=>s.status==="aberto").length} aberto(s) · {filtered.filter(s=>s.status==="aberto"&&shiftPrntoPronto(s).ok).length} pronto(s)
             </div>
             <div style={{fontFamily:"'DM Mono',monospace",color:"var(--text)",fontWeight:700}}>
-              Total: R$ {filtered.reduce((sum, s) => sum + (s.totalCalc || 0), 0).toFixed(2)}
+              Total fechado: R$ {filtered.reduce((sum, s) => sum + (s.totalCalc || 0), 0).toFixed(2)}
             </div>
           </div>
         </div>
@@ -21714,44 +21610,171 @@ function FreelaLancamentoTab({ restaurantId, allPessoas, restPessoas, restFreela
 // ═══════════════════════════════════════════════════════════════
 // ──  FREELAS — sub-componente Fechamento (criar lote, marcar pago) ─
 // ═══════════════════════════════════════════════════════════════
-// v8.5 — Linha editável pra DP fechar um shift (preencher saída, intervalo, valor)
-function FechaShiftRow({ shift: s, pessoa, updateShift, mobileOnly, ac, onUpdate, pessoas }) {
+// v8.5.1 — Card do Lançamento (Líder). Cor amarela se faltar saída/intervalo, verde se completo.
+// Líder pode editar entrada/saída/intervalo enquanto status="aberto" (qualquer líder, não só quem abriu).
+function FreelaShiftCard({ shift: s, pessoa, editable, shiftPrntoPronto, updateShift, deleteShift, fmtHoras, mobileOnly, ac }) {
+  const [editing, setEditing] = useState(false);
+  const [entrada, setEntrada] = useState(s.entrada || "");
   const [saida, setSaida] = useState(s.saida || "");
   const [intervalo, setIntervalo] = useState(s.intervalo || 0);
+
+  // Sincroniza state com prop quando shift muda externamente
+  useEffect(() => {
+    setEntrada(s.entrada || "");
+    setSaida(s.saida || "");
+    setIntervalo(s.intervalo || 0);
+  }, [s.entrada, s.saida, s.intervalo]);
+
+  const turnoCompleto = !!(s.entrada && s.saida);
+  const pronto = s.status === "aberto" ? shiftPrntoPronto(s) : { ok: false };
+
+  // Cor do card por completude
+  let bg, border, statusBadge;
+  if (s.status === "pago") {
+    bg = "#10b98108"; border = "#10b98144";
+    statusBadge = { icon: "💸", color: "#15803d", bg: "#10b98122", label: "Pago" };
+  } else if (s.status === "fechamento") {
+    bg = "#7c3aed08"; border = "#7c3aed44";
+    statusBadge = { icon: "🔒", color: "#6d28d9", bg: "#7c3aed22", label: "Em fechamento" };
+  } else if (pronto.ok) {
+    bg = "#10b98115"; border = "#10b98155";
+    statusBadge = { icon: "✅", color: "#15803d", bg: "#10b98122", label: "Pronto pra lote" };
+  } else if (turnoCompleto) {
+    // Turno fechado mas falta valor (DP precifica)
+    bg = "#dbeafe"; border = "#3b82f655";
+    statusBadge = { icon: "💰", color: "#1e40af", bg: "#3b82f622", label: "Aguardando DP" };
+  } else {
+    // Turno em aberto (sem saída) — Líder precisa fechar
+    bg = "#fef3c7"; border = "#f59e0b66";
+    statusBadge = { icon: "⏳", color: "#92400e", bg: "#f59e0b22", label: "Turno em aberto" };
+  }
+
+  function handleSalvarTurno() {
+    if (!entrada) { alert("Entrada é obrigatória."); return; }
+    updateShift(s.id, { entrada, saida, intervalo: parseInt(intervalo) || 0 });
+    setEditing(false);
+  }
+
+  return (
+    <div style={{ background: bg, border: `1px solid ${border}`, borderRadius: 12, padding: 12, position: "relative" }}>
+      {/* Header: nome + status */}
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8, marginBottom: 8 }}>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontWeight: 700, color: "var(--text)", fontSize: 14 }}>{pessoa?.name || "(removido)"}</div>
+          <div style={{ fontSize: 11, color: "var(--text3)", marginTop: 2 }}>📅 {fmtDate(s.date)}{s.area ? ` · ${s.area}` : ""}</div>
+        </div>
+        <span style={{ padding: "3px 8px", background: statusBadge.bg, color: statusBadge.color, borderRadius: 6, fontSize: 10, fontWeight: 700, whiteSpace: "nowrap" }}>
+          {statusBadge.icon} {statusBadge.label}
+        </span>
+      </div>
+
+      {/* Modo editing: form inline pra Líder fechar turno */}
+      {editing ? (
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 6, marginBottom: 8 }}>
+          <div>
+            <label style={{ ...S.label, fontSize: 9 }}>Entrada</label>
+            <input type="time" value={entrada} onChange={e => setEntrada(e.target.value)} style={{ ...S.input, fontSize: 12, padding: "5px 7px" }} />
+          </div>
+          <div>
+            <label style={{ ...S.label, fontSize: 9 }}>Saída</label>
+            <input type="time" value={saida} onChange={e => setSaida(e.target.value)} style={{ ...S.input, fontSize: 12, padding: "5px 7px" }} />
+          </div>
+          <div>
+            <label style={{ ...S.label, fontSize: 9 }}>Interv. (min)</label>
+            <input type="number" min="0" value={intervalo} onChange={e => setIntervalo(e.target.value)} style={{ ...S.input, fontSize: 12, padding: "5px 7px" }} />
+          </div>
+        </div>
+      ) : (
+        // Modo visual: chips com horários
+        <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 8 }}>
+          <div style={{ background: "rgba(255,255,255,0.6)", padding: "5px 10px", borderRadius: 6, fontSize: 12 }}>
+            <span style={{ color: "var(--text3)", fontSize: 10, marginRight: 4 }}>Entrada:</span>
+            <strong style={{ fontFamily: "'DM Mono',monospace", color: "var(--text)" }}>{s.entrada || "—"}</strong>
+          </div>
+          <div style={{ background: "rgba(255,255,255,0.6)", padding: "5px 10px", borderRadius: 6, fontSize: 12 }}>
+            <span style={{ color: "var(--text3)", fontSize: 10, marginRight: 4 }}>Saída:</span>
+            <strong style={{ fontFamily: "'DM Mono',monospace", color: s.saida ? "var(--text)" : "#92400e" }}>{s.saida || "Aguardando"}</strong>
+          </div>
+          {(s.intervalo > 0 || s.saida) && (
+            <div style={{ background: "rgba(255,255,255,0.6)", padding: "5px 10px", borderRadius: 6, fontSize: 12 }}>
+              <span style={{ color: "var(--text3)", fontSize: 10, marginRight: 4 }}>Int.:</span>
+              <strong style={{ fontFamily: "'DM Mono',monospace", color: "var(--text)" }}>{s.intervalo || 0}min</strong>
+            </div>
+          )}
+          {s.horas > 0 && (
+            <div style={{ background: "rgba(255,255,255,0.6)", padding: "5px 10px", borderRadius: 6, fontSize: 12 }}>
+              <span style={{ color: "var(--text3)", fontSize: 10, marginRight: 4 }}>⏱️</span>
+              <strong style={{ fontFamily: "'DM Mono',monospace", color: "var(--text)" }}>{fmtHoras(s.horas)}</strong>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Observação */}
+      {s.observacao && !editing && (
+        <div style={{ fontSize: 11, color: "var(--text3)", fontStyle: "italic", marginBottom: 8, padding: "4px 8px", background: "rgba(255,255,255,0.5)", borderRadius: 6 }}>
+          💬 {s.observacao}
+        </div>
+      )}
+
+      {/* Footer: total + ações */}
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 8, paddingTop: 8, borderTop: `1px solid ${border}` }}>
+        <div style={{ fontSize: 13, fontWeight: 700, fontFamily: "'DM Mono',monospace", color: s.totalCalc != null ? ac : "var(--text3)" }}>
+          {s.totalCalc != null ? `R$ ${s.totalCalc.toFixed(2)}` : "—"}
+        </div>
+        <div style={{ display: "flex", gap: 6 }}>
+          {editable && !editing && (
+            <button onClick={()=>setEditing(true)} title="Editar entrada/saída/intervalo" style={{ background: "transparent", color: ac, border: `1px solid ${ac}55`, borderRadius: 6, padding: "3px 10px", fontSize: 11, fontWeight: 600, cursor: "pointer" }}>
+              {turnoCompleto ? "✏️ Editar" : "🔚 Fechar turno"}
+            </button>
+          )}
+          {editing && (
+            <>
+              <button onClick={()=>setEditing(false)} style={{ background: "transparent", color: "var(--text3)", border: "1px solid var(--border)", borderRadius: 6, padding: "3px 10px", fontSize: 11, cursor: "pointer" }}>Cancelar</button>
+              <button onClick={handleSalvarTurno} style={{ background: ac, color: "#fff", border: "none", borderRadius: 6, padding: "3px 10px", fontSize: 11, fontWeight: 700, cursor: "pointer" }}>✓ Salvar</button>
+            </>
+          )}
+          {editable && !editing && (
+            <button onClick={()=>deleteShift(s.id)} title="Apagar shift" style={{ background: "transparent", color: "var(--red)", border: "1px solid var(--red)55", borderRadius: 6, padding: "3px 10px", fontSize: 11, cursor: "pointer" }}>🗑️</button>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// v8.5.1 — Row do Fechamento (DP): SAÍDA e INTERVALO já vêm preenchidos pelo Líder.
+// DP só lança o VALOR (e PIX da pessoa se faltar).
+function FechaShiftRow({ shift: s, pessoa, updateShift, mobileOnly, ac, onUpdate, pessoas, fmtHoras }) {
   const [valorTipo, setValorTipo] = useState(s.valorTipo || "hora");
   const [valorUnit, setValorUnit] = useState(s.valorUnit != null ? String(s.valorUnit).replace(".", ",") : "");
   const [pix, setPix] = useState(pessoa?.pix || "");
   const fromBR = (v) => parseFloat(String(v || "").replace(",", ".")) || 0;
   const missingPix = !pessoa?.pix;
   function handleSalvar() {
-    if (!saida) { alert("Preencha a hora de saída."); return; }
-    updateShift(s.id, {
-      saida, intervalo: parseInt(intervalo) || 0,
-      valorTipo, valorUnit: fromBR(valorUnit),
-    });
+    if (!valorUnit || fromBR(valorUnit) <= 0) { alert("Preencha o valor."); return; }
+    updateShift(s.id, { valorTipo, valorUnit: fromBR(valorUnit) });
     if (missingPix && pix.trim() && pessoa && onUpdate && pessoas) {
       const next = pessoas.map(p => p.id === pessoa.id ? { ...p, pix: pix.trim() } : p);
       onUpdate("pessoas", next);
     }
-    onUpdate && onUpdate("_toast", `🔧 Shift de ${pessoa?.name} fechado`);
+    onUpdate && onUpdate("_toast", `💰 Valor de ${pessoa?.name} lançado`);
   }
   return (
     <div style={{ background: "var(--card-bg)", border: "1px solid var(--border)", borderRadius: 10, padding: 12 }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10, flexWrap: "wrap", gap: 6 }}>
         <div>
           <div style={{ fontWeight: 700, color: "var(--text)", fontSize: 14 }}>{pessoa?.name || "(removido)"}</div>
-          <div style={{ fontSize: 11, color: "var(--text3)" }}>📅 {fmtDate(s.date)} · entrada {s.entrada || "—"}{s.area ? ` · ${s.area}` : ""}{s.observacao ? ` · ${s.observacao}` : ""}</div>
+          <div style={{ fontSize: 11, color: "var(--text3)", marginTop: 2 }}>
+            📅 {fmtDate(s.date)} · ⏱️ {s.entrada || "?"} → {s.saida || "?"}
+            {s.intervalo > 0 ? ` (${s.intervalo}min int.)` : ""}
+            {s.horas > 0 ? ` = ${fmtHoras ? fmtHoras(s.horas) : s.horas + "h"}` : ""}
+            {s.area ? ` · ${s.area}` : ""}
+          </div>
+          {s.observacao && <div style={{ fontSize: 11, color: "var(--text3)", fontStyle: "italic", marginTop: 2 }}>💬 {s.observacao}</div>}
         </div>
       </div>
-      <div style={{ display: "grid", gridTemplateColumns: mobileOnly ? "1fr 1fr" : "1fr 1fr 1.2fr 1fr", gap: 8, marginBottom: missingPix ? 8 : 0 }}>
-        <div>
-          <label style={{ ...S.label, fontSize: 10 }}>Saída</label>
-          <input type="time" value={saida} onChange={e => setSaida(e.target.value)} style={{ ...S.input, fontSize: 12, padding: "7px 9px" }} />
-        </div>
-        <div>
-          <label style={{ ...S.label, fontSize: 10 }}>Intervalo (min)</label>
-          <input type="number" value={intervalo} onChange={e => setIntervalo(e.target.value)} placeholder="0" style={{ ...S.input, fontSize: 12, padding: "7px 9px" }} />
-        </div>
+      <div style={{ display: "grid", gridTemplateColumns: mobileOnly ? "1fr 1fr" : "1.2fr 1fr", gap: 8, marginBottom: missingPix ? 8 : 0 }}>
         <div>
           <label style={{ ...S.label, fontSize: 10 }}>Tipo de valor</label>
           <select value={valorTipo} onChange={e => setValorTipo(e.target.value)} style={{ ...S.input, fontSize: 12, padding: "7px 9px" }}>
@@ -21765,15 +21788,13 @@ function FechaShiftRow({ shift: s, pessoa, updateShift, mobileOnly, ac, onUpdate
         </div>
       </div>
       {missingPix && (
-        <div style={{ display: "grid", gridTemplateColumns: mobileOnly ? "1fr" : "2fr 1fr", gap: 8, marginBottom: 4 }}>
-          <div>
-            <label style={{ ...S.label, fontSize: 10, color: "#b45309" }}>⚠️ PIX da pessoa (não cadastrado)</label>
-            <input type="text" value={pix} onChange={e => setPix(e.target.value)} placeholder="CPF, e-mail, celular ou chave aleatória" style={{ ...S.input, fontSize: 12, padding: "7px 9px" }} />
-          </div>
+        <div style={{ marginBottom: 4 }}>
+          <label style={{ ...S.label, fontSize: 10, color: "#b45309" }}>⚠️ PIX da pessoa (não cadastrado)</label>
+          <input type="text" value={pix} onChange={e => setPix(e.target.value)} placeholder="CPF, e-mail, celular ou chave aleatória" style={{ ...S.input, fontSize: 12, padding: "7px 9px" }} />
         </div>
       )}
       <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 8 }}>
-        <button onClick={handleSalvar} style={{ background: ac, color: "#fff", border: "none", borderRadius: 8, padding: "7px 16px", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>✓ Salvar fechamento</button>
+        <button onClick={handleSalvar} style={{ background: ac, color: "#fff", border: "none", borderRadius: 8, padding: "7px 16px", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>💰 Lançar valor</button>
       </div>
     </div>
   );
@@ -21787,8 +21808,10 @@ function FreelaFechamentoTab({ restaurantId, restPessoas, shifts, lotes, shiftPr
   const [payData, setPayData] = useState({ data: today(), forma: "PIX" });
 
   const abertos = shifts.filter(s => s.status === "aberto");
+  // v8.5.1: separa em "aguardando Líder" (sem saída ainda) vs "aguardando DP" (saída ok mas sem valor)
+  const aguardandoLider = abertos.filter(s => !s.saida);
+  const incompletos = abertos.filter(s => s.saida && !shiftPrntoPronto(s).ok); // aguardando DP precificar
   const prontos = abertos.filter(s => shiftPrntoPronto(s).ok);
-  const incompletos = abertos.filter(s => !shiftPrntoPronto(s).ok);
   const pendentesLotes = lotes.filter(l => l.status === "pendente").sort((a,b) => (b.criadoEm||"").localeCompare(a.criadoEm||""));
 
   const selIds = Object.keys(selected).filter(id => selected[id]);
@@ -21828,8 +21851,13 @@ function FreelaFechamentoTab({ restaurantId, restPessoas, shifts, lotes, shiftPr
           <strong style={{color:ac,fontFamily:"'DM Mono',monospace"}}>{prontos.length}</strong>
         </div>
         {incompletos.length > 0 && (
+          <div style={{padding:"8px 12px",background:"#dbeafe",border:"1px solid #3b82f6",borderRadius:8,fontSize:12,color:"#1e40af"}}>
+            💰 <strong>{incompletos.length}</strong> aguardando precificação (DP)
+          </div>
+        )}
+        {aguardandoLider.length > 0 && (
           <div style={{padding:"8px 12px",background:"#fef3c7",border:"1px solid #fbbf24",borderRadius:8,fontSize:12,color:"#92400e"}}>
-            🔧 <strong>{incompletos.length}</strong> aguardando fechamento (preencha abaixo)
+            ⏳ <strong>{aguardandoLider.length}</strong> aguardando o Líder fechar o turno (preencher saída/intervalo no Lançamento)
           </div>
         )}
         {selShifts.length > 0 && (
@@ -21864,11 +21892,11 @@ function FreelaFechamentoTab({ restaurantId, restPessoas, shifts, lotes, shiftPr
         </div>
       )}
 
-      {/* v8.5 — Aguardando fechamento: shifts em "aberto" sem valor preenchido */}
+      {/* v8.5.1 — Aguardando precificação (turno fechado pelo Líder, sem valor) */}
       {incompletos.length > 0 && (
         <div style={{ marginBottom: 18 }}>
           <div style={{ fontSize: 11, color: "var(--text3)", fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.4, marginBottom: 8 }}>
-            🔧 Aguardando fechamento ({incompletos.length})
+            💰 Aguardando precificação ({incompletos.length})
           </div>
           <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
             {incompletos.map(s => {
@@ -21881,6 +21909,7 @@ function FreelaFechamentoTab({ restaurantId, restPessoas, shifts, lotes, shiftPr
                   updateShift={updateShift}
                   onUpdate={onUpdate}
                   pessoas={pessoas}
+                  fmtHoras={fmtHoras}
                   mobileOnly={mobileOnly}
                   ac={ac}
                 />
