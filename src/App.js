@@ -3,7 +3,7 @@ import React, { useState, useEffect, useMemo, useRef, Component } from "react";
 import { db } from "./firebase";
 import { doc, getDoc, setDoc, onSnapshot } from "firebase/firestore";
 
-const APP_VERSION = "8.12.5";
+const APP_VERSION = "8.12.6";
 
 // v8.11.1: comparação de versão semver-like (8.11.1 > 8.10.7 > 8.9.4)
 function compareVersions(a, b) {
@@ -7090,6 +7090,8 @@ function ValeTransporteTab({ restaurantId, employees, roles, workSchedules, sche
     onUpdate("_toast", "🖨️ PDF pronto para impressão");
   }
 
+  // v8.12.6: goMonth removido — VT usa gate de seleção de mês via "↺ Trocar mês"
+  // eslint-disable-next-line no-unused-vars
   const goMonth = (dir) => { const d = new Date(year, month + dir, 1); setYear(d.getFullYear()); setMonth(d.getMonth()); };
 
   // ── Render helpers ──
@@ -7235,10 +7237,12 @@ function ValeTransporteTab({ restaurantId, employees, roles, workSchedules, sche
 
   return (
     <div>
-      {/* Header */}
+      {/* v8.12.6: header com mês no título + Trocar mês — sem ◀ ▶ navegação inline */}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 12, marginBottom: 16 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-          <h3 style={{ color: "var(--text)", margin: 0, fontSize: mobileOnly ? 16 : 20 }}>🚌 Vale Transporte</h3>
+          <h3 style={{ color: "var(--text)", margin: 0, fontSize: mobileOnly ? 16 : 20, textTransform: "capitalize" }}>
+            🚌 Vale Transporte — {monthLabel(year, month)}
+          </h3>
           <SaveIndicator mode="auto" pending={dirty} savedAt={vtSavedAt} compact />
           <button onClick={()=>setVtMonthConfirmed(false)} style={{ ...S.btnSecondary, fontSize: 11, padding: "3px 10px" }} title="Voltar pra seleção de mês">↺ Trocar mês</button>
         </div>
@@ -7246,13 +7250,6 @@ function ValeTransporteTab({ restaurantId, employees, roles, workSchedules, sche
           <button onClick={exportCSV} style={{ ...S.btnSecondary, fontSize: 12, padding: "6px 14px" }}>📊 CSV</button>
           <button onClick={exportPDF} style={{ ...S.btnSecondary, fontSize: 12, padding: "6px 14px" }}>🖨️ PDF</button>
         </div>
-      </div>
-
-      {/* Month selector */}
-      <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 16 }}>
-        <button onClick={() => goMonth(-1)} style={{ ...S.btnSecondary, padding: "6px 12px", fontSize: 16 }}>◀</button>
-        <span style={{ color: "var(--text)", fontWeight: 700, fontSize: mobileOnly ? 14 : 16, textTransform: "capitalize" }}>{monthLabel(year, month)}</span>
-        <button onClick={() => goMonth(1)} style={{ ...S.btnSecondary, padding: "6px 12px", fontSize: 16 }}>▶</button>
       </div>
 
       {/* Payment status */}
@@ -11151,15 +11148,13 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
       <div style={{ padding:mobileOnly?"12px 10px":"20px 24px", maxWidth:1100, margin:"0 auto" }}>
         {["dashboard","tips","schedule"].includes(tab) && (
           <>
-            <div style={{ marginBottom: 12 }}><MonthNav year={year} month={month} onChange={async (y,m)=>{
-              if (tab === "schedule" && schedDirty) {
-                const action = await appConfirm("Você tem edições na escala não salvas.\n\nDeseja salvar como nova versão antes de mudar de mês?");
-                if (action) commitPendingScheduleEdits();
-                else setSchedLocalEdits(null);
-              }
-              setYear(y);setMonth(m);setWeekIdx(calcWeekForToday(y,m));
-              onUpdate("_toast", `📅 ${monthLabel(y, m)} selecionado`);
-            }} /></div>
+            {/* v8.12.6: Schedule usa o gate de seleção de mês — sem MonthNav inline. Trocar mês via botão no header. */}
+            {tab !== "schedule" && (
+              <div style={{ marginBottom: 12 }}><MonthNav year={year} month={month} onChange={async (y,m)=>{
+                setYear(y);setMonth(m);setWeekIdx(calcWeekForToday(y,m));
+                onUpdate("_toast", `📅 ${monthLabel(y, m)} selecionado`);
+              }} /></div>
+            )}
             {/* v8.0 — Banner contextual de mês: futuro/atual/passado/fechado, cor-coded */}
             {(() => {
               const today = new Date();
