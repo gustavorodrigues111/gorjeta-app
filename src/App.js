@@ -3,7 +3,7 @@ import React, { useState, useEffect, useMemo, useRef, Component } from "react";
 import { db } from "./firebase";
 import { doc, getDoc, setDoc } from "firebase/firestore";
 
-const APP_VERSION = "8.4.1";
+const APP_VERSION = "8.4.2";
 
 const DEFAULT_ADMISSION = () => `${new Date().getFullYear()}-01-01`;
 const round2 = (v) => Math.round(v * 100) / 100;
@@ -10117,7 +10117,12 @@ function MonthPickerGate({ contextLabel, year, month, onPick, scheduleStatus, re
             Confirme o mês antes de visualizar ou editar — evita alterações em mês errado.
           </p>
         </div>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: 10 }}>
+        <div style={{
+          display: "grid",
+          // v8.4.2: grid fixo pra evitar última linha com botões esticados
+          gridTemplateColumns: typeof window !== "undefined" && window.innerWidth < 600 ? "repeat(2, 1fr)" : "repeat(3, 1fr)",
+          gap: 10,
+        }}>
           {options.map(o => (
             <button key={`${o.y}-${o.m}`} onClick={() => onPick(o.y, o.m)}
               style={{
