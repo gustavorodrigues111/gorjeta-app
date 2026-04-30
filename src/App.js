@@ -3,7 +3,7 @@ import React, { useState, useEffect, useMemo, useRef, Component } from "react";
 import { db } from "./firebase";
 import { doc, getDoc, setDoc, onSnapshot } from "firebase/firestore";
 
-const APP_VERSION = "8.14.0";
+const APP_VERSION = "8.14.1";
 
 // v8.11.1: comparação de versão semver-like (8.11.1 > 8.10.7 > 8.9.4)
 function compareVersions(a, b) {
@@ -7971,29 +7971,44 @@ function MeetingPlannerSection({ restaurantId, employees, roles, areas, meetingP
     ? visibleOccurrences.filter(o => { const oa = o.areas ?? []; return oa.length === 0 || oa.some(a => managerAreas.includes(a)); })
     : visibleOccurrences;
 
-  // v8.14.0: lista de gestores/líderes do restaurante elegíveis pra compartilhar visibilidade
+  // v8.14.0: lista de gestores/líderes do restaurante elegíveis pra compartilhar visibilidade.
+  // Dedupe por CPF (canônico) + linkedManagerId — evita repetir quando pessoa migrada existe em managers e pessoas.
   const shareableManagers = (() => {
-    const seen = new Set();
     const result = [];
-    (data?.managers ?? []).forEach(m => {
-      if (!(m.restaurantIds ?? []).includes(restaurantId)) return;
-      if (m.id === currentUser?.id) return;
-      seen.add(m.id);
-      const role = m.profile === "lider" ? "Líder de Área" : (m.isDP ? "DP" : "Gestor");
-      result.push({ id: m.id, name: m.name, role });
-    });
+    const seenIds = new Set();
+    const seenCpfs = new Set();
+    const cpfClean = s => (s || "").replace(/\D/g, "");
+    const cpfCurrent = cpfClean(currentUser?.cpf);
+    // Pessoa primeiro (fonte preferencial — tem o id "novo" que aparece em todas as nossas listas)
     (data?.pessoas ?? []).forEach(p => {
       if (!(p.restaurantIds ?? []).includes(restaurantId)) return;
       if (p.id === currentUser?.id) return;
-      if (seen.has(p.id)) return;
+      const pcpf = cpfClean(p.cpf);
+      if (cpfCurrent && pcpf === cpfCurrent) return;
       const perms = p.permissions?.[restaurantId];
       if (!perms) return;
       const hasAdmin = Object.values(perms.admin ?? {}).some(v => v === true);
       const isLid = perms.special?.isLider === true || perms.special?.profile === "lider";
       const isDpP = perms.special?.isDP === true;
       if (!hasAdmin && !isLid && !isDpP) return;
+      seenIds.add(p.id);
+      if (p.linkedManagerId) seenIds.add(p.linkedManagerId);
+      if (pcpf) seenCpfs.add(pcpf);
       const role = isLid ? "Líder de Área" : isDpP ? "DP" : "Gestor";
       result.push({ id: p.id, name: p.name, role });
+    });
+    // Managers que ainda não vieram de pessoas
+    (data?.managers ?? []).forEach(m => {
+      if (!(m.restaurantIds ?? []).includes(restaurantId)) return;
+      if (m.id === currentUser?.id) return;
+      if (seenIds.has(m.id)) return;
+      const mcpf = cpfClean(m.cpf);
+      if (cpfCurrent && mcpf === cpfCurrent) return;
+      if (mcpf && seenCpfs.has(mcpf)) return;
+      seenIds.add(m.id);
+      if (mcpf) seenCpfs.add(mcpf);
+      const role = m.profile === "lider" ? "Líder de Área" : (m.isDP ? "DP" : "Gestor");
+      result.push({ id: m.id, name: m.name, role });
     });
     return result.sort((a,b) => a.name.localeCompare(b.name));
   })();
