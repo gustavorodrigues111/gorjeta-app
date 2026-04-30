@@ -3,7 +3,7 @@ import React, { useState, useEffect, useMemo, useRef, Component } from "react";
 import { db } from "./firebase";
 import { doc, getDoc, setDoc } from "firebase/firestore";
 
-const APP_VERSION = "8.7.1";
+const APP_VERSION = "8.8.0";
 
 const DEFAULT_ADMISSION = () => `${new Date().getFullYear()}-01-01`;
 const round2 = (v) => Math.round(v * 100) / 100;
@@ -12347,6 +12347,9 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
               miseCounts={data?.miseCounts ?? []}
               miseSuppliers={data?.miseSuppliers ?? []}
               miseProductSuppliers={data?.miseProductSuppliers ?? []}
+              miseCycles={data?.miseCycles ?? []}
+              miseSupplierOrders={data?.miseSupplierOrders ?? []}
+              isOwner={isOwner}
               onUpdate={onUpdate}
               mobileOnly={mobileOnly}
             />
@@ -17776,7 +17779,7 @@ function miseBuildImportPlan(parsed, ctx) {
 // ═══════════════════════════════════════════════════════════════
 // ──  MISE CONTAGENS — ADMIN (Gestor Administrativo)            ──
 // ═══════════════════════════════════════════════════════════════
-function MiseContagensAdmin({ restaurantId, restaurantName = "", employees, miseCategories, miseStocks, miseAssignments, miseItems, miseCounts, miseSuppliers, miseProductSuppliers, onUpdate, mobileOnly }) {
+function MiseContagensAdmin({ restaurantId, restaurantName = "", employees, miseCategories, miseStocks, miseAssignments, miseItems, miseCounts, miseSuppliers, miseProductSuppliers, miseCycles = [], miseSupplierOrders = [], isOwner = false, onUpdate, mobileOnly }) {
   const [subTab, setSubTab] = useState("atribuicoes");
   const restCategories = miseCategories.filter(c => c.restaurantId === restaurantId);
   const restStocks = miseStocks.filter(s => s.restaurantId === restaurantId);
@@ -19339,6 +19342,57 @@ function MiseContagensAdmin({ restaurantId, restaurantName = "", employees, mise
           </div>
         );
       })()}
+
+      {/* v8.8 — Owner-only: zona de perigo (apagar tudo de Contagens) */}
+      {isOwner && (
+        <details style={{ marginTop: 32, padding: "12px 16px", background: "#fee2e2", border: "1px solid #ef4444aa", borderRadius: 10 }}>
+          <summary style={{ cursor: "pointer", fontSize: 12, fontWeight: 700, color: "#991b1b", padding: "4px 0" }}>
+            ⚠️ Zona de perigo (Owner) — apagar tudo
+          </summary>
+          <div style={{ marginTop: 12, fontSize: 12, color: "var(--text2)", lineHeight: 1.6 }}>
+            <p style={{ margin: "0 0 12px" }}>
+              Esta ação <strong style={{ color: "#991b1b" }}>apaga TODAS as configurações de Contagens deste restaurante</strong>:
+            </p>
+            <ul style={{ margin: "0 0 12px", paddingLeft: 20, color: "var(--text2)", fontSize: 12 }}>
+              <li>{restCategories.length} categoria(s)</li>
+              <li>{restStocks.length} estoque(s)</li>
+              <li>{restItems.length} produto(s)</li>
+              <li>{restAssignments.length} atribuição(ões) de pessoa</li>
+              <li>{restSuppliers.length} fornecedor(es)</li>
+              <li>{restProductSuppliers.length} vínculo(s) produto-fornecedor</li>
+              <li>{(miseCounts || []).filter(c => c.restaurantId === restaurantId).length} contagem(ns) registrada(s)</li>
+              <li>{(miseCycles || []).filter(c => c.restaurantId === restaurantId).length} ciclo(s) de contagem</li>
+              <li>{(miseSupplierOrders || []).filter(o => o.restaurantId === restaurantId).length} pedido(s) de compra</li>
+            </ul>
+            <p style={{ margin: "0 0 12px", color: "#991b1b", fontWeight: 600 }}>
+              ⚠️ Esta ação é IRREVERSÍVEL. Use apenas pra resetar configuração ou em ambiente de teste.
+            </p>
+            <button onClick={async () => {
+              const expected = `APAGAR ${restaurantName || "TUDO"}`;
+              const typed = window.prompt(`Pra confirmar, digite EXATAMENTE:\n\n${expected}\n\nSem aspas. Maiúsculas e espaços importam.`);
+              if (typed !== expected) {
+                if (typed != null) alert("Texto não confere. Operação cancelada.");
+                return;
+              }
+              if (!await appConfirm(`ÚLTIMA CONFIRMAÇÃO\n\nApagar TODAS as configurações de Contagens de "${restaurantName}"?\n\nNão dá pra desfazer.`)) return;
+              // Apaga tudo deste restaurante
+              onUpdate("miseCategories",       (miseCategories || []).filter(x => x.restaurantId !== restaurantId));
+              onUpdate("miseStocks",           (miseStocks || []).filter(x => x.restaurantId !== restaurantId));
+              onUpdate("miseAssignments",      (miseAssignments || []).filter(x => x.restaurantId !== restaurantId));
+              onUpdate("miseItems",            (miseItems || []).filter(x => x.restaurantId !== restaurantId));
+              onUpdate("miseCounts",           (miseCounts || []).filter(x => x.restaurantId !== restaurantId));
+              onUpdate("miseSuppliers",        (miseSuppliers || []).filter(x => x.restaurantId !== restaurantId));
+              onUpdate("miseProductSuppliers", (miseProductSuppliers || []).filter(x => x.restaurantId !== restaurantId));
+              onUpdate("miseCycles",           (miseCycles || []).filter(x => x.restaurantId !== restaurantId));
+              onUpdate("miseSupplierOrders",   (miseSupplierOrders || []).filter(x => x.restaurantId !== restaurantId));
+              onUpdate("_toast", `🗑️ Configuração de Contagens de ${restaurantName} apagada`);
+            }}
+              style={{ background: "#dc2626", color: "#fff", border: "none", borderRadius: 8, padding: "9px 16px", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>
+              🗑️ Apagar TUDO de Contagens deste restaurante
+            </button>
+          </div>
+        </details>
+      )}
     </div>
   );
 }
@@ -22261,64 +22315,98 @@ function FreelaFechamentoTab({ restaurantId, restPessoas, shifts, lotes, shiftPr
           </button>
         )}
       </div>
-      {/* v8.7 — Prontos pra fechar: grid de cards verdes individuais com checkbox */}
+      {/* v8.7.2 — Prontos pra fechar agrupado POR PESSOA (1 card por pessoa, N turnos dentro) */}
       {prontos.length === 0 && incompletos.length === 0 && aguardandoLider.length === 0 && pendentesLotes.length === 0 ? (
         <div style={{padding:"30px 20px",textAlign:"center",color:"var(--text3)",fontSize:13,background:"var(--card-bg)",border:"1px dashed var(--border)",borderRadius:10}}>
           <div style={{fontSize:32,marginBottom:8}}>📭</div>
           Nenhum shift no momento. Os shifts abertos pelos Líderes em <strong>Lançamento</strong> aparecerão aqui pra precificar e fechar.
         </div>
-      ) : prontos.length > 0 && (
-        <div style={{ marginBottom: 18 }}>
-          <div style={{ fontSize: 11, color: "var(--text3)", fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.4, marginBottom: 8 }}>
-            ✅ Prontos pra entrar em lote ({prontos.length})
-          </div>
-          <div style={{ display: "grid", gridTemplateColumns: mobileOnly ? "1fr" : "repeat(auto-fill, minmax(300px, 1fr))", gap: 10 }}>
-            {prontos.sort((a,b) => (a.date||"").localeCompare(b.date||"")).map(s => {
-              const p = restPessoas.find(x => x.id === s.pessoaId) || {};
-              const isSel = !!selected[s.id];
-              return (
-                <div key={s.id}
-                  onClick={()=>setSelected({...selected,[s.id]:!isSel})}
-                  style={{
-                    background: isSel ? "#10b98122" : "#10b98112",
-                    border: `2px solid ${isSel ? "#16a34a" : "#10b98155"}`,
-                    borderRadius: 12, padding: 12, cursor: "pointer",
-                    transition: "all .12s",
-                  }}>
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 8, gap: 8 }}>
-                    <div style={{ display: "flex", alignItems: "center", gap: 8, flex: 1, minWidth: 0 }}>
-                      <input type="checkbox" checked={isSel} onChange={()=>setSelected({...selected,[s.id]:!isSel})} onClick={e=>e.stopPropagation()} style={{ cursor: "pointer", width: 16, height: 16, accentColor: "#16a34a" }}/>
-                      <div style={{ flex: 1, minWidth: 0 }}>
-                        <div style={{ fontWeight: 700, color: "var(--text)", fontSize: 14 }}>{p.name || "(removido)"}</div>
-                        <div style={{ fontSize: 11, color: "var(--text3)", marginTop: 2 }}>📅 {fmtDate(s.date)}{s.area ? ` · ${s.area}` : ""}</div>
+      ) : prontos.length > 0 && (() => {
+        const byPessoa = {};
+        prontos.forEach(s => {
+          if (!byPessoa[s.pessoaId]) byPessoa[s.pessoaId] = [];
+          byPessoa[s.pessoaId].push(s);
+        });
+        const pessoaCount = Object.keys(byPessoa).length;
+        return (
+          <div style={{ marginBottom: 18 }}>
+            <div style={{ fontSize: 11, color: "var(--text3)", fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.4, marginBottom: 8 }}>
+              ✅ Prontos pra entrar em lote ({prontos.length} turno{prontos.length !== 1 ? "s" : ""} · {pessoaCount} pessoa{pessoaCount !== 1 ? "s" : ""})
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: mobileOnly ? "1fr" : "repeat(auto-fill, minmax(340px, 1fr))", gap: 10 }}>
+              {Object.entries(byPessoa).map(([pessoaId, sList]) => {
+                const p = restPessoas.find(x => x.id === pessoaId) || {};
+                const sortedShifts = sList.sort((a,b) => (a.date||"").localeCompare(b.date||""));
+                const subTotal = sortedShifts.reduce((sum, s) => sum + (s.totalCalc || 0), 0);
+                const allSel = sortedShifts.every(s => selected[s.id]);
+                const someSel = sortedShifts.some(s => selected[s.id]);
+                const headerSel = allSel; // borda forte só quando TUDO está marcado
+                function toggleAll() {
+                  const next = { ...selected };
+                  sortedShifts.forEach(s => { next[s.id] = !allSel; });
+                  setSelected(next);
+                }
+                return (
+                  <div key={pessoaId} onClick={toggleAll}
+                    style={{
+                      background: headerSel ? "#10b98122" : "#10b98112",
+                      border: `2px solid ${headerSel ? "#16a34a" : (someSel ? "#16a34a99" : "#10b98155")}`,
+                      borderRadius: 12, padding: 12, cursor: "pointer",
+                      transition: "all .12s",
+                    }}>
+                    {/* Header: pessoa + checkbox + status */}
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 10, gap: 8 }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 8, flex: 1, minWidth: 0 }}>
+                        <input type="checkbox" checked={allSel} ref={el => { if (el) el.indeterminate = someSel && !allSel; }} onChange={toggleAll} onClick={e=>e.stopPropagation()} style={{ cursor: "pointer", width: 16, height: 16, accentColor: "#16a34a" }}/>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ fontWeight: 700, color: "var(--text)", fontSize: 14 }}>{p.name || "(removido)"}</div>
+                          <div style={{ fontSize: 11, color: "var(--text3)", marginTop: 2 }}>{sortedShifts.length} turno{sortedShifts.length !== 1 ? "s" : ""} pronto{sortedShifts.length !== 1 ? "s" : ""}</div>
+                        </div>
                       </div>
+                      <span style={{ padding: "3px 8px", background: "#16a34a22", color: "#15803d", borderRadius: 6, fontSize: 10, fontWeight: 700, whiteSpace: "nowrap" }}>✅ Pronto</span>
                     </div>
-                    <span style={{ padding: "3px 8px", background: "#16a34a22", color: "#15803d", borderRadius: 6, fontSize: 10, fontWeight: 700, whiteSpace: "nowrap" }}>✅ Pronto</span>
+
+                    {/* Lista de turnos com checkbox individual */}
+                    <div style={{ display: "flex", flexDirection: "column", gap: 4, marginBottom: 10, padding: "6px 8px", background: "rgba(255,255,255,0.5)", borderRadius: 8 }}>
+                      {sortedShifts.map(s => {
+                        const isSel = !!selected[s.id];
+                        return (
+                          <div key={s.id}
+                            onClick={(e) => { e.stopPropagation(); setSelected({ ...selected, [s.id]: !isSel }); }}
+                            style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, padding: "3px 0", borderBottom: "1px dashed rgba(0,0,0,0.06)", cursor: "pointer" }}>
+                            <input type="checkbox" checked={isSel} onChange={()=>setSelected({...selected,[s.id]:!isSel})} onClick={e=>e.stopPropagation()} style={{ cursor: "pointer", width: 13, height: 13, accentColor: "#16a34a" }}/>
+                            <span style={{ color: "var(--text2)", flex: 1, minWidth: 0 }}>📅 {fmtDate(s.date)}{s.area ? ` · ${s.area}` : ""}</span>
+                            <span style={{ color: "var(--text)", fontFamily: "'DM Mono',monospace", fontWeight: 600 }}>
+                              {s.entrada}→{s.saida}{s.intervalo > 0 ? ` (${s.intervalo}m)` : ""} · {fmtHoras(s.horas)}
+                            </span>
+                            <span style={{ color: "var(--text)", fontFamily: "'DM Mono',monospace", fontWeight: 700, minWidth: 70, textAlign: "right" }}>
+                              R$ {(s.totalCalc||0).toFixed(2)}
+                            </span>
+                          </div>
+                        );
+                      })}
+                    </div>
+
+                    {/* Footer: valor unitário (uniforme se todos iguais) + total */}
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", paddingTop: 8, borderTop: "1px solid #16a34a33" }}>
+                      <div style={{ fontSize: 11, color: "var(--text3)" }}>
+                        {(() => {
+                          const allSameRate = sortedShifts.every(s => s.valorTipo === sortedShifts[0].valorTipo && s.valorUnit === sortedShifts[0].valorUnit);
+                          const r = sortedShifts[0];
+                          return allSameRate
+                            ? <>R$ {(r.valorUnit||0).toFixed(2)} {r.valorTipo === "hora" ? "/hora" : "/diária"}</>
+                            : <>valores variados</>;
+                        })()}
+                      </div>
+                      <span style={{ fontFamily: "'DM Mono',monospace", fontWeight: 800, fontSize: 18, color: "#15803d" }}>R$ {subTotal.toFixed(2)}</span>
+                    </div>
                   </div>
-                  <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 8 }}>
-                    <div style={{ background: "rgba(255,255,255,0.6)", padding: "4px 8px", borderRadius: 6, fontSize: 11 }}>
-                      <span style={{ color: "var(--text3)", fontSize: 9, marginRight: 3 }}>⏱️</span>
-                      <strong style={{ fontFamily: "'DM Mono',monospace", color: "var(--text)" }}>{s.entrada}→{s.saida}</strong>
-                      {s.intervalo > 0 && <span style={{ color: "var(--text3)", fontSize: 10 }}> ({s.intervalo}min)</span>}
-                    </div>
-                    <div style={{ background: "rgba(255,255,255,0.6)", padding: "4px 8px", borderRadius: 6, fontSize: 11 }}>
-                      <strong style={{ fontFamily: "'DM Mono',monospace", color: "var(--text)" }}>{fmtHoras(s.horas)}</strong>
-                    </div>
-                    <div style={{ background: "rgba(255,255,255,0.6)", padding: "4px 8px", borderRadius: 6, fontSize: 11 }}>
-                      <span style={{ color: "var(--text3)", fontSize: 10, marginRight: 3 }}>{s.valorTipo === "hora" ? "R$/h" : "Diária"}:</span>
-                      <strong style={{ fontFamily: "'DM Mono',monospace", color: "var(--text)" }}>R$ {(s.valorUnit||0).toFixed(2)}</strong>
-                    </div>
-                  </div>
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", paddingTop: 8, borderTop: "1px solid #16a34a33" }}>
-                    <span style={{ fontSize: 11, color: "var(--text3)" }}>Total</span>
-                    <span style={{ fontFamily: "'DM Mono',monospace", fontWeight: 800, fontSize: 16, color: "#15803d" }}>R$ {(s.totalCalc||0).toFixed(2)}</span>
-                  </div>
-                </div>
-              );
-            })}
+                );
+              })}
+            </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
 
       {/* v8.6 — Modal de gerenciar níveis pré-cadastrados */}
       {showRatesManager && (
