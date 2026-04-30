@@ -3,7 +3,7 @@ import React, { useState, useEffect, useMemo, useRef, Component } from "react";
 import { db } from "./firebase";
 import { doc, getDoc, setDoc } from "firebase/firestore";
 
-const APP_VERSION = "8.10.4";
+const APP_VERSION = "8.10.5";
 
 const DEFAULT_ADMISSION = () => `${new Date().getFullYear()}-01-01`;
 const round2 = (v) => Math.round(v * 100) / 100;
@@ -20099,7 +20099,9 @@ function buildShellSections({ pessoa, restaurantId, isOwner, employees, restaura
   if (op.escalas || ad.schedule) {
     planItems.push({ id: "mod_escalas", label: "Escalas", icon: "📅", kind: "manager", tab: "schedule" });
   }
-  if (isOwner || sp.isDP || sp.isLider) {
+  // v8.10.5: aceita tanto sp.isLider (matriz nova) quanto sp.profile=="lider" (legacy migração)
+  const _isLiderShell = sp.isLider === true || sp.profile === "lider";
+  if (isOwner || sp.isDP || _isLiderShell) {
     planItems.push({ id: "mod_freelas", label: "Freelas", icon: "🎒", kind: "manager", tab: "freelas" });
   }
   if (op.reunioes) {
@@ -20444,7 +20446,8 @@ function AppShell({ pessoa, data, activeRestaurantId, setActiveRestaurantId, use
             faq:         _ad.faq         === true,
             config:      _ad.config      === true,
             isDP:        _sp.isDP        === true,
-            managerAreas: _sp.profile === "lider" ? (_sp.areas || []) : [],
+            // v8.10.5: aceita tanto profile=="lider" (legacy) quanto special.isLider (matriz nova).
+            managerAreas: (_sp.profile === "lider" || _sp.isLider === true) ? (_sp.areas || []) : [],
           };
       return (
         <RestaurantPanel
