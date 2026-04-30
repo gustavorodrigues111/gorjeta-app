@@ -3,7 +3,7 @@ import React, { useState, useEffect, useMemo, useRef, Component } from "react";
 import { db } from "./firebase";
 import { doc, getDoc, setDoc } from "firebase/firestore";
 
-const APP_VERSION = "8.9.1";
+const APP_VERSION = "8.9.2";
 
 const DEFAULT_ADMISSION = () => `${new Date().getFullYear()}-01-01`;
 const round2 = (v) => Math.round(v * 100) / 100;
@@ -19989,7 +19989,7 @@ function hasAnyAdminRole(ad, sp, isOwner) {
 
 // Define estrutura da sidebar derivada de permissões da pessoa
 // v7.3: aceita employees pra check defensivo de isTeam
-function buildShellSections({ pessoa, restaurantId, isOwner, employees }) {
+function buildShellSections({ pessoa, restaurantId, isOwner, employees, restaurants }) {
   // Owner tem acesso implícito total — simula permissões completas
   let perms, isTeam;
   if (isOwner) {
@@ -20043,14 +20043,20 @@ function buildShellSections({ pessoa, restaurantId, isOwner, employees }) {
   // Comunicados/FAQ/DP saíram pra seção "Comunicação" (todos).
   // v7.8: tab IDs ajustados pra bater com os do EmployeePortal (extrato, escala) — não com os do admin (gorjeta, schedule).
   if (isTeam) {
+    // v8.9.2: itens da Minha Jornada respeitam tabsConfig/tabsGestor do restaurante (admin pode ocultar)
+    const restaurantObj = (restaurants || []).find(r => r.id === restaurantId);
+    const empTabVisivel = (key) =>
+      restaurantObj?.tabsConfig?.[key] !== false && restaurantObj?.tabsGestor?.[key] !== false;
+    const jornadaItems = [
+      { id: "me_extrato", label: "Meu extrato",    icon: "💰", kind: "employee", tab: "extrato" },
+      { id: "me_escala",  label: "Minha escala",   icon: "📅", kind: "employee", tab: "escala"  },
+      empTabVisivel("trilha")   && { id: "me_trilha",   label: "Minhas trilhas",  icon: "🎯", kind: "employee", tab: "trilha"   },
+      empTabVisivel("horarios") && { id: "me_horarios", label: "Meus horários",   icon: "🕐", kind: "employee", tab: "horarios" },
+    ].filter(Boolean);
     sections.push({
       group: "Minha Jornada",
       color: "#d4a017",
-      items: [
-        { id: "me_extrato", label: "Meu extrato",    icon: "💰", kind: "employee", tab: "extrato" },
-        { id: "me_escala",  label: "Minha escala",   icon: "📅", kind: "employee", tab: "escala"  },
-        { id: "me_trilha",  label: "Minhas trilhas", icon: "🎯", kind: "employee", tab: "trilha"  },
-      ],
+      items: jornadaItems,
     });
   }
 
@@ -20207,7 +20213,7 @@ function AppShell({ pessoa, data, activeRestaurantId, setActiveRestaurantId, use
   const isOwner = isRealOwnerLocal && !impersonatedPessoa;
   const accessibleRestaurants = isRealOwnerLocal ? restaurants : (pessoa?.restaurantIds || []).map(rid => restaurants.find(r => r.id === rid)).filter(Boolean);
   const activeRest = restaurants.find(r => r.id === activeRestaurantId);
-  const sections = buildShellSections({ pessoa, restaurantId: activeRestaurantId, isOwner, employees: data?.employees ?? [] });
+  const sections = buildShellSections({ pessoa, restaurantId: activeRestaurantId, isOwner, employees: data?.employees ?? [], restaurants: data?.restaurants ?? [] });
   const allItems = sections.flatMap(s => s.items);
 
   // Seção ativa do shell (persistida em localStorage)
