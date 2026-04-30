@@ -3,7 +3,7 @@ import React, { useState, useEffect, useMemo, useRef, Component } from "react";
 import { db } from "./firebase";
 import { doc, getDoc, setDoc, onSnapshot } from "firebase/firestore";
 
-const APP_VERSION = "8.11.2";
+const APP_VERSION = "8.11.3";
 
 // v8.11.1: comparação de versão semver-like (8.11.1 > 8.10.7 > 8.9.4)
 function compareVersions(a, b) {
@@ -4079,10 +4079,14 @@ function WorkScheduleManagerTab({ restaurantId, employees, roles, workSchedules,
         const sundayActiveAlt    = isAlternating && (editDays?.[0]?.active === true || editDaysB?.[0]?.active === true);
         const showCycle = !isEmpFreela && (sundayActiveSingle || sundayActiveAlt);
         if (!showCycle) return null;
-        // Sugere refDate automático: primeiro domingo a partir do validFrom
+        // v8.11.3: refDate é o PRIMEIRO domingo de FOLGA. O empregado trabalha workCount domingos
+        // antes da primeira folga, então a sugestão = primeiro domingo on/after validFrom + (workCount × 7 dias).
+        // Ex: 3 trab + 1 folga, vigência 01/04 → 1º domingo (05/04) trab, +21 dias = 26/04 (4º domingo, folga).
         const suggestRef = () => {
           const base = new Date((validFrom || today()) + "T12:00:00");
           while (base.getDay() !== 0) base.setDate(base.getDate() + 1);
+          const w = parseInt(sundayCycle.workCount, 10);
+          if (Number.isFinite(w) && w > 0) base.setDate(base.getDate() + 7 * w);
           return base.toISOString().slice(0, 10);
         };
         const refIsValid = sundayCycle.refDate && new Date(sundayCycle.refDate + "T12:00:00").getDay() === 0;
