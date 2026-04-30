@@ -3,7 +3,7 @@ import React, { useState, useEffect, useMemo, useRef, Component } from "react";
 import { db } from "./firebase";
 import { doc, getDoc, setDoc } from "firebase/firestore";
 
-const APP_VERSION = "8.10.1";
+const APP_VERSION = "8.10.2";
 
 const DEFAULT_ADMISSION = () => `${new Date().getFullYear()}-01-01`;
 const round2 = (v) => Math.round(v * 100) / 100;
@@ -20461,6 +20461,24 @@ function AppShell({ pessoa, data, activeRestaurantId, setActiveRestaurantId, use
       const virtualMgr = pessoa?.linkedManagerId
         ? (data?.managers || []).find(m => m.id === pessoa.linkedManagerId)
         : (isOwner ? { id: "owner_virt", name: currentUser?.name || "Owner", cpf: currentUser?.cpf, restaurantIds: [activeRestaurantId], perms: {tips:true,schedule:true}, isMaster: true } : null);
+      // v8.10.2: perms reais da pessoa (não mais hardcoded). Owner mantém tudo true; demais herdam do pessoa.permissions[rid].
+      const _pessoaPerms = pessoa?.permissions?.[activeRestaurantId] || { admin: {}, special: {} };
+      const _ad = _pessoaPerms.admin || {};
+      const _sp = _pessoaPerms.special || {};
+      const realPerms = isOwner
+        ? { tips:true, schedule:true, vt:true, roles:true, employees:true, comunicados:true, faq:true, config:true, isDP:true, managerAreas:[] }
+        : {
+            tips:        _ad.tips        === true,
+            schedule:    _ad.schedule    === true,
+            vt:          _ad.vt          === true,
+            roles:       _ad.roles       === true,
+            employees:   _ad.employees   === true,
+            comunicados: _ad.comunicados === true,
+            faq:         _ad.faq         === true,
+            config:      _ad.config      === true,
+            isDP:        _sp.isDP        === true,
+            managerAreas: _sp.profile === "lider" ? (_sp.areas || []) : [],
+          };
       return (
         <RestaurantPanel
           key={`rp-${activeRestaurantId}-${effectiveTab}-${resetCounter}`}
@@ -20472,7 +20490,7 @@ function AppShell({ pessoa, data, activeRestaurantId, setActiveRestaurantId, use
           splits={data?.splits || {}}
           schedules={data?.schedules || {}}
           onUpdate={onUpdate}
-          perms={{tips:true, schedule:true, vt:true, roles:true, employees:true, comunicados:true, faq:true, config:true, isDP:true}}
+          perms={realPerms}
           isOwner={isOwner}
           data={data}
           currentUser={virtualMgr || currentUser}
