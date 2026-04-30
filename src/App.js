@@ -3,7 +3,7 @@ import React, { useState, useEffect, useMemo, useRef, Component } from "react";
 import { db } from "./firebase";
 import { doc, getDoc, setDoc, onSnapshot } from "firebase/firestore";
 
-const APP_VERSION = "8.15.0";
+const APP_VERSION = "8.15.1";
 
 // v8.11.1: comparação de versão semver-like (8.11.1 > 8.10.7 > 8.9.4)
 function compareVersions(a, b) {
@@ -540,7 +540,7 @@ const K = {
   schedulePrevista:    "v4:schedulePrevista",     // {[rid]: {[mk]: frozen snapshot of schedules at first edit/VT payment}}
   scheduleSwaps:       "v4:scheduleSwaps",        // [{id, restaurantId, date, empAId, empBId, note?, registeredAt, registeredBy}] — inversões informais (v8.11.0)
   recursoFolders:      "v4:recursoFolders",       // [{id, restaurantId, name, icon, order, createdAt, createdBy, deletedAt?}]  (v8.15.0)
-  recursos:            "v4:recursos",             // [{id, restaurantId, folderId, name, type:"link"|"nota", url?, content?, responsavelId?, tags:[], visibility:{mode,sharedWith}, createdById, createdBy, createdAt, updatedAt?, updatedBy?, deletedAt?}]
+  recursos:            "v4:recursos",             // [{id, restaurantId, folderId, name, type:"link"|"nota", url?, content?, tags:[], visibility:{mode,sharedWith}, editores:[pessoaId], createdById, createdBy, createdAt, updatedAt?, updatedBy?, deletedAt?}]  (v8.15.1: editores delegados pelo Owner; responsavelId removido)
   recursosInitialized: "v4:recursosInitialized",  // {[restaurantId]: true} — evita recriar pastas exemplo
   employeeGoals:       "v4:employeeGoals",        // {[empId]: [{id, type, title, targetRoleId?, topic?, materials:[], metas:[], createdAt, createdBy, status:"active"|"completed"|"cancelled"}]}
   delays:              "v4:delays",               // {[rid]: {[mk]: {[empId]: {[day]: minutes}}}}
@@ -22026,7 +22026,7 @@ function RecursosTab({ restaurantId, recursoFolders, recursos, recursosInitializ
   const [activeFolderId, setActiveFolderId] = useState(null);
   const [search, setSearch] = useState("");
   // Modal item
-  const [itemForm, setItemForm] = useState(null); // null | {id?, folderId, name, type, url, content, responsavelId, tags, visibility:{mode,sharedWith}}
+  const [itemForm, setItemForm] = useState(null); // null | {id?, folderId, name, type, url, content, tags, visibility:{mode,sharedWith}, editores:[]}
   // Modal pasta
   const [folderForm, setFolderForm] = useState(null);
   // Pasta selecionada (default = primeira)
@@ -22035,16 +22035,7 @@ function RecursosTab({ restaurantId, recursoFolders, recursos, recursosInitializ
     if (activeFolderId && !restFolders.find(f => f.id === activeFolderId)) setActiveFolderId(restFolders[0]?.id ?? null);
   }, [restFolders, activeFolderId]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Helpers
-  const empNameById = {};
-  (employees ?? []).forEach(e => { empNameById[e.id] = e.name; });
-  const pessoaNameById = {};
-  (pessoas ?? []).forEach(p => { pessoaNameById[p.id] = p.name; });
-  const managerNameById = {};
-  (managers ?? []).forEach(m => { managerNameById[m.id] = m.name; });
-  const personNameById = (id) => pessoaNameById[id] || managerNameById[id] || empNameById[id] || "—";
-
-  // Lista de pessoas elegíveis pra "Responsável" — gestores/líderes do restaurante
+  // v8.15.1: Lista de gestores/líderes elegíveis pra delegação de edição
   const eligibleResponsaveis = (() => {
     const seenIds = new Set(), seenCpfs = new Set(), result = [];
     const cpfClean = s => (s || "").replace(/\D/g, "");
@@ -22082,7 +22073,14 @@ function RecursosTab({ restaurantId, recursoFolders, recursos, recursosInitializ
     if (v.mode === "shared") return isCreatorOf(item) || (Array.isArray(v.sharedWith) && v.sharedWith.includes(currentUser?.id));
     return true; // default: todos os gestores que abrem essa aba
   };
-  const canEditItem = (item) => isOwner || isDP || isCreatorOf(item);
+  // v8.15.1: edição = Owner OU DP OU criador (legado) OU editor delegado pelo Owner
+  const canEditItem = (item) => {
+    if (isOwner) return true;
+    if (isDP) return true;
+    if (isCreatorOf(item)) return true;
+    if (Array.isArray(item.editores) && item.editores.includes(currentUser?.id)) return true;
+    return false;
+  };
 
   // Itens da pasta ativa, filtrados por busca + visibilidade
   const visibleItems = restItems
@@ -22130,20 +22128,22 @@ function RecursosTab({ restaurantId, recursoFolders, recursos, recursosInitializ
     }
   }
 
-  // Item actions
+  // Item actions — v8.15.1: criação só pelo Owner; editores delegados podem editar item.
   function startNewItem(folderId) {
     setItemForm({
       folderId, name: "", type: "link", url: "", content: "",
-      responsavelId: currentUser?.id || "", tags: [],
+      tags: [],
       visibility: { mode: "default", sharedWith: [] },
+      editores: [],
     });
   }
   function startEditItem(r) {
     setItemForm({
       id: r.id, folderId: r.folderId, name: r.name || "", type: r.type || "link",
       url: r.url || "", content: r.content || "",
-      responsavelId: r.responsavelId || "", tags: [...(r.tags || [])],
+      tags: [...(r.tags || [])],
       visibility: { mode: r.visibility?.mode || "default", sharedWith: [...(r.visibility?.sharedWith || [])] },
+      editores: Array.isArray(r.editores) ? [...r.editores] : [],
     });
   }
   function saveItem() {
@@ -22158,16 +22158,17 @@ function RecursosTab({ restaurantId, recursoFolders, recursos, recursosInitializ
       name: itemForm.name.trim(),
       type: itemForm.type,
       ...(itemForm.type === "link" ? { url: itemForm.url.trim() } : { content: itemForm.content }),
-      responsavelId: itemForm.responsavelId || null,
       tags: (itemForm.tags || []).filter(Boolean),
       visibility: {
         mode: itemForm.visibility.mode || "default",
         sharedWith: itemForm.visibility.mode === "shared" ? [...(itemForm.visibility.sharedWith || [])] : [],
       },
+      // v8.15.1: editores só são gravados pelo Owner. Outros mantêm o que estava.
+      editores: isOwner ? [...(itemForm.editores || [])] : (existing?.editores || []),
       createdAt: existing?.createdAt || now,
       createdBy: existing?.createdBy || (currentUser?.name || "—"),
       createdById: existing?.createdById || currentUser?.id || null,
-      ...(isEdit ? { updatedAt: now, updatedBy: currentUser?.name || "—" } : {}),
+      ...(isEdit ? { updatedAt: now, updatedBy: currentUser?.name || "—", updatedById: currentUser?.id || null } : {}),
     };
     if (isEdit) {
       onUpdate("recursos", (recursos ?? []).map(r => r.id === itemForm.id ? item : r));
@@ -22231,7 +22232,7 @@ function RecursosTab({ restaurantId, recursoFolders, recursos, recursosInitializ
               </div>
               <div style={{display:"flex",gap:8,alignItems:"center"}}>
                 <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="🔍 Buscar..." style={{...S.input,fontSize:12,padding:"6px 10px",width:180}} />
-                <button onClick={()=>startNewItem(activeFolder.id)} style={{...S.btnPrimary,fontSize:12,padding:"7px 14px",background:ac,borderColor:ac}}>+ Novo recurso</button>
+                {isOwner && <button onClick={()=>startNewItem(activeFolder.id)} style={{...S.btnPrimary,fontSize:12,padding:"7px 14px",background:ac,borderColor:ac}}>+ Novo recurso</button>}
               </div>
             </div>
           )}
@@ -22244,10 +22245,10 @@ function RecursosTab({ restaurantId, recursoFolders, recursos, recursosInitializ
           ) : (
             <div style={{display:"flex",flexDirection:"column",gap:8}}>
               {visibleItems.map(r => {
-                const responsavel = r.responsavelId ? personNameById(r.responsavelId) : null;
                 const isLink = r.type === "link";
                 const visMode = r.visibility?.mode || "default";
                 const visBadge = visMode === "private" ? "🔒" : visMode === "shared" ? "👥" : null;
+                const editoresCount = Array.isArray(r.editores) ? r.editores.length : 0;
                 return (
                   <div key={r.id} style={{...S.card,padding:"12px 14px",display:"flex",alignItems:"flex-start",gap:12}}>
                     <span style={{fontSize:20,marginTop:1}}>{isLink ? "🔗" : "📝"}</span>
@@ -22255,6 +22256,7 @@ function RecursosTab({ restaurantId, recursoFolders, recursos, recursosInitializ
                       <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
                         <span style={{color:"var(--text)",fontWeight:700,fontSize:14}}>{r.name}</span>
                         {visBadge && <span title={visMode === "private" ? "Privado" : "Compartilhado"} style={{fontSize:11}}>{visBadge}</span>}
+                        {editoresCount > 0 && <span title={`${editoresCount} editor(es) delegado(s)`} style={{fontSize:10,padding:"1px 6px",borderRadius:10,background:ac+"22",color:ac,fontWeight:700}}>✏️ {editoresCount}</span>}
                       </div>
                       {isLink ? (
                         <a href={r.url} target="_blank" rel="noopener noreferrer" style={{color:ac,fontSize:11,textDecoration:"underline",fontFamily:"'DM Mono',monospace",wordBreak:"break-all",display:"block",marginTop:3}}>{r.url}</a>
@@ -22262,9 +22264,14 @@ function RecursosTab({ restaurantId, recursoFolders, recursos, recursosInitializ
                         r.content && <div style={{color:"var(--text2)",fontSize:12,marginTop:4,whiteSpace:"pre-wrap",lineHeight:1.5}}>{r.content}</div>
                       )}
                       <div style={{display:"flex",gap:10,flexWrap:"wrap",marginTop:6,fontSize:10,color:"var(--text3)"}}>
-                        {responsavel && <span>👤 {responsavel}</span>}
                         {(r.tags || []).map(t => <span key={t} style={{padding:"1px 7px",borderRadius:10,background:"var(--bg2)",color:"var(--text2)"}}>#{t}</span>)}
-                        <span style={{marginLeft:"auto"}}>por {r.createdBy} · {new Date(r.createdAt).toLocaleDateString("pt-BR")}</span>
+                      </div>
+                      {/* v8.15.1: Auditoria no rodapé — criado por X em DD/MM · editado por Y em DD/MM */}
+                      <div style={{marginTop:6,paddingTop:6,borderTop:"1px solid var(--border)",fontSize:10,color:"var(--text3)",fontStyle:"italic"}}>
+                        Criado por <strong>{r.createdBy || "—"}</strong> em {new Date(r.createdAt).toLocaleDateString("pt-BR")}
+                        {r.updatedAt && r.updatedBy && (
+                          <> · Editado por <strong>{r.updatedBy}</strong> em {new Date(r.updatedAt).toLocaleDateString("pt-BR")}</>
+                        )}
                       </div>
                     </div>
                     {canEditItem(r) && (
@@ -22336,25 +22343,42 @@ function RecursosTab({ restaurantId, recursoFolders, recursos, recursosInitializ
                   <textarea value={itemForm.content} onChange={e=>setItemForm({...itemForm,content:e.target.value})} rows={6} placeholder="Texto livre..." style={{...S.input,fontFamily:"'DM Mono',monospace",fontSize:12,resize:"vertical",minHeight:120}}/>
                 </div>
               )}
-              <div style={{display:"grid",gridTemplateColumns:mobileOnly?"1fr":"1fr 1fr",gap:10}}>
-                <div>
-                  <label style={{...S.label,fontSize:11}}>Pasta</label>
-                  <select value={itemForm.folderId} onChange={e=>setItemForm({...itemForm,folderId:e.target.value})} style={S.input}>
-                    {restFolders.map(f => <option key={f.id} value={f.id}>{f.icon} {f.name}</option>)}
-                  </select>
-                </div>
-                <div>
-                  <label style={{...S.label,fontSize:11}}>Responsável</label>
-                  <select value={itemForm.responsavelId} onChange={e=>setItemForm({...itemForm,responsavelId:e.target.value})} style={S.input}>
-                    <option value="">— Sem responsável —</option>
-                    {eligibleResponsaveis.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
-                  </select>
-                </div>
+              <div>
+                <label style={{...S.label,fontSize:11}}>Pasta</label>
+                <select value={itemForm.folderId} onChange={e=>setItemForm({...itemForm,folderId:e.target.value})} style={S.input}>
+                  {restFolders.map(f => <option key={f.id} value={f.id}>{f.icon} {f.name}</option>)}
+                </select>
               </div>
               <div>
                 <label style={{...S.label,fontSize:11}}>Tags (separadas por vírgula)</label>
                 <input value={(itemForm.tags || []).join(", ")} onChange={e=>setItemForm({...itemForm,tags:e.target.value.split(",").map(s=>s.trim()).filter(Boolean)})} placeholder="ex: fechamento, fiscal" style={S.input}/>
               </div>
+
+              {/* v8.15.1: Editores delegados — Owner only */}
+              {isOwner && (
+                <div style={{padding:"10px 12px",background:"var(--bg2)",border:"1px solid var(--border)",borderRadius:8}}>
+                  <div style={{fontSize:11,fontWeight:700,color:"var(--text2)",textTransform:"uppercase",letterSpacing:0.4,marginBottom:6}}>✏️ Quem pode editar este recurso</div>
+                  <div style={{fontSize:10,color:"var(--text3)",marginBottom:8,lineHeight:1.4}}>Por padrão, só você (Owner) edita. Marque outros gestores pra delegar permissão de edição.</div>
+                  {eligibleResponsaveis.filter(p => p.id !== currentUser?.id).length === 0 ? (
+                    <div style={{fontSize:11,color:"var(--text3)",fontStyle:"italic"}}>Nenhum outro gestor cadastrado.</div>
+                  ) : (
+                    <div style={{display:"flex",flexDirection:"column",gap:3,maxHeight:140,overflow:"auto"}}>
+                      {eligibleResponsaveis.filter(p => p.id !== currentUser?.id).map(p => {
+                        const checked = (itemForm.editores || []).includes(p.id);
+                        return (
+                          <label key={p.id} style={{display:"flex",alignItems:"center",gap:7,padding:"3px 4px",fontSize:12,cursor:"pointer"}}>
+                            <input type="checkbox" checked={checked} onChange={()=>{
+                              const cur = itemForm.editores || [];
+                              setItemForm({...itemForm, editores: checked ? cur.filter(x=>x!==p.id) : [...cur, p.id]});
+                            }} style={{accentColor:ac}}/>
+                            <span style={{color:"var(--text)"}}>{p.name}</span>
+                          </label>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              )}
 
               {/* Visibilidade */}
               <div style={{padding:"10px 12px",background:"var(--bg2)",border:"1px solid var(--border)",borderRadius:8}}>
