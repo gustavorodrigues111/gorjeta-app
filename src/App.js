@@ -3,7 +3,7 @@ import React, { useState, useEffect, useMemo, useRef, Component } from "react";
 import { db } from "./firebase";
 import { doc, getDoc, setDoc } from "firebase/firestore";
 
-const APP_VERSION = "8.7.0";
+const APP_VERSION = "8.7.1";
 
 const DEFAULT_ADMISSION = () => `${new Date().getFullYear()}-01-01`;
 const round2 = (v) => Math.round(v * 100) / 100;
@@ -21745,8 +21745,137 @@ function FreelaShiftCard({ shift: s, pessoa, editable, shiftPrntoPronto, updateS
   );
 }
 
+// v8.7.1 — Card do Fechamento por PESSOA (agrupa N turnos da mesma pessoa em 1 card).
+// Pre-fill com última paga (valorTipo+valor) que essa pessoa recebeu em shifts anteriores.
+// DP precifica todos os turnos da pessoa de uma vez com o mesmo valor.
+function FechaPessoaCard({ pessoa, shifts: pessoaShifts, allShifts, updateShift, mobileOnly, ac, onUpdate, pessoas, fmtHoras, freelaRates, onOpenManageRates }) {
+  // Encontra última paga (mais recente) dessa pessoa em qualquer shift histórico
+  const lastRate = (() => {
+    const sorted = (allShifts || [])
+      .filter(s => s.pessoaId === pessoa?.id && s.valorTipo && (s.valorUnit || 0) > 0)
+      .sort((a,b) => (b.lancadoEm || b.date || "").localeCompare(a.lancadoEm || a.date || ""));
+    return sorted[0] ? { valorTipo: sorted[0].valorTipo, valorUnit: sorted[0].valorUnit } : null;
+  })();
+
+  const [selectedRateId, setSelectedRateId] = useState(""); // "" = Personalizado
+  const [valorTipo, setValorTipo] = useState(lastRate?.valorTipo || "hora");
+  const [valorUnit, setValorUnit] = useState(lastRate?.valorUnit != null ? String(lastRate.valorUnit).replace(".", ",") : "");
+  const [pix, setPix] = useState(pessoa?.pix || "");
+  const fromBR = (v) => parseFloat(String(v || "").replace(",", ".")) || 0;
+  const missingPix = !pessoa?.pix;
+
+  // Total estimado com base no valor escolhido
+  const valorNum = fromBR(valorUnit);
+  const totalEstimado = pessoaShifts.reduce((sum, s) => {
+    if (valorTipo === "hora") return sum + (s.horas || 0) * valorNum;
+    return sum + valorNum; // diária
+  }, 0);
+
+  function handleSelectRate(rateId) {
+    setSelectedRateId(rateId);
+    if (rateId === "__manage__") { onOpenManageRates && onOpenManageRates(); setSelectedRateId(""); return; }
+    if (!rateId) return;
+    const rate = (freelaRates || []).find(r => r.id === rateId);
+    if (rate) {
+      setValorTipo(rate.valorTipo);
+      setValorUnit(String(rate.valor).replace(".", ","));
+    }
+  }
+
+  function handleSalvarTodos() {
+    const v = fromBR(valorUnit);
+    if (v <= 0) { alert("Preencha o valor."); return; }
+    pessoaShifts.forEach(s => updateShift(s.id, { valorTipo, valorUnit: v }));
+    if (missingPix && pix.trim() && pessoa && onUpdate && pessoas) {
+      const next = pessoas.map(p => p.id === pessoa.id ? { ...p, pix: pix.trim() } : p);
+      onUpdate("pessoas", next);
+    }
+    onUpdate && onUpdate("_toast", `💰 ${pessoaShifts.length} turno(s) de ${pessoa?.name} precificado(s)`);
+  }
+
+  return (
+    <div style={{ background: "#dbeafe", border: "1px solid #3b82f655", borderRadius: 12, padding: 12 }}>
+      {/* Header */}
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 10, gap: 8 }}>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontWeight: 700, color: "var(--text)", fontSize: 14 }}>{pessoa?.name || "(removido)"}</div>
+          <div style={{ fontSize: 11, color: "var(--text3)", marginTop: 2 }}>
+            {pessoaShifts.length} turno{pessoaShifts.length !== 1 ? "s" : ""} aguardando precificação
+            {lastRate && <span style={{ color: "#1e40af", fontWeight: 600 }}> · 💡 sugerido: R$ {lastRate.valorUnit.toFixed(2)}{lastRate.valorTipo === "hora" ? "/h" : " diária"}</span>}
+          </div>
+        </div>
+        <span style={{ padding: "3px 8px", background: "#3b82f622", color: "#1e40af", borderRadius: 6, fontSize: 10, fontWeight: 700, whiteSpace: "nowrap" }}>💰 Aguardando DP</span>
+      </div>
+
+      {/* Lista de turnos compacta */}
+      <div style={{ display: "flex", flexDirection: "column", gap: 4, marginBottom: 10, padding: "6px 8px", background: "rgba(255,255,255,0.5)", borderRadius: 8 }}>
+        {pessoaShifts.sort((a,b) => (a.date || "").localeCompare(b.date || "")).map(s => (
+          <div key={s.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 11, padding: "3px 0", borderBottom: "1px dashed rgba(0,0,0,0.06)" }}>
+            <span style={{ color: "var(--text2)" }}>📅 {fmtDate(s.date)}{s.area ? ` · ${s.area}` : ""}</span>
+            <span style={{ color: "var(--text)", fontFamily: "'DM Mono',monospace", fontWeight: 600 }}>
+              {s.entrada}→{s.saida}{s.intervalo > 0 ? ` (${s.intervalo}m)` : ""} = {fmtHoras ? fmtHoras(s.horas) : s.horas + "h"}
+            </span>
+          </div>
+        ))}
+      </div>
+
+      {/* Dropdown de nível pré-cadastrado */}
+      <div style={{ marginBottom: 8 }}>
+        <label style={{ ...S.label, fontSize: 10 }}>Nível / Valor</label>
+        <select value={selectedRateId} onChange={e => handleSelectRate(e.target.value)} style={{ ...S.input, fontSize: 12, padding: "7px 9px", cursor: "pointer" }}>
+          <option value="">— Personalizado (digite abaixo) —</option>
+          {(freelaRates || []).length > 0 && (
+            <optgroup label="Cadastrados">
+              {freelaRates.map(r => (
+                <option key={r.id} value={r.id}>
+                  {r.label} — R$ {r.valor.toFixed(2)} {r.valorTipo === "hora" ? "/hora" : "/diária"}
+                </option>
+              ))}
+            </optgroup>
+          )}
+          <option value="__manage__" style={{ fontWeight: 700 }}>⚙️ Gerenciar níveis...</option>
+        </select>
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: mobileOnly ? "1fr 1fr" : "1.2fr 1fr", gap: 8, marginBottom: missingPix ? 8 : 0 }}>
+        <div>
+          <label style={{ ...S.label, fontSize: 10 }}>Tipo de valor</label>
+          <select value={valorTipo} onChange={e => { setValorTipo(e.target.value); setSelectedRateId(""); }} style={{ ...S.input, fontSize: 12, padding: "7px 9px" }}>
+            <option value="hora">R$ por hora</option>
+            <option value="diaria">Diária</option>
+          </select>
+        </div>
+        <div>
+          <label style={{ ...S.label, fontSize: 10 }}>Valor (R$)</label>
+          <input type="text" inputMode="decimal" value={valorUnit} onChange={e => { setValorUnit(e.target.value); setSelectedRateId(""); }} placeholder="0,00" style={{ ...S.input, fontSize: 12, padding: "7px 9px" }} />
+        </div>
+      </div>
+      {missingPix && (
+        <div style={{ marginBottom: 4 }}>
+          <label style={{ ...S.label, fontSize: 10, color: "#b45309" }}>⚠️ PIX da pessoa (não cadastrado)</label>
+          <input type="text" value={pix} onChange={e => setPix(e.target.value)} placeholder="CPF, e-mail, celular ou chave aleatória" style={{ ...S.input, fontSize: 12, padding: "7px 9px" }} />
+        </div>
+      )}
+
+      {/* Total estimado + ação */}
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 10, paddingTop: 8, borderTop: "1px solid #3b82f633" }}>
+        <div>
+          <div style={{ fontSize: 10, color: "var(--text3)" }}>Total estimado ({pessoaShifts.length} turno{pessoaShifts.length !== 1 ? "s" : ""}):</div>
+          <div style={{ fontFamily: "'DM Mono',monospace", fontWeight: 800, fontSize: 16, color: valorNum > 0 ? "#1e40af" : "var(--text3)" }}>
+            R$ {totalEstimado.toFixed(2)}
+          </div>
+        </div>
+        <button onClick={handleSalvarTodos} style={{ background: ac, color: "#fff", border: "none", borderRadius: 8, padding: "8px 16px", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>
+          💰 Lançar pros {pessoaShifts.length} turno{pessoaShifts.length !== 1 ? "s" : ""}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 // v8.6 — Row do Fechamento (DP) com dropdown de níveis pré-cadastrados.
 // DP pode escolher nível (Ajudante/Operacional/etc) ou "Personalizado" pra digitar livre.
+// (Mantido por compat — substituído por FechaPessoaCard na v8.7.1)
+// eslint-disable-next-line no-unused-vars
 function FechaShiftRow({ shift: s, pessoa, updateShift, mobileOnly, ac, onUpdate, pessoas, fmtHoras, freelaRates, onOpenManageRates }) {
   const [selectedRateId, setSelectedRateId] = useState(""); // "" = Personalizado
   const [valorTipo, setValorTipo] = useState(s.valorTipo || "hora");
@@ -22027,34 +22156,44 @@ function FreelaFechamentoTab({ restaurantId, restPessoas, shifts, lotes, shiftPr
         </div>
       )}
 
-      {/* v8.6 — Aguardando precificação em GRID de cards (consistência com Lançamento) */}
-      {incompletos.length > 0 && (
-        <div style={{ marginBottom: 18 }}>
-          <div style={{ fontSize: 11, color: "var(--text3)", fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.4, marginBottom: 8 }}>
-            💰 Aguardando precificação ({incompletos.length})
+      {/* v8.7.1 — Aguardando precificação agrupado POR PESSOA (1 card por pessoa, N turnos dentro) */}
+      {incompletos.length > 0 && (() => {
+        // Agrupa incompletos por pessoaId
+        const byPessoa = {};
+        incompletos.forEach(s => {
+          if (!byPessoa[s.pessoaId]) byPessoa[s.pessoaId] = [];
+          byPessoa[s.pessoaId].push(s);
+        });
+        const pessoaCount = Object.keys(byPessoa).length;
+        return (
+          <div style={{ marginBottom: 18 }}>
+            <div style={{ fontSize: 11, color: "var(--text3)", fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.4, marginBottom: 8 }}>
+              💰 Aguardando precificação ({incompletos.length} turno{incompletos.length !== 1 ? "s" : ""} · {pessoaCount} pessoa{pessoaCount !== 1 ? "s" : ""})
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: mobileOnly ? "1fr" : "repeat(auto-fill, minmax(360px, 1fr))", gap: 10 }}>
+              {Object.entries(byPessoa).map(([pessoaId, pessoaShifts]) => {
+                const pessoa = restPessoas.find(p => p.id === pessoaId);
+                return (
+                  <FechaPessoaCard
+                    key={pessoaId}
+                    pessoa={pessoa}
+                    shifts={pessoaShifts}
+                    allShifts={shifts}
+                    updateShift={updateShift}
+                    onUpdate={onUpdate}
+                    pessoas={pessoas}
+                    fmtHoras={fmtHoras}
+                    freelaRates={freelaRates}
+                    onOpenManageRates={() => setShowRatesManager(true)}
+                    mobileOnly={mobileOnly}
+                    ac={ac}
+                  />
+                );
+              })}
+            </div>
           </div>
-          <div style={{ display: "grid", gridTemplateColumns: mobileOnly ? "1fr" : "repeat(auto-fill, minmax(340px, 1fr))", gap: 10 }}>
-            {incompletos.map(s => {
-              const pessoa = restPessoas.find(p => p.id === s.pessoaId);
-              return (
-                <FechaShiftRow
-                  key={s.id}
-                  shift={s}
-                  pessoa={pessoa}
-                  updateShift={updateShift}
-                  onUpdate={onUpdate}
-                  pessoas={pessoas}
-                  fmtHoras={fmtHoras}
-                  freelaRates={freelaRates}
-                  onOpenManageRates={() => setShowRatesManager(true)}
-                  mobileOnly={mobileOnly}
-                  ac={ac}
-                />
-              );
-            })}
-          </div>
-        </div>
-      )}
+        );
+      })()}
 
       {/* v8.7 — Lotes pendentes em grid de cards roxos */}
       {pendentesLotes.length > 0 && (
