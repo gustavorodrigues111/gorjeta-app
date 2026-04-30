@@ -3,7 +3,7 @@ import React, { useState, useEffect, useMemo, useRef, Component } from "react";
 import { db } from "./firebase";
 import { doc, getDoc, setDoc } from "firebase/firestore";
 
-const APP_VERSION = "8.4.6";
+const APP_VERSION = "8.5.0";
 
 const DEFAULT_ADMISSION = () => `${new Date().getFullYear()}-01-01`;
 const round2 = (v) => Math.round(v * 100) / 100;
@@ -20982,7 +20982,7 @@ function FreelasModule({ restaurantId, pessoas, freelaShifts, freelaPagamentos, 
   async function cancelarLote(loteId) {
     const lote = (freelaPagamentos || []).find(l => l.id === loteId);
     if (!lote) return;
-    if (lote.status === "pago") { alert("Lote já foi pago — não dá pra cancelar."); return; }
+    if (lote.status === "pago") { alert("Lote já foi pago — use 'Reabrir lote' antes de cancelar."); return; }
     if (!await appConfirm(`Cancelar o lote "${lote.numero}"? Os ${lote.qtdShifts} shifts voltam pro status "Aberto".`)) return;
     const updatedShifts = (freelaShifts || []).map(s => {
       if (lote.shiftIds.includes(s.id)) return { ...s, status: "aberto", lotePagamentoId: null };
@@ -20991,6 +20991,45 @@ function FreelasModule({ restaurantId, pessoas, freelaShifts, freelaPagamentos, 
     onUpdate("freelaShifts", updatedShifts);
     onUpdate("freelaPagamentos", (freelaPagamentos || []).filter(l => l.id !== loteId));
     onUpdate("_toast", `🗑️ Lote cancelado`);
+  }
+
+  // v8.5 — Owner reabre lote já pago (volta pra pendente)
+  async function reabrirLotePago(loteId) {
+    const lote = (freelaPagamentos || []).find(l => l.id === loteId);
+    if (!lote) return;
+    if (lote.status !== "pago") { alert("Esse lote não está pago."); return; }
+    if (!await appConfirm(`Reabrir o lote "${lote.numero}"? Os shifts voltam para "Fechamento" e o lote volta a aguardar pagamento.`)) return;
+    const updatedShifts = (freelaShifts || []).map(s => {
+      if (lote.shiftIds.includes(s.id)) return { ...s, status: "fechamento", pagoEm: null };
+      return s;
+    });
+    onUpdate("freelaShifts", updatedShifts);
+    onUpdate("freelaPagamentos", (freelaPagamentos || []).map(l => l.id === loteId ? { ...l, status: "pendente", pagoEm: null, pagoPor: null, formaPagamento: null } : l));
+    onUpdate("_toast", `↺ Lote ${lote.numero} reaberto`);
+  }
+
+  // v8.5 — Owner exclui shift do histórico (de qualquer status)
+  async function excluirShiftHistorico(shiftId) {
+    const s = (freelaShifts || []).find(x => x.id === shiftId);
+    if (!s) return;
+    const pessoa = restPessoas.find(p => p.id === s.pessoaId);
+    if (!await appConfirm(`Excluir definitivamente o shift de ${pessoa?.name || "?"} em ${fmtDate(s.date)}?\n\nEssa ação é IRREVERSÍVEL.`)) return;
+    // Se está em lote, também limpa do lote
+    let updatedLotes = freelaPagamentos || [];
+    if (s.lotePagamentoId) {
+      updatedLotes = updatedLotes.map(l => {
+        if (l.id !== s.lotePagamentoId) return l;
+        return {
+          ...l,
+          shiftIds: (l.shiftIds || []).filter(id => id !== shiftId),
+          qtdShifts: Math.max(0, (l.qtdShifts || 0) - 1),
+          totalGeral: Math.max(0, (l.totalGeral || 0) - (s.totalCalc || 0)),
+        };
+      });
+      onUpdate("freelaPagamentos", updatedLotes);
+    }
+    onUpdate("freelaShifts", (freelaShifts || []).filter(x => x.id !== shiftId));
+    onUpdate("_toast", `🗑️ Shift de ${pessoa?.name} excluído`);
   }
 
   async function marcarLotePago(loteId, dataPagamento, formaPagamento) {
@@ -21141,6 +21180,10 @@ function FreelasModule({ restaurantId, pessoas, freelaShifts, freelaPagamentos, 
           cancelarLote={cancelarLote}
           marcarLotePago={marcarLotePago}
           gerarPDFLote={gerarPDFLote}
+          updateShift={updateShift}
+          onUpdate={onUpdate}
+          pessoas={pessoas}
+          isOwner={isOwner}
           mobileOnly={mobileOnly}
           ac={ac}
         />
@@ -21155,6 +21198,9 @@ function FreelasModule({ restaurantId, pessoas, freelaShifts, freelaPagamentos, 
           fmtHoras={fmtHoras}
           gerarPDFLote={gerarPDFLote}
           cancelarLote={cancelarLote}
+          reabrirLotePago={reabrirLotePago}
+          excluirShiftHistorico={excluirShiftHistorico}
+          isOwner={isOwner}
           mobileOnly={mobileOnly}
           ac={ac}
         />
@@ -21204,7 +21250,9 @@ function FreelaLancamentoTab({ restaurantId, allPessoas, restPessoas, restFreela
   function handleAddSubmit() {
     if (!newShift.pessoaId) { alert("Selecione a pessoa."); return; }
     if (!newShift.date) { alert("Selecione a data."); return; }
-    if (!newShift.entrada || !newShift.saida) { alert("Preencha entrada e saída."); return; }
+    // v8.5: só entrada é obrigatória na ABERTURA. Saída/intervalo/valor são preenchidos
+    // pelo DP no Fechamento. Se o operador já souber o resto, pode preencher tudo de uma vez.
+    if (!newShift.entrada) { alert("Preencha a hora de entrada."); return; }
     addShift(newShift);
     setNewShift({ pessoaId: "", date: today(), entrada: "", saida: "", intervalo: 0, area: "", observacao: "" });
     setShowAddForm(false);
@@ -21666,7 +21714,72 @@ function FreelaLancamentoTab({ restaurantId, allPessoas, restPessoas, restFreela
 // ═══════════════════════════════════════════════════════════════
 // ──  FREELAS — sub-componente Fechamento (criar lote, marcar pago) ─
 // ═══════════════════════════════════════════════════════════════
-function FreelaFechamentoTab({ restaurantId, restPessoas, shifts, lotes, shiftPrntoPronto, fmtHoras, criarLote, cancelarLote, marcarLotePago, gerarPDFLote, mobileOnly, ac }) {
+// v8.5 — Linha editável pra DP fechar um shift (preencher saída, intervalo, valor)
+function FechaShiftRow({ shift: s, pessoa, updateShift, mobileOnly, ac, onUpdate, pessoas }) {
+  const [saida, setSaida] = useState(s.saida || "");
+  const [intervalo, setIntervalo] = useState(s.intervalo || 0);
+  const [valorTipo, setValorTipo] = useState(s.valorTipo || "hora");
+  const [valorUnit, setValorUnit] = useState(s.valorUnit != null ? String(s.valorUnit).replace(".", ",") : "");
+  const [pix, setPix] = useState(pessoa?.pix || "");
+  const fromBR = (v) => parseFloat(String(v || "").replace(",", ".")) || 0;
+  const missingPix = !pessoa?.pix;
+  function handleSalvar() {
+    if (!saida) { alert("Preencha a hora de saída."); return; }
+    updateShift(s.id, {
+      saida, intervalo: parseInt(intervalo) || 0,
+      valorTipo, valorUnit: fromBR(valorUnit),
+    });
+    if (missingPix && pix.trim() && pessoa && onUpdate && pessoas) {
+      const next = pessoas.map(p => p.id === pessoa.id ? { ...p, pix: pix.trim() } : p);
+      onUpdate("pessoas", next);
+    }
+    onUpdate && onUpdate("_toast", `🔧 Shift de ${pessoa?.name} fechado`);
+  }
+  return (
+    <div style={{ background: "var(--card-bg)", border: "1px solid var(--border)", borderRadius: 10, padding: 12 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10, flexWrap: "wrap", gap: 6 }}>
+        <div>
+          <div style={{ fontWeight: 700, color: "var(--text)", fontSize: 14 }}>{pessoa?.name || "(removido)"}</div>
+          <div style={{ fontSize: 11, color: "var(--text3)" }}>📅 {fmtDate(s.date)} · entrada {s.entrada || "—"}{s.area ? ` · ${s.area}` : ""}{s.observacao ? ` · ${s.observacao}` : ""}</div>
+        </div>
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: mobileOnly ? "1fr 1fr" : "1fr 1fr 1.2fr 1fr", gap: 8, marginBottom: missingPix ? 8 : 0 }}>
+        <div>
+          <label style={{ ...S.label, fontSize: 10 }}>Saída</label>
+          <input type="time" value={saida} onChange={e => setSaida(e.target.value)} style={{ ...S.input, fontSize: 12, padding: "7px 9px" }} />
+        </div>
+        <div>
+          <label style={{ ...S.label, fontSize: 10 }}>Intervalo (min)</label>
+          <input type="number" value={intervalo} onChange={e => setIntervalo(e.target.value)} placeholder="0" style={{ ...S.input, fontSize: 12, padding: "7px 9px" }} />
+        </div>
+        <div>
+          <label style={{ ...S.label, fontSize: 10 }}>Tipo de valor</label>
+          <select value={valorTipo} onChange={e => setValorTipo(e.target.value)} style={{ ...S.input, fontSize: 12, padding: "7px 9px" }}>
+            <option value="hora">R$ por hora</option>
+            <option value="diaria">Diária</option>
+          </select>
+        </div>
+        <div>
+          <label style={{ ...S.label, fontSize: 10 }}>Valor (R$)</label>
+          <input type="text" inputMode="decimal" value={valorUnit} onChange={e => setValorUnit(e.target.value)} placeholder="0,00" style={{ ...S.input, fontSize: 12, padding: "7px 9px" }} />
+        </div>
+      </div>
+      {missingPix && (
+        <div style={{ display: "grid", gridTemplateColumns: mobileOnly ? "1fr" : "2fr 1fr", gap: 8, marginBottom: 4 }}>
+          <div>
+            <label style={{ ...S.label, fontSize: 10, color: "#b45309" }}>⚠️ PIX da pessoa (não cadastrado)</label>
+            <input type="text" value={pix} onChange={e => setPix(e.target.value)} placeholder="CPF, e-mail, celular ou chave aleatória" style={{ ...S.input, fontSize: 12, padding: "7px 9px" }} />
+          </div>
+        </div>
+      )}
+      <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 8 }}>
+        <button onClick={handleSalvar} style={{ background: ac, color: "#fff", border: "none", borderRadius: 8, padding: "7px 16px", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>✓ Salvar fechamento</button>
+      </div>
+    </div>
+  );
+}
+
+function FreelaFechamentoTab({ restaurantId, restPessoas, shifts, lotes, shiftPrntoPronto, fmtHoras, criarLote, cancelarLote, marcarLotePago, gerarPDFLote, updateShift, onUpdate, pessoas, isOwner, mobileOnly, ac }) {
   const [selected, setSelected] = useState({}); // { shiftId: true }
   const [showLoteForm, setShowLoteForm] = useState(false);
   const [loteData, setLoteData] = useState({ numero: "", observacao: "" });
@@ -21716,7 +21829,7 @@ function FreelaFechamentoTab({ restaurantId, restPessoas, shifts, lotes, shiftPr
         </div>
         {incompletos.length > 0 && (
           <div style={{padding:"8px 12px",background:"#fef3c7",border:"1px solid #fbbf24",borderRadius:8,fontSize:12,color:"#92400e"}}>
-            ⚠️ <strong>{incompletos.length}</strong> shift(s) incompleto(s) — preencha valor e PIX em <em>Lançamento</em>
+            🔧 <strong>{incompletos.length}</strong> aguardando fechamento (preencha abaixo)
           </div>
         )}
         {selShifts.length > 0 && (
@@ -21747,6 +21860,32 @@ function FreelaFechamentoTab({ restaurantId, restPessoas, shifts, lotes, shiftPr
           <div style={{display:"flex",gap:8,justifyContent:"flex-end"}}>
             <button onClick={()=>setShowLoteForm(false)} style={{...S.btnSecondary,fontSize:12,padding:"7px 14px"}}>Cancelar</button>
             <button onClick={handleCriarLote} style={{background:ac,color:"#fff",border:"none",borderRadius:8,padding:"7px 18px",fontSize:13,fontWeight:700,cursor:"pointer"}}>📑 Criar lote</button>
+          </div>
+        </div>
+      )}
+
+      {/* v8.5 — Aguardando fechamento: shifts em "aberto" sem valor preenchido */}
+      {incompletos.length > 0 && (
+        <div style={{ marginBottom: 18 }}>
+          <div style={{ fontSize: 11, color: "var(--text3)", fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.4, marginBottom: 8 }}>
+            🔧 Aguardando fechamento ({incompletos.length})
+          </div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            {incompletos.map(s => {
+              const pessoa = restPessoas.find(p => p.id === s.pessoaId);
+              return (
+                <FechaShiftRow
+                  key={s.id}
+                  shift={s}
+                  pessoa={pessoa}
+                  updateShift={updateShift}
+                  onUpdate={onUpdate}
+                  pessoas={pessoas}
+                  mobileOnly={mobileOnly}
+                  ac={ac}
+                />
+              );
+            })}
           </div>
         </div>
       )}
@@ -21867,7 +22006,7 @@ function FreelaFechamentoTab({ restaurantId, restPessoas, shifts, lotes, shiftPr
 // ═══════════════════════════════════════════════════════════════
 // ──  FREELAS — sub-componente Histórico (lotes pagos + dashboard) ─
 // ═══════════════════════════════════════════════════════════════
-function FreelaHistoricoTab({ restaurantId, restPessoas, shifts, lotes, fmtHoras, gerarPDFLote, cancelarLote, mobileOnly, ac }) {
+function FreelaHistoricoTab({ restaurantId, restPessoas, shifts, lotes, fmtHoras, gerarPDFLote, cancelarLote, reabrirLotePago, excluirShiftHistorico, isOwner, mobileOnly, ac }) {
   const [filterMes, setFilterMes] = useState(""); // "YYYY-MM" ou ""
   const [filterStatus, setFilterStatus] = useState("todos"); // todos | pago | pendente
   const [filterPessoa, setFilterPessoa] = useState("");
@@ -22038,9 +22177,13 @@ function FreelaHistoricoTab({ restaurantId, restPessoas, shifts, lotes, fmtHoras
                 {l.status === "pendente" && (
                   <button onClick={()=>cancelarLote(l.id)} style={{background:"transparent",color:"var(--red)",border:"1px solid var(--red)",borderRadius:6,padding:"5px 12px",fontSize:11,fontWeight:600,cursor:"pointer"}}>✕ Cancelar</button>
                 )}
+                {/* v8.5: Owner-only — reabrir lote pago */}
+                {isOwner && l.status === "pago" && reabrirLotePago && (
+                  <button onClick={()=>reabrirLotePago(l.id)} style={{background:"transparent",color:"#b45309",border:"1px solid #b45309",borderRadius:6,padding:"5px 12px",fontSize:11,fontWeight:600,cursor:"pointer"}} title="Reabre o lote: volta pra pendente, shifts pra Fechamento">↺ Reabrir lote</button>
+                )}
                 {/* Detalhe expandível por pessoa */}
                 <details style={{marginLeft:"auto"}}>
-                  <summary style={{cursor:"pointer",fontSize:11,color:"var(--text3)"}}>Ver detalhes</summary>
+                  <summary style={{cursor:"pointer",fontSize:11,color:"var(--text3)"}}>Ver detalhes{isOwner ? " (Owner pode excluir shifts)" : ""}</summary>
                   <div style={{marginTop:6,paddingTop:6,borderTop:"1px solid var(--border)"}}>
                     {l.pessoasResumo.map(pr => (
                       <div key={pr.pessoaId} style={{display:"flex",justifyContent:"space-between",fontSize:11,padding:"3px 0"}}>
@@ -22049,6 +22192,18 @@ function FreelaHistoricoTab({ restaurantId, restPessoas, shifts, lotes, fmtHoras
                         <span style={{fontFamily:"'DM Mono',monospace",fontWeight:700,color:"var(--text)",minWidth:80,textAlign:"right"}}>R$ {pr.totalValor.toFixed(2)}</span>
                       </div>
                     ))}
+                    {/* v8.5: Owner-only — lista de shifts individuais com botão excluir */}
+                    {isOwner && excluirShiftHistorico && (
+                      <div style={{marginTop:10,paddingTop:8,borderTop:"1px dashed var(--border)"}}>
+                        <div style={{fontSize:10,color:"var(--text3)",fontWeight:700,textTransform:"uppercase",letterSpacing:0.4,marginBottom:6}}>Shifts individuais (excluir):</div>
+                        {shifts.filter(s => l.shiftIds?.includes(s.id)).map(s => (
+                          <div key={s.id} style={{display:"flex",alignItems:"center",justifyContent:"space-between",fontSize:11,padding:"3px 0",gap:6}}>
+                            <span style={{color:"var(--text3)"}}>{pessoaName(s.pessoaId)} · {fmtDate(s.date)} · {s.entrada}-{s.saida || "?"} · R$ {(s.totalCalc||0).toFixed(2)}</span>
+                            <button onClick={()=>excluirShiftHistorico(s.id)} style={{background:"transparent",color:"var(--red)",border:"1px solid var(--red)",borderRadius:4,padding:"1px 8px",fontSize:10,cursor:"pointer"}}>🗑️</button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 </details>
               </div>
