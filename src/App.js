@@ -3,7 +3,7 @@ import React, { useState, useEffect, useMemo, useRef, Component } from "react";
 import { db } from "./firebase";
 import { doc, getDoc, setDoc } from "firebase/firestore";
 
-const APP_VERSION = "8.4.5";
+const APP_VERSION = "8.4.6";
 
 const DEFAULT_ADMISSION = () => `${new Date().getFullYear()}-01-01`;
 const round2 = (v) => Math.round(v * 100) / 100;
@@ -23127,6 +23127,7 @@ const PERM_GROUPS = [
     id: "secao_planejamento", label: "📅 Planejamento", color: "var(--ac)", bg: "var(--ac)22",
     perms: [
       { key: "operational.escalas",  label: "Escalas",     icon: "📅" },
+      { key: "admin.schedule",       label: "Fechar Escala", icon: "🔒" }, // v8.4.6: movido de Ajustes — é ação direta sobre escala
       { key: "operational.reunioes", label: "Reuniões",    icon: "🗣️" },
       { key: "operational.trilhas",  label: "Trilhas",     icon: "🎯" },
       { key: "operational.gorjetas", label: "Gorjetas (visualizar)", icon: "💰" },
@@ -23149,7 +23150,6 @@ const PERM_GROUPS = [
     id: "secao_ajustes", label: "⚙️ Ajustes", color: "#64748b", bg: "#64748b22",
     perms: [
       { key: "admin.config",   label: "Configurações", icon: "⚙️" },
-      { key: "admin.schedule", label: "Fechar Escala", icon: "🔒" },
     ],
   },
   {
