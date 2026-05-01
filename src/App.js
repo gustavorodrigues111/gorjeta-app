@@ -3,7 +3,7 @@ import React, { useState, useEffect, useMemo, useRef, Component } from "react";
 import { db } from "./firebase";
 import { doc, getDoc, setDoc, onSnapshot } from "firebase/firestore";
 
-const APP_VERSION = "8.17.0";
+const APP_VERSION = "8.18.0";
 
 // v8.11.1: comparação de versão semver-like (8.11.1 > 8.10.7 > 8.9.4)
 function compareVersions(a, b) {
@@ -27810,11 +27810,14 @@ function MiseChecklistsAdmin({ restaurantId, miseChecklistTemplates, miseCheckli
 }
 
 // Editor de um template
-function MiseChecklistTemplateEditor({ tpl, updateTpl, onBack, mobileOnly, mkId }) {
+function MiseChecklistTemplateEditor({ tpl, updateTpl, onBack, mobileOnly, mkId, restEmps, restAreas }) {
   const [local, setLocal] = useState(tpl);
   useEffect(() => { setLocal(tpl); }, [tpl.id]); // eslint-disable-line react-hooks/exhaustive-deps
   const dirty = JSON.stringify(local) !== JSON.stringify(tpl);
   const miseAc = "#7c9e5e";
+  // v8.18.0: modal de adicionar em lote
+  const [bulkOpen, setBulkOpen] = useState(false);
+  const [bulkText, setBulkText] = useState("");
 
   function save() { updateTpl(local); }
   async function handleBack() {
@@ -27825,6 +27828,18 @@ function MiseChecklistTemplateEditor({ tpl, updateTpl, onBack, mobileOnly, mkId 
     const text = window.prompt("Texto do item:");
     if (!text || !text.trim()) return;
     setLocal(l => ({ ...l, items: [...(l.items || []), { id: mkId(), text: text.trim(), order: (l.items || []).length }] }));
+  }
+  // v8.18.0: parse texto multi-linhas → vários itens
+  function applyBulk() {
+    const lines = bulkText.split(/\r?\n/).map(s => s.trim()).filter(Boolean);
+    if (lines.length === 0) { setBulkOpen(false); return; }
+    setLocal(l => {
+      const startOrder = (l.items || []).length;
+      const newItems = lines.map((text, i) => ({ id: mkId(), text, order: startOrder + i }));
+      return { ...l, items: [...(l.items || []), ...newItems] };
+    });
+    setBulkText("");
+    setBulkOpen(false);
   }
   function updateItem(id, patch) {
     setLocal(l => ({ ...l, items: (l.items || []).map(i => i.id === id ? { ...i, ...patch } : i) }));
@@ -27842,6 +27857,15 @@ function MiseChecklistTemplateEditor({ tpl, updateTpl, onBack, mobileOnly, mkId 
       return { ...l, items: arr.map((i, k) => ({ ...i, order: k })) };
     });
   }
+  // v8.18.0: helpers responsáveis
+  function toggleResponsavel(empId) {
+    setLocal(l => {
+      const cur = l.responsaveis || [];
+      return { ...l, responsaveis: cur.includes(empId) ? cur.filter(x => x !== empId) : [...cur, empId] };
+    });
+  }
+  const empsSorted = [...(restEmps || [])].sort((a,b) => a.name.localeCompare(b.name));
+  const areasOpts = ["Geral", ...(restAreas || [])];
 
   return (
     <div>
@@ -27864,10 +27888,61 @@ function MiseChecklistTemplateEditor({ tpl, updateTpl, onBack, mobileOnly, mkId 
         <textarea value={local.description ?? ""} onChange={e=>setLocal({...local, description: e.target.value})} placeholder="Quando usar, instruções gerais..." style={{...S.input,minHeight:60,fontFamily:"inherit",resize:"vertical"}} />
       </div>
 
-      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:10}}>
-        <h4 style={{color:"var(--text)",margin:0,fontSize:15,fontWeight:700}}>Itens ({(local.items || []).length})</h4>
-        <button onClick={addItem} style={{...S.btnSecondary,fontSize:12,padding:"6px 12px"}}>+ Adicionar item</button>
+      {/* v8.18.0: área + responsáveis */}
+      <div style={{display:"grid",gridTemplateColumns:mobileOnly?"1fr":"1fr 2fr",gap:14,marginBottom:14}}>
+        <div>
+          <label style={S.label}>Área</label>
+          <select value={local.area || "Geral"} onChange={e=>setLocal({...local, area: e.target.value})} style={S.input}>
+            {areasOpts.map(a => <option key={a} value={a}>{a}</option>)}
+          </select>
+        </div>
+        <div>
+          <label style={S.label}>Responsáveis ({(local.responsaveis||[]).length})</label>
+          <div style={{padding:"8px 10px",background:"var(--card-bg)",border:"1px solid var(--border)",borderRadius:8,maxHeight:120,overflow:"auto"}}>
+            {empsSorted.length === 0 ? (
+              <div style={{color:"var(--text3)",fontSize:12,fontStyle:"italic"}}>Nenhum empregado cadastrado.</div>
+            ) : (
+              <div style={{display:"flex",flexDirection:"column",gap:4}}>
+                {empsSorted.map(e => {
+                  const checked = (local.responsaveis || []).includes(e.id);
+                  return (
+                    <label key={e.id} style={{display:"flex",alignItems:"center",gap:7,fontSize:12,cursor:"pointer"}}>
+                      <input type="checkbox" checked={checked} onChange={()=>toggleResponsavel(e.id)} style={{accentColor:miseAc}}/>
+                      <span style={{color:"var(--text)"}}>{e.name}</span>
+                    </label>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        </div>
       </div>
+
+      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:10,flexWrap:"wrap",gap:8}}>
+        <h4 style={{color:"var(--text)",margin:0,fontSize:15,fontWeight:700}}>Itens ({(local.items || []).length})</h4>
+        <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+          <button onClick={()=>setBulkOpen(true)} style={{...S.btnSecondary,fontSize:12,padding:"6px 12px",color:miseAc,borderColor:miseAc+"55"}} title="Cole várias linhas — cada uma vira uma atividade">📋 Adicionar em lote</button>
+          <button onClick={addItem} style={{...S.btnSecondary,fontSize:12,padding:"6px 12px"}}>+ Adicionar item</button>
+        </div>
+      </div>
+
+      {/* v8.18.0: Modal de adicionar em lote */}
+      {bulkOpen && (
+        <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.45)",zIndex:1000,display:"flex",alignItems:"center",justifyContent:"center",padding:16}} onClick={()=>setBulkOpen(false)}>
+          <div onClick={e=>e.stopPropagation()} style={{background:"var(--card-bg)",border:"1px solid var(--border)",borderRadius:14,maxWidth:560,width:"100%",padding:24}}>
+            <h3 style={{margin:"0 0 8px",color:"var(--text)",fontSize:16,fontWeight:700}}>📋 Adicionar atividades em lote</h3>
+            <p style={{color:"var(--text3)",fontSize:12,margin:"0 0 12px",lineHeight:1.5}}>Cole abaixo, uma atividade por linha. Linhas em branco são ignoradas. As atividades vão pro fim da lista.</p>
+            <textarea value={bulkText} onChange={e=>setBulkText(e.target.value)} rows={10} placeholder={"Conferir vidros do bar\nLavar pisos do salão\nLimpar mesas\nVerificar copos limpos\n..."} style={{...S.input,width:"100%",minHeight:200,fontFamily:"'DM Mono',monospace",fontSize:13,resize:"vertical"}} autoFocus/>
+            <div style={{fontSize:11,color:"var(--text3)",marginTop:6}}>
+              {bulkText.split(/\r?\n/).filter(s => s.trim()).length} atividade(s) detectada(s)
+            </div>
+            <div style={{display:"flex",justifyContent:"flex-end",gap:10,marginTop:14}}>
+              <button onClick={()=>{setBulkOpen(false);setBulkText("");}} style={{...S.btnSecondary,padding:"8px 14px",fontSize:13}}>Cancelar</button>
+              <button onClick={applyBulk} disabled={bulkText.split(/\r?\n/).filter(s=>s.trim()).length===0} style={{...S.btnPrimary,padding:"8px 14px",fontSize:13,fontWeight:700,background:miseAc,borderColor:miseAc,opacity:bulkText.split(/\r?\n/).filter(s=>s.trim()).length===0?0.5:1}}>Adicionar todas</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {(local.items || []).length === 0 ? (
         <div style={{padding:"32px 16px",textAlign:"center",color:"var(--text3)",fontSize:14,background:"var(--card-bg)",borderRadius:12,border:"1px dashed var(--border)"}}>
