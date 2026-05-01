@@ -3,7 +3,7 @@ import React, { useState, useEffect, useMemo, useRef, Component } from "react";
 import { db } from "./firebase";
 import { doc, getDoc, setDoc, onSnapshot } from "firebase/firestore";
 
-const APP_VERSION = "8.23.0";
+const APP_VERSION = "8.23.1";
 
 // v8.11.1: comparação de versão semver-like (8.11.1 > 8.10.7 > 8.9.4)
 function compareVersions(a, b) {
@@ -29179,6 +29179,25 @@ function ChecklistReviewAggregatedScreen({ runs, tpl, restaurantId, employee, pe
     onBack();
   }
 
+  // v8.23.1: líder reabre conferência — runs voltam pra fila de pendentes, usuários podem editar
+  async function reopenReview() {
+    if (!await appConfirm(`Reabrir conferência?\n\n${runs.length > 1 ? `Os ${runs.length} envios voltam` : "O envio volta"} pra fila de pendentes. Os empregados também poderão reabrir e editar os próprios envios.\n\n${(linkedOccs || []).length > 0 ? `⚠️ ${linkedOccs.length} ocorrência(s) já vinculada(s) ficam preservadas.` : ""}`)) return;
+    const groupIds = new Set(runs.map(r => r.id));
+    const now = new Date().toISOString();
+    const next = (miseChecklistRuns || []).map(r => {
+      if (!groupIds.has(r.id)) return r;
+      const cleaned = { ...r, updatedAt: now };
+      delete cleaned.reviewedAt;
+      delete cleaned.reviewerId;
+      delete cleaned.reviewerName;
+      delete cleaned.reviewerNotes;
+      return cleaned;
+    });
+    onUpdate("miseChecklistRuns", next);
+    onUpdate("_toast", "🔓 Conferência reaberta — voltou pra fila de pendentes");
+    onBack();
+  }
+
   function addOccurrence(empPessoa, description, severity) {
     const now = new Date().toISOString();
     const incId = `inc_${Date.now().toString(36)}${Math.random().toString(36).slice(2,5)}`;
@@ -29220,7 +29239,11 @@ function ChecklistReviewAggregatedScreen({ runs, tpl, restaurantId, employee, pe
           <div style={{fontSize:11,color:"var(--text3)",fontWeight:700,textTransform:"uppercase",letterSpacing:0.4}}>{isAlreadyReviewed ? "Visualizando (já conferido)" : "Conferindo"}</div>
           <div style={{fontSize:16,color:"var(--text)",fontWeight:700}}>{tpl?.name || "Template removido"}</div>
         </div>
-        {!isAlreadyReviewed && (
+        {isAlreadyReviewed ? (
+          <button onClick={reopenReview} style={{background:"transparent",color:"#b45309",border:"1px solid #f59e0b66",borderRadius:8,padding:"10px 16px",fontSize:13,fontWeight:700,cursor:"pointer",minHeight:44,whiteSpace:"nowrap"}}>
+            🔓 Reabrir conferência
+          </button>
+        ) : (
           <button onClick={approve} style={{background:"#15803d",color:"#fff",border:"none",borderRadius:8,padding:"10px 20px",fontSize:13,fontWeight:700,cursor:"pointer",minHeight:44}}>
             ✅ Aprovar{runs.length > 1 ? ` (${runs.length})` : ""}
           </button>
