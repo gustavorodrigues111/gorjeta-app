@@ -3,7 +3,7 @@ import React, { useState, useEffect, useMemo, useRef, Component } from "react";
 import { db } from "./firebase";
 import { doc, getDoc, setDoc, onSnapshot } from "firebase/firestore";
 
-const APP_VERSION = "8.15.1";
+const APP_VERSION = "8.15.2";
 
 // v8.11.1: comparação de versão semver-like (8.11.1 > 8.10.7 > 8.9.4)
 function compareVersions(a, b) {
@@ -10503,26 +10503,25 @@ function MonthPickerGate({ contextLabel, year, month, onPick, scheduleStatus, re
   // Smart default
   const sd = smartDefaultMonth();
   const today = new Date();
-  // v8.13.0: navegação livre — offset desloca a janela de 6 meses
+  // v8.15.2: 3 botões — anterior, atual em destaque, seguinte. Setas navegam ±3 meses.
   const [offset, setOffset] = useState(0);
-  const startDelta = -2 + offset; // delta inicial relativo a hoje
+  const startDelta = -1 + offset;
   const options = [];
-  for (let i = 0; i < 6; i++) {
+  for (let i = 0; i < 3; i++) {
     const delta = startDelta + i;
     const d = new Date(today.getFullYear(), today.getMonth() + delta, 1);
     const y = d.getFullYear(), m = d.getMonth();
-    let context = "";
-    let bg = "var(--bg2)", color = "var(--text)", border = "var(--border)";
+    let context = "", bg = "var(--bg2)", color = "var(--text)", border = "var(--border)";
     if (delta < 0) { context = "Mês passado"; bg = "#64748b15"; color = "#64748b"; border = "#64748b44"; }
     else if (delta === 0) { context = "Mês atual"; bg = "#d4a01715"; color = "#d4a017"; border = "#d4a01744"; }
     else { context = "Mês futuro"; bg = "#16a34a15"; color = "#16a34a"; border = "#16a34a44"; }
+    const isCurrent = delta === 0;
     const isSmart = (y === sd.year && m === sd.month);
     const mk = monthKey(y, m);
     const isClosed = !!scheduleStatus?.[restaurantId]?.[mk] && scheduleStatus[restaurantId][mk].status === "closed";
     if (isClosed) { context = "Mês fechado 🔒"; bg = "#dc262615"; color = "#dc2626"; border = "#dc262644"; }
-    options.push({ y, m, label: monthLabel(y, m), context, bg, color, border, isSmart, mk, isClosed });
+    options.push({ y, m, label: monthLabel(y, m), context, bg, color, border, isSmart, isCurrent, mk, isClosed });
   }
-  // Range label: "março 2026 – agosto 2026"
   const firstM = options[0], lastM = options[options.length - 1];
   const rangeLabel = `${monthLabel(firstM.y, firstM.m).replace(" de ","/")} → ${monthLabel(lastM.y, lastM.m).replace(" de ","/")}`;
   return (
@@ -10545,42 +10544,48 @@ function MonthPickerGate({ contextLabel, year, month, onPick, scheduleStatus, re
           </p>
         </div>
 
-        {/* v8.13.0: Navegação por janela */}
-        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:12,gap:8}}>
-          <button onClick={()=>setOffset(o => o - 6)} style={{...S.btnSecondary, fontSize:12, padding:"6px 12px", whiteSpace:"nowrap"}} title="6 meses anteriores">◀ Anteriores</button>
+        {/* Navegação ±3 meses + voltar pra hoje */}
+        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:14,gap:8}}>
+          <button onClick={()=>setOffset(o => o - 3)} style={{...S.btnSecondary, fontSize:12, padding:"6px 12px", whiteSpace:"nowrap"}} title="3 meses anteriores">◀ Anteriores</button>
           <div style={{flex:1, textAlign:"center"}}>
             <div style={{fontSize:11,color:"var(--text3)",fontFamily:"'DM Mono',monospace",textTransform:"capitalize"}}>{rangeLabel}</div>
             {offset !== 0 && (
               <button onClick={()=>setOffset(0)} style={{marginTop:4,fontSize:10,padding:"3px 10px",border:"1px solid var(--ac)44",background:"var(--ac)11",color:"var(--ac)",borderRadius:14,cursor:"pointer",fontFamily:"'DM Sans',sans-serif",fontWeight:600}}>📍 Voltar pra hoje</button>
             )}
           </div>
-          <button onClick={()=>setOffset(o => o + 6)} style={{...S.btnSecondary, fontSize:12, padding:"6px 12px", whiteSpace:"nowrap"}} title="6 meses seguintes">Próximos ▶</button>
+          <button onClick={()=>setOffset(o => o + 3)} style={{...S.btnSecondary, fontSize:12, padding:"6px 12px", whiteSpace:"nowrap"}} title="3 meses seguintes">Próximos ▶</button>
         </div>
 
-        <div style={{
-          display: "grid",
-          gridTemplateColumns: typeof window !== "undefined" && window.innerWidth < 600 ? "repeat(2, 1fr)" : "repeat(3, 1fr)",
-          gridAutoRows: "1fr",
-          gap: 10,
-        }}>
-          {options.map(o => (
-            <button key={`${o.y}-${o.m}`} onClick={() => onPick(o.y, o.m)}
-              style={{
-                background: o.bg, border: `1px solid ${o.border}`, borderRadius: 12,
-                padding: "14px 10px", cursor: "pointer", fontFamily: "'DM Sans',sans-serif",
-                position: "relative", transition: "transform .12s, box-shadow .12s",
-                width: "100%", boxSizing: "border-box", minWidth: 0, minHeight: 88,
-                display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 4,
-              }}
-              onMouseEnter={e => { e.currentTarget.style.transform = "translateY(-2px)"; e.currentTarget.style.boxShadow = `0 4px 12px ${o.color}33`; }}
-              onMouseLeave={e => { e.currentTarget.style.transform = "translateY(0)"; e.currentTarget.style.boxShadow = "none"; }}>
-              {o.isSmart && (
-                <span style={{ position: "absolute", top: 6, right: 6, fontSize: 9, padding: "2px 8px", borderRadius: 999, background: "var(--ac)", color: "#fff", fontWeight: 800, letterSpacing: 0.3 }}>SUGERIDO</span>
-              )}
-              <div style={{ fontSize: 14, fontWeight: 800, color: "var(--text)", lineHeight: 1.2, textAlign: "center", textTransform: "capitalize" }}>{o.label}</div>
-              <div style={{ fontSize: 11, color: o.color, fontWeight: 600, textAlign: "center" }}>{o.context}</div>
-            </button>
-          ))}
+        {/* 3 botões em linha — mês atual em destaque (maior, sombra mais forte, badge) */}
+        <div style={{display:"grid", gridTemplateColumns:"1fr 1.25fr 1fr", gridAutoRows:"1fr", gap:10, alignItems:"stretch"}}>
+          {options.map(o => {
+            const big = o.isCurrent;
+            return (
+              <button key={`${o.y}-${o.m}`} onClick={() => onPick(o.y, o.m)}
+                style={{
+                  background: o.bg, border: `${big ? 2 : 1}px solid ${big ? o.color : o.border}`,
+                  borderRadius: big ? 14 : 12,
+                  padding: big ? "20px 12px" : "14px 10px",
+                  cursor: "pointer", fontFamily: "'DM Sans',sans-serif",
+                  position: "relative", transition: "transform .12s, box-shadow .12s",
+                  width: "100%", boxSizing: "border-box", minWidth: 0,
+                  minHeight: big ? 110 : 88,
+                  display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 4,
+                  boxShadow: big ? `0 4px 16px ${o.color}33` : "none",
+                }}
+                onMouseEnter={e => { e.currentTarget.style.transform = "translateY(-2px)"; e.currentTarget.style.boxShadow = `0 6px 18px ${o.color}55`; }}
+                onMouseLeave={e => { e.currentTarget.style.transform = "translateY(0)"; e.currentTarget.style.boxShadow = big ? `0 4px 16px ${o.color}33` : "none"; }}>
+                {big && (
+                  <span style={{ position: "absolute", top: -10, left: "50%", transform: "translateX(-50%)", fontSize: 10, padding: "3px 12px", borderRadius: 999, background: o.color, color: "#fff", fontWeight: 800, letterSpacing: 0.5, whiteSpace:"nowrap" }}>★ ATUAL</span>
+                )}
+                {!big && o.isSmart && (
+                  <span style={{ position: "absolute", top: 6, right: 6, fontSize: 9, padding: "2px 8px", borderRadius: 999, background: "var(--ac)", color: "#fff", fontWeight: 800, letterSpacing: 0.3 }}>SUGERIDO</span>
+                )}
+                <div style={{ fontSize: big ? 16 : 13, fontWeight: 800, color: "var(--text)", lineHeight: 1.2, textAlign: "center", textTransform: "capitalize" }}>{o.label}</div>
+                <div style={{ fontSize: big ? 12 : 10, color: o.color, fontWeight: 600, textAlign: "center" }}>{o.context}</div>
+              </button>
+            );
+          })}
         </div>
       </div>
     </div>
