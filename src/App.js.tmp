@@ -3,7 +3,7 @@ import React, { useState, useEffect, useMemo, useRef, Component } from "react";
 import { db } from "./firebase";
 import { doc, getDoc, setDoc, onSnapshot } from "firebase/firestore";
 
-const APP_VERSION = "8.16.0";
+const APP_VERSION = "8.15.3";
 
 // v8.11.1: comparação de versão semver-like (8.11.1 > 8.10.7 > 8.9.4)
 function compareVersions(a, b) {
@@ -21727,7 +21727,7 @@ function AppShell({ pessoa, data, activeRestaurantId, setActiveRestaurantId, use
       {/* HEADER */}
       <header style={{background:"var(--header-bg)",borderBottom:"1px solid var(--border)",padding:isMobile?"8px 10px":"10px 16px",display:"flex",alignItems:"center",gap:isMobile?6:12,flexWrap:"nowrap",overflowX:"auto"}}>
         <button onClick={()=>setSidebarOpen(o=>!o)} title={sidebarOpen?"Fechar menu":"Abrir menu"} style={{background:sidebarOpen?"var(--bg2)":"none",border:"none",cursor:"pointer",fontSize:20,color:"var(--text2)",padding:"4px 10px",borderRadius:8,flexShrink:0}}>☰</button>
-        {!isMobile && <div style={{fontSize:14,fontWeight:800,color:"var(--text)",flexShrink:0}}>Sistema</div>}
+        {!isMobile && <div style={{fontSize:14,fontWeight:800,color:"var(--text)",flexShrink:0}}>AppTip</div>}
         {accessibleRestaurants.length > 0 && (
           <>
             <button
@@ -24301,7 +24301,7 @@ function FreelaHistoricoTab({ restaurantId, restPessoas, shifts, lotes, fmtHoras
 }
 
 function PessoasAdmin({ restaurantId, pessoas, roles, owners, employees, managers, restCode, onUpdate, mobileOnly, realIsOwner, onStartImpersonate }) {
-  // Filtra owners do sistema — eles têm acesso implícito, não constam como pessoa do restaurante
+  // Filtra owners do AppTip — eles têm acesso implícito, não constam como pessoa do restaurante
   const ownerCpfSet = new Set((owners || []).map(o => (o.cpf || "").replace(/\D/g, "")).filter(Boolean));
   const restPessoas = (pessoas || []).filter(p => {
     if (!(p.restaurantIds || []).includes(restaurantId)) return false;
@@ -25506,7 +25506,7 @@ function PermissoesMatrix({ restaurantId, pessoas, employees, managers, owners, 
     : (ridProfilesRaw?.hiddenDefaults || []);
   const visibleDefaults = PERM_PROFILES.filter(p => !hiddenDefaultIds.includes(p.id));
   const hiddenDefaults = PERM_PROFILES.filter(p => hiddenDefaultIds.includes(p.id));
-  // Filtra owners do sistema — acesso implícito, não aparecem na matriz
+  // Filtra owners do AppTip — acesso implícito, não aparecem na matriz
   const ownerCpfSet = new Set((owners || []).map(o => (o.cpf || "").replace(/\D/g, "")).filter(Boolean));
   const restPessoas = (pessoas || []).filter(p => {
     if (!(p.restaurantIds || []).includes(restaurantId)) return false;
@@ -31316,7 +31316,7 @@ function AlertEmailConfig({ restaurantId, currentEmail, onUpdate, ac, mobileOnly
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           to: currentEmail,
-          subject: "🔔 Teste de alerta — Sistema",
+          subject: "🔔 Teste de alerta — AppTip",
           html: buildAlertEmailHtml({
             restaurantName: "Teste",
             sensorName: "Sensor de teste",
@@ -31428,7 +31428,7 @@ function buildAlertEmailHtml({ restaurantName, sensorName, location, currentTemp
 
   return `<!DOCTYPE html>
 <html lang="pt-BR">
-<head><meta charset="utf-8"/><title>Alerta</title></head>
+<head><meta charset="utf-8"/><title>Alerta AppTip</title></head>
 <body style="margin:0;padding:0;background:#faf8f4;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;color:#1c1710;">
   <div style="max-width:560px;margin:24px auto;background:#fff;border-radius:12px;overflow:hidden;border:1px solid #e8e2d8;">
     <div style="background:${bannerColor};color:#fff;padding:16px 22px;">
@@ -31457,12 +31457,12 @@ function buildAlertEmailHtml({ restaurantName, sensorName, location, currentTemp
 
       ${!isTest ? `
       <div style="margin-top:18px;text-align:center;">
-        <a href="https://apptip.app" style="display:inline-block;background:#7c9e5e;color:#fff;text-decoration:none;padding:10px 22px;border-radius:8px;font-weight:700;font-size:14px;">Abrir Sistema pra reconhecer</a>
+        <a href="https://apptip.app" style="display:inline-block;background:#7c9e5e;color:#fff;text-decoration:none;padding:10px 22px;border-radius:8px;font-weight:700;font-size:14px;">Abrir AppTip pra reconhecer</a>
       </div>
       ` : ""}
     </div>
     <div style="padding:14px 22px;background:#f2efe8;font-size:11px;color:#9a8d7a;text-align:center;border-top:1px solid #e8e2d8;">
-      Sistema — Monitoramento de temperaturas · integração Tuya/SmartLife
+      AppTip — Monitoramento de temperaturas · integração Tuya/SmartLife
     </div>
   </div>
 </body>
@@ -32768,7 +32768,7 @@ function UnifiedLogin({ owners, managers, employees, restaurants, pessoas, onLog
         <div style={{textAlign:"center",marginTop:16,paddingTop:16,borderTop:"1px solid var(--border)"}}>
           <button onClick={onGoHome}
             style={{background:"none",border:"none",color:"var(--text3)",cursor:"pointer",fontFamily:"'DM Sans',sans-serif",fontSize:13,padding:0}}>
-            Ainda não usa o sistema? <span style={{color:"var(--ac-text)",fontWeight:700}}>Conheça como funciona →</span>
+            Ainda não usa o AppTip? <span style={{color:"var(--ac-text)",fontWeight:700}}>Conheça como funciona →</span>
           </button>
         </div>
       </div>
@@ -32903,7 +32903,7 @@ function Home({ onLogin }) {
             Gorjetas distribuídas<br/><span style={{color:ac}}>com transparência total</span>
           </h1>
           <p style={{color:"#8c7a5e",fontSize:"clamp(15px,2vw,18px)",lineHeight:1.7,marginBottom:40,maxWidth:520,margin:"0 auto 40px"}}>
-            Esta plataforma automatiza o cálculo e distribuição de gorjetas, controla escala, horários e comunicados com IA — tudo pelo celular, sem app para instalar.
+            O AppTip automatiza o cálculo e distribuição de gorjetas, controla escala, horários e comunicados com IA — tudo pelo celular, sem app para instalar.
           </p>
           <div style={{display:"flex",gap:12,justifyContent:"center",flexWrap:"wrap"}}>
             <a href="#contato" style={{padding:"15px 32px",borderRadius:12,background:ac,color:"#fff",fontWeight:700,fontSize:16,textDecoration:"none",display:"inline-block",boxShadow:"0 4px 20px #d4a01744"}}>
@@ -33135,7 +33135,7 @@ function Home({ onLogin }) {
           <a href="mailto:contato@apptip.app" style={{color:"#8c7a5e",fontSize:13,textDecoration:"none"}}>contato@apptip.app</a>
           <button onClick={()=>window.__showPrivacy?.()} style={{background:"none",border:"none",color:"#8c7a5e",cursor:"pointer",fontFamily:"'DM Sans',sans-serif",fontSize:13}}>Política de Privacidade</button>
         </div>
-        <p style={{color:"#4a3a2a",fontSize:12}}>© {new Date().getFullYear()} Sistema. Todos os direitos reservados.</p>
+        <p style={{color:"#4a3a2a",fontSize:12}}>© {new Date().getFullYear()} AppTip. Todos os direitos reservados.</p>
       </footer>
     </div>
   );
@@ -33229,7 +33229,7 @@ function FaturaPage({ faturaId, restaurants, onUpdate, loaded }) {
         <div style={{background:"#fff",borderRadius:16,border:"1px solid #ede8df",boxShadow:"0 4px 24px rgba(0,0,0,0.06)",overflow:"hidden",marginBottom:20}}>
           {/* Cabeçalho da fatura */}
           <div style={{background:"#1c1208",padding:"24px",textAlign:"center"}}>
-            <div style={{color:"#8c7a5e",fontSize:12,fontWeight:600,textTransform:"uppercase",letterSpacing:1,marginBottom:8}}>Fatura</div>
+            <div style={{color:"#8c7a5e",fontSize:12,fontWeight:600,textTransform:"uppercase",letterSpacing:1,marginBottom:8}}>Fatura AppTip</div>
             <div style={{color:"#fff",fontSize:22,fontWeight:800,marginBottom:4}}>{restFound.name}</div>
             <div style={{color:"#d4c4a0",fontSize:14}}>{cobFound.periodoLabel}</div>
           </div>
@@ -33316,7 +33316,7 @@ function GuiaGestor() {
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-<title>Guia do Gestor</title>
+<title>AppTip — Guia do Gestor</title>
 <style>
 @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;700;800&family=DM+Mono:wght@400;500&display=swap');
 :root{--ac:#d4a017;--ac-l:#fef9ee;--ac-b:#f0d080;--text:#1c1208;--t2:#4a3b1f;--t3:#8c7a5e;--bg:#faf8f4;--card:#fff;--border:#ede8df;--green:#16a34a;--gbg:#f0fdf4;--red:#dc2626;--rbg:#fef2f2;--blue:#2563eb;--bbg:#eff6ff;--sw:260px}
@@ -33387,7 +33387,7 @@ hr{border:none;border-top:1px solid var(--border);margin:24px 0}
 <nav class="sidebar">
   <div class="logo"><span style="font-size:20px">🍽️</span><span class="nm">App<span>Tip</span></span><span class="badge">Gestor</span></div>
   <div class="sg">Visão Geral</div>
-  <a href="#intro"><span class="ic">📖</span> O que é o sistema?</a>
+  <a href="#intro"><span class="ic">📖</span> O que é o AppTip?</a>
   <a href="#acesso"><span class="ic">🔐</span> Acesso e Login</a>
   <a href="#restaurante"><span class="ic">🏢</span> Selecionar Restaurante</a>
   <a href="#dashboard"><span class="ic">📊</span> Dashboard</a>
@@ -33413,21 +33413,21 @@ hr{border:none;border-top:1px solid var(--border);margin:24px 0}
 </nav>
 <div class="main">
   <div class="topbar">
-    <div><h1>Guia do Gestor</h1><div class="sub">Manual completo de uso do sistema para gestores de restaurante</div></div>
+    <div><h1>Guia do Gestor</h1><div class="sub">Manual completo de uso do AppTip para gestores de restaurante</div></div>
     <span class="ver">v${APP_VERSION} · 2026</span>
   </div>
   <div class="content">
 
     <div class="hero">
-      <h2>Bem-vindo 🍽️</h2>
-      <p>A plataforma centraliza a gestão de gorjetas. Como gestor, você lança gorjetas, gerencia equipe, escala, horários com IA, comunicados, FAQ com IA e configura as regras do restaurante — inclusive pelo celular.</p>
+      <h2>Bem-vindo ao AppTip 🍽️</h2>
+      <p>O AppTip centraliza a gestão de gorjetas. Como gestor, você lança gorjetas, gerencia equipe, escala, horários com IA, comunicados, FAQ com IA e configura as regras do restaurante — inclusive pelo celular.</p>
       <div class="chips">
         <span class="chip">💸 Gorjetas automáticas</span><span class="chip">📅 Escala</span><span class="chip">👥 Equipe</span><span class="chip">🕐 Horários com IA</span><span class="chip">❓ FAQ com IA</span><span class="chip">📢 Comunicados com IA</span><span class="chip">📱 Mobile gestor</span><span class="chip">⚙️ Configurações</span>
       </div>
     </div>
 
     <div class="sec" id="intro">
-      <div class="sh"><div class="iw">📖</div><div><h2>O que é o sistema?</h2><p>Visão geral do sistema</p></div></div>
+      <div class="sh"><div class="iw">📖</div><div><h2>O que é o AppTip?</h2><p>Visão geral do sistema</p></div></div>
       <div class="card"><h3>🎯 Para que serve?</h3><p>O gestor lança o valor total de gorjeta do dia. O sistema distribui automaticamente entre os empregados conforme os pontos de cada cargo e os dias na escala. A dedução fiscal é calculada e mostrada automaticamente para cada empregado.</p></div>
       <div class="card"><h3>📱 Como acessar?</h3><p>Pelo navegador em <code>apptip.app</code>. O botão <strong>❓ Ajuda</strong> no header abre este guia a qualquer momento. Adicione à tela inicial do celular para acesso rápido como app nativo.</p></div>
     </div>
@@ -33689,7 +33689,7 @@ hr{border:none;border-top:1px solid var(--border);margin:24px 0}
       <div class="card"><h3>Sistema de dois níveis</h3>
         <table>
           <tr><th>Nível</th><th>Quem controla</th><th>O que faz</th></tr>
-          <tr><td>1. Autorização</td><td>Master</td><td>Define quais abas o restaurante pode usar</td></tr>
+          <tr><td>1. Autorização</td><td>Administrador AppTip</td><td>Define quais abas o restaurante pode usar</td></tr>
           <tr><td>2. Visibilidade</td><td>Gestor (você)</td><td>Decide quais abas ativas aparecem para você e os empregados</td></tr>
         </table>
         <div class="ib tip"><span class="ico">💡</span><span>Você só pode ativar abas que o administrador autorizou. Abas bloqueadas aparecem acinzentadas com "(não autorizado pelo admin)".</span></div>
@@ -33759,7 +33759,7 @@ hr{border:none;border-top:1px solid var(--border);margin:24px 0}
 
     <div class="sec" id="privacidade-admin">
       <div class="sh"><div class="iw">🛡️</div><div><h2>Privacidade de Dados <span class="new">NOVO</span></h2><p>Controle o que a equipe de administradores pode ver</p></div></div>
-      <div class="card"><h3>O que é o Modo Privacidade?</h3><p>Quando ativado, o modo privacidade oculta dados sensíveis do seu restaurante para a equipe de Masters. Os admins continuam tendo acesso à gestão do sistema, mas não visualizam informações confidenciais da sua operação.</p></div>
+      <div class="card"><h3>O que é o Modo Privacidade?</h3><p>Quando ativado, o modo privacidade oculta dados sensíveis do seu restaurante para a equipe de administradores do AppTip. Os admins continuam tendo acesso à gestão do sistema, mas não visualizam informações confidenciais da sua operação.</p></div>
       <div class="card"><h3>O que fica oculto para o admin</h3>
         <table>
           <tr><th>Dado</th><th>Visão do admin</th></tr>
@@ -33801,7 +33801,7 @@ hr{border:none;border-top:1px solid var(--border);margin:24px 0}
 
     <div class="sec" id="bloqueio">
       <div class="sh"><div class="iw">🔒</div><div><h2>Acesso Suspenso</h2><p>O que fazer quando o acesso está bloqueado</p></div></div>
-      <div class="card"><h3>Por que ocorre?</h3><p>O acesso é suspenso por pendência financeira. Você faz login normalmente, mas ao entrar no restaurante vê a tela de bloqueio. Na seleção de restaurantes, o card aparece com <span class="tag rd">🔒 Suspenso</span>.</p></div>
+      <div class="card"><h3>Por que ocorre?</h3><p>O acesso é suspenso por pendência financeira com o AppTip. Você faz login normalmente, mas ao entrar no restaurante vê a tela de bloqueio. Na seleção de restaurantes, o card aparece com <span class="tag rd">🔒 Suspenso</span>.</p></div>
       <div class="card"><h3>O que fazer</h3>
         <div class="steps">
           <div class="step"><div class="sn">1</div><div class="sc"><strong>Entre em contato com o Master</strong><p>O número aparece na tela de bloqueio: <strong>(11) 98549-9821</strong></p></div></div>
@@ -33814,7 +33814,7 @@ hr{border:none;border-top:1px solid var(--border);margin:24px 0}
     <hr>
     <div style="text-align:center;padding:20px 0 40px;color:var(--t3);font-size:13px">
       <div style="font-size:28px;margin-bottom:8px">🍽️</div>
-      <div>Guia do Gestor · v${APP_VERSION} · Abril 2026</div>
+      <div>AppTip · Guia do Gestor · v${APP_VERSION} · Abril 2026</div>
       <div style="margin-top:4px">Dúvidas? <a href="/cdn-cgi/l/email-protection#9bf8f4f5effaeff4dbfaebebeff2ebb5faebeb" style="color:var(--ac)"><span class="__cf_email__" data-cfemail="3a5955544e5b4e557a5b4a4a4e534a145b4a4a">[email&#160;protected]</span></a> · Clientes: <strong style="color:var(--t2)">(11) 98549-9821</strong></div>
     </div>
 
@@ -34686,7 +34686,7 @@ export default function App() {
       {view === "shell" && !loaded && (
         <div style={{minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",flexDirection:"column",gap:12,fontFamily:"'DM Sans',sans-serif"}}>
           <div style={{fontSize:40}}>🍽️</div>
-          <div style={{fontSize:14,color:"var(--text2)"}}>Carregando…</div>
+          <div style={{fontSize:14,color:"var(--text2)"}}>Carregando AppTip…</div>
           <div style={{fontSize:11,color:"var(--text3)"}}>{loadProgress}</div>
         </div>
       )}

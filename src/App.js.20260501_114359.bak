@@ -1,9 +1,9 @@
-// Sistema — gestão de gestão de gorjetas e equipe para restaurantes
+// AppTip — sistema de gestão de gorjetas e equipe para restaurantes
 import React, { useState, useEffect, useMemo, useRef, Component } from "react";
 import { db } from "./firebase";
 import { doc, getDoc, setDoc, onSnapshot } from "firebase/firestore";
 
-const APP_VERSION = "8.16.0";
+const APP_VERSION = "8.15.3";
 
 // v8.11.1: comparação de versão semver-like (8.11.1 > 8.10.7 > 8.9.4)
 function compareVersions(a, b) {
@@ -56,7 +56,7 @@ const round2 = (v) => Math.round(v * 100) / 100;
 class ErrorBoundary extends Component {
   constructor(props) { super(props); this.state = { hasError: false, error: null }; }
   static getDerivedStateFromError(error) { return { hasError: true, error }; }
-  componentDidCatch(error, info) { console.error("Sistema ErrorBoundary:", error, info); }
+  componentDidCatch(error, info) { console.error("AppTip ErrorBoundary:", error, info); }
   render() {
     if (this.state.hasError) {
       return (
@@ -553,7 +553,7 @@ const K = {
   meetingPendencias:   "v4:meetingPendencias",    // [{id, restaurantId, text, reason, type:"pendente"|"sem_resolucao", fromPautaId, fromItemId, createdAt, status:"ativa"|"na_pauta"|"resolvida"}]
   inbox:               "v4:inbox",                // [{id, tipo, de:{id,nome,role}, para:{id?,role?,restaurantId?}, restaurantId?, assunto, corpo, lido:bool, criadoEm, metadata:{}, folder:null|string, deletedAt:null|iso}]
   inboxFolders:        "v4:inboxFolders",         // {userId: [{id, nome, cor, ordem}]}
-  // ═══ Operacional — Contagens (estoques por perfil de usuário) ═══
+  // ═══ AppMise — Contagens (estoques por perfil de usuário) ═══
   miseCategories:      "v4:miseCategories",       // [{id, restaurantId, name}]   ex: Vinhos, Bar, Cozinha
   miseStocks:          "v4:miseStocks",           // [{id, restaurantId, name, location?}]   ex: Estoque 1, Adega
   miseAssignments:     "v4:miseAssignments",      // [{id, restaurantId, categoryId, stockId, userId}]  unicidade por tripla
@@ -573,11 +573,11 @@ const K = {
   // ═══ Pessoas (entidade unificada: empregados + gestores → uma só) ═══
   pessoas:             "v4:pessoas",              // [{id, restaurantIds:[], name, cpf, pin, mustChangePin, email?, whatsapp?, isTeam:{[rid]:bool}, teamData:{[rid]:{empCode,roleId,admission,...}}, linkedEmployeeId?, linkedManagerId?, permissions:{[rid]:{operational:{},admin:{},special:{}}}}]
   pessoasMigratedAt:   "v4:pessoasMigratedAt",    // ISO date da última migração (para idempotência)
-  // ═══ Operacional — Fichas Técnicas (portado do projeto fichastecnicas-c3829) ═══
+  // ═══ AppMise — Fichas Técnicas (portado do projeto fichastecnicas-c3829) ═══
   miseFtInsumos:       "v4:miseFtInsumos",        // [{id, restaurantId, name, unit, price}]
   miseFtEquipamentos:  "v4:miseFtEquipamentos",   // {[restaurantId]: [string]}
   miseFtDishes:        "v4:miseFtDishes",         // [{id, restaurantId, name, description, louca, equipamentos:[], markup, sub_fichas:[{id,name,rendimento,rendimento_qty,rendimento_unit,modo_preparo,subproduto?:{name},ingredientes:[{insumo_id?,insumo_name?,subref_id?,qty,unit,qty_raw?,is_qb?,fc?}]}], photos:[]}]
-  // ═══ Operacional — Temperaturas (sensores Tuya/SmartLife) ═══
+  // ═══ AppMise — Temperaturas (sensores Tuya/SmartLife) ═══
   tuyaLinks:           "v4:tuyaLinks",            // {[restaurantId]: {uid, accessToken?, refreshToken?, expiresAt?, linkedAt, linkedBy, accountEmail?}}
   tempSensors:         "v4:tempSensors",          // [{id, restaurantId, tuyaDeviceId, name, equipmentId?, location?, minTemp, maxTemp, alertMinutes, alertWhatsapp?, alertPessoaId?, createdAt, active}]
   tempReadings:        "v4:tempReadings",         // [{id, sensorId, restaurantId, timestamp, temp, battery?, online:bool}]   // histórico — pode ser truncado/arquivado
@@ -821,7 +821,7 @@ function PrivacyModal({ open, onClose }) {
         </div>
         <div style={{color:"var(--text2)",fontSize:13,lineHeight:1.8,display:"flex",flexDirection:"column",gap:12}}>
           <p style={{color:"var(--text3)",fontSize:11}}>Última atualização: {new Date().toLocaleDateString("pt-BR")}</p>
-          <p><strong style={{color:"var(--text)"}}>1. Quem somos</strong><br/>Esta é uma plataforma de gestão de gorjetas para restaurantes, operada pelo estabelecimento ao qual você está vinculado.</p>
+          <p><strong style={{color:"var(--text)"}}>1. Quem somos</strong><br/>O AppTip é uma plataforma de gestão de gorjetas para restaurantes, operada pelo estabelecimento ao qual você está vinculado.</p>
           <p><strong style={{color:"var(--text)"}}>2. Dados coletados</strong><br/>Coletamos: nome completo, CPF, cargo, data de admissão e PIN de acesso. Esses dados são necessários para identificação e distribuição de gorjetas.</p>
           <p><strong style={{color:"var(--text)"}}>3. Finalidade</strong><br/>Seus dados são usados exclusivamente para: controle de acesso ao sistema, cálculo e distribuição de gorjetas, gestão de escala e comunicados internos.</p>
           <p><strong style={{color:"var(--text)"}}>4. Armazenamento</strong><br/>Os dados são armazenados no Google Firebase (servidores na América do Sul) com acesso restrito ao seu restaurante. Não compartilhamos seus dados com terceiros.</p>
@@ -1182,7 +1182,7 @@ function ExportModal({ onClose, employees, roles, tips, restaurant }) {
       });
 
       doc.setFontSize(7); doc.setTextColor(150);
-      doc.text("* Valores brutos sem dedução fiscal. Documento gerado pelo sistema.", 10, doc.lastAutoTable.finalY + 5);
+      doc.text("* Valores brutos sem dedução fiscal. Documento gerado pelo AppTip.", 10, doc.lastAutoTable.finalY + 5);
       setPreviewDoc(doc); setPreviewFileName(`gorjetas_${restaurant.name}_${dateFrom}_${dateTo}.pdf`);
       setStatus("done");
     } catch (e) { console.error(e); setStatus("error"); }
@@ -1457,7 +1457,7 @@ Exemplo (gorjeta R$${fmtR(EX)}, ${totalPontos}pt no total):
       id:"__pin__",
       tabKey: null,
       q:"🔐 O que é o PIN e como trocar?",
-      a:"O PIN é sua senha de acesso ao sistema — um código de 4 dígitos numéricos.\n\nPara fazer login use:\n• Seu ID de empregado (ex: LBZ0005) ou CPF\n• Seu PIN de 4 dígitos\n\nNo primeiro acesso o sistema pedirá que você crie um PIN pessoal.\n\nPara trocar o PIN depois: solicite ao seu gestor que faça o reset. Após o reset, você deverá criar um novo PIN no próximo acesso.\n\nNunca compartilhe seu PIN com ninguém.",
+      a:"O PIN é sua senha de acesso ao AppTip — um código de 4 dígitos numéricos.\n\nPara fazer login use:\n• Seu ID de empregado (ex: LBZ0005) ou CPF\n• Seu PIN de 4 dígitos\n\nNo primeiro acesso o sistema pedirá que você crie um PIN pessoal.\n\nPara trocar o PIN depois: solicite ao seu gestor que faça o reset. Após o reset, você deverá criar um novo PIN no próximo acesso.\n\nNunca compartilhe seu PIN com ninguém.",
     },
   ].filter(item => {
     // v8.9.4: visibilidade do item de FAQ é INDEPENDENTE da aba (tab pode estar oculta e o FAQ
@@ -2931,7 +2931,7 @@ function WorkScheduleManagerTab({ restaurantId, employees, roles, workSchedules,
 
     // Rodapé
     doc.setFontSize(8); doc.setTextColor(150);
-    doc.text(`Gerado em ${new Date().toLocaleString("pt-BR")}`, 14, H - 8);
+    doc.text(`AppTip · Gerado em ${new Date().toLocaleString("pt-BR")}`, 14, H - 8);
     const safeName = (selEmp?.name || "horario").replace(/[^a-zA-Z0-9]/g,"_");
     doc.save(`horario_${safeName}.pdf`);
     onUpdate("_toast", "📄 PDF do horário gerado");
@@ -5606,7 +5606,7 @@ function EmployeeSpreadsheet({ restEmps, restRoles, rid, employees, pessoas, onU
     const demitidoEm = `${yyyy}-${mm.padStart(2,"0")}-${dd.padStart(2,"0")}`;
     if (isNaN(new Date(demitidoEm+"T12:00:00").getTime())) { window.alert("Data inválida."); return; }
     if (!await appConfirm(`Confirmar demissão de "${emp.name}" em ${dataStr}?\n\nA partir desta data:\n• Sai do cálculo de gorjeta\n• Consta como "DEM" na escala\n• No próximo mês será movido para inativo`)) return;
-    onUpdate("employees", employees.map(x => x.id===emp.id ? {...x, demitidoEm, demitidoPor: isOwner ? "Master" : "Gestor Adm.", inactive: true, inactiveFrom: demitidoEm} : x));
+    onUpdate("employees", employees.map(x => x.id===emp.id ? {...x, demitidoEm, demitidoPor: isOwner ? "Gestor AppTip" : "Gestor Adm.", inactive: true, inactiveFrom: demitidoEm} : x));
     onUpdate("_toast", `📋 ${emp.name} demitido em ${dataStr}`);
   }
 
@@ -5639,7 +5639,7 @@ function EmployeeSpreadsheet({ restEmps, restRoles, rid, employees, pessoas, onU
     const effectiveDate = `${yyyy}-${mm.padStart(2,"0")}-${dd.padStart(2,"0")}`;
     if (isNaN(new Date(effectiveDate+"T12:00:00").getTime())) { window.alert("Data inválida."); return; }
     const reason = window.prompt("Motivo (opcional):") || "";
-    const changedBy = isOwner ? "Master" : "Gestor Adm.";
+    const changedBy = isOwner ? "Gestor AppTip" : "Gestor Adm.";
     const oldRole = restRoles.find(r => r.id === emp.roleId);
 
     if (effectiveDate <= today()) {
@@ -5797,7 +5797,7 @@ function EmployeeSpreadsheet({ restEmps, restRoles, rid, employees, pessoas, onU
                   workSchedules={workSchedules}
                   notifications={notifications}
                   managers={managers}
-                  currentManagerName={currentUser?.name ?? (isOwner?"Master":"Gestor Adm.")}
+                  currentManagerName={currentUser?.name ?? (isOwner?"Gestor AppTip":"Gestor Adm.")}
                   onUpdate={onUpdate}
                   communications={communications}
                   isOwner={isOwner}
@@ -6150,7 +6150,7 @@ function EmployeeSpreadsheet({ restEmps, restRoles, rid, employees, pessoas, onU
                       if (y > 250) { doc.addPage(); y = 15; } doc.setFontSize(12); doc.text("RESUMO", 14, y); y += 2;
                       const negIncs = empIncs.filter(i => { const t=INCIDENT_TYPES.find(x=>x.id===i.type); return t?.negative; }); const posIncs = empIncs.filter(i => { const t=INCIDENT_TYPES.find(x=>x.id===i.type); return !t?.negative; });
                       doc.autoTable({ startY:y, head:[], body:[["Ocorrências negativas",String(negIncs.length)],["Ocorrências positivas",String(posIncs.length)],["Reuniões realizadas",String(empFbsPdf.length)],["Mudanças de cargo",String(roleHist.length)],["Avaliação média",empFbsPdf.length>0?(empFbsPdf.reduce((a,f)=>a+(f.rating||0),0)/empFbsPdf.length).toFixed(1):"—"]], theme:"grid", styles:{fontSize:10,cellPadding:3}, columnStyles:{0:{fontStyle:"bold",cellWidth:60}}, margin:{left:14,right:14} });
-                      const pages = doc.internal.getNumberOfPages(); for (let i=1;i<=pages;i++) { doc.setPage(i); doc.setFontSize(8); doc.setTextColor(150,150,150); doc.text(`Trilha de ${emp.name} · ${dateFrom} a ${dateTo} · Página ${i}/${pages}`, W/2, doc.internal.pageSize.getHeight()-8, {align:"center"}); }
+                      const pages = doc.internal.getNumberOfPages(); for (let i=1;i<=pages;i++) { doc.setPage(i); doc.setFontSize(8); doc.setTextColor(150,150,150); doc.text(`AppTip · Trilha de ${emp.name} · ${dateFrom} a ${dateTo} · Página ${i}/${pages}`, W/2, doc.internal.pageSize.getHeight()-8, {align:"center"}); }
                       const safeName = emp.name.replace(/[^a-zA-Z0-9]/g,"_").toLowerCase();
                       setPreviewDoc(doc); setPreviewFileName(`trilha_${safeName}_${fromISO}_${toISO}.pdf`);
                       onUpdate("_toast", `📄 Trilha de ${emp.name} exportada!`);
@@ -6441,7 +6441,7 @@ function EmployeeSpreadsheet({ restEmps, restRoles, rid, employees, pessoas, onU
                                   e.stopPropagation();
                                   const dateStr = ev.fb.meetingDate ? new Date(ev.fb.meetingDate+"T12:00:00").toLocaleDateString("pt-BR") : "";
                                   if (!await appConfirm(`Excluir reunião de ${dateStr}?\n\nO registro ficará na lixeira por 90 dias.`)) return;
-                                  const updated = (feedbacks??[]).map(f => f.id === ev.fb.id ? {...f, deletedAt: new Date().toISOString(), deletedBy: currentUser?.name || (isOwner ? "Master" : "Gestor Adm.")} : f);
+                                  const updated = (feedbacks??[]).map(f => f.id === ev.fb.id ? {...f, deletedAt: new Date().toISOString(), deletedBy: currentUser?.name || (isOwner ? "Gestor AppTip" : "Gestor Adm.")} : f);
                                   onUpdate("feedbacks", updated);
                                   setExpandedJornada(null);
                                 }} style={{padding:"3px 10px",borderRadius:6,border:"1px solid var(--red)33",background:"transparent",color:"var(--red)",cursor:"pointer",fontSize:10,fontFamily:"'DM Mono',monospace"}}>🗑️ Excluir</button></div>}
@@ -6460,7 +6460,7 @@ function EmployeeSpreadsheet({ restEmps, restRoles, rid, employees, pessoas, onU
                                 {canDeleteInc && <div style={{marginTop:6,display:"flex",justifyContent:"flex-end"}}><button onClick={async (e)=>{
                                   e.stopPropagation();
                                   if (!await appConfirm(`Excluir ocorrência?\n\nO registro ficará na lixeira por 90 dias.`)) return;
-                                  const updated = (incidents??[]).map(inc => inc.id === ev.inc.id ? {...inc, deletedAt: new Date().toISOString(), deletedBy: currentUser?.name || (isOwner ? "Master" : "Gestor Adm.")} : inc);
+                                  const updated = (incidents??[]).map(inc => inc.id === ev.inc.id ? {...inc, deletedAt: new Date().toISOString(), deletedBy: currentUser?.name || (isOwner ? "Gestor AppTip" : "Gestor Adm.")} : inc);
                                   onUpdate("incidents", updated);
                                   setExpandedJornada(null);
                                 }} style={{padding:"3px 10px",borderRadius:6,border:"1px solid var(--red)33",background:"transparent",color:"var(--red)",cursor:"pointer",fontSize:10,fontFamily:"'DM Mono',monospace"}}>🗑️ Excluir</button></div>}
@@ -7117,7 +7117,7 @@ function ValeTransporteTab({ restaurantId, employees, roles, workSchedules, sche
       tableBody += `<tr style="background:#f9f9f9"><td colspan="8" style="text-align:right;font-weight:600;font-size:12px;color:${color}">Subtotal ${area}</td><td style="text-align:right;font-weight:700;color:${color}">${fmt(sub)}</td></tr>`;
     });
     tableBody += `<tr style="font-weight:700;background:#e8e8e8"><td colspan="8" style="text-align:right;font-size:15px">TOTAL GERAL</td><td style="text-align:right;font-size:15px">${fmt(grandTotal)}</td></tr>`;
-    w.document.write(`<!DOCTYPE html><html><head><title>VT ${mk}</title><style>body{font-family:Arial,sans-serif;margin:24px}table{border-collapse:collapse;width:100%}th,td{border:1px solid #ccc;padding:8px 12px;font-size:13px}th{background:#f5f5f5;font-weight:700}h1{font-size:20px}</style></head><body><h1>🚌 Vale Transporte — ${monthLabel(year,month)}</h1>${paidInfo}<table><thead><tr><th>Empregado</th><th>Cargo</th><th>VT Diário</th><th>Dias</th><th>VT Bruto</th><th>Ajuste Mês Ant.</th><th>Ajuda de Custo</th><th>Desconto</th><th>Total</th></tr></thead><tbody>${tableBody}</tbody></table><p style="font-size:11px;color:#999;margin-top:24px">Gerado em em ${new Date().toLocaleString("pt-BR")}</p></body></html>`);
+    w.document.write(`<!DOCTYPE html><html><head><title>VT ${mk}</title><style>body{font-family:Arial,sans-serif;margin:24px}table{border-collapse:collapse;width:100%}th,td{border:1px solid #ccc;padding:8px 12px;font-size:13px}th{background:#f5f5f5;font-weight:700}h1{font-size:20px}</style></head><body><h1>🚌 Vale Transporte — ${monthLabel(year,month)}</h1>${paidInfo}<table><thead><tr><th>Empregado</th><th>Cargo</th><th>VT Diário</th><th>Dias</th><th>VT Bruto</th><th>Ajuste Mês Ant.</th><th>Ajuda de Custo</th><th>Desconto</th><th>Total</th></tr></thead><tbody>${tableBody}</tbody></table><p style="font-size:11px;color:#999;margin-top:24px">Gerado por AppTip em ${new Date().toLocaleString("pt-BR")}</p></body></html>`);
     w.document.close();
     setTimeout(() => w.print(), 500);
     onUpdate("_toast", "🖨️ PDF pronto para impressão");
@@ -7432,7 +7432,7 @@ function IncidentForm({ restaurantId, employees, onUpdate, incidents, currentUse
       description: description.trim(),
       date,
       createdAt: new Date().toISOString(),
-      createdBy: isOwner ? "Master" : (currentUser?.name ?? "Gestor Adm."),
+      createdBy: isOwner ? "Gestor AppTip" : (currentUser?.name ?? "Gestor Adm."),
       createdById: currentUser?.id ?? null,
       visibility: "internal",
     };
@@ -7581,7 +7581,7 @@ function GoalsManager({ empId, employeeGoals, roles, restaurantId, onUpdate, cur
       materials: [],
       metas: [],
       createdAt: new Date().toISOString(),
-      createdBy: isOwner ? "Master" : (currentUser?.name ?? "Gestor Adm."),
+      createdBy: isOwner ? "Gestor AppTip" : (currentUser?.name ?? "Gestor Adm."),
       status: "active",
     };
     saveGoals([...(employeeGoals?.[empId] ?? []), newGoal]);
@@ -8051,7 +8051,7 @@ function MeetingPlannerSection({ restaurantId, employees, roles, areas, meetingP
       employeeIds: [...selectedEmps],
       plannedDate: planDate,
       note: planNote.trim(),
-      createdBy: existing?.createdBy || (isOwner ? "Master" : (currentUser?.name ?? "Gestor Adm.")),
+      createdBy: existing?.createdBy || (isOwner ? "Gestor AppTip" : (currentUser?.name ?? "Gestor Adm.")),
       createdById: existing?.createdById || currentUser?.id || null, // v8.14.0
       createdAt: existing?.createdAt || new Date().toISOString(),
       completedFeedbackIds: existing?.completedFeedbackIds || {},
@@ -8171,7 +8171,7 @@ function MeetingPlannerSection({ restaurantId, employees, roles, areas, meetingP
       title: ideaTitle.trim(),
       description: ideaDesc.trim(),
       areas: ideaAreas.length > 0 ? [...ideaAreas] : null,
-      createdBy: currentUser?.name ?? (isOwner ? "Master" : "Gestor Adm."),
+      createdBy: currentUser?.name ?? (isOwner ? "Gestor AppTip" : "Gestor Adm."),
       createdAt: new Date().toISOString(),
       priority: false,
       status: "nova", // nova | na_pauta | descartada
@@ -8250,7 +8250,7 @@ function MeetingPlannerSection({ restaurantId, employees, roles, areas, meetingP
         return prev ? { ...prev, ...it, id: prev.id, status: prev.status, notes: prev.notes, decision: prev.decision, reason: prev.reason } : { ...it };
       }),
       participants: lidParticipants.length > 0 ? [...lidParticipants] : [],
-      createdBy: existing?.createdBy || (currentUser?.name ?? (isOwner ? "Master" : "Gestor Adm.")),
+      createdBy: existing?.createdBy || (currentUser?.name ?? (isOwner ? "Gestor AppTip" : "Gestor Adm.")),
       createdById: existing?.createdById || currentUser?.id || null, // v8.14.0
       createdAt: existing?.createdAt || new Date().toISOString(),
       status: existing?.status || "aberta",
@@ -8373,7 +8373,7 @@ function MeetingPlannerSection({ restaurantId, employees, roles, areas, meetingP
       subtype: occType === "pessoal" ? occSubtype : "",
       areas: occAreas.length > 0 ? [...occAreas] : [],
       employeeIds: occEmployeeIds.length > 0 ? [...occEmployeeIds] : [],
-      createdBy: currentUser?.name ?? (isOwner ? "Master" : "Gestor Adm."),
+      createdBy: currentUser?.name ?? (isOwner ? "Gestor AppTip" : "Gestor Adm."),
       createdById: currentUser?.id ?? null, // v8.14.0: pra filtro de visibilidade
       createdAt: new Date().toISOString(),
       status: "nova", // nova | na_pauta | resolvida | descartada
@@ -8390,7 +8390,7 @@ function MeetingPlannerSection({ restaurantId, employees, roles, areas, meetingP
       if (status === "resolvida") {
         all[idx].resolvedText = resolvedText || "";
         all[idx].resolvedAt = new Date().toISOString();
-        all[idx].resolvedBy = currentUser?.name ?? (isOwner ? "Master" : "Gestor Adm.");
+        all[idx].resolvedBy = currentUser?.name ?? (isOwner ? "Gestor AppTip" : "Gestor Adm.");
       }
       onUpdate("meetingOccurrences", all);
     }
@@ -8438,7 +8438,7 @@ function MeetingPlannerSection({ restaurantId, employees, roles, areas, meetingP
       const occIds = resolvedItems.filter(it => it.fromOccurrence).map(it => it.fromOccurrence);
       if (occIds.length > 0) {
         const allOcc = [...getData("meetingOccurrences")];
-        occIds.forEach(oid => { const idx = allOcc.findIndex(o => o.id === oid); if (idx >= 0 && (allOcc[idx].status === "na_pauta" || allOcc[idx].status === "nova")) allOcc[idx] = { ...allOcc[idx], status: "resolvida", resolvedAt: new Date().toISOString(), resolvedBy: currentUser?.name ?? (isOwner ? "Master" : "Gestor Adm.") }; });
+        occIds.forEach(oid => { const idx = allOcc.findIndex(o => o.id === oid); if (idx >= 0 && (allOcc[idx].status === "na_pauta" || allOcc[idx].status === "nova")) allOcc[idx] = { ...allOcc[idx], status: "resolvida", resolvedAt: new Date().toISOString(), resolvedBy: currentUser?.name ?? (isOwner ? "Gestor AppTip" : "Gestor Adm.") }; });
         onUpdate("meetingOccurrences", allOcc);
       }
       // Mark resolved idea items
@@ -10037,7 +10037,7 @@ function FeedbackForm({ restaurantId, employees, roles, onUpdate, feedbacks, cur
       targetRoleId: null,
       devChecklist: [],
       createdAt: new Date().toISOString(),
-      createdBy: isOwner ? "Master" : (currentUser?.name ?? "Gestor Adm."),
+      createdBy: isOwner ? "Gestor AppTip" : (currentUser?.name ?? "Gestor Adm."),
     };
     onUpdate("feedbacks", [...(feedbacks ?? []), fb]);
     // Suggest next meeting
@@ -10059,7 +10059,7 @@ function FeedbackForm({ restaurantId, employees, roles, onUpdate, feedbacks, cur
       employeeIds: [lastRegisteredEmpId],
       plannedDate: suggestedNextDate,
       note: "Sugestão automática",
-      createdBy: isOwner ? "Master" : (currentUser?.name ?? "Gestor Adm."),
+      createdBy: isOwner ? "Gestor AppTip" : (currentUser?.name ?? "Gestor Adm."),
       createdAt: new Date().toISOString(),
       completedFeedbackIds: {},
     };
@@ -10632,7 +10632,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
   // Encapsulam o autor + snapshot + saveVersion num único call.
   // Snapshot é opcional: se omitido, captura o estado atual.
   function authorName() {
-    return currentUser?.name || (isOwner ? "Master" : "Gestor Adm.");
+    return currentUser?.name || (isOwner ? "Gestor AppTip" : "Gestor Adm.");
   }
   function saveTipsSnapshot(reason, snapshot) {
     const snap = snapshot !== undefined ? snapshot : snapshotTipsMonth(tips, rid, mk);
@@ -11256,7 +11256,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
     setTab(g.tabs[0][0]);
   }
 
-  // Reset de aba — só Master (isOwner)
+  // Reset de aba — só Admin AppTip (isOwner)
   async function resetTab(tabKey, tabLabel, getSnapshot) {
     if (!isOwner) return;
     if (!await appConfirm(`Resetar "${tabLabel}"?\n\nOs dados ficam na lixeira por 90 dias e podem ser restaurados.`)) return;
@@ -11970,7 +11970,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                       const publishDay = () => {
                         if (!isLaunched) return;
                         const now = new Date().toISOString();
-                        const author = currentUser?.name || (isOwner ? "Master" : "Gestor Adm.");
+                        const author = currentUser?.name || (isOwner ? "Gestor AppTip" : "Gestor Adm.");
                         const authorId = currentUser?.id || "admin";
                         const updatedTips = tips.map(t => {
                           if (t.restaurantId === rid && t.date === date) {
@@ -12254,11 +12254,11 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                   doc.setFont(undefined, "normal");
                   doc.text(`${restaurant.name}  ·  ${new Date().toLocaleDateString("pt-BR")}`, mx, y + 5);
 
-                  // Logo text right-aligned
+                  // AppTip logo text right-aligned
                   doc.setFontSize(10);
                   doc.setTextColor(37, 99, 235);
                   doc.setFont(undefined, "bold");
-                  doc.text("Sistema", W - mx, y, { align: "right" });
+                  doc.text("AppTip", W - mx, y, { align: "right" });
                   doc.setFont(undefined, "normal");
                   y += 10;
 
@@ -12583,7 +12583,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                   doc.rect(0, H - 3, W, 3, "F");
                   doc.setFontSize(7);
                   doc.setTextColor(150,150,150);
-                  doc.text(`  Relatório de Desligamento  ·  ${emp.name}  ·  ${fmtDate(demDate)}`, W/2, H - 6, { align: "center" });
+                  doc.text(`AppTip  ·  Relatório de Desligamento  ·  ${emp.name}  ·  ${fmtDate(demDate)}`, W/2, H - 6, { align: "center" });
 
                   const safeName = emp.name.replace(/[^a-zA-Z0-9]/g,"_").toLowerCase();
                   setPreviewDoc(doc); setPreviewFileName(`relatorio_desligamento_${safeName}_${demDate}.pdf`);
@@ -12768,7 +12768,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
           const virtEmp = {
             id: currentUser?.id ? `admin_${currentUser.id}` : `admin_compras_${rid}`,
             restaurantId: rid,
-            name: currentUser?.name || (isOwner ? "Master" : "Gestor"),
+            name: currentUser?.name || (isOwner ? "Gestor AppTip" : "Gestor"),
             cpf: currentUser?.cpf || "",
             operationalAreas: { compras: true, contagens: true, checklists: true, fichasTecnicas: true, temperaturas: true },
           };
@@ -13319,7 +13319,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                     const preSnap = snapshotSchedulesMonth(schedules, rid, mk);
                     saveSchedulesSnapshot("Edição manual", preSnap);
                     // Record adjustments for Phase 2
-                    const adjAuthor = currentUser?.name || (isOwner?"Master":"Gestor Adm.");
+                    const adjAuthor = currentUser?.name || (isOwner?"Gestor AppTip":"Gestor Adm.");
                     const adjTimestamp = new Date().toISOString();
                     const newAdjs = [];
                     Object.entries(schedLocalEdits).forEach(([eid, dayEdits]) => {
@@ -13455,7 +13455,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                       // No delta, close directly
                       const newStatus = { ...(data?.scheduleStatus ?? {}) };
                       if (!newStatus[rid]) newStatus[rid] = {};
-                      newStatus[rid][mk] = { ...(newStatus[rid][mk] ?? {}), status: "closed", closedAt: new Date().toISOString(), closedBy: currentUser?.name || "Master" };
+                      newStatus[rid][mk] = { ...(newStatus[rid][mk] ?? {}), status: "closed", closedAt: new Date().toISOString(), closedBy: currentUser?.name || "Gestor AppTip" };
                       onUpdate("scheduleStatus", newStatus);
                       onUpdate("_toast", "Mes fechado com sucesso");
                     }
@@ -13571,7 +13571,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                         // Close the month and persist
                         const newStatus = { ...(data?.scheduleStatus ?? {}) };
                         if (!newStatus[rid]) newStatus[rid] = {};
-                        newStatus[rid][mk] = { ...(newStatus[rid][mk] ?? {}), status: "closed", closedAt: new Date().toISOString(), closedBy: currentUser?.name || "Master" };
+                        newStatus[rid][mk] = { ...(newStatus[rid][mk] ?? {}), status: "closed", closedAt: new Date().toISOString(), closedBy: currentUser?.name || "Gestor AppTip" };
                         onUpdate("scheduleStatus", newStatus);
                         // Save effective schedule as the final schedule
                         const finalMonth = { ...effectiveMonth };
@@ -14694,7 +14694,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
         {/* HORARIOS */}
         {tab === "horarios" && (
           <div>
-            <WorkScheduleManagerTab restaurantId={rid} employees={employees} roles={roles} workSchedules={data?.workSchedules??{}} notifications={data?.notifications??[]} managers={data?.managers??[]} currentManagerName={currentUser?.name ?? (isOwner?"Master":"Gestor Adm.")} onUpdate={onUpdate} communications={data?.communications??[]} isOwner={isOwner} mobileOnly={mobileOnly} />
+            <WorkScheduleManagerTab restaurantId={rid} employees={employees} roles={roles} workSchedules={data?.workSchedules??{}} notifications={data?.notifications??[]} managers={data?.managers??[]} currentManagerName={currentUser?.name ?? (isOwner?"Gestor AppTip":"Gestor Adm.")} onUpdate={onUpdate} communications={data?.communications??[]} isOwner={isOwner} mobileOnly={mobileOnly} />
           </div>
         )}
 
@@ -14915,7 +14915,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                 </div>
               </div>
 
-              {/* Master toggle — só para Gestor Adm. e visível para Master */}
+              {/* Master toggle — só para Gestor Adm. e visível para AppTip/master */}
               {dpMgrForm.profile === "dp" && currentIsMasterDP && (
                 <div style={{borderTop:"1px solid var(--border)",paddingTop:12}}>
                   <button onClick={()=>{const ids=dpMgrForm.masterRestaurantIds??[];setDpMgrForm({...dpMgrForm,masterRestaurantIds:ids.includes(rid)?ids.filter(x=>x!==rid):[...ids,rid]});}}
@@ -15242,7 +15242,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
             {/* Privacidade */}
             <div style={{...S.card,marginBottom:20}}>
               <p style={{color:ac,fontSize:14,fontWeight:700,margin:"0 0 8px"}}>🔒 Privacidade</p>
-              <p style={{color:"var(--text3)",fontSize:12,marginBottom:14}}>Quando ativo, oculta dados sensíveis (valores de gorjeta, CPFs, mensagens DP e comunicados) da visão do master.</p>
+              <p style={{color:"var(--text3)",fontSize:12,marginBottom:14}}>Quando ativo, oculta dados sensíveis (valores de gorjeta, CPFs, mensagens DP e comunicados) da visão do administrador AppTip.</p>
               <label style={{display:"flex",alignItems:"center",gap:12,cursor:"pointer"}}>
                 <div onClick={()=>patchConfig({ privacyMode: !localRest.privacyMode })} style={{width:48,height:26,borderRadius:13,background:localRest.privacyMode?ac:"var(--border)",position:"relative",cursor:"pointer",transition:"background 0.2s"}}>
                   <div style={{width:22,height:22,borderRadius:11,background:"#fff",position:"absolute",top:2,left:localRest.privacyMode?24:2,transition:"left 0.2s",boxShadow:"0 1px 3px rgba(0,0,0,0.2)"}}/>
@@ -15403,7 +15403,7 @@ function ArchitectureTab({ isMobile }) {
       <div style={sty.nav}>{SECTIONS.map(([id,label])=>(<button key={id} style={sty.navBtn(archSec===id)} onClick={()=>setArchSec(id)}>{label}</button>))}</div>
 
       {archSec === "overview" && (<div>
-        <p style={{fontSize:13,color:"var(--text2)",marginBottom:14,lineHeight:1.6}}>Esta é uma aplicação React de página única (~17.000 linhas) com Firebase Firestore. Todos os dados são carregados ao iniciar e gerenciados pela função central <span style={sty.code}>handleUpdate(campo, valor)</span>.</p>
+        <p style={{fontSize:13,color:"var(--text2)",marginBottom:14,lineHeight:1.6}}>O AppTip é um app React de página única (~17.000 linhas) com Firebase Firestore. Todos os dados são carregados ao iniciar e gerenciados pela função central <span style={sty.code}>handleUpdate(campo, valor)</span>.</p>
         <Flow steps={["👤 Usuário","🔐 Login (CPF/Código)","⚛️ React App","🔥 Firebase Firestore"]} />
         <div style={sty.secTitle}>🛠️ Stack Tecnológica</div>
         <div style={sty.grid}>
@@ -15416,7 +15416,7 @@ function ArchitectureTab({ isMobile }) {
         </div>
         <div style={sty.secTitle}>👥 Perfis de Usuário</div>
         <div style={sty.grid}>
-          <div style={{...sty.card,borderColor:"#a855f7"}}><div style={sty.cardTitle}>⭐ Master</div><div style={sty.cardDesc}>Admin SaaS. Acesso total. isMaster para lixeira, offline.</div><span style={sty.tag}>view = "super"</span></div>
+          <div style={{...sty.card,borderColor:"#a855f7"}}><div style={sty.cardTitle}>⭐ Gestor AppTip</div><div style={sty.cardDesc}>Admin SaaS. Acesso total. isMaster para lixeira, offline.</div><span style={sty.tag}>view = "super"</span></div>
           <div style={{...sty.card,borderColor:"#3b82f6"}}><div style={sty.cardTitle}>👔 Gestor Adm.</div><div style={sty.cardDesc}>Gerente do restaurante. isDP para mensagens.</div><span style={sty.tag}>view = "manager"</span></div>
           <div style={{...sty.card,borderColor:"#22c55e"}}><div style={sty.cardTitle}>🎯 Líder Op.</div><div style={sty.cardDesc}>Dashboard, Escala, Horários, Equipe, Reuniões.</div><span style={sty.tag}>profile = "lider"</span></div>
           <div style={{...sty.card,borderColor:"#f59e0b"}}><div style={sty.cardTitle}>👷 Empregado</div><div style={sty.cardDesc}>Escala, gorjetas, trilha, comunicados, FAQ, DP.</div><span style={sty.tag}>view = "employee"</span></div>
@@ -15430,7 +15430,7 @@ function ArchitectureTab({ isMobile }) {
 
       {archSec === "data" && (<div>
         <p style={{fontSize:13,color:"var(--text2)",marginBottom:14,lineHeight:1.6}}>Coleção <span style={sty.code}>appdata</span> do Firestore. Chave <span style={sty.code}>v4:nome</span>, valor <span style={sty.code}>{"{ value: ... }"}</span>.</p>
-        {[{title:"📋 Principais",rows:[["owners","Masters"],["managers","Gestores"],["restaurants","Restaurantes"],["employees","Empregados"],["roles","Cargos"]]},{title:"💰 Gorjetas",rows:[["tips","Por dia"],["splits","% por área"],["tipVersions","30 snapshots"],["tipApprovals","Aprovação semanal"],["noTipDays","Sem gorjeta"]]},{title:"📅 Escala",rows:[["schedules","Mensais"],["workSchedules","Horário contratado"],["schedTemplates","Templates"],["scheduleVersions","30 snapshots"],["scheduleStatus","Status mês"],["schedulePrevista","Snapshot"],["delays","Atrasos"]]},{title:"🚌 VT",rows:[["vtConfig","Taxa diária"],["vtMonthly","Ajustes"],["vtPayments","Pagamentos"]]},{title:"👥 Pessoas",rows:[["incidents","Ocorrências"],["feedbacks","Avaliações"],["employeeGoals","Objetivos"],["devChecklists","Checklists"]]},{title:"🤝 Reuniões",rows:[["meetingPlans","Planejamento"],["meetingAgendas","Pautas"],["meetingIdeas","Ideias"],["meetingActions","Ações"],["meetingOccurrences","Ocorrências"],["meetingPendencias","Pendências"]]},{title:"📢 Comunicação",rows:[["communications","Comunicados"],["commAcks","Ciências"],["faq","FAQ"],["dpMessages","Mensagens DP"],["notifications","Notificações"]]},{title:"🗑️ Sistema",rows:[["trash","Lixeira (30 dias)"]]}
+        {[{title:"📋 Principais",rows:[["owners","Admins AppTip"],["managers","Gestores"],["restaurants","Restaurantes"],["employees","Empregados"],["roles","Cargos"]]},{title:"💰 Gorjetas",rows:[["tips","Por dia"],["splits","% por área"],["tipVersions","30 snapshots"],["tipApprovals","Aprovação semanal"],["noTipDays","Sem gorjeta"]]},{title:"📅 Escala",rows:[["schedules","Mensais"],["workSchedules","Horário contratado"],["schedTemplates","Templates"],["scheduleVersions","30 snapshots"],["scheduleStatus","Status mês"],["schedulePrevista","Snapshot"],["delays","Atrasos"]]},{title:"🚌 VT",rows:[["vtConfig","Taxa diária"],["vtMonthly","Ajustes"],["vtPayments","Pagamentos"]]},{title:"👥 Pessoas",rows:[["incidents","Ocorrências"],["feedbacks","Avaliações"],["employeeGoals","Objetivos"],["devChecklists","Checklists"]]},{title:"🤝 Reuniões",rows:[["meetingPlans","Planejamento"],["meetingAgendas","Pautas"],["meetingIdeas","Ideias"],["meetingActions","Ações"],["meetingOccurrences","Ocorrências"],["meetingPendencias","Pendências"]]},{title:"📢 Comunicação",rows:[["communications","Comunicados"],["commAcks","Ciências"],["faq","FAQ"],["dpMessages","Mensagens DP"],["notifications","Notificações"]]},{title:"🗑️ Sistema",rows:[["trash","Lixeira (30 dias)"]]}
         ].map((g,gi) => (<div key={gi}><div style={sty.secTitle}>{g.title}</div><table style={sty.tbl}><thead><tr><th style={sty.th}>Campo</th><th style={sty.th}>Descrição</th></tr></thead><tbody>{g.rows.map(([f,d],ri) => (<tr key={ri}><td style={sty.td}><span style={sty.code}>{f}</span></td><td style={sty.td}>{d}</td></tr>))}</tbody></table></div>))}
       </div>)}
 
@@ -15654,7 +15654,7 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme, 
   const ac = "var(--ac)";
   const TABS = [
     ["financeiro_geral", "💰 Financeiro"],
-    ["owners","👔 Masters"],
+    ["owners","👔 Gestores AppTip"],
     ["inbox", `📬 Caixa${unreadNotifs > 0 ? ` (${unreadNotifs})` : ""}`],
     ...(isMaster ? [["trash", `🗑️ Lixeira${trashCount > 0 ? ` (${trashCount})` : ""}`]] : []),
     ["changelog", "📋 Versões"],
@@ -16184,7 +16184,7 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme, 
                 <div style={{background:"#f0fdf4",borderRadius:10,padding:"10px 14px",marginBottom:12,border:"1px solid #86efac"}}>
                   <div style={{color:"#166534",fontSize:11,fontWeight:700,marginBottom:4}}>📱 Mensagem que será enviada</div>
                   <div style={{color:"#166534",fontSize:13,lineHeight:1.6}}>
-                    Ola, <strong>{rest?.name}</strong>! Segue o link da sua fatura referente ao período <strong>{fmt(cobPeriodo||proxIni)} a {fmt(cobVenc||proxFim)}</strong>: apptip.app/fatura/(link)
+                    Ola, <strong>{rest?.name}</strong>! Segue o link da sua fatura AppTip referente ao período <strong>{fmt(cobPeriodo||proxIni)} a {fmt(cobVenc||proxFim)}</strong>: apptip.app/fatura/(link)
                   </div>
                 </div>
 
@@ -16201,7 +16201,7 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme, 
                   const cob={id:Date.now().toString(),periodoLabel:pLabel,periodoInicio:ini,periodoFim:fim,venc,valor,forma:cobForma==="pix"?"PIX":"Link",chave,criadaEm:new Date().toISOString(),status:"pendente"};
                   saveFin({cobrancas:[...(fin.cobrancas??[]).filter(c=>!(c.autoGerada&&c.status==="pendente")),cob]});
                   const faturaUrl=`https://apptip.app/fatura/${cob.id}`;
-                  const msg=`Ola, *${rest?.name}*!\n\nSegue o link da sua fatura *Sistema* referente ao periodo *${pLabel}*:\n\n${faturaUrl}\n\nQualquer duvida estamos a disposicao!\n*Equipe de gestão*`;
+                  const msg=`Ola, *${rest?.name}*!\n\nSegue o link da sua fatura *AppTip* referente ao periodo *${pLabel}*:\n\n${faturaUrl}\n\nQualquer duvida estamos a disposicao!\n*Equipe AppTip*`;
                   const numero=rest.whatsappFin.replace(/\D/g,"");
                   setTimeout(()=>{window.location.href=`https://wa.me/55${numero}?text=${encodeURIComponent(msg)}`;},300);
                   setCobValor("");setCobVenc("");setCobLink("");setCobPeriodo("");
@@ -16347,7 +16347,7 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme, 
                 </div>
               </div>
 
-              {/* Master toggle — só para Gestor Adm. (Master sempre pode) */}
+              {/* Master toggle — só para Gestor Adm. (AppTip sempre pode) */}
               {mgrForm.profile === "dp" && (
                 <div style={{borderTop:"1px solid var(--border)",paddingTop:12}}>
                   <button onClick={()=>{const ids=mgrForm.masterRestaurantIds??[];setMgrForm({...mgrForm,masterRestaurantIds:ids.includes(selRestaurant)?ids.filter(x=>x!==selRestaurant):[...ids,selRestaurant]});}}
@@ -16437,7 +16437,7 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme, 
       <div style={{ background:"var(--header-bg)", borderBottom:"1px solid var(--border)", padding:isMobile?"10px 12px":"14px 20px", display:"flex", justifyContent:"space-between", alignItems:"center", boxShadow:"0 1px 4px rgba(0,0,0,0.04)", gap:8 }}>
         <div style={{ display:"flex", alignItems:"center", gap:isMobile?6:8, minWidth:0 }}>
           <span style={{ fontSize:isMobile?14:18 }}>⭐</span>
-          <span style={{ color:"var(--text)", fontWeight:800, fontSize:isMobile?13:16 }}>{isMobile?"Gestor":"Master"}</span>
+          <span style={{ color:"var(--text)", fontWeight:800, fontSize:isMobile?13:16 }}>{isMobile?"Gestor":"Gestor AppTip"}</span>
           {!isMobile && <span style={{ color:"var(--text3)", fontSize:12 }}>· {currentUser?.name}</span>}
         </div>
         <div style={{display:"flex",gap:isMobile?4:6,alignItems:"center",flexShrink:0}}>
@@ -16712,7 +16712,7 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme, 
             if (!composeData.assunto.trim() || !composeData.corpo.trim()) return;
             const msg = createInboxMessage({
               tipo: "comunicado",
-              de: { id: uid, nome: currentUser?.name ?? "Master", role: "owner" },
+              de: { id: uid, nome: currentUser?.name ?? "Gestor AppTip", role: "owner" },
               para: composeData.restaurantId ? { role: "manager", restaurantId: composeData.restaurantId } : { role: "manager" },
               restaurantId: composeData.restaurantId || null,
               assunto: composeData.assunto.trim(),
@@ -17345,7 +17345,7 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme, 
         {/* SUPER GESTORES */}
         {tab === "owners" && (
           <div>
-            <button onClick={()=>{setEditOwnerId(null);setOwnerForm({name:"",cpf:"",pin:""});setShowOwnerModal(true);}} style={{...S.btnPrimary,marginBottom:20,fontSize:isMobile?12:14}}>+ Novo Master</button>
+            <button onClick={()=>{setEditOwnerId(null);setOwnerForm({name:"",cpf:"",pin:""});setShowOwnerModal(true);}} style={{...S.btnPrimary,marginBottom:20,fontSize:isMobile?12:14}}>+ Novo Admin AppTip</button>
             {owners.map(s=>(
               <div key={s.id} style={{...S.card,marginBottom:10,display:"flex",flexDirection:isMobile?"column":"row",justifyContent:"space-between",alignItems:isMobile?"stretch":"center",gap:isMobile?10:0,border:s.isMaster?"1px solid var(--ac)44":"1px solid var(--border)"}}>
                 <div style={{minWidth:0}}>
@@ -17522,27 +17522,27 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme, 
               "Novo: pastas customizáveis na Caixa de entrada — crie, renomeie e exclua pastas com cores para organizar mensagens",
               "Novo: aba Excluídas com lixeira de 90 dias e purge automático",
               "Novo: mover mensagens entre pastas e Entrada com modal dedicado",
-              "Novo: exclusão definitiva restrita ao master (owner)",
-              "Novo: pastas disponíveis para todos os perfis — Master, Gestor ADM, Líder e Funcionário",
+              "Novo: exclusão definitiva restrita ao gestor AppTip (owner)",
+              "Novo: pastas disponíveis para todos os perfis — Gestor AppTip, Gestor ADM, Líder e Funcionário",
               "Melhoria: aba Caixa sempre visível no portal do funcionário (não apenas com mensagens não lidas)",
               "Melhoria: contadores de não-lidas por pasta em todas as visualizações",
             ]},
             { version:"5.47.0", date:"2026-04-19", items:[
-              "Novo: sistema unificado de Caixa de Entrada (inbox) — mensagens por papel (Master, ADM, Líder, Funcionário)",
+              "Novo: sistema unificado de Caixa de Entrada (inbox) — mensagens por papel (Gestor AppTip, ADM, Líder, Funcionário)",
               "Novo: notificações automáticas ao agendar reuniões — cada participante recebe aviso na Caixa",
               "Novo: notificações de ações pós-reunião — responsável recebe resumo com responsabilidades diretas e envolvidas",
-              "Novo: composição de comunicados pelo Master para todos ou restaurante específico",
+              "Novo: composição de comunicados pelo Gestor AppTip para todos ou restaurante específico",
               "Novo: aba Caixa no portal do funcionário — visualização e marcação de lidas",
               "Novo: grupo Comunicação com aba Caixa para líderes operacionais",
               "Melhoria: filtros por tipo (reuniões, ações, solicitações, sistema) na Caixa do owner",
               "Melhoria: contador de não-lidas no badge da aba Caixa em todos os portais",
             ]},
             { version:"5.46.0", date:"2026-04-19", items:[
-              "Novo: aba Arquitetura no portal do master — mapa interativo do sistema com 7 seções navegáveis",
+              "Novo: aba Arquitetura no portal do gestor AppTip — mapa interativo do sistema com 7 seções navegáveis",
               "Novo: visão geral da stack, portais (árvore expandível), modelo de dados, abas, permissões, fluxos e guia de planejamento",
             ]},
             { version:"5.45.0", date:"2026-04-19", items:[
-              "Novo: persistência offline com cache local (IndexedDB) para master master",
+              "Novo: persistência offline com cache local (IndexedDB) para gestor AppTip master",
               "Novo: indicador de conexão online/offline no rodapé (somente master)",
               "Novo: banner vermelho no topo quando offline — modo somente leitura",
               "Novo: bloqueio de escrita quando offline impede sobrescrever dados de gestores online",
@@ -17596,7 +17596,7 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme, 
               "Novo: Métricas anônimas comparando faltas do empregado com média da área",
               "Novo: Checklist de desenvolvimento por cargo com links para materiais de estudo",
               "Segurança: ocorrências negativas, gravidade, nomes de envolvidos e observações internas NÃO visíveis ao empregado",
-              "Acesso: Master, Gestor Adm. e Líder Operacional (líder só vê empregados da sua área)",
+              "Acesso: Gestor AppTip, Gestor Adm. e Líder Operacional (líder só vê empregados da sua área)",
             ]},
             { version:"5.15.4", date:"2026-04-17", items:[
               "Correção: tela de primeiro acesso do empregado (cadastro de PIN) agora tem botão '← Voltar ao login'",
@@ -17647,7 +17647,7 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme, 
               "Melhoria: card verde 'Horário validado' aparece entre validação e salvamento como confirmação visual",
             ]},
             { version:"5.13.0", date:"2026-04-12", items:[
-              "Novo: botão '🔐 Resetar PIN' nos cards de gestores (Master e DP Gestores) — PIN volta para 4 primeiros dígitos do CPF e força troca no próximo acesso",
+              "Novo: botão '🔐 Resetar PIN' nos cards de gestores (Admin AppTip e DP Gestores) — PIN volta para 4 primeiros dígitos do CPF e força troca no próximo acesso",
               "Melhoria: fluxo de reset de PIN dos gestores agora consistente com o dos empregados",
               "Correção: IA (Comunicados, FAQ, Cargos, Empregados, Horários) agora exibe mensagem real do erro em vez de 'Não foi possível gerar'",
               "Correção: groqGenerate detecta chave ausente, modelo descontinuado, rate limit (429) e auth inválido (401) com mensagens específicas",
@@ -17981,7 +17981,7 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme, 
       )}
 
       {showOwnerModal && (
-        <Modal title={editOwnerId?"Editar Master":"Novo Master"} onClose={()=>setShowOwnerModal(false)}>
+        <Modal title={editOwnerId?"Editar Gestor AppTip":"Novo Gestor AppTip"} onClose={()=>setShowOwnerModal(false)}>
           <div style={{display:"flex",flexDirection:"column",gap:12}}>
             <div><label style={S.label}>Nome completo</label><input value={ownerForm.name} onChange={e=>setOwnerForm({...ownerForm,name:e.target.value})} style={S.input}/></div>
             <div><label style={S.label}>CPF</label><input value={ownerForm.cpf} onChange={e=>setOwnerForm({...ownerForm,cpf:maskCpf(e.target.value)})} placeholder="000.000.000-00" style={S.input} inputMode="numeric"/></div>
@@ -18091,7 +18091,7 @@ function ManagerPortal({ manager, data, onUpdate, onBack, toggleTheme, theme, on
             <div style={{textAlign:"center",padding:"60px 24px"}}>
               <div style={{fontSize:48,marginBottom:16}}>🏢</div>
               <h3 style={{color:"var(--text)",fontSize:18,fontWeight:700,margin:"0 0 8px"}}>Nenhum restaurante atribuído</h3>
-              <p style={{color:"var(--text3)",fontSize:14,lineHeight:1.6}}>Seu acesso ainda não foi configurado.<br/>Entre em contato com o Master.</p>
+              <p style={{color:"var(--text3)",fontSize:14,lineHeight:1.6}}>Seu acesso ainda não foi configurado.<br/>Entre em contato com o administrador do AppTip.</p>
             </div>
           ) : (
             <>
@@ -18194,8 +18194,8 @@ function ManagerPortal({ manager, data, onUpdate, onBack, toggleTheme, theme, on
 // para o Portal do Gestor Operacional, onde vê abas apenas das áreas
 // em que operationalAreas[area] === true.
 //
-// Áreas: escalas, gorjetas, trilhas, reunioes 
-//        contagens, checklists, fichasTecnicas (Operacional)
+// Áreas: escalas, gorjetas, trilhas, reunioes (AppTip)
+//        contagens, checklists, fichasTecnicas (AppMise)
 //
 const OPERATIONAL_AREA_DEFS = [
   { key: "escalas",        label: "Escalas",         icon: "📅", module: "tip"  },
@@ -18303,7 +18303,7 @@ function OperationalPortal({ employee, data, onUpdate, onBack, toggleTheme, them
             {theme==="dark"?"☀️":"🌙"}
           </button>
           {employee?._isOwnerVirtual && onReturnToOwner && (
-            <button onClick={onReturnToOwner} title="Voltar ao Portal Super (Master)"
+            <button onClick={onReturnToOwner} title="Voltar ao Portal Super (master do AppTip)"
               style={{...S.btnSecondary,fontSize:11,padding:"5px 10px",color:"#a855f7",borderColor:"#a855f7"}}>
               ← Super
             </button>
@@ -18384,7 +18384,7 @@ function OperationalPortal({ employee, data, onUpdate, onBack, toggleTheme, them
             <div style={{fontSize:48,marginBottom:16}}>{activeArea?.icon}</div>
             <h3 style={{color:"var(--text)",fontSize:18,fontWeight:700,margin:"0 0 8px"}}>{activeArea?.label}</h3>
             <p style={{fontSize:14,lineHeight:1.6,maxWidth:460,margin:"0 auto 20px"}}>
-              Esta área do sistema é acessível hoje pelo <b>Portal do Gestor Administrativo</b>. Use o botão <span style={{fontFamily:"monospace",background:"var(--bg2)",padding:"2px 6px",borderRadius:4,color:"var(--ac)"}}>📊</span> no cabeçalho acima para alternar — se você tiver também esse perfil.
+              Esta área do AppTip é acessível hoje pelo <b>Portal do Gestor Administrativo</b>. Use o botão <span style={{fontFamily:"monospace",background:"var(--bg2)",padding:"2px 6px",borderRadius:4,color:"var(--ac)"}}>📊</span> no cabeçalho acima para alternar — se você tiver também esse perfil.
             </p>
             <div style={{fontSize:12,color:"var(--text3)",background:"#fffbeb",border:"1px solid #f59e0b44",borderRadius:10,padding:"10px 16px",maxWidth:460,margin:"0 auto"}}>
               💡 <b>Em evolução:</b> uma visão operacional dedicada (diferente do Gestor Adm) chega em iteração futura. Por enquanto, quem tem a permissão <b>{activeArea?.label}</b> no Gestor Operacional vê este aviso.
@@ -18395,7 +18395,7 @@ function OperationalPortal({ employee, data, onUpdate, onBack, toggleTheme, them
             <div style={{fontSize:48,marginBottom:16}}>{activeArea?.icon}</div>
             <h3 style={{color:"var(--text)",fontSize:18,fontWeight:700,margin:"0 0 8px"}}>{activeArea?.label}</h3>
             <p style={{fontSize:14,lineHeight:1.6,maxWidth:420,margin:"0 auto"}}>
-              Em construção. Esta área do {activeArea?.module === "mise" ? "Operacional" : "Sistema"} será habilitada nos próximos passos da implantação.
+              Em construção. Esta área do {activeArea?.module === "mise" ? "AppMise" : "AppTip"} será habilitada nos próximos passos da implantação.
             </p>
           </div>
         )}
@@ -18517,7 +18517,7 @@ function miseBuildModeloXLSX({ items = [], suppliers = [], stocks = [], categori
 
   // ── Aba 5: Instruções ──
   const instRows = [
-    ["Modelo de Importação de Produtos"],
+    ["AppTip — Modelo de Importação de Produtos"],
     [""],
     ["Como usar:"],
     ["1. Preencha a aba Fornecedores PRIMEIRO (nome obrigatório). Os fornecedores precisam existir antes dos produtos referenciá-los."],
@@ -21325,7 +21325,7 @@ function buildShellSections({ pessoa, restaurantId, isOwner, employees, restaura
     });
   }
 
-  // Nota: seções "Master" (Restaurantes, Financeiro, Admins, Caixa)
+  // Nota: seções "Super (AppTip)" (Restaurantes, Financeiro, Admins, Caixa)
   // ficam no OwnerPortal (nível meta), não aqui dentro do restaurante.
   // Owner usa o botão "← Painel" no header do shell pra voltar ao OwnerPortal.
 
@@ -21727,7 +21727,7 @@ function AppShell({ pessoa, data, activeRestaurantId, setActiveRestaurantId, use
       {/* HEADER */}
       <header style={{background:"var(--header-bg)",borderBottom:"1px solid var(--border)",padding:isMobile?"8px 10px":"10px 16px",display:"flex",alignItems:"center",gap:isMobile?6:12,flexWrap:"nowrap",overflowX:"auto"}}>
         <button onClick={()=>setSidebarOpen(o=>!o)} title={sidebarOpen?"Fechar menu":"Abrir menu"} style={{background:sidebarOpen?"var(--bg2)":"none",border:"none",cursor:"pointer",fontSize:20,color:"var(--text2)",padding:"4px 10px",borderRadius:8,flexShrink:0}}>☰</button>
-        {!isMobile && <div style={{fontSize:14,fontWeight:800,color:"var(--text)",flexShrink:0}}>Sistema</div>}
+        {!isMobile && <div style={{fontSize:14,fontWeight:800,color:"var(--text)",flexShrink:0}}>AppTip</div>}
         {accessibleRestaurants.length > 0 && (
           <>
             <button
@@ -21760,7 +21760,7 @@ function AppShell({ pessoa, data, activeRestaurantId, setActiveRestaurantId, use
           </div>
         )}
         {isOwner && onReturnToOwnerHome && (
-          <button onClick={onReturnToOwnerHome} title="Voltar ao Painel"
+          <button onClick={onReturnToOwnerHome} title="Voltar ao Painel do AppTip"
             style={{background:"#a855f722",border:"1px solid #a855f744",borderRadius:8,padding:isMobile?"4px 8px":"5px 10px",cursor:"pointer",fontSize:isMobile?10:11,color:"#a855f7",fontWeight:700,fontFamily:"'DM Sans',sans-serif",flexShrink:0}}>
             ← Painel
           </button>
@@ -21940,7 +21940,7 @@ function InicioModule({ currentUser, restaurant, isOwner, isDP, isLider, mobileO
     || perms?.tips || perms?.schedule || perms?.config
     || perms?.employees || perms?.roles || perms?.vt
     || perms?.comunicados || perms?.faq;
-  const papel = isOwner ? "Master" : isDP ? "Departamento Pessoal" : isLider ? "Líder de Área" : hasAnyAdmin ? "Gestor" : "Equipe";
+  const papel = isOwner ? "Gestor AppTip" : isDP ? "Departamento Pessoal" : isLider ? "Líder de Área" : hasAnyAdmin ? "Gestor" : "Equipe";
 
   return (
     <div style={{maxWidth:760,margin:"0 auto",padding:mobileOnly?"8px 4px":"16px 8px"}}>
@@ -22826,7 +22826,7 @@ function FreelasModule({ restaurantId, pessoas, freelaShifts, freelaPagamentos, 
       doc.setPage(i);
       doc.setFontSize(8); doc.setTextColor(120);
       doc.text(`Página ${i} de ${totalPages}`, pageW - 14, doc.internal.pageSize.getHeight() - 8, { align: "right" });
-      doc.text(`Gerado em · ${new Date().toLocaleString("pt-BR")}`, 14, doc.internal.pageSize.getHeight() - 8);
+      doc.text(`Gerado por AppTip · ${new Date().toLocaleString("pt-BR")}`, 14, doc.internal.pageSize.getHeight() - 8);
     }
     doc.save(`Freelas_${lote.numero.replace(/[^a-zA-Z0-9]/g, "_")}.pdf`);
     // marca timestamp do PDF gerado
@@ -24301,7 +24301,7 @@ function FreelaHistoricoTab({ restaurantId, restPessoas, shifts, lotes, fmtHoras
 }
 
 function PessoasAdmin({ restaurantId, pessoas, roles, owners, employees, managers, restCode, onUpdate, mobileOnly, realIsOwner, onStartImpersonate }) {
-  // Filtra owners do sistema — eles têm acesso implícito, não constam como pessoa do restaurante
+  // Filtra owners do AppTip — eles têm acesso implícito, não constam como pessoa do restaurante
   const ownerCpfSet = new Set((owners || []).map(o => (o.cpf || "").replace(/\D/g, "")).filter(Boolean));
   const restPessoas = (pessoas || []).filter(p => {
     if (!(p.restaurantIds || []).includes(restaurantId)) return false;
@@ -24327,7 +24327,7 @@ function PessoasAdmin({ restaurantId, pessoas, roles, owners, employees, manager
   });
   const [vincularOpen, setVincularOpen] = useState(false);
   const [vincularFilter, setVincularFilter] = useState("");
-  // Bulk add via IA — só pra Master (realIsOwner)
+  // Bulk add via IA — só pra Gestor AppTip (realIsOwner)
   const [bulkAiOpen, setBulkAiOpen] = useState(false);
   const [bulkAiText, setBulkAiText] = useState("");
   const [bulkAiLoading, setBulkAiLoading] = useState(false);
@@ -24857,7 +24857,7 @@ Regras:
           )}
           {realIsOwner && candidatasVincular.length > 0 && (
             <button onClick={()=>setVincularOpen(true)} style={{...S.btnSecondary,fontSize:12,padding:"6px 12px",color:"var(--ac)",borderColor:"var(--ac)44"}}
-              title="Visível só pra Master — vincula pessoa que já existe em outro restaurante">
+              title="Visível só pra Gestor AppTip — vincula pessoa que já existe em outro restaurante">
               🔗 Vincular existente <span style={{opacity:0.6,fontWeight:400}}>({candidatasVincular.length})</span>
             </button>
           )}
@@ -25120,7 +25120,7 @@ Regras:
         </div>
       )}
 
-      {/* MODAL: adicionar pessoas em lote via IA (somente Master) */}
+      {/* MODAL: adicionar pessoas em lote via IA (somente Gestor AppTip) */}
       {bulkAiOpen && (
         <div onClick={bulkAiClose} style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.5)",zIndex:9500,display:"flex",alignItems:"center",justifyContent:"center",padding:20}}>
           <div onClick={e=>e.stopPropagation()} style={{background:"var(--card-bg)",borderRadius:14,maxWidth:740,width:"100%",maxHeight:"90vh",display:"flex",flexDirection:"column",boxShadow:"0 10px 40px rgba(0,0,0,0.3)"}}>
@@ -25321,7 +25321,7 @@ Regras:
               </div>
               <div style={{padding:"12px 20px",borderBottom:"1px solid var(--border)"}}>
                 <p style={{color:"var(--text3)",fontSize:12,margin:"0 0 10px",lineHeight:1.5}}>
-                  Pessoas que já existem em outros restaurantes . Vincular adiciona acesso a este restaurante sem criar cadastro novo — mantém o mesmo CPF, PIN e ID.
+                  Pessoas que já existem em outros restaurantes (do AppTip). Vincular adiciona acesso a este restaurante sem criar cadastro novo — mantém o mesmo CPF, PIN e ID.
                 </p>
                 <input value={vincularFilter} onChange={e=>setVincularFilter(e.target.value)} placeholder="🔍 Buscar por nome ou CPF..." style={{...S.input}} autoFocus />
               </div>
@@ -25506,7 +25506,7 @@ function PermissoesMatrix({ restaurantId, pessoas, employees, managers, owners, 
     : (ridProfilesRaw?.hiddenDefaults || []);
   const visibleDefaults = PERM_PROFILES.filter(p => !hiddenDefaultIds.includes(p.id));
   const hiddenDefaults = PERM_PROFILES.filter(p => hiddenDefaultIds.includes(p.id));
-  // Filtra owners do sistema — acesso implícito, não aparecem na matriz
+  // Filtra owners do AppTip — acesso implícito, não aparecem na matriz
   const ownerCpfSet = new Set((owners || []).map(o => (o.cpf || "").replace(/\D/g, "")).filter(Boolean));
   const restPessoas = (pessoas || []).filter(p => {
     if (!(p.restaurantIds || []).includes(restaurantId)) return false;
@@ -25847,9 +25847,9 @@ function PermissoesMatrix({ restaurantId, pessoas, employees, managers, owners, 
         <select value={accessFilter} onChange={e=>setAccessFilter(e.target.value)}
           style={{...S.input,maxWidth:200,fontSize:12,padding:"7px 10px",cursor:"pointer"}}>
           <option value="todos">📋 Todos</option>
-          <option value="apptip_admin">🛂 Com Master</option>
-          <option value="apptip_op">📅 Com Operacional</option>
-          <option value="mise">📦 Com Operacional</option>
+          <option value="apptip_admin">🛂 Com AppTip Admin</option>
+          <option value="apptip_op">📅 Com AppTip Operacional</option>
+          <option value="mise">📦 Com AppMise</option>
           <option value="sem_perm">🚫 Sem permissões</option>
         </select>
         <select value={sortMode} onChange={e=>setSortMode(e.target.value)}
@@ -27322,7 +27322,7 @@ function generateAtaPDF({ version, restaurant, pessoas, roles, finalPct, employe
     doc.setFont("helvetica", "normal");
     doc.setFontSize(8);
     doc.setTextColor(...TEXT3);
-    doc.text(`Documento gerado pelo sistema em ${new Date().toLocaleString("pt-BR")} · ID da regra: ${version.id}`, pageW / 2, pageH - 12, { align: "center" });
+    doc.text(`Documento gerado pelo AppTip em ${new Date().toLocaleString("pt-BR")} · ID da regra: ${version.id}`, pageW / 2, pageH - 12, { align: "center" });
     doc.text(`Página ${i} de ${totalPages}`, pageW / 2, pageH - 8, { align: "center" });
   }
 
@@ -28047,7 +28047,7 @@ function OperationalChecklists({ employee, miseChecklistTemplates, miseChecklist
 }
 
 // ═══════════════════════════════════════════════════════════════
-// ──  MISE FICHAS TÉCNICAS — UTILITIES (portado do Operacional)      ──
+// ──  MISE FICHAS TÉCNICAS — UTILITIES (portado do AppMise)      ──
 // ═══════════════════════════════════════════════════════════════
 /* eslint-disable no-unused-vars */
 const FT_WEIGHT_G = ['g','gr','gram','grama','gramas'];
@@ -28474,7 +28474,7 @@ function MiseFichasTecnicasAdmin({ restaurantId, miseFtInsumos, miseFtEquipament
         const insumos = data.insumos || [];
         const equipamentosList = data.equipamentos_disponiveis || [];
         if (!dishes.length && !insumos.length && !equipamentosList.length) {
-          alert("Arquivo não tem dishes, insumos ou equipamentos. Verifique se é o data.json correto do Operacional.");
+          alert("Arquivo não tem dishes, insumos ou equipamentos. Verifique se é o data.json correto do AppMise.");
           return;
         }
         const existingDishes = miseFtDishes.filter(d => d.restaurantId === restaurantId).length;
@@ -28587,7 +28587,7 @@ function MiseFichasTecnicasAdmin({ restaurantId, miseFtInsumos, miseFtEquipament
           ))}
         </div>
         <label style={{...S.btnSecondary,fontSize:11,padding:"6px 12px",cursor:"pointer",display:"inline-flex",alignItems:"center",color:miseAc,borderColor:miseAc+"66"}}>
-          ⬆ Importar do Operacional (JSON)
+          ⬆ Importar do AppMise (JSON)
           <input type="file" accept=".json,application/json" onChange={handleImportJSON} style={{display:"none"}} />
         </label>
       </div>
@@ -28947,7 +28947,7 @@ function MiseFtDishesAdmin({ restaurantId, miseFtInsumos, miseFtEquipamentos, mi
             <>
               <div style={{fontSize:40,marginBottom:12}}>📋</div>
               <div style={{color:"var(--text)",fontWeight:600,fontSize:16,marginBottom:6}}>Nenhuma ficha cadastrada neste restaurante</div>
-              <div>Clique em "+ Nova ficha" para começar ou use "Importar do Operacional (JSON)" no topo.</div>
+              <div>Clique em "+ Nova ficha" para começar ou use "Importar do AppMise (JSON)" no topo.</div>
               {(() => {
                 const totalDishes = (miseFtDishes || []).length;
                 const otherRests = (miseFtDishes || []).reduce((s, d) => { s[d.restaurantId] = (s[d.restaurantId] || 0) + 1; return s; }, {});
@@ -30399,7 +30399,7 @@ function TemperaturasExportModal({ sensors, readings, alerts, restaurantId, onCl
       const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
 
       // Paleta
-      const ACCENT_RGB = [124, 158, 94]; // #7c9e5e (Operacional verde)
+      const ACCENT_RGB = [124, 158, 94]; // #7c9e5e (AppMise verde)
       const TEXT_RGB = [28, 23, 16];
       const TEXT2_RGB = [74, 63, 48];
       const TEXT3_RGB = [154, 141, 122];
@@ -30440,7 +30440,7 @@ function TemperaturasExportModal({ sensors, readings, alerts, restaurantId, onCl
         doc.setFont("helvetica", "normal");
         doc.setFontSize(8);
         doc.setTextColor(...TEXT3_RGB);
-        const footerText = `Relatório gerado em ${new Date().toLocaleString("pt-BR")} · Página ${pageNum}${totalPages?` de ${totalPages}`:""}`;
+        const footerText = `AppTip · Relatório gerado em ${new Date().toLocaleString("pt-BR")} · Página ${pageNum}${totalPages?` de ${totalPages}`:""}`;
         doc.text(footerText, pageW / 2, pageH - 8, { align: "center" });
       }
 
@@ -30501,7 +30501,7 @@ function TemperaturasExportModal({ sensors, readings, alerts, restaurantId, onCl
       doc.setFontSize(9);
       doc.setTextColor(...TEXT3_RGB);
       doc.text(
-        "Leituras capturadas pelo sistema a partir dos sensores Tuya/SmartLife. Cada célula de temperatura representa a média das leituras daquela hora. Faixas de referência configuradas por sensor são destacadas em cada seção.",
+        "Leituras capturadas pelo AppTip a partir dos sensores Tuya/SmartLife. Cada célula de temperatura representa a média das leituras daquela hora. Faixas de referência configuradas por sensor são destacadas em cada seção.",
         pageW / 2,
         150,
         { align: "center", maxWidth: pageW - 60 }
@@ -30981,7 +30981,7 @@ function MiseTemperaturasAdmin({ restaurantId, tuyaLink, tempSensors, tempReadin
           <div style={{fontSize:32,marginBottom:8}}>🔗</div>
           <h4 style={{color:"var(--text)",margin:"0 0 6px",fontSize:15,fontWeight:700}}>Conectar conta SmartLife</h4>
           <p style={{color:"var(--text2)",fontSize:12,lineHeight:1.5,marginBottom:14}}>
-            Vincule a conta SmartLife deste restaurante pra começar a monitorar os sensores Tuya. Você só precisa fazer isso uma vez — novos sensores pareados no SmartLife aparecem automaticamente no sistema.
+            Vincule a conta SmartLife deste restaurante pra começar a monitorar os sensores Tuya. Você só precisa fazer isso uma vez — novos sensores pareados no SmartLife aparecem automaticamente no AppTip.
           </p>
           {!showLinkWizard ? (
             <button onClick={()=>setShowLinkWizard(true)}
@@ -31126,7 +31126,7 @@ function MiseTemperaturasAdmin({ restaurantId, tuyaLink, tempSensors, tempReadin
       )}
 
       <div style={{fontSize:11,lineHeight:1.5,marginTop:14,padding:"10px 14px",background:"#ecfccb",borderRadius:8,border:"1px solid #84cc1644",color:"#3f6212"}}>
-        🟢 <b>Integração ativa:</b> leituras vêm do Tuya Cloud (atualização a cada 5 min quando o sistema está aberto). Para monitoramento 24/7 (alertas de madrugada), vamos precisar de uma camada adicional de backend — conversamos depois.
+        🟢 <b>Integração ativa:</b> leituras vêm do Tuya Cloud (atualização a cada 5 min quando o AppTip está aberto). Para monitoramento 24/7 (alertas de madrugada), vamos precisar de uma camada adicional de backend — conversamos depois.
       </div>
     </div>
   );
@@ -31316,7 +31316,7 @@ function AlertEmailConfig({ restaurantId, currentEmail, onUpdate, ac, mobileOnly
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           to: currentEmail,
-          subject: "🔔 Teste de alerta — Sistema",
+          subject: "🔔 Teste de alerta — AppTip",
           html: buildAlertEmailHtml({
             restaurantName: "Teste",
             sensorName: "Sensor de teste",
@@ -31428,7 +31428,7 @@ function buildAlertEmailHtml({ restaurantName, sensorName, location, currentTemp
 
   return `<!DOCTYPE html>
 <html lang="pt-BR">
-<head><meta charset="utf-8"/><title>Alerta</title></head>
+<head><meta charset="utf-8"/><title>Alerta AppTip</title></head>
 <body style="margin:0;padding:0;background:#faf8f4;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;color:#1c1710;">
   <div style="max-width:560px;margin:24px auto;background:#fff;border-radius:12px;overflow:hidden;border:1px solid #e8e2d8;">
     <div style="background:${bannerColor};color:#fff;padding:16px 22px;">
@@ -31457,12 +31457,12 @@ function buildAlertEmailHtml({ restaurantName, sensorName, location, currentTemp
 
       ${!isTest ? `
       <div style="margin-top:18px;text-align:center;">
-        <a href="https://apptip.app" style="display:inline-block;background:#7c9e5e;color:#fff;text-decoration:none;padding:10px 22px;border-radius:8px;font-weight:700;font-size:14px;">Abrir Sistema pra reconhecer</a>
+        <a href="https://apptip.app" style="display:inline-block;background:#7c9e5e;color:#fff;text-decoration:none;padding:10px 22px;border-radius:8px;font-weight:700;font-size:14px;">Abrir AppTip pra reconhecer</a>
       </div>
       ` : ""}
     </div>
     <div style="padding:14px 22px;background:#f2efe8;font-size:11px;color:#9a8d7a;text-align:center;border-top:1px solid #e8e2d8;">
-      Sistema — Monitoramento de temperaturas · integração Tuya/SmartLife
+      AppTip — Monitoramento de temperaturas · integração Tuya/SmartLife
     </div>
   </div>
 </body>
@@ -32502,7 +32502,7 @@ function UnifiedLogin({ owners, managers, employees, restaurants, pessoas, onLog
     }
 
     if (!isEmpId) {
-      // 1) Master — acesso direto, sem tela de escolha
+      // 1) Admin AppTip — acesso direto, sem tela de escolha
       const superUser = owners.find(s => s.cpf?.replace(/\D/g,"") === cleanCpf && String(s.pin) === cleanPin);
       if (superUser) { setErr(""); setAttempts(0); onLoginOwner(superUser); return; }
 
@@ -32642,7 +32642,7 @@ function UnifiedLogin({ owners, managers, employees, restaurants, pessoas, onLog
               <div>
                 <div style={{color:"var(--text)",fontWeight:700,fontSize:16}}>{opt.label}</div>
                 <div style={{color:"var(--text3)",fontSize:13,marginTop:2}}>
-                  {opt.label==="Master"&&"Gerenciar restaurantes e equipes"}
+                  {opt.label==="Gestor AppTip"&&"Gerenciar restaurantes e equipes"}
                   {opt.label==="Gestor Adm."&&"Gerenciar gorjetas, escala e equipe"}
                   {opt.label==="Empregado"&&"Ver meu extrato, escala e comunicados"}
                 </div>
@@ -32768,7 +32768,7 @@ function UnifiedLogin({ owners, managers, employees, restaurants, pessoas, onLog
         <div style={{textAlign:"center",marginTop:16,paddingTop:16,borderTop:"1px solid var(--border)"}}>
           <button onClick={onGoHome}
             style={{background:"none",border:"none",color:"var(--text3)",cursor:"pointer",fontFamily:"'DM Sans',sans-serif",fontSize:13,padding:0}}>
-            Ainda não usa o sistema? <span style={{color:"var(--ac-text)",fontWeight:700}}>Conheça como funciona →</span>
+            Ainda não usa o AppTip? <span style={{color:"var(--ac-text)",fontWeight:700}}>Conheça como funciona →</span>
           </button>
         </div>
       </div>
@@ -32806,7 +32806,7 @@ function FirstSetup({ onDone }) {
         <div style={{textAlign:"center",marginBottom:24}}>
           <div style={{fontSize:40,marginBottom:8}}>🍽️</div>
           <h2 style={{color:"var(--text)",margin:"0 0 6px",fontSize:22,fontWeight:800}}>App<span style={{color:ac}}>Tip</span></h2>
-          <p style={{color:"var(--text3)",fontSize:13}}>{step==="invite"?"Digite a senha de convite para continuar":"Cadastro do primeiro Master"}</p>
+          <p style={{color:"var(--text3)",fontSize:13}}>{step==="invite"?"Digite a senha de convite para continuar":"Cadastro do primeiro Admin AppTip"}</p>
         </div>
 
         {step === "invite" ? (
@@ -32845,7 +32845,7 @@ function Home({ onLogin }) {
     if (!formData.nome.trim()) return;
     setFormSending(true);
     const msg = encodeURIComponent(
-      `Olá! Tenho interesse no sistema.\n\nNome: ${formData.nome}\nRestaurante: ${formData.restaurante || "—"}\nNº empregados: ${formData.empregados || "—"}${formData.mensagem ? `\n\nMensagem: ${formData.mensagem}` : ""}`
+      `Olá! Tenho interesse no AppTip.\n\nNome: ${formData.nome}\nRestaurante: ${formData.restaurante || "—"}\nNº empregados: ${formData.empregados || "—"}${formData.mensagem ? `\n\nMensagem: ${formData.mensagem}` : ""}`
     );
     window.open(`https://wa.me/5511985499821?text=${msg}`, "_blank");
     setTimeout(() => { setFormSent(true); setFormSending(false); }, 800);
@@ -32903,7 +32903,7 @@ function Home({ onLogin }) {
             Gorjetas distribuídas<br/><span style={{color:ac}}>com transparência total</span>
           </h1>
           <p style={{color:"#8c7a5e",fontSize:"clamp(15px,2vw,18px)",lineHeight:1.7,marginBottom:40,maxWidth:520,margin:"0 auto 40px"}}>
-            Esta plataforma automatiza o cálculo e distribuição de gorjetas, controla escala, horários e comunicados com IA — tudo pelo celular, sem app para instalar.
+            O AppTip automatiza o cálculo e distribuição de gorjetas, controla escala, horários e comunicados com IA — tudo pelo celular, sem app para instalar.
           </p>
           <div style={{display:"flex",gap:12,justifyContent:"center",flexWrap:"wrap"}}>
             <a href="#contato" style={{padding:"15px 32px",borderRadius:12,background:ac,color:"#fff",fontWeight:700,fontSize:16,textDecoration:"none",display:"inline-block",boxShadow:"0 4px 20px #d4a01744"}}>
@@ -33088,7 +33088,7 @@ function Home({ onLogin }) {
             <div style={{textAlign:"center",padding:"48px",background:"#fff",borderRadius:16,border:"1px solid #ede8df"}}>
               <div style={{fontSize:48,marginBottom:16}}>✅</div>
               <h3 style={{fontSize:20,fontWeight:700,margin:"0 0 8px",color:"#1c1208"}}>Mensagem enviada!</h3>
-              <p style={{color:"#8c7a5e"}}>Entraremos em contato em breve. Obrigado pelo interesse no sistema!</p>
+              <p style={{color:"#8c7a5e"}}>Entraremos em contato em breve. Obrigado pelo interesse no AppTip!</p>
             </div>
           ) : (
             <div style={{background:"#fff",borderRadius:16,padding:"36px",border:"1px solid #ede8df",boxShadow:"0 4px 24px rgba(0,0,0,0.06)"}}>
@@ -33135,7 +33135,7 @@ function Home({ onLogin }) {
           <a href="mailto:contato@apptip.app" style={{color:"#8c7a5e",fontSize:13,textDecoration:"none"}}>contato@apptip.app</a>
           <button onClick={()=>window.__showPrivacy?.()} style={{background:"none",border:"none",color:"#8c7a5e",cursor:"pointer",fontFamily:"'DM Sans',sans-serif",fontSize:13}}>Política de Privacidade</button>
         </div>
-        <p style={{color:"#4a3a2a",fontSize:12}}>© {new Date().getFullYear()} Sistema. Todos os direitos reservados.</p>
+        <p style={{color:"#4a3a2a",fontSize:12}}>© {new Date().getFullYear()} AppTip. Todos os direitos reservados.</p>
       </footer>
     </div>
   );
@@ -33229,7 +33229,7 @@ function FaturaPage({ faturaId, restaurants, onUpdate, loaded }) {
         <div style={{background:"#fff",borderRadius:16,border:"1px solid #ede8df",boxShadow:"0 4px 24px rgba(0,0,0,0.06)",overflow:"hidden",marginBottom:20}}>
           {/* Cabeçalho da fatura */}
           <div style={{background:"#1c1208",padding:"24px",textAlign:"center"}}>
-            <div style={{color:"#8c7a5e",fontSize:12,fontWeight:600,textTransform:"uppercase",letterSpacing:1,marginBottom:8}}>Fatura</div>
+            <div style={{color:"#8c7a5e",fontSize:12,fontWeight:600,textTransform:"uppercase",letterSpacing:1,marginBottom:8}}>Fatura AppTip</div>
             <div style={{color:"#fff",fontSize:22,fontWeight:800,marginBottom:4}}>{restFound.name}</div>
             <div style={{color:"#d4c4a0",fontSize:14}}>{cobFound.periodoLabel}</div>
           </div>
@@ -33316,7 +33316,7 @@ function GuiaGestor() {
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-<title>Guia do Gestor</title>
+<title>AppTip — Guia do Gestor</title>
 <style>
 @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;700;800&family=DM+Mono:wght@400;500&display=swap');
 :root{--ac:#d4a017;--ac-l:#fef9ee;--ac-b:#f0d080;--text:#1c1208;--t2:#4a3b1f;--t3:#8c7a5e;--bg:#faf8f4;--card:#fff;--border:#ede8df;--green:#16a34a;--gbg:#f0fdf4;--red:#dc2626;--rbg:#fef2f2;--blue:#2563eb;--bbg:#eff6ff;--sw:260px}
@@ -33387,7 +33387,7 @@ hr{border:none;border-top:1px solid var(--border);margin:24px 0}
 <nav class="sidebar">
   <div class="logo"><span style="font-size:20px">🍽️</span><span class="nm">App<span>Tip</span></span><span class="badge">Gestor</span></div>
   <div class="sg">Visão Geral</div>
-  <a href="#intro"><span class="ic">📖</span> O que é o sistema?</a>
+  <a href="#intro"><span class="ic">📖</span> O que é o AppTip?</a>
   <a href="#acesso"><span class="ic">🔐</span> Acesso e Login</a>
   <a href="#restaurante"><span class="ic">🏢</span> Selecionar Restaurante</a>
   <a href="#dashboard"><span class="ic">📊</span> Dashboard</a>
@@ -33413,21 +33413,21 @@ hr{border:none;border-top:1px solid var(--border);margin:24px 0}
 </nav>
 <div class="main">
   <div class="topbar">
-    <div><h1>Guia do Gestor</h1><div class="sub">Manual completo de uso do sistema para gestores de restaurante</div></div>
+    <div><h1>Guia do Gestor</h1><div class="sub">Manual completo de uso do AppTip para gestores de restaurante</div></div>
     <span class="ver">v${APP_VERSION} · 2026</span>
   </div>
   <div class="content">
 
     <div class="hero">
-      <h2>Bem-vindo 🍽️</h2>
-      <p>A plataforma centraliza a gestão de gorjetas. Como gestor, você lança gorjetas, gerencia equipe, escala, horários com IA, comunicados, FAQ com IA e configura as regras do restaurante — inclusive pelo celular.</p>
+      <h2>Bem-vindo ao AppTip 🍽️</h2>
+      <p>O AppTip centraliza a gestão de gorjetas. Como gestor, você lança gorjetas, gerencia equipe, escala, horários com IA, comunicados, FAQ com IA e configura as regras do restaurante — inclusive pelo celular.</p>
       <div class="chips">
         <span class="chip">💸 Gorjetas automáticas</span><span class="chip">📅 Escala</span><span class="chip">👥 Equipe</span><span class="chip">🕐 Horários com IA</span><span class="chip">❓ FAQ com IA</span><span class="chip">📢 Comunicados com IA</span><span class="chip">📱 Mobile gestor</span><span class="chip">⚙️ Configurações</span>
       </div>
     </div>
 
     <div class="sec" id="intro">
-      <div class="sh"><div class="iw">📖</div><div><h2>O que é o sistema?</h2><p>Visão geral do sistema</p></div></div>
+      <div class="sh"><div class="iw">📖</div><div><h2>O que é o AppTip?</h2><p>Visão geral do sistema</p></div></div>
       <div class="card"><h3>🎯 Para que serve?</h3><p>O gestor lança o valor total de gorjeta do dia. O sistema distribui automaticamente entre os empregados conforme os pontos de cada cargo e os dias na escala. A dedução fiscal é calculada e mostrada automaticamente para cada empregado.</p></div>
       <div class="card"><h3>📱 Como acessar?</h3><p>Pelo navegador em <code>apptip.app</code>. O botão <strong>❓ Ajuda</strong> no header abre este guia a qualquer momento. Adicione à tela inicial do celular para acesso rápido como app nativo.</p></div>
     </div>
@@ -33441,7 +33441,7 @@ hr{border:none;border-top:1px solid var(--border);margin:24px 0}
           <div class="step"><div class="sn">3</div><div class="sc"><strong>Selecione "Gestor"</strong><p>Se tiver mais de um perfil cadastrado, escolha o correto.</p></div></div>
         </div>
       </div>
-      <div class="ib warn"><span class="ico">⚠️</span><span>Nunca compartilhe seu PIN. Em caso de comprometimento, solicite troca ao master.</span></div>
+      <div class="ib warn"><span class="ico">⚠️</span><span>Nunca compartilhe seu PIN. Em caso de comprometimento, solicite troca ao administrador AppTip.</span></div>
     </div>
 
     <div class="sec" id="restaurante">
@@ -33571,7 +33571,7 @@ hr{border:none;border-top:1px solid var(--border);margin:24px 0}
           <tr><td>Profissional</td><td>50 empregados</td></tr>
           <tr><td>Enterprise</td><td>51–100 empregados</td></tr>
         </table>
-        <div class="ib warn"><span class="ico">⚠️</span><span>Ao atingir o limite, um botão "Solicitar upgrade" aparece para contato com o master.</span></div>
+        <div class="ib warn"><span class="ico">⚠️</span><span>Ao atingir o limite, um botão "Solicitar upgrade" aparece para contato com o administrador AppTip.</span></div>
       </div>
     </div>
 
@@ -33640,7 +33640,7 @@ hr{border:none;border-top:1px solid var(--border);margin:24px 0}
       <div class="card"><h3>Duas seções no FAQ do empregado</h3>
         <p>O FAQ que o empregado vê está dividido em duas seções distintas:</p>
         <ul>
-          <li><strong>📐 Regras do sistema</strong> — 7 perguntas geradas <em>automaticamente</em> pelo sistema com base nas regras reais do restaurante. Sempre atualizadas.</li>
+          <li><strong>📐 Regras do sistema</strong> — 7 perguntas geradas <em>automaticamente</em> pelo AppTip com base nas regras reais do restaurante. Sempre atualizadas.</li>
           <li><strong>🏢 Sobre o restaurante</strong> — perguntas cadastradas por você, específicas do restaurante.</li>
         </ul>
       </div>
@@ -33673,7 +33673,7 @@ hr{border:none;border-top:1px solid var(--border);margin:24px 0}
     <div class="sec" id="dp">
       <div class="sh"><div class="iw">💬</div><div><h2>Fale com DP</h2><p>Canal com o departamento pessoal</p></div></div>
       <div class="card"><h3>Como funciona?</h3><p>Canal direto entre empregados e o gestor de DP — férias, atestados, dúvidas trabalhistas e documentos. Empregados podem enviar anonimamente.</p>
-        <div class="ib blue"><span class="ico">ℹ️</span><span>Somente gestores marcados como "Gestor do DP" pelo master recebem essas mensagens.</span></div>
+        <div class="ib blue"><span class="ico">ℹ️</span><span>Somente gestores marcados como "Gestor do DP" pelo administrador AppTip recebem essas mensagens.</span></div>
       </div>
       <div class="card"><h3>Gerenciar mensagens</h3><p>As mensagens aparecem na aba "Fale com DP". Selecione mensagens e mova para a lixeira. Na lixeira é possível restaurar ou (admin) apagar permanentemente.</p></div>
     </div>
@@ -33689,7 +33689,7 @@ hr{border:none;border-top:1px solid var(--border);margin:24px 0}
       <div class="card"><h3>Sistema de dois níveis</h3>
         <table>
           <tr><th>Nível</th><th>Quem controla</th><th>O que faz</th></tr>
-          <tr><td>1. Autorização</td><td>Master</td><td>Define quais abas o restaurante pode usar</td></tr>
+          <tr><td>1. Autorização</td><td>Administrador AppTip</td><td>Define quais abas o restaurante pode usar</td></tr>
           <tr><td>2. Visibilidade</td><td>Gestor (você)</td><td>Decide quais abas ativas aparecem para você e os empregados</td></tr>
         </table>
         <div class="ib tip"><span class="ico">💡</span><span>Você só pode ativar abas que o administrador autorizou. Abas bloqueadas aparecem acinzentadas com "(não autorizado pelo admin)".</span></div>
@@ -33759,7 +33759,7 @@ hr{border:none;border-top:1px solid var(--border);margin:24px 0}
 
     <div class="sec" id="privacidade-admin">
       <div class="sh"><div class="iw">🛡️</div><div><h2>Privacidade de Dados <span class="new">NOVO</span></h2><p>Controle o que a equipe de administradores pode ver</p></div></div>
-      <div class="card"><h3>O que é o Modo Privacidade?</h3><p>Quando ativado, o modo privacidade oculta dados sensíveis do seu restaurante para a equipe de Masters. Os admins continuam tendo acesso à gestão do sistema, mas não visualizam informações confidenciais da sua operação.</p></div>
+      <div class="card"><h3>O que é o Modo Privacidade?</h3><p>Quando ativado, o modo privacidade oculta dados sensíveis do seu restaurante para a equipe de administradores do AppTip. Os admins continuam tendo acesso à gestão do sistema, mas não visualizam informações confidenciais da sua operação.</p></div>
       <div class="card"><h3>O que fica oculto para o admin</h3>
         <table>
           <tr><th>Dado</th><th>Visão do admin</th></tr>
@@ -33801,10 +33801,10 @@ hr{border:none;border-top:1px solid var(--border);margin:24px 0}
 
     <div class="sec" id="bloqueio">
       <div class="sh"><div class="iw">🔒</div><div><h2>Acesso Suspenso</h2><p>O que fazer quando o acesso está bloqueado</p></div></div>
-      <div class="card"><h3>Por que ocorre?</h3><p>O acesso é suspenso por pendência financeira. Você faz login normalmente, mas ao entrar no restaurante vê a tela de bloqueio. Na seleção de restaurantes, o card aparece com <span class="tag rd">🔒 Suspenso</span>.</p></div>
+      <div class="card"><h3>Por que ocorre?</h3><p>O acesso é suspenso por pendência financeira com o AppTip. Você faz login normalmente, mas ao entrar no restaurante vê a tela de bloqueio. Na seleção de restaurantes, o card aparece com <span class="tag rd">🔒 Suspenso</span>.</p></div>
       <div class="card"><h3>O que fazer</h3>
         <div class="steps">
-          <div class="step"><div class="sn">1</div><div class="sc"><strong>Entre em contato com o Master</strong><p>O número aparece na tela de bloqueio: <strong>(11) 98549-9821</strong></p></div></div>
+          <div class="step"><div class="sn">1</div><div class="sc"><strong>Entre em contato com o Admin AppTip</strong><p>O número aparece na tela de bloqueio: <strong>(11) 98549-9821</strong></p></div></div>
           <div class="step"><div class="sn">2</div><div class="sc"><strong>Regularize a pendência</strong><p>Após confirmação do pagamento, o acesso é liberado automaticamente.</p></div></div>
         </div>
         <div class="ib warn"><span class="ico">⚠️</span><span>Durante a suspensão, os empregados também perdem acesso. Regularize o quanto antes para não impactar a operação.</span></div>
@@ -33814,7 +33814,7 @@ hr{border:none;border-top:1px solid var(--border);margin:24px 0}
     <hr>
     <div style="text-align:center;padding:20px 0 40px;color:var(--t3);font-size:13px">
       <div style="font-size:28px;margin-bottom:8px">🍽️</div>
-      <div>Guia do Gestor · v${APP_VERSION} · Abril 2026</div>
+      <div>AppTip · Guia do Gestor · v${APP_VERSION} · Abril 2026</div>
       <div style="margin-top:4px">Dúvidas? <a href="/cdn-cgi/l/email-protection#9bf8f4f5effaeff4dbfaebebeff2ebb5faebeb" style="color:var(--ac)"><span class="__cf_email__" data-cfemail="3a5955544e5b4e557a5b4a4a4e534a145b4a4a">[email&#160;protected]</span></a> · Clientes: <strong style="color:var(--t2)">(11) 98549-9821</strong></div>
     </div>
 
@@ -33834,7 +33834,7 @@ links.forEach(l=>{l.addEventListener('click',e=>{e.preventDefault();const id=l.g
     <iframe
       srcDoc={html}
       style={{width:"100%", height:"100vh", border:"none"}}
-      title="Guia do Master"
+      title="Guia do Gestor AppTip"
     />
   );
 }
@@ -34041,7 +34041,7 @@ export default function App() {
   const [meetingPendencias,   setMeetingPendencias]   = useState([]);
   const [inbox,               setInbox]               = useState([]);
   const [inboxFolders,        setInboxFolders]        = useState({});
-  // Operacional — Contagens
+  // AppMise — Contagens
   const [miseCategories,  setMiseCategories]  = useState([]);
   const [miseStocks,      setMiseStocks]      = useState([]);
   const [miseAssignments, setMiseAssignments] = useState([]);
@@ -34055,11 +34055,11 @@ export default function App() {
   const [miseChecklistRuns,      setMiseChecklistRuns]      = useState([]);
   const [pessoas,             setPessoas]              = useState([]);
   const [pessoasMigratedAt,   setPessoasMigratedAt]    = useState(null);
-  // Operacional — Fichas Técnicas
+  // AppMise — Fichas Técnicas
   const [miseFtInsumos,      setMiseFtInsumos]      = useState([]);
   const [miseFtEquipamentos, setMiseFtEquipamentos] = useState({});
   const [miseFtDishes,       setMiseFtDishes]       = useState([]);
-  // Operacional — Temperaturas (piloto: dados mockados até integração Tuya)
+  // AppMise — Temperaturas (piloto: dados mockados até integração Tuya)
   const [tuyaLinks,          setTuyaLinks]          = useState({});
   const [tempSensors,        setTempSensors]        = useState([]);
   const [tempReadings,       setTempReadings]       = useState([]);
@@ -34465,7 +34465,7 @@ export default function App() {
 
   async function handleUpdate(field, value) {
     if (field === "_toast") { setToast(value); return; }
-    // Bloqueio de escrita offline — somente para master master
+    // Bloqueio de escrita offline — somente para gestor AppTip master
     if (!isOnline && currentUser?.isMaster === true && field !== "_toast") {
       setToast("⚠️ Você está offline — conecte à internet para salvar alterações");
       return;
@@ -34686,7 +34686,7 @@ export default function App() {
       {view === "shell" && !loaded && (
         <div style={{minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",flexDirection:"column",gap:12,fontFamily:"'DM Sans',sans-serif"}}>
           <div style={{fontSize:40}}>🍽️</div>
-          <div style={{fontSize:14,color:"var(--text2)"}}>Carregando…</div>
+          <div style={{fontSize:14,color:"var(--text2)"}}>Carregando AppTip…</div>
           <div style={{fontSize:11,color:"var(--text3)"}}>{loadProgress}</div>
         </div>
       )}
@@ -34812,7 +34812,7 @@ export default function App() {
       {view === "fatura" && <FaturaPage faturaId={faturaId} restaurants={restaurants} onUpdate={handleUpdate} loaded={loaded} />}
       {view === "guia-gestor" && <GuiaGestor />}
       {view === "home" && <Home onLogin={()=>setView("login")} />}
-      {/* Banner offline — somente master master */}
+      {/* Banner offline — somente gestor AppTip master */}
       {currentUser?.isMaster === true && !isOnline && (
         <div style={{position:"fixed",top:0,left:0,right:0,zIndex:9999,background:"#ef4444",color:"#fff",textAlign:"center",padding:"6px 16px",fontSize:13,fontFamily:"'DM Sans',sans-serif",fontWeight:600,letterSpacing:0.3}}>
           📡 Sem conexão — modo somente leitura
