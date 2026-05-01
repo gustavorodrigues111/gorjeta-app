@@ -1686,12 +1686,12 @@ function ComunicadosManagerTab({ restaurantId, communications, commAcks, employe
         <div style={{ ...S.card, marginBottom: 16 }}>
           <div style={{ color: "var(--text)", fontWeight: 700, fontSize: 16, marginBottom: 4 }}>{c.title}</div>
           <div style={{ color: "var(--text3)", fontSize: 12, marginBottom: 4 }}>Publicado em {new Date(c.createdAt).toLocaleString("pt-BR")} por {c.createdBy}</div>
-          <div style={{fontSize:11,color:"var(--text3)",marginBottom:12}}>→ {!c.target||c.target==="all"?"Todos":c.target.startsWith("emps:")?`${c.target.replace("emps:","").split(",").length} empregado(s)`:c.target.startsWith("areas:")?`Áreas: ${c.target.replace("areas:","").replace(/,/g,", ")}`:c.target.startsWith("emp:")?employees.find(e=>e.id===c.target.replace("emp:",""))?.name?.split(" ")[0]??"":`Área ${c.target.replace("area:","")}`}</div>
+          <div style={{fontSize:11,color:"var(--text3)",marginBottom:12}}>→ {!c.target||c.target==="all"?"Todos":c.target.startsWith("emps:")?`${c.target.replace("emps:","").split(",").length} empregado(s)`:c.target.startsWith("areas:")?`Áreas: ${c.target.replace("areas:","").replace(/,/g,", ")}`:c.target.startsWith("emp:")?shortName(employees.find(e=>e.id===c.target.replace("emp:",""))?.name)||"":`Área ${c.target.replace("area:","")}`}</div>
           <div style={{ color: "var(--text2)", fontSize: 13, lineHeight: 1.6, whiteSpace: "pre-wrap", marginBottom: 12 }}>{c.body}</div>
         </div>
         {(() => {
           const targetLabel = !c.target || c.target==="all" ? "Todos os empregados"
-            : c.target.startsWith("emps:") ? `Empregados: ${c.target.replace("emps:","").split(",").map(id=>employees.find(e=>e.id===id)?.name?.split(" ")[0]??"").join(", ")}`
+            : c.target.startsWith("emps:") ? `Empregados: ${c.target.replace("emps:","").split(",").map(id=>shortName(employees.find(e=>e.id===id)?.name)||"").filter(Boolean).join(", ")}`
             : c.target.startsWith("areas:") ? `Áreas: ${c.target.replace("areas:","").replace(/,/g,", ")}`
             : c.target.startsWith("emp:") ? `Empregado: ${employees.find(e=>e.id===c.target.replace("emp:",""))?.name??""}`
             : `Área: ${c.target.replace("area:","")}`;
@@ -1757,7 +1757,7 @@ function ComunicadosManagerTab({ restaurantId, communications, commAcks, employe
                 <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
                   {restEmps.sort((a,b)=>a.name.localeCompare(b.name)).map(e=>{
                     const on = selEmps.includes(e.id);
-                    return <button key={e.id} onClick={()=>toggleEmp(e.id)} style={{padding:"4px 12px",borderRadius:20,border:`1px solid ${on?"var(--green)":"var(--border)"}`,background:on?"#10b98122":"transparent",color:on?"var(--green)":"var(--text3)",cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:12,fontWeight:on?700:400}}>{e.name.split(" ")[0]}</button>;
+                    return <button key={e.id} onClick={()=>toggleEmp(e.id)} style={{padding:"4px 12px",borderRadius:20,border:`1px solid ${on?"var(--green)":"var(--border)"}`,background:on?"#10b98122":"transparent",color:on?"var(--green)":"var(--text3)",cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:12,fontWeight:on?700:400}}>{shortName(e.name)}</button>;
                   })}
                 </div>
               </div>
@@ -8428,7 +8428,7 @@ function MeetingPlannerSection({ restaurantId, employees, roles, areas, meetingP
   function handleAddIncidentToPauta(inc) {
     if (pautaPickIdeas.includes(inc.id)) return;
     setPautaPickIdeas(prev => [...prev, inc.id]);
-    const empNames = (inc.employeeIds ?? []).map(eid => { const e = employees.find(emp => emp.id === eid); return e?.name?.split(" ")[0] ?? ""; }).filter(Boolean).join(", ");
+    const empNames = (inc.employeeIds ?? []).map(eid => { const e = employees.find(emp => emp.id === eid); return shortName(e?.name); }).filter(Boolean).join(", ");
     setPautaItems(prev => [...prev, { id: `inc-${inc.id}`, text: `[Empregado${empNames ? `: ${empNames}` : ""}] ${inc.type ?? "Ocorrência"} — ${inc.description ?? ""}`, fromIncident: inc.id, fromIdea: null, fromOccurrence: null, status: "pendente", decision: "", reason: "" }]);
   }
 
@@ -8925,7 +8925,7 @@ function MeetingPlannerSection({ restaurantId, employees, roles, areas, meetingP
                     <label style={{...S.label,display:"flex",alignItems:"center",gap:4}}>👤 Puxar ocorrências de empregados</label>
                     <div style={{display:"flex",gap:4,flexWrap:"wrap",maxHeight:120,overflowY:"auto"}}>
                       {recentIncidents.map(inc => {
-                        const empNames = (inc.employeeIds ?? []).map(eid => { const e = employees.find(emp => emp.id === eid); return e?.name?.split(" ")[0] ?? ""; }).filter(Boolean).join(", ");
+                        const empNames = (inc.employeeIds ?? []).map(eid => { const e = employees.find(emp => emp.id === eid); return shortName(e?.name); }).filter(Boolean).join(", ");
                         return (
                           <button key={inc.id} onClick={()=>handleAddIncidentToPauta(inc)} style={{
                             padding:"5px 10px",borderRadius:8,border:"1px solid #8b5cf644",background:"#8b5cf608",color:"var(--text2)",
@@ -9044,7 +9044,7 @@ function MeetingPlannerSection({ restaurantId, employees, roles, areas, meetingP
                               const sIcon = status === "realizada" ? "✓" : status === "atrasada" ? "⏰" : "○";
                               return (
                                 <span key={eid} style={{fontSize:10,padding:"3px 8px",borderRadius:6,border:`1px solid ${sColor}33`,background:sColor+"08",color:sColor,fontWeight:status==="realizada"?700:400}}>
-                                  {sIcon} {emp?.name?.split(" ")[0] ?? eid}
+                                  {sIcon} {shortName(emp?.name) || eid}
                                 </span>
                               );
                             })}
@@ -9448,7 +9448,7 @@ function MeetingPlannerSection({ restaurantId, employees, roles, areas, meetingP
                 return (
                   <div key={p.id} style={{display:"flex",alignItems:"center",gap:8,marginBottom:6,padding:"8px 10px",borderRadius:8,background:"var(--card-bg)",border:"1px solid var(--border)"}}>
                     <span style={{fontSize:10}}>{p.type==="avaliação"?"📋":"💬"}</span>
-                    <span style={{flex:1,fontSize:11,color:"var(--text3)",textDecoration:"line-through"}}>{p.type} {emp0?`— ${emp0.name?.split(" ")[0]}`:""} {p.plannedDate?new Date(p.plannedDate+"T12:00:00").toLocaleDateString("pt-BR"):""}</span>
+                    <span style={{flex:1,fontSize:11,color:"var(--text3)",textDecoration:"line-through"}}>{p.type} {emp0?`— ${shortName(emp0.name)}`:""} {p.plannedDate?new Date(p.plannedDate+"T12:00:00").toLocaleDateString("pt-BR"):""}</span>
                     <span style={{fontSize:9,color:"var(--text3)"}}>{daysLeft}d</span>
                     <button onClick={()=>handleRestorePlan(p.id)} style={{padding:"2px 8px",borderRadius:4,border:"1px solid #3b82f633",background:"transparent",color:"#3b82f6",cursor:"pointer",fontSize:10}}>↩ Restaurar</button>
                     {isOwner && <button onClick={async ()=>{
@@ -9613,7 +9613,7 @@ function MeetingPlannerSection({ restaurantId, employees, roles, areas, meetingP
                         padding:"3px 8px",borderRadius:6,border:`1px solid ${active?"#8b5cf6":"var(--border)"}`,
                         background:active?"#8b5cf614":"transparent",color:active?"#8b5cf6":"var(--text3)",
                         cursor:"pointer",fontSize:10,fontFamily:"'DM Sans',sans-serif",fontWeight:active?600:400
-                      }}>{active?"✓ ":""}{emp.name?.split(" ")[0]}</button>
+                      }}>{active?"✓ ":""}{shortName(emp.name)}</button>
                     );
                   })}
                 </div>
@@ -9666,7 +9666,7 @@ function MeetingPlannerSection({ restaurantId, employees, roles, areas, meetingP
                     <div style={{color:"var(--text)",fontWeight:600,fontSize:13}}>{occ.title}</div>
                     {(occ.employeeIds ?? []).length > 0 && (
                       <div style={{display:"flex",gap:4,flexWrap:"wrap",marginTop:4}}>
-                        {occ.employeeIds.map(eid => { const emp = employees.find(e=>e.id===eid); return emp ? <span key={eid} style={{fontSize:9,padding:"2px 6px",borderRadius:4,background:"#8b5cf612",color:"#8b5cf6",border:"1px solid #8b5cf622"}}>👤 {emp.name?.split(" ")[0]}</span> : null; })}
+                        {occ.employeeIds.map(eid => { const emp = employees.find(e=>e.id===eid); return emp ? <span key={eid} style={{fontSize:9,padding:"2px 6px",borderRadius:4,background:"#8b5cf612",color:"#8b5cf6",border:"1px solid #8b5cf622"}}>👤 {shortName(emp.name)}</span> : null; })}
                       </div>
                     )}
                     {occ.description && <div style={{color:"var(--text3)",fontSize:11,marginTop:2}}>{occ.description}</div>}
@@ -9964,7 +9964,7 @@ function MeetingPlannerSection({ restaurantId, employees, roles, areas, meetingP
                       {[...new Set(meetings.map(m=>m.employeeId))].map(eid=>{
                         const emp=employees.find(e=>e.id===eid);
                         const count=meetings.filter(m=>m.employeeId===eid).length;
-                        return <span key={eid} style={{marginRight:10}}>{emp?.name?.split(" ")[0]??"?"} ({count})</span>;
+                        return <span key={eid} style={{marginRight:10}}>{shortName(emp?.name)||"?"} ({count})</span>;
                       })}
                     </div>
                   </div>
@@ -13125,10 +13125,10 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                       {ctx.date1 && <span style={{color:"var(--text2)"}}>{date1Label}</span>}
                       <span>›</span>
                       <span style={{color:step>=2?ac:"var(--text3)",fontWeight:step===2?700:500}}>2·Folga</span>
-                      {empBObj && <span style={{color:"var(--text2)"}}>{empBObj.name.split(" ")[0]}</span>}
+                      {empBObj && <span style={{color:"var(--text2)"}}>{shortName(empBObj.name)}</span>}
                       <span>›</span>
                       <span style={{color:step>=3?ac:"var(--text3)",fontWeight:step===3?700:500}}>3·Trab</span>
-                      {empAObj && <span style={{color:"var(--text2)"}}>{empAObj.name.split(" ")[0]}</span>}
+                      {empAObj && <span style={{color:"var(--text2)"}}>{shortName(empAObj.name)}</span>}
                       <span>›</span>
                       <span style={{color:step>=4?ac:"var(--text3)",fontWeight:step===4?700:500}}>4·Recíproca</span>
                       {ctx.date2 && <span style={{color:"var(--text2)"}}>{date2Label}</span>}
@@ -13227,7 +13227,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                         <p style={{color:"var(--text2)",fontSize:13,margin:"0 0 6px"}}>
                           Em qual domingo <strong>{empAObj?.name}</strong> folgaria — e <strong>{empBObj?.name}</strong> vai cobrir?
                         </p>
-                        <p style={{color:"var(--text3)",fontSize:11,margin:"0 0 12px"}}>Folgas de domingo do {empAObj?.name?.split(" ")[0]} (mês anterior, atual e próximo).</p>
+                        <p style={{color:"var(--text3)",fontSize:11,margin:"0 0 12px"}}>Folgas de domingo do {shortName(empAObj?.name)} (mês anterior, atual e próximo).</p>
                         {reciprocCandidates.length > 0 ? (
                           (() => {
                             // Agrupa por mês pra ficar mais claro
