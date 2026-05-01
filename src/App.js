@@ -3,7 +3,7 @@ import React, { useState, useEffect, useMemo, useRef, Component } from "react";
 import { db } from "./firebase";
 import { doc, getDoc, setDoc, onSnapshot } from "firebase/firestore";
 
-const APP_VERSION = "8.22.2";
+const APP_VERSION = "8.22.3";
 
 // v8.11.1: comparação de versão semver-like (8.11.1 > 8.10.7 > 8.9.4)
 function compareVersions(a, b) {
@@ -25007,15 +25007,52 @@ Regras:
       } : x);
       onUpdate("pessoas", next);
     } else {
-      if (!await appConfirm(`Apagar ${p.name} definitivamente? Esta pessoa não está em nenhum outro restaurante.`)) return;
+      if (!await appConfirm(`Apagar ${p.name} definitivamente? Esta pessoa não está em nenhum outro restaurante.\n\nIsso vai apagar também o registro em Equipe (se existir).`)) return;
       onUpdate("pessoas", (pessoas || []).filter(x => x.id !== id));
+      // Cascata: se tinha linkedEmployee, marca como inativo (não apaga histórico — gorjetas/escala dependem disso)
+      if (p.linkedEmployeeId) {
+        onUpdate("employees", (employees || []).map(e => e.id === p.linkedEmployeeId ? { ...e, inactive: true, inactiveFrom: today() } : e));
+      }
     }
+    setEditingId(null);
+  }
+
+  // v8.22.3: inativa/reativa pessoa neste restaurante (mantém histórico). Sincroniza com employee.
+  async function toggleInactivePessoa(id) {
+    const p = (pessoas || []).find(x => x.id === id);
+    if (!p) return;
+    const isCurrentlyInactive = p.inactive === true;
+    const verb = isCurrentlyInactive ? "Reativar" : "Inativar";
+    if (!await appConfirm(`${verb} ${p.name}?\n\n${isCurrentlyInactive
+      ? "Vai voltar a aparecer nas listas operacionais."
+      : "Vai sumir das listas operacionais (escala, contagens, atribuições) mas o histórico fica preservado."}`)) return;
+    const today_ = today();
+    onUpdate("pessoas", (pessoas || []).map(x => x.id === id ? {
+      ...x,
+      inactive: !isCurrentlyInactive,
+      inactiveFrom: !isCurrentlyInactive ? today_ : null,
+    } : x));
+    if (p.linkedEmployeeId) {
+      onUpdate("employees", (employees || []).map(e => e.id === p.linkedEmployeeId ? {
+        ...e,
+        inactive: !isCurrentlyInactive,
+        inactiveFrom: !isCurrentlyInactive ? today_ : null,
+      } : e));
+    }
+    onUpdate("_toast", `${isCurrentlyInactive ? "✅ Reativada" : "⏸ Inativada"}: ${p.name}`);
+    setEditingId(null);
   }
 
   const q = filter.trim().toLowerCase();
   let filtered = q ? restPessoas.filter(p => p.name.toLowerCase().includes(q) || (p.cpf || "").includes(q)) : restPessoas;
+  // v8.22.3: filtro de ativos (default esconde inativos, exceto se filtro "inativos" ou "todos com inativos")
+  if (vincFilter !== "inativos" && vincFilter !== "todos_inc") {
+    filtered = filtered.filter(p => !p.inactive);
+  } else if (vincFilter === "inativos") {
+    filtered = filtered.filter(p => p.inactive);
+  }
   // Filtro por vínculo
-  if (vincFilter !== "todos") {
+  if (vincFilter !== "todos" && vincFilter !== "inativos" && vincFilter !== "todos_inc") {
     filtered = filtered.filter(p => {
       const isTeam = !!p.isTeam?.[restaurantId];
       const isFreela = !!p.isFreela;
@@ -25174,14 +25211,16 @@ Regras:
       {/* Filter */}
       <div style={{marginBottom:10,display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
         <input value={filter} onChange={e=>setFilter(e.target.value)} placeholder="🔍 Buscar por nome ou CPF..." style={{...S.input,maxWidth:280,flex:"1 1 200px"}} />
-        <select value={vincFilter} onChange={e=>setVincFilter(e.target.value)} style={{...S.input,maxWidth:170,fontSize:12,padding:"7px 10px",cursor:"pointer"}}>
-          <option value="todos">📋 Todos</option>
-          <option value="equipe">👥 Equipe (CLT)</option>
-          <option value="freela">🎒 Freelas</option>
-          <option value="sem">— Sem vínculo</option>
+        <select value={vincFilter} onChange={e=>setVincFilter(e.target.value)} style={{...S.input,maxWidth:200,fontSize:12,padding:"7px 10px",cursor:"pointer"}}>
+          <option value="todos">📋 Ativos · Todos</option>
+          <option value="equipe">👥 Ativos · Equipe</option>
+          <option value="freela">🎒 Ativos · Freelas</option>
+          <option value="sem">— Ativos · Sem vínculo</option>
+          <option value="inativos">⏸ Apenas Inativos</option>
+          <option value="todos_inc">📂 Todos (inc. inativos)</option>
         </select>
         <div style={{fontSize:11,color:"var(--text3)"}}>
-          {restPessoas.length} pessoa(s) · {restPessoas.filter(p => p.isTeam?.[restaurantId]).length} equipe · {restPessoas.filter(p => p.isFreela).length} freela
+          {restPessoas.filter(p=>!p.inactive).length} ativa(s) · {restPessoas.filter(p=>p.inactive).length} inativa(s) · {restPessoas.filter(p => p.isTeam?.[restaurantId]&&!p.inactive).length} equipe · {restPessoas.filter(p => p.isFreela&&!p.inactive).length} freela
         </div>
       </div>
 
@@ -25272,15 +25311,28 @@ Regras:
                       mobileOnly={mobileOnly}
                     />
                   </div>
-                  <div style={{display:"flex",gap:8,justifyContent:"flex-end"}}>
-                    <button onClick={()=>setEditingId(null)} style={{...S.btnSecondary,fontSize:12,padding:"6px 14px"}}>Cancelar</button>
-                    <button onClick={()=>{
-                      if (editForm.isFreela) {
-                        if (!editForm.whatsapp.trim()) { alert("Telefone/WhatsApp é obrigatório para freela."); return; }
-                        if (!editForm.pix.trim()) { alert("Chave PIX é obrigatória para freela."); return; }
-                      }
-                      saveEdit();
-                    }} style={{...S.btnPrimary,fontSize:12,padding:"6px 14px"}}>💾 Salvar</button>
+                  {/* v8.22.3: ações de inativar/excluir + salvar/cancelar */}
+                  <div style={{display:"flex",gap:8,justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",marginTop:4}}>
+                    <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+                      <button onClick={()=>toggleInactivePessoa(p.id)}
+                        style={{...S.btnSecondary,fontSize:12,padding:"6px 14px",color:p.inactive?"#15803d":"#b45309",borderColor:p.inactive?"#10b98144":"#f59e0b66"}}>
+                        {p.inactive ? "✅ Reativar" : "⏸ Inativar"}
+                      </button>
+                      <button onClick={()=>delPessoa(p.id)}
+                        style={{...S.btnSecondary,fontSize:12,padding:"6px 14px",color:"var(--red)",borderColor:"var(--red)44"}}>
+                        🗑️ Excluir
+                      </button>
+                    </div>
+                    <div style={{display:"flex",gap:8}}>
+                      <button onClick={()=>setEditingId(null)} style={{...S.btnSecondary,fontSize:12,padding:"6px 14px"}}>Cancelar</button>
+                      <button onClick={()=>{
+                        if (editForm.isFreela) {
+                          if (!editForm.whatsapp.trim()) { alert("Telefone/WhatsApp é obrigatório para freela."); return; }
+                          if (!editForm.pix.trim()) { alert("Chave PIX é obrigatória para freela."); return; }
+                        }
+                        saveEdit();
+                      }} style={{...S.btnPrimary,fontSize:12,padding:"6px 14px"}}>💾 Salvar</button>
+                    </div>
                   </div>
                 </div>
               );
@@ -25295,6 +25347,7 @@ Regras:
                     {p.linkedManagerId && <span style={{fontSize:10,padding:"1px 8px",borderRadius:10,background:"var(--ac)22",color:"var(--ac)",fontWeight:700,letterSpacing:0.4}}>GESTOR</span>}
                     {p.restaurantIds.length > 1 && <span style={{fontSize:10,padding:"1px 8px",borderRadius:10,background:"var(--bg2)",color:"var(--text3)",fontWeight:700}}>{p.restaurantIds.length}× rest.</span>}
                     {p.mustChangePin && <span style={{fontSize:10,padding:"1px 8px",borderRadius:10,background:"#fffbeb",color:"#d97706",fontWeight:700,letterSpacing:0.4}}>PIN INICIAL</span>}
+                    {p.inactive && <span style={{fontSize:10,padding:"1px 8px",borderRadius:10,background:"#f3f4f6",color:"#6b7280",fontWeight:700,letterSpacing:0.4}}>INATIVO{p.inactiveFrom ? ` ${fmtDate(p.inactiveFrom)}` : ""}</span>}
                   </div>
                   <div style={{fontSize:11,color:"var(--text3)",marginTop:2,display:"flex",gap:10,flexWrap:"wrap"}}>
                     {p.cpf && <span style={{fontFamily:"'DM Mono',monospace"}}>{maskCpf(p.cpf)}</span>}
@@ -33680,6 +33733,11 @@ function UnifiedLogin({ owners, managers, employees, restaurants, pessoas, onLog
     if (!isEmpId && (pessoas || []).length > 0) {
       const pessoa = pessoas.find(p => (p.cpf || "").replace(/\D/g, "") === cleanCpf && String(p.pin) === cleanPin);
       if (pessoa) {
+        // v8.22.3: bloqueio imediato pra pessoa inativada
+        if (pessoa.inactive === true) {
+          setErr("Acesso desativado. Fale com o departamento pessoal.");
+          return;
+        }
         if (pessoa.mustChangePin) {
           setErr(""); setAttempts(0);
           setPinChangePessoa(pessoa);
@@ -33732,11 +33790,13 @@ function UnifiedLogin({ owners, managers, employees, restaurants, pessoas, onLog
       // PIN bateu — montar opções
       const found = [];
 
-      if (mgr) {
+      // v8.22.3: bloqueio imediato — manager.inactive (consistência com pessoa inativa)
+      if (mgr && !(mgr.inactive === true)) {
         found.push({ label:"Gestor Adm.", icon:"📊", action:()=>{ setChoices(null); onLoginManager(mgr); } });
       }
 
-      if (emp && !(emp.inactive && emp.inactiveFrom && emp.inactiveFrom <= today())) {
+      // v8.22.3: empregado inativo (com ou sem inactiveFrom) → bloqueado
+      if (emp && !(emp.inactive === true)) {
         const restDoEmp = restaurants.find(r=>r.id===emp.restaurantId);
         if (restDoEmp?.financeiro?.status === "inadimplente") {
           if (!mgr) { setErr("⚠️ O acesso ao sistema está suspenso. Entre em contato com o administrador do restaurante."); return; }
@@ -33763,7 +33823,8 @@ function UnifiedLogin({ owners, managers, employees, restaurants, pessoas, onLog
       // Por ID — busca empregado, mas verifica se também é gestor
       const emp = employees.find(e => e.empCode?.toUpperCase() === clean.toUpperCase() && String(e.pin) === cleanPin);
       if (emp) {
-        if (emp.inactive && emp.inactiveFrom && emp.inactiveFrom <= today()) {
+        // v8.22.3: bloqueia inativo imediatamente, com ou sem inactiveFrom
+        if (emp.inactive === true) {
           setErr("Acesso desativado. Fale com o departamento pessoal."); return;
         }
         // Verificar se o CPF desse empregado também é de um gestor
@@ -35703,6 +35764,35 @@ export default function App() {
   }, [view, loaded, currentUser?.id, pessoas?.length]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const data = { owners, managers, restaurants, employees, roles, tips, splits, schedules, communications, commAcks, faq, dpMessages, workSchedules, notifications, noTipDays, trash, schedTemplates, schedDrafts, scheduleVersions, tipVersions, vtConfig, vtMonthly, vtPayments, incidents, feedbacks, devChecklists, scheduleAdjustments, scheduleStatus, schedulePrevista, scheduleSwaps, recursoFolders, recursos, recursosInitialized, employeeGoals, delays, tipApprovals, meetingPlans, meetingIdeas, meetingAgendas, meetingActions, meetingOccurrences, meetingPendencias, inbox, inboxFolders, miseCategories, miseStocks, miseAssignments, miseItems, miseCycles, miseCounts, miseSuppliers, miseProductSuppliers, miseSupplierOrders, miseChecklistTemplates, miseChecklistRuns, miseFtInsumos, miseFtEquipamentos, miseFtDishes, pessoas, pessoasMigratedAt, permsV2MigratedAt, tuyaLinks, tempSensors, tempReadings, tempAlerts, tempBackfillState, permProfiles, freelaShifts, freelaPagamentos };
+
+  // v8.22.3: kick out automático — se o usuário logado for inativado durante a sessão,
+  // a próxima rodada de data-refresh o desloga + mostra toast.
+  useEffect(() => {
+    if (!currentUser || !sessionRestoredRef.current) return;
+    if (userRole === "super") return; // Owner nunca é deslogado por isso
+    const cuId = currentUser.id;
+    const cuCpf = (currentUser.cpf || "").replace(/\D/g, "");
+    let kicked = false;
+    let reason = "";
+    // Acha pessoa correspondente (por id ou cpf)
+    const pessoa = (pessoas || []).find(p => p.id === cuId)
+      || (cuCpf ? (pessoas || []).find(p => (p.cpf || "").replace(/\D/g, "") === cuCpf) : null);
+    if (pessoa && pessoa.inactive === true) { kicked = true; reason = "Sua conta foi inativada."; }
+    if (!kicked && (userRole === "employee" || userRole === "operational")) {
+      const emp = (employees || []).find(e => e.id === cuId);
+      if (!emp || emp.inactive === true) { kicked = true; reason = "Seu vínculo foi encerrado."; }
+    }
+    if (!kicked && userRole === "manager") {
+      const mgr = (managers || []).find(m => m.id === cuId);
+      if (!mgr || mgr.inactive === true) { kicked = true; reason = "Seu acesso de gestor foi removido."; }
+    }
+    if (kicked) {
+      setToast(`🔒 ${reason} Você foi desconectado.`);
+      try { localStorage.removeItem("apptip_userid"); localStorage.removeItem("apptip_empid"); localStorage.removeItem("apptip_role"); } catch (e) {}
+      setCurrentUser(null);
+      setUserRole(null);
+    }
+  }, [currentUser, userRole, pessoas, employees, managers]); // eslint-disable-line react-hooks/exhaustive-deps
 
   async function handleUpdate(field, value) {
     if (field === "_toast") { setToast(value); return; }
