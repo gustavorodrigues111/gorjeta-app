@@ -3,7 +3,7 @@ import React, { useState, useEffect, useMemo, useRef, Component } from "react";
 import { db } from "./firebase";
 import { doc, getDoc, setDoc, onSnapshot } from "firebase/firestore";
 
-const APP_VERSION = "8.30.0";
+const APP_VERSION = "8.31.0";
 
 // v8.11.1: comparação de versão semver-like (8.11.1 > 8.10.7 > 8.9.4)
 function compareVersions(a, b) {
@@ -23064,12 +23064,12 @@ function FreelasModule({ restaurantId, pessoas, freelaShifts, freelaPagamentos, 
   }
 
   // Quem pode ver cada sub-tab
-  // v8.30.0: agendar é alias de fechar — usa a permissão granular operational.freelasFechar.
-  // Quem pode fechar lote (DP/Owner ou pessoa com a perm na matriz) também agenda.
-  // ad.freelasFechar mantido como fallback de transição (pré-migração).
-  const _canFechar = isDP || isOwner
-    || perms?.operational?.freelasFechar === true
-    || perms?.admin?.freelasFechar === true; // legacy v8.24-v8.29
+  // v8.31.0: líder de área agenda/fecha automaticamente — não precisa mais de checkbox.
+  // operational.freelasFechar mantido como fallback (pessoas que já tinham antes da v8.31).
+  // ad.freelasFechar mantido como fallback de transição pré-v8.30.
+  const _canFechar = isDP || isOwner || isLider
+    || perms?.operational?.freelasFechar === true // legacy v8.30
+    || perms?.admin?.freelasFechar === true;       // legacy v8.24-v8.29
   const canFechamento = _canFechar;
   const canAgendar    = _canFechar; // alias — quem fecha, agenda
   const canHistorico  = _canFechar;
@@ -26443,7 +26443,8 @@ const PERM_GROUPS = [
     perms: [
       { key: "admin.schedule",              label: "Editar escala",                icon: "📅" },
       { key: "admin.fecharEscala",          label: "Fechar mês da escala",         icon: "🔒" },
-      { key: "operational.freelasFechar",   label: "Agendar e fechar lote de freelas", icon: "💵" }, // v8.30.0: movido de admin.X
+      // v8.31.0: 'Agendar e fechar lote de freelas' deixou de ser checkbox — líder de área ganha automático.
+      // Quem já tinha operational.freelasFechar marcado continua tendo (legacy fallback nas checagens).
       { key: "operational.reunioes",        label: "Gerir reuniões",               icon: "🗣️" },
       { key: "operational.trilhas",         label: "Gerir trilhas",                icon: "🎯" },
     ],
