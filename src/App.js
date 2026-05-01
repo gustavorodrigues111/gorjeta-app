@@ -3,7 +3,7 @@ import React, { useState, useEffect, useMemo, useRef, Component } from "react";
 import { db } from "./firebase";
 import { doc, getDoc, setDoc, onSnapshot } from "firebase/firestore";
 
-const APP_VERSION = "8.19.0";
+const APP_VERSION = "8.19.1";
 
 // v8.11.1: comparação de versão semver-like (8.11.1 > 8.10.7 > 8.9.4)
 function compareVersions(a, b) {
@@ -28186,7 +28186,9 @@ function OperationalChecklists({ employee, miseChecklistTemplates, miseChecklist
           return acc + (ri?.done ? 1 : 0);
         }, 0);
         const pct = items.length > 0 ? Math.round(doneCount/items.length*100) : 0;
-        const isExpanded = expandedTpl === tpl.id || (!run && items.length > 0);
+        // v8.19.1: cards sempre começam fechados — só expande o que o usuário clicou.
+        // expandedTpl é singular (1 só aberto por vez) → clicar em outro card fecha o anterior.
+        const isExpanded = expandedTpl === tpl.id;
         // Último envio do template hoje (qualquer pessoa)
         const lastSubmission = restRunsToday
           .filter(r => r.templateId === tpl.id)
