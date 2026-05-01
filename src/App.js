@@ -3,7 +3,7 @@ import React, { useState, useEffect, useMemo, useRef, Component } from "react";
 import { db } from "./firebase";
 import { doc, getDoc, setDoc, onSnapshot } from "firebase/firestore";
 
-const APP_VERSION = "8.22.3";
+const APP_VERSION = "8.23.0";
 
 // v8.11.1: comparação de versão semver-like (8.11.1 > 8.10.7 > 8.9.4)
 function compareVersions(a, b) {
@@ -28629,6 +28629,39 @@ function OperationalChecklists({ employee, pessoas = [], isOwner = false, miseCh
     });
   }
 
+  // v8.23.0: reabre o próprio envio pra editar/adicionar coisa (válido enquanto não foi conferido)
+  function reopenSubmission(tpl) {
+    const run = myRunsToday.find(r => r.templateId === tpl.id);
+    if (!run || !run.completedAt) return;
+    if (run.reviewedAt) {
+      onUpdate("_toast", "⚠️ Este envio já foi conferido. Não é possível reabrir.");
+      return;
+    }
+    // Mantém o mesmo id pra sobrescrever o run ao re-enviar
+    draftRunIds.current[tpl.id] = run.id;
+    // Popula drafts local com items atuais
+    const draftFromRun = {};
+    (tpl.items || []).forEach(it => {
+      const ri = (run.items || []).find(x => x.itemId === it.id);
+      draftFromRun[it.id] = {
+        done: !!ri?.done,
+        note: ri?.note || "",
+        showNote: !!ri?.note,
+      };
+    });
+    setDrafts(d => ({ ...d, [tpl.id]: draftFromRun }));
+    // Remove completedAt + autoBypass do run no Firestore (vira rascunho de novo)
+    onUpdate("miseChecklistRuns", (prev) => (prev || []).map(r => {
+      if (r.id !== run.id) return r;
+      const next = { ...r };
+      delete next.completedAt;
+      delete next.autoBypass;
+      return next;
+    }));
+    setExpandedTpl(tpl.id);
+    onUpdate("_toast", "✏️ Envio reaberto — edite e envie de novo");
+  }
+
   async function submitChecklist(tpl) {
     const draft = drafts[tpl.id] || ensureDraft(tpl);
     // v8.22.2: bloqueia envio sem nada preenchido (pelo menos 1 item ou 1 nota)
@@ -28731,6 +28764,7 @@ function OperationalChecklists({ employee, pessoas = [], isOwner = false, miseCh
       {templates.map(tpl => {
         const run = myRunsToday.find(r => r.templateId === tpl.id);
         const isCompleted = !!run?.completedAt;
+        const isReviewed = !!run?.reviewedAt;
         // v8.19.0: rascunho = run existe mas sem completedAt, OU draft local não vazio
         const isDraft = !isCompleted && (!!run || !!drafts[tpl.id]);
         const items = tpl.items || [];
@@ -28746,6 +28780,23 @@ function OperationalChecklists({ employee, pessoas = [], isOwner = false, miseCh
         // v8.19.1: cards sempre começam fechados — só expande o que o usuário clicou.
         // expandedTpl é singular (1 só aberto por vez) → clicar em outro card fecha o anterior.
         const isExpanded = expandedTpl === tpl.id;
+        // v8.23.0: outros enviaram esse template hoje (excluindo eu)
+        const othersRunsToday = restRunsToday.filter(r => r.templateId === tpl.id && r.userId !== employee.id);
+        const otherContributors = othersRunsToday.map(r => ({ id: r.userId, name: r.userName })).filter((v,i,a)=>a.findIndex(x=>x.id===v.id)===i);
+        // Itens marcados por TODOS (eu + outros) — usado pra mostrar progresso coletivo do dia
+        const aggregateDoneSet = new Set();
+        if (run) (run.items || []).forEach(it => { if (it.done) aggregateDoneSet.add(it.itemId); });
+        othersRunsToday.forEach(r => (r.items || []).forEach(it => { if (it.done) aggregateDoneSet.add(it.itemId); }));
+        const aggregateDone = aggregateDoneSet.size;
+        // helper: pra um itemId, retorna lista [{userName, doneAt}] de OUTROS que já marcaram
+        function getOtherMarksForItem(itemId) {
+          const out = [];
+          othersRunsToday.forEach(r => {
+            const ri = (r.items || []).find(x => x.itemId === itemId);
+            if (ri && ri.done) out.push({ userName: r.userName, doneAt: ri.doneAt || r.completedAt });
+          });
+          return out.sort((a,b) => (a.doneAt||"").localeCompare(b.doneAt||""));
+        }
         // Último envio do template hoje (qualquer pessoa)
         const lastSubmission = restRunsToday
           .filter(r => r.templateId === tpl.id)
@@ -28758,14 +28809,22 @@ function OperationalChecklists({ employee, pessoas = [], isOwner = false, miseCh
                 <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
                   <span style={{fontSize:15,color:"var(--text)",fontWeight:700}}>{tpl.name}</span>
                   {isCompleted && <span style={{fontSize:10,padding:"1px 8px",borderRadius:10,background:"#10b98122",color:"#15803d",fontWeight:700}}>✓ ENVIADO</span>}
+                  {isReviewed && <span style={{fontSize:10,padding:"1px 8px",borderRadius:10,background:"#dbeafe",color:"#1e40af",fontWeight:700}}>🔒 CONFERIDO</span>}
                   {isDraft && <span style={{fontSize:10,padding:"1px 8px",borderRadius:10,background:"#f59e0b22",color:"#b45309",fontWeight:700}}>RASCUNHO</span>}
                 </div>
                 {tpl.description && <div style={{fontSize:12,color:"var(--text3)",marginTop:3}}>{tpl.description}</div>}
-                {/* Último envio de hoje — ajuda quem entrou no meio do turno a saber se já foi feito */}
-                {lastSubmission && (
+                {/* v8.23.0: outros contribuintes hoje + progresso coletivo */}
+                {otherContributors.length > 0 && (
+                  <div style={{fontSize:11,color:"#1e40af",marginTop:4,display:"flex",alignItems:"center",gap:4,flexWrap:"wrap"}}>
+                    <span>👥</span>
+                    <span>Já enviaram hoje: <b>{otherContributors.slice(0,3).map(c => shortName(c.name)).join(", ")}</b>{otherContributors.length > 3 ? ` +${otherContributors.length-3}` : ""} · <b>{aggregateDone}/{items.length}</b> itens marcados no total</span>
+                  </div>
+                )}
+                {/* Último envio de hoje — só mostra se não tem o bloco "outros" acima (pra não duplicar) */}
+                {otherContributors.length === 0 && lastSubmission && lastSubmission.userId !== employee.id && (
                   <div style={{fontSize:11,color:"#15803d",marginTop:3,display:"flex",alignItems:"center",gap:4}}>
                     <span>✓</span>
-                    <span>Último envio: <b>{lastSubmission.userName || "—"}</b> às {new Date(lastSubmission.completedAt).toLocaleTimeString("pt-BR",{hour:"2-digit",minute:"2-digit"})}</span>
+                    <span>Último envio: <b>{shortName(lastSubmission.userName) || "—"}</b> às {new Date(lastSubmission.completedAt).toLocaleTimeString("pt-BR",{hour:"2-digit",minute:"2-digit"})}</span>
                   </div>
                 )}
                 <div style={{display:"flex",alignItems:"center",gap:8,marginTop:6}}>
@@ -28789,8 +28848,9 @@ function OperationalChecklists({ employee, pessoas = [], isOwner = false, miseCh
                       {items.map((it, idx) => {
                         const state = getItemState(tpl, it.id);
                         const done = state.done;
+                        const otherMarks = getOtherMarksForItem(it.id); // v8.23.0
                         return (
-                          <div key={it.id} style={{background:done?"#f0fdf4":"var(--bg2)",border:`1px solid ${done?"#10b98144":"var(--border)"}`,borderRadius:8,opacity:isCompleted?0.7:1}}>
+                          <div key={it.id} style={{background:done?"#f0fdf4":(otherMarks.length>0?"#f0f9ff":"var(--bg2)"),border:`1px solid ${done?"#10b98144":(otherMarks.length>0?"#0ea5e944":"var(--border)")}`,borderRadius:8,opacity:isCompleted?0.7:1}}>
                             <div onClick={()=>!isCompleted && updateItem(tpl, it.id, { done: !done })}
                               style={{display:"flex",alignItems:"center",gap:10,padding:"12px 14px",cursor:isCompleted?"default":"pointer"}}>
                               <input type="checkbox" checked={done} disabled={isCompleted}
@@ -28806,6 +28866,17 @@ function OperationalChecklists({ employee, pessoas = [], isOwner = false, miseCh
                                 </button>
                               )}
                             </div>
+                            {/* v8.23.0: outros que já marcaram esse item hoje */}
+                            {otherMarks.length > 0 && (
+                              <div style={{padding:"0 14px 8px",marginTop:-4,display:"flex",gap:4,flexWrap:"wrap",alignItems:"center"}}>
+                                <span style={{fontSize:10,color:"var(--text3)",marginRight:2}}>✓ Já marcado por:</span>
+                                {otherMarks.map((m, i) => (
+                                  <span key={i} style={{fontSize:10,padding:"1px 7px",background:"#0ea5e922",color:"#075985",borderRadius:8,fontWeight:600}}>
+                                    {shortName(m.userName)} {m.doneAt ? `às ${new Date(m.doneAt).toLocaleTimeString("pt-BR",{hour:"2-digit",minute:"2-digit"})}` : ""}
+                                  </span>
+                                ))}
+                              </div>
+                            )}
                             {state.showNote && !isCompleted && (
                               <div style={{padding:"0 14px 12px",marginTop:-4}}>
                                 <textarea
@@ -28847,6 +28918,24 @@ function OperationalChecklists({ employee, pessoas = [], isOwner = false, miseCh
                           style={{background:"#15803d",color:"#fff",border:"none",borderRadius:8,padding:"10px 20px",fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:"'DM Sans',sans-serif",minHeight:44}}>
                           📨 Enviar checklist
                         </button>
+                      </div>
+                    )}
+                    {/* v8.23.0: card já enviado mas ainda não conferido — botão pra reabrir */}
+                    {isCompleted && !isReviewed && (
+                      <div style={{marginTop:14,display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:8,padding:"10px 12px",background:"#f0fdf4",border:"1px dashed #10b98144",borderRadius:8}}>
+                        <div style={{fontSize:12,color:"#15803d"}}>
+                          ✓ Enviado às {new Date(run.completedAt).toLocaleTimeString("pt-BR",{hour:"2-digit",minute:"2-digit"})}. Esqueceu algum item? Dá pra reabrir até a conferência do líder.
+                        </div>
+                        <button onClick={()=>reopenSubmission(tpl)}
+                          style={{background:"transparent",color:"#15803d",border:"1px solid #10b98166",borderRadius:8,padding:"6px 14px",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"'DM Sans',sans-serif",whiteSpace:"nowrap"}}>
+                          ✏️ Reabrir envio
+                        </button>
+                      </div>
+                    )}
+                    {/* Já conferido — mensagem de bloqueio */}
+                    {isCompleted && isReviewed && (
+                      <div style={{marginTop:14,padding:"10px 12px",background:"#dbeafe",border:"1px solid #1e40af33",borderRadius:8,fontSize:12,color:"#1e40af"}}>
+                        🔒 Conferido por <b>{shortName(run.reviewerName)}</b> em {new Date(run.reviewedAt).toLocaleString("pt-BR",{day:"2-digit",month:"2-digit",hour:"2-digit",minute:"2-digit"})}. Não é mais editável.
                       </div>
                     )}
                   </>
