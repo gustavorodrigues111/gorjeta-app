@@ -3,7 +3,7 @@ import React, { useState, useEffect, useMemo, useRef, Component } from "react";
 import { db } from "./firebase";
 import { doc, getDoc, setDoc, onSnapshot } from "firebase/firestore";
 
-const APP_VERSION = "8.18.0";
+const APP_VERSION = "8.18.1";
 
 // v8.11.1: comparação de versão semver-like (8.11.1 > 8.10.7 > 8.9.4)
 function compareVersions(a, b) {
@@ -12889,6 +12889,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
               restaurantId={rid}
               restaurantName={restaurants.find(r => r.id === rid)?.name || ""}
               employees={employees}
+              pessoas={data?.pessoas ?? []}
               miseCategories={data?.miseCategories ?? []}
               miseStocks={data?.miseStocks ?? []}
               miseAssignments={data?.miseAssignments ?? []}
@@ -18942,7 +18943,7 @@ function miseBuildImportPlan(parsed, ctx) {
 // ═══════════════════════════════════════════════════════════════
 // ──  MISE CONTAGENS — ADMIN (Gestor Administrativo)            ──
 // ═══════════════════════════════════════════════════════════════
-function MiseContagensAdmin({ restaurantId, restaurantName = "", employees, miseCategories, miseStocks, miseAssignments, miseItems, miseCounts, miseSuppliers, miseProductSuppliers, miseCycles = [], miseSupplierOrders = [], isOwner = false, onUpdate, mobileOnly }) {
+function MiseContagensAdmin({ restaurantId, restaurantName = "", employees, pessoas = [], miseCategories, miseStocks, miseAssignments, miseItems, miseCounts, miseSuppliers, miseProductSuppliers, miseCycles = [], miseSupplierOrders = [], isOwner = false, onUpdate, mobileOnly }) {
   const [subTab, setSubTab] = useState("atribuicoes");
   const restCategories = miseCategories.filter(c => c.restaurantId === restaurantId);
   const restStocks = miseStocks.filter(s => s.restaurantId === restaurantId);
@@ -18950,9 +18951,37 @@ function MiseContagensAdmin({ restaurantId, restaurantName = "", employees, mise
   const restItems = miseItems.filter(i => i.restaurantId === restaurantId);
   const restSuppliers = (miseSuppliers || []).filter(s => s.restaurantId === restaurantId);
   const restProductSuppliers = (miseProductSuppliers || []).filter(ps => ps.restaurantId === restaurantId);
-  const restEmps = employees.filter(e => e.restaurantId === restaurantId && !(e.inactive && e.inactiveFrom && e.inactiveFrom <= today()));
-  // Só empregados que têm a área "contagens" concedida aparecem como responsáveis
-  const eligibleEmps = restEmps.filter(e => e.operationalAreas?.contagens === true);
+  // v8.18.1: elegíveis pra contar = quem tem permissão "Fazer contagens" (operational.contagensExec)
+  // Inclui também empregados com área legada `contagens` marcada (compat). Não restrito à equipe.
+  const _today = today();
+  const restPessoasMise = (pessoas || []).filter(p => (p.restaurantIds || []).includes(restaurantId));
+  const eligibleEmps = (() => {
+    const out = [];
+    const seen = new Set();
+    restPessoasMise.forEach(p => {
+      const perms = p.permissions?.[restaurantId];
+      const linkedEmp = (employees || []).find(e => e.id === p.linkedEmployeeId);
+      const inactive = linkedEmp && linkedEmp.inactive && linkedEmp.inactiveFrom && linkedEmp.inactiveFrom <= _today;
+      if (inactive) return;
+      const hasNew = perms?.operational?.contagensExec === true;
+      const hasLegacy = linkedEmp?.operationalAreas?.contagens === true;
+      if (!hasNew && !hasLegacy) return;
+      const id = p.linkedEmployeeId || `pes_as_emp_${p.id}`;
+      if (seen.has(id)) return;
+      seen.add(id);
+      out.push({ id, name: p.name });
+    });
+    // Fallback: empregados sem pessoa mas com área legada
+    (employees || []).forEach(e => {
+      if (e.restaurantId !== restaurantId) return;
+      if (e.inactive && e.inactiveFrom && e.inactiveFrom <= _today) return;
+      if (e.operationalAreas?.contagens !== true) return;
+      if (seen.has(e.id)) return;
+      seen.add(e.id);
+      out.push({ id: e.id, name: e.name });
+    });
+    return out.sort((a, b) => (a.name || "").localeCompare(b.name || ""));
+  })();
 
   const [newCatName, setNewCatName] = useState("");
   const [newCatType, setNewCatType] = useState("ambos");
@@ -19633,7 +19662,7 @@ function MiseContagensAdmin({ restaurantId, restaurantName = "", employees, mise
 
           {eligibleEmps.length === 0 && (
             <div style={{padding:"12px 16px",background:"#fffbeb",border:"1px solid #f59e0b44",borderRadius:10,marginBottom:16,fontSize:13,color:"#92400e",lineHeight:1.5}}>
-              ⚠️ Nenhum funcionário tem a área <b>Contagens</b> concedida. Primeiro marque a área em <b>Pessoas → Permissões Op.</b> para os funcionários elegíveis.
+              ⚠️ Ninguém tem a permissão <b>Fazer contagens</b>. Primeiro conceda a permissão em <b>Pessoas → Permissões</b> (grupo Execução Operacional) para quem vai contar.
             </div>
           )}
 
@@ -27662,8 +27691,38 @@ function MiseChecklistsAdmin({ restaurantId, miseChecklistTemplates, miseCheckli
   const miseAc = "#7c9e5e";
   const mkId = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
 
-  // v8.18.0: lista de pessoas elegíveis pra responsável (qualquer empregado/admin do restaurante)
-  const restEmps = (employees || []).filter(e => e.restaurantId === restaurantId && !(e.inactive && e.inactiveFrom && e.inactiveFrom <= today()));
+  // v8.18.1: lista de pessoas elegíveis = quem tem permissão "Fazer checklists" (operational.checklistsExec)
+  // Inclui também empregados com a área legada `checklists` marcada (compat enquanto migration nova não roda).
+  // Não é mais restrito à equipe — qualquer pessoa do restaurante (admin, líder, etc.) com a permissão aparece.
+  const _today = today();
+  const restPessoas = (pessoas || []).filter(p => (p.restaurantIds || []).includes(restaurantId));
+  const restEmps = (() => {
+    const out = [];
+    const seen = new Set();
+    restPessoas.forEach(p => {
+      const perms = p.permissions?.[restaurantId];
+      const linkedEmp = (employees || []).find(e => e.id === p.linkedEmployeeId);
+      const inactive = linkedEmp && linkedEmp.inactive && linkedEmp.inactiveFrom && linkedEmp.inactiveFrom <= _today;
+      if (inactive) return;
+      const hasNew = perms?.operational?.checklistsExec === true;
+      const hasLegacy = linkedEmp?.operationalAreas?.checklists === true;
+      if (!hasNew && !hasLegacy) return;
+      const id = p.linkedEmployeeId || `pes_as_emp_${p.id}`;
+      if (seen.has(id)) return;
+      seen.add(id);
+      out.push({ id, name: p.name });
+    });
+    // Fallback: empregados com área legada mas sem pessoa vinculada
+    (employees || []).forEach(e => {
+      if (e.restaurantId !== restaurantId) return;
+      if (e.inactive && e.inactiveFrom && e.inactiveFrom <= _today) return;
+      if (e.operationalAreas?.checklists !== true) return;
+      if (seen.has(e.id)) return;
+      seen.add(e.id);
+      out.push({ id: e.id, name: e.name });
+    });
+    return out.sort((a, b) => (a.name || "").localeCompare(b.name || ""));
+  })();
   const restAreas = [...new Set((roles || []).map(r => r.area).filter(Boolean))];
 
   function addTemplate() {
