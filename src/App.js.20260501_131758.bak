@@ -3,7 +3,7 @@ import React, { useState, useEffect, useMemo, useRef, Component } from "react";
 import { db } from "./firebase";
 import { doc, getDoc, setDoc, onSnapshot } from "firebase/firestore";
 
-const APP_VERSION = "8.21.0";
+const APP_VERSION = "8.20.0";
 
 // v8.11.1: comparação de versão semver-like (8.11.1 > 8.10.7 > 8.9.4)
 function compareVersions(a, b) {
@@ -240,13 +240,6 @@ const fmtBR = (v) => new Intl.NumberFormat("pt-BR", { minimumFractionDigits: 2, 
 const fmtDate = (d) => d ? new Date(d + "T12:00:00").toLocaleDateString("pt-BR") : "—";
 const today = () => new Date().toISOString().slice(0, 10);
 const maskCpf = (v) => { const d = (v ?? "").replace(/\D/g,"").slice(0,11); if(d.length<=3) return d; if(d.length<=6) return `${d.slice(0,3)}.${d.slice(3)}`; if(d.length<=9) return `${d.slice(0,3)}.${d.slice(3,6)}.${d.slice(6)}`; return `${d.slice(0,3)}.${d.slice(3,6)}.${d.slice(6,9)}-${d.slice(9,11)}`; };
-// v8.21.0: nome curto = primeiro nome + último sobrenome (desambigua quando 2 pessoas têm o mesmo primeiro nome)
-const shortName = (name) => {
-  if (!name) return "";
-  const parts = String(name).trim().split(/\s+/);
-  if (parts.length === 1) return parts[0];
-  return `${parts[0]} ${parts[parts.length - 1]}`;
-};
 const monthKey = (y, m) => `${y}-${String(m + 1).padStart(2, "0")}`;
 
 // v8.9.1 — Sanitiza key pra Firestore (que rejeita campos com __ início+fim).
@@ -18393,7 +18386,6 @@ function OperationalPortal({ employee, data, onUpdate, onBack, toggleTheme, them
         ) : tab === "checklists" ? (
           <OperationalChecklists
             employee={employee}
-            pessoas={data?.pessoas ?? []}
             miseChecklistTemplates={data?.miseChecklistTemplates ?? []}
             miseChecklistRuns={data?.miseChecklistRuns ?? []}
             onUpdate={onUpdate}
@@ -19752,7 +19744,7 @@ function MiseContagensAdmin({ restaurantId, restaurantName = "", employees, pess
                                       background:checked?miseAc:"transparent",color:checked?"#fff":"var(--text2)",
                                       border:`1px solid ${checked?miseAc:"var(--border)"}`,cursor:"pointer",
                                     }}>
-                                    {checked ? "✓ " : ""}{shortName(emp.name)}
+                                    {checked ? "✓ " : ""}{emp.name}
                                   </button>
                                 );
                               })}
@@ -21570,7 +21562,6 @@ function AppShell({ pessoa, data, activeRestaurantId, setActiveRestaurantId, use
       return (
         <OperationalChecklists
           employee={buildVirtualEmpForPessoa(pessoa, activeRestaurantId)}
-          pessoas={data?.pessoas ?? []}
           miseChecklistTemplates={data?.miseChecklistTemplates ?? []}
           miseChecklistRuns={data?.miseChecklistRuns ?? []}
           onUpdate={onUpdate}
@@ -25633,7 +25624,6 @@ const PERM_GROUPS = [
     id: "g_execucao", label: "✅ Execução Operacional", color: "#0ea5e9", bg: "#0ea5e922",
     perms: [
       { key: "operational.checklistsExec",   label: "Fazer checklists",        icon: "✅" },
-      { key: "operational.checklistsReview", label: "Conferir checklists",     icon: "🔎" },
       { key: "operational.contagensExec",    label: "Fazer contagens",         icon: "📦" },
       { key: "operational.temperaturasExec", label: "Registrar temperaturas",  icon: "🌡️" },
       { key: "operational.fichasTecnicas",   label: "Consultar fichas técnicas", icon: "📖" },
@@ -25717,29 +25707,6 @@ const ALL_PERM_KEYS = [
   "admin.tips","admin.schedule","admin.employees","admin.roles","admin.vt","admin.comunicados","admin.faq","admin.config","admin.pessoas",
   "special.isDP","special.isLider",
 ];
-
-// v8.21.0: helper pra checar se uma pessoa pode conferir checklists de um template específico.
-// Regra: tem perm explícita "checklistsReview" OU é líder de uma área que cobre o template.
-// Owner sempre pode (verificado externamente). Template "Geral" cai pra qualquer admin com checklists.
-// eslint-disable-next-line no-unused-vars
-function canReviewChecklist(pessoa, tpl, restaurantId) {
-  if (!pessoa || !tpl) return false;
-  const perms = pessoa.permissions?.[restaurantId];
-  if (!perms) return false;
-  // Perm explícita
-  if (perms.operational?.checklistsReview === true) return true;
-  // Líder com área compatível
-  const isLider = perms.special?.isLider === true;
-  const liderAreas = perms.special?.areas || [];
-  if (isLider) {
-    // Template "Geral" → qualquer líder confere
-    if (!tpl.area || tpl.area === "Geral") return true;
-    if (liderAreas.includes(tpl.area)) return true;
-  }
-  // Quem configura checklists também confere (admin do módulo)
-  if (perms.operational?.checklists === true) return true;
-  return false;
-}
 
 // Ícones e cores disponíveis pro editor de perfis customizados
 const PROFILE_ICONS = ["👑","🛂","💰","⭐","🍳","🍷","📅","🎯","🌡️","📦","✅","📋","🚌","📢","❓","⚙️","👥","🏷️","🗂️","🔧","🚫","🛒","🔥","🧊","⚡","🎓","🎩"];
@@ -28077,46 +28044,6 @@ function MiseChecklistsAdmin({ restaurantId, miseChecklistTemplates, miseCheckli
   }
   function updateTpl(id, patch) {
     onUpdate("miseChecklistTemplates", (miseChecklistTemplates || []).map(t => t.id === id ? { ...t, ...patch } : t));
-    // v8.21.0: se mudou os responsáveis, auto-concede operational.checklistsExec aos novos pra que vejam o checklist no Operacional.
-    if (patch.responsaveis !== undefined) {
-      const oldTpl = (miseChecklistTemplates || []).find(t => t.id === id);
-      const oldResp = (oldTpl?.responsaveis || []);
-      const newResp = patch.responsaveis || [];
-      const added = newResp.filter(eid => !oldResp.includes(eid));
-      if (added.length > 0) {
-        // Mapeia empId → pessoa (via linkedEmployeeId ou fallback id pes_as_emp_)
-        const targetPessoaIds = added.map(empId => {
-          const direct = (pessoas || []).find(p => p.linkedEmployeeId === empId);
-          if (direct) return direct.id;
-          // Caso o empId já seja pes_as_emp_<id>
-          const m = String(empId).match(/^pes_as_emp_(.+)$/);
-          if (m) return m[1];
-          return null;
-        }).filter(Boolean);
-        if (targetPessoaIds.length > 0) {
-          const nextPessoas = (pessoas || []).map(p => {
-            if (!targetPessoaIds.includes(p.id)) return p;
-            const cur = p.permissions?.[restaurantId]?.operational?.checklistsExec === true;
-            if (cur) return p; // já tem
-            return {
-              ...p,
-              permissions: {
-                ...(p.permissions || {}),
-                [restaurantId]: {
-                  ...(p.permissions?.[restaurantId] || { operational: {}, admin: {}, special: {} }),
-                  operational: {
-                    ...(p.permissions?.[restaurantId]?.operational || {}),
-                    checklistsExec: true,
-                  },
-                },
-              },
-            };
-          });
-          onUpdate("pessoas", nextPessoas);
-          onUpdate("_toast", `🔓 Permissão "Fazer checklists" concedida automaticamente`);
-        }
-      }
-    }
   }
   function toggleActive(id) {
     const t = restTemplates.find(x => x.id === id);
@@ -28176,7 +28103,7 @@ function MiseChecklistsAdmin({ restaurantId, miseChecklistTemplates, miseCheckli
                 const runsCount = restRuns.filter(r => r.templateId === t.id).length;
                 const area = t.area || "Geral";
                 const responsaveisCount = (t.responsaveis || []).length;
-                const responsaveisNames = (t.responsaveis || []).map(eid => shortName(restEmps.find(e => e.id === eid)?.name)).filter(Boolean);
+                const responsaveisNames = (t.responsaveis || []).map(eid => restEmps.find(e => e.id === eid)?.name?.split(" ")[0]).filter(Boolean);
                 return (
                   <div key={t.id} style={{display:"flex",alignItems:"center",gap:10,padding:"12px 14px",background:"var(--card-bg)",border:`1px solid ${t.active?"var(--border)":"#f59e0b44"}`,borderRadius:10,opacity:t.active?1:0.6,flexWrap:"wrap"}}>
                     <div style={{flex:1,minWidth:180,cursor:"pointer"}} onClick={()=>setEditingTplId(t.id)}>
@@ -28341,7 +28268,7 @@ function MiseChecklistTemplateEditor({ tpl, updateTpl, onBack, mobileOnly, mkId,
                   return (
                     <label key={e.id} style={{display:"flex",alignItems:"center",gap:7,fontSize:12,cursor:"pointer"}}>
                       <input type="checkbox" checked={checked} onChange={()=>toggleResponsavel(e.id)} style={{accentColor:miseAc}}/>
-                      <span style={{color:"var(--text)"}}>{shortName(e.name)}</span>
+                      <span style={{color:"var(--text)"}}>{e.name}</span>
                     </label>
                   );
                 })}
@@ -28399,19 +28326,10 @@ function MiseChecklistTemplateEditor({ tpl, updateTpl, onBack, mobileOnly, mkId,
 }
 
 // ── CHECKLISTS — USER (Gestor Operacional) ──
-function OperationalChecklists({ employee, pessoas = [], miseChecklistTemplates, miseChecklistRuns, onUpdate }) {
+function OperationalChecklists({ employee, miseChecklistTemplates, miseChecklistRuns, onUpdate }) {
   const restaurantId = employee.restaurantId;
   const today_ = today();
-  // v8.21.0: filtra templates onde:
-  //   - responsaveis vazio → visível pra todos com perm exec (comportamento antigo)
-  //   - responsaveis preenchido → só pra quem está na lista (delegação)
-  const templates = (miseChecklistTemplates || []).filter(t => {
-    if (t.restaurantId !== restaurantId) return false;
-    if (t.active === false) return false;
-    const resp = t.responsaveis || [];
-    if (resp.length === 0) return true;
-    return resp.includes(employee.id);
-  });
+  const templates = (miseChecklistTemplates || []).filter(t => t.restaurantId === restaurantId && t.active !== false);
   const myRunsToday = (miseChecklistRuns || []).filter(r =>
     r.restaurantId === restaurantId && r.userId === employee.id && r.date === today_
   );
@@ -28467,7 +28385,6 @@ function OperationalChecklists({ employee, pessoas = [], miseChecklistTemplates,
   }
 
   // Constrói o objeto run a partir do draft. Se isSubmit=true, marca completedAt.
-  // v8.21.0: bypass — se quem submete já pode conferir (líder da área), marca reviewedAt = completedAt.
   function buildRun(tpl, draftData, isSubmit) {
     const id = getOrCreateRunId(tpl);
     const now = new Date().toISOString();
@@ -28492,30 +28409,6 @@ function OperationalChecklists({ employee, pessoas = [], miseChecklistTemplates,
     // Preserva completedAt se já existia, ou seta agora se for submit
     if (isSubmit) run.completedAt = now;
     else if (existing?.completedAt) run.completedAt = existing.completedAt;
-    // v8.21.0: bypass de conferência — quem confere e preenche, autoaprova
-    if (isSubmit) {
-      // Pessoa equivalente ao employee atual: tenta achar via _pessoaId (se foi um empVirtual) ou via linkedEmployeeId
-      const myPessoaId = employee._pessoaId || (() => {
-        const m = String(employee.id).match(/^pes_as_emp_(.+)$/);
-        return m ? m[1] : null;
-      })();
-      const myPessoa = myPessoaId
-        ? (pessoas || []).find(p => p.id === myPessoaId)
-        : (pessoas || []).find(p => p.linkedEmployeeId === employee.id);
-      if (myPessoa && canReviewChecklist(myPessoa, tpl, restaurantId)) {
-        run.reviewedAt = now;
-        run.reviewerId = employee.id;
-        run.reviewerName = employee.name;
-        run.autoBypass = true;
-      }
-    } else if (existing?.reviewedAt) {
-      // Preserva review anterior (não deve acontecer em rascunho mas defensivo)
-      run.reviewedAt = existing.reviewedAt;
-      run.reviewerId = existing.reviewerId;
-      run.reviewerName = existing.reviewerName;
-    }
-    if (existing?.reviewerNotes) run.reviewerNotes = existing.reviewerNotes;
-    if (existing?.linkedOccurrenceIds) run.linkedOccurrenceIds = existing.linkedOccurrenceIds;
     return { run, existing };
   }
 
@@ -28560,30 +28453,7 @@ function OperationalChecklists({ employee, pessoas = [], miseChecklistTemplates,
     onUpdate("_toast", `✓ Checklist "${tpl.name}" enviado`);
   }
 
-  // v8.21.0: detecta se a pessoa atual pode conferir algum template, pra exibir aba "Conferir"
-  const myPessoaForReview = (() => {
-    const pid = employee._pessoaId || (() => {
-      const m = String(employee.id).match(/^pes_as_emp_(.+)$/);
-      return m ? m[1] : null;
-    })();
-    if (pid) return (pessoas || []).find(p => p.id === pid);
-    return (pessoas || []).find(p => p.linkedEmployeeId === employee.id);
-  })();
-  const allActiveTpls = (miseChecklistTemplates || []).filter(t => t.restaurantId === restaurantId && t.active !== false);
-  const myReviewableTpls = myPessoaForReview
-    ? allActiveTpls.filter(t => canReviewChecklist(myPessoaForReview, t, restaurantId))
-    : [];
-  const pendingReviews = (miseChecklistRuns || []).filter(r =>
-    r.restaurantId === restaurantId &&
-    r.completedAt && !r.reviewedAt &&
-    myReviewableTpls.some(t => t.id === r.templateId) &&
-    r.userId !== employee.id // não confere o próprio (já tem bypass)
-  );
-  const canReviewAny = myReviewableTpls.length > 0;
-  const [view, setView] = useState("executar"); // executar | conferir
-  const [reviewingRunId, setReviewingRunId] = useState(null);
-
-  if (templates.length === 0 && !canReviewAny) {
+  if (templates.length === 0) {
     return (
       <div style={{padding:"60px 24px",textAlign:"center",color:"var(--text3)"}}>
         <div style={{fontSize:48,marginBottom:16}}>✅</div>
@@ -28595,46 +28465,11 @@ function OperationalChecklists({ employee, pessoas = [], miseChecklistTemplates,
     );
   }
 
-  // Render do modo Conferir (sub-view ou modal de revisão)
-  if (canReviewAny && view === "conferir") {
-    return (
-      <ChecklistsConferenciaView
-        restaurantId={restaurantId}
-        employee={employee}
-        pessoas={pessoas}
-        miseChecklistTemplates={miseChecklistTemplates}
-        miseChecklistRuns={miseChecklistRuns}
-        onUpdate={onUpdate}
-        myReviewableTpls={myReviewableTpls}
-        pendingReviews={pendingReviews}
-        reviewingRunId={reviewingRunId}
-        setReviewingRunId={setReviewingRunId}
-        onSwitchToExecutar={() => setView("executar")}
-        myPessoa={myPessoaForReview}
-      />
-    );
-  }
-
   return (
     <div style={{display:"flex",flexDirection:"column",gap:16}}>
-      {canReviewAny && (
-        <div style={{display:"flex",gap:6,padding:4,background:"var(--bg2)",borderRadius:10,border:"1px solid var(--border)"}}>
-          <button onClick={()=>setView("executar")}
-            style={{flex:1,padding:"8px 12px",borderRadius:8,border:"none",background:"#15803d",color:"#fff",fontSize:13,fontWeight:700,cursor:"pointer"}}>
-            ✅ Executar
-          </button>
-          <button onClick={()=>setView("conferir")}
-            style={{flex:1,padding:"8px 12px",borderRadius:8,border:"none",background:"transparent",color:"var(--text2)",fontSize:13,fontWeight:600,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",gap:6}}>
-            🔎 Conferir
-            {pendingReviews.length > 0 && (
-              <span style={{padding:"1px 8px",background:"#dc2626",color:"#fff",borderRadius:10,fontSize:11,fontWeight:700}}>{pendingReviews.length}</span>
-            )}
-          </button>
-        </div>
-      )}
       <div style={{padding:"12px 16px",background:"#f0fdf4",border:"1px solid #10b98144",borderRadius:10}}>
         <div style={{fontSize:11,color:"#15803d",fontWeight:700,textTransform:"uppercase",letterSpacing:0.4}}>Checklists de hoje</div>
-        <div style={{fontSize:13,color:"var(--text)",marginTop:2}}>{fmtDate(today_)} · {shortName(employee.name)}</div>
+        <div style={{fontSize:13,color:"var(--text)",marginTop:2}}>{fmtDate(today_)} · {employee.name}</div>
       </div>
 
       {templates.map(tpl => {
@@ -28765,345 +28600,6 @@ function OperationalChecklists({ employee, pessoas = [], miseChecklistTemplates,
           </div>
         );
       })}
-    </div>
-  );
-}
-
-// ═══════════════════════════════════════════════════════════════
-// ──  CHECKLISTS — CONFERÊNCIA (Líder/Conferente) — v8.21.0      ──
-// ═══════════════════════════════════════════════════════════════
-// Lista de runs pendentes de conferência + tela de revisão + modal de criar ocorrência.
-// Critério de visibilidade: pessoa precisa passar em canReviewChecklist(pessoa, tpl, rid).
-// Ao aprovar, seta reviewedAt no run. Ocorrências criadas viram incidents (visibility:"internal").
-function ChecklistsConferenciaView({ restaurantId, employee, pessoas, miseChecklistTemplates, miseChecklistRuns, onUpdate, myReviewableTpls, pendingReviews, reviewingRunId, setReviewingRunId, onSwitchToExecutar, myPessoa }) {
-  const miseAc = "#7c9e5e";
-  // Já conferidos por mim (histórico recente)
-  const myReviewed = (miseChecklistRuns || []).filter(r =>
-    r.restaurantId === restaurantId &&
-    r.reviewedAt &&
-    myReviewableTpls.some(t => t.id === r.templateId)
-  ).sort((a,b) => (b.reviewedAt || "").localeCompare(a.reviewedAt || "")).slice(0, 20);
-
-  if (reviewingRunId) {
-    const run = (miseChecklistRuns || []).find(r => r.id === reviewingRunId);
-    if (!run) {
-      setTimeout(() => setReviewingRunId(null), 0);
-      return null;
-    }
-    const tpl = (miseChecklistTemplates || []).find(t => t.id === run.templateId);
-    return (
-      <ChecklistReviewScreen
-        run={run}
-        tpl={tpl}
-        restaurantId={restaurantId}
-        employee={employee}
-        pessoas={pessoas}
-        miseChecklistRuns={miseChecklistRuns}
-        onUpdate={onUpdate}
-        onBack={() => setReviewingRunId(null)}
-        myPessoa={myPessoa}
-      />
-    );
-  }
-
-  return (
-    <div style={{display:"flex",flexDirection:"column",gap:16}}>
-      <div style={{display:"flex",gap:6,padding:4,background:"var(--bg2)",borderRadius:10,border:"1px solid var(--border)"}}>
-        <button onClick={onSwitchToExecutar}
-          style={{flex:1,padding:"8px 12px",borderRadius:8,border:"none",background:"transparent",color:"var(--text2)",fontSize:13,fontWeight:600,cursor:"pointer"}}>
-          ✅ Executar
-        </button>
-        <button
-          style={{flex:1,padding:"8px 12px",borderRadius:8,border:"none",background:miseAc,color:"#fff",fontSize:13,fontWeight:700,cursor:"default",display:"flex",alignItems:"center",justifyContent:"center",gap:6}}>
-          🔎 Conferir
-          {pendingReviews.length > 0 && (
-            <span style={{padding:"1px 8px",background:"#fff",color:miseAc,borderRadius:10,fontSize:11,fontWeight:700}}>{pendingReviews.length}</span>
-          )}
-        </button>
-      </div>
-
-      <div style={{padding:"12px 16px",background:"#fef3c7",border:"1px solid #f59e0b44",borderRadius:10}}>
-        <div style={{fontSize:11,color:"#92400e",fontWeight:700,textTransform:"uppercase",letterSpacing:0.4}}>Conferência de checklists</div>
-        <div style={{fontSize:13,color:"var(--text)",marginTop:2}}>
-          {pendingReviews.length === 0
-            ? "Nenhum checklist pendente. Tudo conferido!"
-            : `${pendingReviews.length} pendente(s) — revise e aprove. Você pode marcar ocorrências relacionadas a empregados.`}
-        </div>
-      </div>
-
-      {/* PENDENTES */}
-      {pendingReviews.length > 0 && (
-        <div style={{display:"flex",flexDirection:"column",gap:8}}>
-          <div style={{fontSize:12,fontWeight:700,color:"var(--text2)",textTransform:"uppercase",letterSpacing:0.4}}>📋 Pendentes</div>
-          {pendingReviews.sort((a,b) => (b.completedAt||"").localeCompare(a.completedAt||"")).map(run => {
-            const tpl = (miseChecklistTemplates || []).find(t => t.id === run.templateId);
-            const items = run.items || [];
-            const doneCount = items.filter(i => i.done).length;
-            const totalCount = items.length;
-            const pct = totalCount > 0 ? Math.round(doneCount/totalCount*100) : 0;
-            const hasNotes = items.some(i => i.note && i.note.trim());
-            const area = tpl?.area || "Geral";
-            return (
-              <div key={run.id} onClick={() => setReviewingRunId(run.id)}
-                style={{padding:"12px 14px",background:"var(--card-bg)",border:"1px solid #f59e0b66",borderRadius:10,cursor:"pointer",display:"flex",alignItems:"center",gap:10,flexWrap:"wrap"}}>
-                <div style={{flex:1,minWidth:180}}>
-                  <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
-                    <span style={{fontSize:14,color:"var(--text)",fontWeight:700}}>{tpl?.name || "Template removido"}</span>
-                    <span style={{fontSize:10,padding:"2px 8px",borderRadius:10,background:area==="Geral"?"var(--bg2)":(AREA_COLORS[area]||"#888")+"22",color:area==="Geral"?"var(--text3)":(AREA_COLORS[area]||"#888"),fontWeight:700}}>{area}</span>
-                    {hasNotes && <span style={{fontSize:10,padding:"2px 6px",borderRadius:6,background:"#fef3c7",color:"#b45309",fontWeight:700}}>📝 com observações</span>}
-                  </div>
-                  <div style={{fontSize:12,color:"var(--text3)",marginTop:3}}>
-                    👤 <b>{shortName(run.userName)}</b> · {fmtDate(run.date)} às {new Date(run.completedAt).toLocaleTimeString("pt-BR",{hour:"2-digit",minute:"2-digit"})}
-                  </div>
-                  <div style={{display:"flex",alignItems:"center",gap:8,marginTop:6}}>
-                    <div style={{width:120,height:5,background:"var(--bg2)",borderRadius:3,overflow:"hidden"}}>
-                      <div style={{width:`${pct}%`,height:"100%",background:pct===100?"#15803d":"#f59e0b"}}/>
-                    </div>
-                    <span style={{fontSize:11,color:"var(--text3)",fontFamily:"'DM Mono',monospace"}}>{doneCount}/{totalCount}</span>
-                  </div>
-                </div>
-                <button style={{padding:"8px 16px",borderRadius:8,border:"none",background:"#f59e0b",color:"#fff",fontSize:13,fontWeight:700,cursor:"pointer"}}>
-                  🔎 Conferir →
-                </button>
-              </div>
-            );
-          })}
-        </div>
-      )}
-
-      {/* HISTÓRICO MEU */}
-      {myReviewed.length > 0 && (
-        <div style={{display:"flex",flexDirection:"column",gap:8}}>
-          <div style={{fontSize:12,fontWeight:700,color:"var(--text2)",textTransform:"uppercase",letterSpacing:0.4,marginTop:8}}>✅ Conferidos recentemente</div>
-          {myReviewed.map(run => {
-            const tpl = (miseChecklistTemplates || []).find(t => t.id === run.templateId);
-            const items = run.items || [];
-            const doneCount = items.filter(i => i.done).length;
-            const totalCount = items.length;
-            return (
-              <div key={run.id} onClick={() => setReviewingRunId(run.id)}
-                style={{padding:"10px 14px",background:"var(--card-bg)",border:"1px solid var(--border)",borderRadius:10,cursor:"pointer",display:"flex",alignItems:"center",gap:10,opacity:0.85}}>
-                <div style={{flex:1,minWidth:180}}>
-                  <div style={{fontSize:13,color:"var(--text)",fontWeight:600}}>
-                    {tpl?.name || "Template removido"}
-                    {run.autoBypass && <span style={{marginLeft:8,fontSize:10,color:"var(--text3)",fontStyle:"italic"}}>(auto-aprovado)</span>}
-                  </div>
-                  <div style={{fontSize:11,color:"var(--text3)",marginTop:2}}>
-                    👤 {shortName(run.userName)} · {fmtDate(run.date)} · ✓ por {shortName(run.reviewerName)} {run.reviewedAt ? new Date(run.reviewedAt).toLocaleTimeString("pt-BR",{hour:"2-digit",minute:"2-digit"}) : ""}
-                  </div>
-                </div>
-                <div style={{fontSize:11,fontFamily:"'DM Mono',monospace",color:"var(--text3)"}}>{doneCount}/{totalCount}</div>
-                <span style={{fontSize:18,color:"var(--text3)"}}>›</span>
-              </div>
-            );
-          })}
-        </div>
-      )}
-    </div>
-  );
-}
-
-// Tela de revisão individual de um run.
-// v8.21.0: read-only do que o empregado fez + observação geral do conferente + lista de ocorrências geradas + botão Aprovar.
-function ChecklistReviewScreen({ run, tpl, restaurantId, employee, pessoas, miseChecklistRuns, onUpdate, onBack, myPessoa }) {
-  const items = (tpl?.items || []);
-  const runItems = run.items || [];
-  const [reviewerNotes, setReviewerNotes] = useState(run.reviewerNotes || "");
-  const [occurrenceModalOpen, setOccurrenceModalOpen] = useState(false);
-  const linkedOccs = run.linkedOccurrenceIds || [];
-
-  // Pessoas atribuíveis na ocorrência: equipe do restaurante. Se o líder lidera áreas específicas, restringe.
-  const allTeamPessoas = (pessoas || []).filter(p => (p.restaurantIds || []).includes(restaurantId) && p.isTeam?.[restaurantId]);
-  // v8.21.0 TODO: filtrar por área (liderAreas vs área do cargo da pessoa). Como roles não está em escopo, mostra todos por enquanto.
-  // const liderAreas = myPessoa?.permissions?.[restaurantId]?.special?.areas || [];
-  const candidatePessoas = allTeamPessoas;
-
-  function approve() {
-    const now = new Date().toISOString();
-    const updated = {
-      ...run,
-      reviewedAt: now,
-      reviewerId: employee.id,
-      reviewerName: employee.name,
-      reviewerNotes: reviewerNotes.trim() || null,
-      updatedAt: now,
-    };
-    onUpdate("miseChecklistRuns", (miseChecklistRuns || []).map(r => r.id === run.id ? updated : r));
-    onUpdate("_toast", `✅ Checklist conferido`);
-    onBack();
-  }
-
-  function addOccurrence(empPessoa, description, severity) {
-    const now = new Date().toISOString();
-    const incId = `inc_${Date.now().toString(36)}${Math.random().toString(36).slice(2,5)}`;
-    const newInc = {
-      id: incId,
-      restaurantId,
-      employeeIds: [empPessoa.linkedEmployeeId || empPessoa.id],
-      type: "checklist_review",
-      severity: severity || "media",
-      description: description.trim(),
-      date: today(),
-      createdAt: now,
-      createdBy: employee.name,
-      createdById: employee.id,
-      visibility: "internal",
-      sourceChecklistRunId: run.id,
-      sourceChecklistTemplateName: tpl?.name || "—",
-    };
-    // Adiciona à coleção incidents (usa updater function pra evitar stale state)
-    onUpdate("incidents", (prev) => [...(prev || []), newInc]);
-    // Refletir no run.linkedOccurrenceIds
-    const updated = {
-      ...run,
-      linkedOccurrenceIds: [...(run.linkedOccurrenceIds || []), incId],
-      updatedAt: now,
-    };
-    onUpdate("miseChecklistRuns", (miseChecklistRuns || []).map(r => r.id === run.id ? updated : r));
-    onUpdate("_toast", `⚠️ Ocorrência registrada para ${shortName(empPessoa.name)}`);
-    setOccurrenceModalOpen(false);
-  }
-
-  return (
-    <div style={{display:"flex",flexDirection:"column",gap:14}}>
-      <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
-        <button onClick={onBack} style={{...S.btnSecondary,fontSize:13,padding:"8px 14px"}}>← Voltar</button>
-        <div style={{flex:1,minWidth:0}}>
-          <div style={{fontSize:11,color:"var(--text3)",fontWeight:700,textTransform:"uppercase",letterSpacing:0.4}}>Conferindo</div>
-          <div style={{fontSize:16,color:"var(--text)",fontWeight:700}}>{tpl?.name || "Template removido"}</div>
-        </div>
-        <button onClick={approve} style={{background:"#15803d",color:"#fff",border:"none",borderRadius:8,padding:"10px 20px",fontSize:13,fontWeight:700,cursor:"pointer",minHeight:44}}>
-          ✅ Aprovar e arquivar
-        </button>
-      </div>
-
-      <div style={{padding:"10px 14px",background:"var(--card-bg)",border:"1px solid var(--border)",borderRadius:10,fontSize:13,color:"var(--text2)"}}>
-        Preenchido por <b>{shortName(run.userName)}</b> em {fmtDate(run.date)} às {new Date(run.completedAt).toLocaleTimeString("pt-BR",{hour:"2-digit",minute:"2-digit"})}.
-      </div>
-
-      {/* Itens read-only */}
-      <div style={{display:"flex",flexDirection:"column",gap:6}}>
-        {items.map((it, idx) => {
-          const ri = runItems.find(x => x.itemId === it.id);
-          const done = !!ri?.done;
-          return (
-            <div key={it.id} style={{padding:"10px 14px",background:done?"#f0fdf4":"#fef9e7",border:`1px solid ${done?"#10b98144":"#f59e0b44"}`,borderRadius:8}}>
-              <div style={{display:"flex",alignItems:"center",gap:10}}>
-                <span style={{fontSize:18}}>{done ? "✅" : "⬜"}</span>
-                <span style={{fontSize:11,color:"var(--text3)",fontFamily:"'DM Mono',monospace",minWidth:24}}>{idx+1}.</span>
-                <span style={{fontSize:14,color:"var(--text)",fontWeight:500,flex:1,textDecoration:done?"line-through":"none"}}>{it.text}</span>
-              </div>
-              {ri?.note && (
-                <div style={{marginTop:6,padding:"6px 10px",background:"#fef3c7",borderRadius:6,fontSize:12,color:"#92400e",fontStyle:"italic"}}>
-                  📝 {ri.note}
-                </div>
-              )}
-            </div>
-          );
-        })}
-      </div>
-
-      {/* Observação geral do conferente */}
-      <div style={{padding:"12px 14px",background:"var(--card-bg)",border:"1px solid var(--border)",borderRadius:10}}>
-        <label style={{fontSize:12,fontWeight:700,color:"var(--text2)",display:"block",marginBottom:6}}>📋 Observação da conferência (opcional)</label>
-        <textarea
-          value={reviewerNotes}
-          onChange={e=>setReviewerNotes(e.target.value)}
-          placeholder="Comentário geral, contexto, observações que ficam no histórico..."
-          rows={3}
-          style={{width:"100%",padding:"8px 10px",borderRadius:6,border:"1px solid var(--border)",background:"var(--bg2)",fontSize:13,resize:"vertical",color:"var(--text)",boxSizing:"border-box"}}
-        />
-      </div>
-
-      {/* Ocorrências relacionadas */}
-      <div style={{padding:"12px 14px",background:"var(--card-bg)",border:"1px solid var(--border)",borderRadius:10}}>
-        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:10,gap:8,flexWrap:"wrap"}}>
-          <div style={{fontSize:12,fontWeight:700,color:"var(--text2)"}}>⚠️ Ocorrências geradas ({linkedOccs.length})</div>
-          <button onClick={()=>setOccurrenceModalOpen(true)}
-            style={{background:"#dc2626",color:"#fff",border:"none",borderRadius:8,padding:"6px 14px",fontSize:12,fontWeight:700,cursor:"pointer"}}>
-            + Nova ocorrência
-          </button>
-        </div>
-        {linkedOccs.length === 0 ? (
-          <div style={{fontSize:11,color:"var(--text3)",fontStyle:"italic"}}>
-            Nenhuma ocorrência registrada. Use o botão acima se identificou problema com algum empregado.
-          </div>
-        ) : (
-          <div style={{fontSize:11,color:"var(--text3)"}}>
-            {linkedOccs.length} ocorrência(s) vinculada(s) — visível em Reuniões e na trilha interna do empregado.
-          </div>
-        )}
-      </div>
-
-      {occurrenceModalOpen && (
-        <ChecklistOccurrenceModal
-          candidatePessoas={candidatePessoas}
-          onClose={()=>setOccurrenceModalOpen(false)}
-          onConfirm={addOccurrence}
-          tplName={tpl?.name || "—"}
-        />
-      )}
-    </div>
-  );
-}
-
-// Modal de criar ocorrência durante conferência
-function ChecklistOccurrenceModal({ candidatePessoas, onClose, onConfirm, tplName }) {
-  const [empId, setEmpId] = useState("");
-  const [description, setDescription] = useState("");
-  const [severity, setSeverity] = useState("media");
-  const sortedPessoas = [...candidatePessoas].sort((a,b) => (a.name||"").localeCompare(b.name||""));
-  const selPessoa = sortedPessoas.find(p => p.id === empId);
-  return (
-    <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.5)",zIndex:1000,display:"flex",alignItems:"center",justifyContent:"center",padding:16}} onClick={onClose}>
-      <div onClick={e=>e.stopPropagation()} style={{background:"var(--card-bg)",borderRadius:14,maxWidth:520,width:"100%",padding:24,maxHeight:"90vh",overflowY:"auto"}}>
-        <h3 style={{margin:"0 0 6px",color:"var(--text)",fontSize:18,fontWeight:700}}>⚠️ Nova ocorrência</h3>
-        <p style={{margin:"0 0 14px",fontSize:12,color:"var(--text3)",lineHeight:1.5}}>
-          Vinculada à conferência de <b>{tplName}</b>. Vai pra coleção de incidentes — visível em reuniões e na trilha interna do empregado.
-        </p>
-        <div style={{display:"flex",flexDirection:"column",gap:10}}>
-          <div>
-            <label style={{fontSize:12,fontWeight:600,color:"var(--text2)",display:"block",marginBottom:4}}>Empregado</label>
-            <select value={empId} onChange={e=>setEmpId(e.target.value)} style={S.input}>
-              <option value="">— Selecione —</option>
-              {sortedPessoas.map(p => <option key={p.id} value={p.id}>{shortName(p.name)}</option>)}
-            </select>
-          </div>
-          <div>
-            <label style={{fontSize:12,fontWeight:600,color:"var(--text2)",display:"block",marginBottom:4}}>Severidade</label>
-            <div style={{display:"flex",gap:6}}>
-              {[
-                {id:"baixa",label:"Baixa",color:"#0ea5e9"},
-                {id:"media",label:"Média",color:"#f59e0b"},
-                {id:"alta",label:"Alta",color:"#dc2626"},
-              ].map(s => (
-                <button key={s.id} onClick={()=>setSeverity(s.id)}
-                  style={{flex:1,padding:"8px 10px",borderRadius:8,border:`1px solid ${severity===s.id?s.color:"var(--border)"}`,background:severity===s.id?s.color:"transparent",color:severity===s.id?"#fff":"var(--text2)",fontSize:13,fontWeight:severity===s.id?700:500,cursor:"pointer"}}>
-                  {s.label}
-                </button>
-              ))}
-            </div>
-          </div>
-          <div>
-            <label style={{fontSize:12,fontWeight:600,color:"var(--text2)",display:"block",marginBottom:4}}>Descrição</label>
-            <textarea value={description} onChange={e=>setDescription(e.target.value)}
-              placeholder="Descreva o que foi observado durante a conferência..."
-              rows={4}
-              style={{width:"100%",padding:"8px 10px",borderRadius:6,border:"1px solid var(--border)",background:"var(--bg2)",fontSize:13,resize:"vertical",color:"var(--text)",boxSizing:"border-box"}}/>
-          </div>
-        </div>
-        <div style={{display:"flex",gap:8,justifyContent:"flex-end",marginTop:16}}>
-          <button onClick={onClose} style={{...S.btnSecondary,padding:"8px 14px",fontSize:13}}>Cancelar</button>
-          <button onClick={()=>{
-              if (!selPessoa) { alert("Escolha um empregado."); return; }
-              if (!description.trim()) { alert("Descreva a ocorrência."); return; }
-              onConfirm(selPessoa, description, severity);
-            }}
-            style={{background:"#dc2626",color:"#fff",border:"none",borderRadius:8,padding:"8px 16px",fontSize:13,fontWeight:700,cursor:"pointer"}}>
-            Registrar ocorrência
-          </button>
-        </div>
-      </div>
     </div>
   );
 }
