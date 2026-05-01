@@ -3,7 +3,7 @@ import React, { useState, useEffect, useMemo, useRef, Component } from "react";
 import { db } from "./firebase";
 import { doc, getDoc, setDoc, onSnapshot } from "firebase/firestore";
 
-const APP_VERSION = "8.20.0";
+const APP_VERSION = "8.19.1";
 
 // v8.11.1: comparação de versão semver-like (8.11.1 > 8.10.7 > 8.9.4)
 function compareVersions(a, b) {
@@ -11180,12 +11180,6 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
   const defaultGroup = "inicio";
   const [tabGroup, setTabGroup] = useState(defaultGroup);
   const [tab, setTab] = useState(forceTab || (isLider ? "employees" : "inicio"));
-  // v8.20.0: trigger pra abrir uma pessoa específica em edição (vindo do resumo de permissões)
-  const [editPessoaTrigger, setEditPessoaTrigger] = useState(null); // { id, ts } — ts pra forçar effect mesmo se for o mesmo id
-  function openPessoaForEdit(pessoaId) {
-    setTab("pessoas");
-    setEditPessoaTrigger({ id: pessoaId, ts: Date.now() });
-  }
   // Se o shell forçar um tab específico, sincroniza
   useEffect(() => {
     if (forceTab && forceTab !== tab) setTab(forceTab);
@@ -12675,7 +12669,6 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
             mobileOnly={mobileOnly}
             realIsOwner={realIsOwner || isOwner}
             onStartImpersonate={onStartImpersonate}
-            editTrigger={editPessoaTrigger}
           />
         )}
 
@@ -12872,13 +12865,16 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
           />
         )}
 
-        {/* PERMISSÕES — v8.20.0: nova view por nível (substituiu a matriz sanfona) */}
+        {/* PERMISSÕES — matriz unificada */}
         {tab === "permissoes" && (
-          <PermissoesResumo
+          <PermissoesMatrix
             restaurantId={rid}
             pessoas={data?.pessoas ?? []}
+            employees={employees}
+            managers={data?.managers ?? []}
             owners={data?.owners ?? []}
-            onOpenPessoa={openPessoaForEdit}
+            permProfiles={data?.permProfiles ?? {}}
+            onUpdate={onUpdate}
             mobileOnly={mobileOnly}
           />
         )}
@@ -24344,108 +24340,7 @@ function FreelaHistoricoTab({ restaurantId, restPessoas, shifts, lotes, fmtHoras
   );
 }
 
-// v8.20.0: editor reusável de permissões da pessoa (usado no cadastro inline e no resumo).
-// Recebe o objeto perms `{ operational, admin, special: { areas, ... } }` e devolve via onChange.
-// Render: 1 acordeão por grupo de PERM_GROUPS (sem legacy) + bloco final de áreas (default vazio).
-function PessoaPermsEditor({ perms, onChange, mobileOnly, compact = false }) {
-  const safe = perms || { operational: {}, admin: {}, special: { areas: [] } };
-  const sp = safe.special || {};
-  const areas = Array.isArray(sp.areas) ? sp.areas : [];
-  const [openGroups, setOpenGroups] = useState({});
-  function isOn(key) {
-    const [g, n] = key.split(".");
-    return safe[g]?.[n] === true;
-  }
-  function setKey(key, val) {
-    const [g, n] = key.split(".");
-    const next = {
-      ...safe,
-      [g]: { ...(safe[g] || {}), [n]: val },
-    };
-    onChange(next);
-  }
-  function setGroupAll(group, val) {
-    const next = { ...safe };
-    group.perms.filter(p => !p.legacy).forEach(p => {
-      const [g, n] = p.key.split(".");
-      next[g] = { ...(next[g] || {}), [n]: val };
-    });
-    onChange(next);
-  }
-  function toggleArea(area) {
-    const has = areas.includes(area);
-    const newAreas = has ? areas.filter(a => a !== area) : [...areas, area];
-    onChange({ ...safe, special: { ...sp, areas: newAreas } });
-  }
-  function setLider(val) {
-    onChange({ ...safe, special: { ...sp, isLider: val, areas: val ? areas : [] } });
-  }
-  return (
-    <div style={{display:"flex",flexDirection:"column",gap:8}}>
-      {PERM_GROUPS.filter(g => !g.legacy).map(group => {
-        const visiblePerms = group.perms.filter(p => !p.legacy);
-        const onCount = visiblePerms.filter(p => isOn(p.key)).length;
-        const total = visiblePerms.length;
-        const allOn = onCount === total && total > 0;
-        const open = openGroups[group.id] ?? false;
-        return (
-          <div key={group.id} style={{border:`1px solid ${onCount>0?group.color+"66":"var(--border)"}`,borderRadius:10,background:onCount>0?group.bg:"var(--card-bg)",overflow:"hidden"}}>
-            <div onClick={()=>setOpenGroups(s=>({...s,[group.id]:!open}))}
-              style={{padding:"10px 12px",display:"flex",alignItems:"center",gap:10,cursor:"pointer",borderBottom:open?`1px solid ${group.color}33`:"none"}}>
-              <span style={{fontSize:13,fontWeight:700,color:"var(--text)",flex:1}}>{group.label}</span>
-              <span style={{fontSize:11,fontWeight:700,color:onCount>0?group.color:"var(--text3)",fontFamily:"'DM Mono',monospace"}}>{onCount}/{total}</span>
-              <button type="button" onClick={e=>{e.stopPropagation();setGroupAll(group, !allOn);}}
-                style={{padding:"4px 10px",borderRadius:6,fontSize:10,fontWeight:700,letterSpacing:0.4,textTransform:"uppercase",cursor:"pointer",border:`1px solid ${group.color}66`,background:allOn?group.color:"transparent",color:allOn?"#fff":group.color}}>
-                {allOn ? "Tudo ✓" : "Tudo"}
-              </button>
-              <span style={{color:"var(--text3)",fontSize:13}}>{open ? "▼" : "▶"}</span>
-            </div>
-            {open && (
-              <div style={{padding:"6px 12px 10px",display:"grid",gridTemplateColumns:mobileOnly||compact?"1fr":"1fr 1fr",gap:4}}>
-                {visiblePerms.map(p => {
-                  const on = isOn(p.key);
-                  return (
-                    <label key={p.key} style={{display:"flex",alignItems:"center",gap:8,padding:"6px 8px",cursor:"pointer",borderRadius:6,background:on?"#ffffff55":"transparent"}}>
-                      <input type="checkbox" checked={on} onChange={e=>setKey(p.key, e.target.checked)} style={{accentColor:group.color,cursor:"pointer",width:16,height:16,flexShrink:0}}/>
-                      <span style={{fontSize:11,marginRight:2}}>{p.icon}</span>
-                      <span style={{fontSize:12,color:on?"var(--text)":"var(--text2)",fontWeight:on?600:400,lineHeight:1.3}}>{p.label}</span>
-                    </label>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-        );
-      })}
-      {/* Bloco Líder + Áreas — default vazio por segurança */}
-      <div style={{border:`1px solid ${sp.isLider?"#f59e0b66":"var(--border)"}`,borderRadius:10,background:sp.isLider?"#fef3c7":"var(--card-bg)",padding:"10px 12px"}}>
-        <label style={{display:"flex",alignItems:"center",gap:10,cursor:"pointer",marginBottom:sp.isLider?10:0}}>
-          <input type="checkbox" checked={!!sp.isLider} onChange={e=>setLider(e.target.checked)} style={{accentColor:"#f59e0b",cursor:"pointer",width:18,height:18}}/>
-          <span style={{fontSize:13,color:"var(--text)",fontWeight:700}}>⭐ Líder</span>
-          <span style={{fontSize:11,color:"var(--text3)",fontWeight:400}}>(lidera uma ou mais áreas — pode ver dados da equipe da área)</span>
-        </label>
-        {sp.isLider && (
-          <div>
-            <div style={{fontSize:11,color:"var(--text3)",marginBottom:6}}>Áreas que lidera (default: nenhuma — selecione abaixo):</div>
-            <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
-              {AREAS.map(a => {
-                const on = areas.includes(a);
-                return (
-                  <button key={a} type="button" onClick={()=>toggleArea(a)}
-                    style={{padding:"5px 12px",borderRadius:18,fontSize:12,fontWeight:on?700:500,cursor:"pointer",border:`1px solid ${on?"#f59e0b":"var(--border)"}`,background:on?"#f59e0b":"transparent",color:on?"#fff":"var(--text2)"}}>
-                    {on ? "✓ " : ""}{a}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
-function PessoasAdmin({ restaurantId, pessoas, roles, owners, employees, managers, restCode, onUpdate, mobileOnly, realIsOwner, onStartImpersonate, editTrigger }) {
+function PessoasAdmin({ restaurantId, pessoas, roles, owners, employees, managers, restCode, onUpdate, mobileOnly, realIsOwner, onStartImpersonate }) {
   // Filtra owners do sistema — eles têm acesso implícito, não constam como pessoa do restaurante
   const ownerCpfSet = new Set((owners || []).map(o => (o.cpf || "").replace(/\D/g, "")).filter(Boolean));
   const restPessoas = (pessoas || []).filter(p => {
@@ -24884,20 +24779,8 @@ Regras:
       : `✅ ${nm} cadastrada`);
   }
 
-  // v8.20.0: react ao editTrigger vindo do resumo de permissões — abre a pessoa em edição
-  useEffect(() => {
-    if (!editTrigger?.id) return;
-    const p = (pessoas || []).find(x => x.id === editTrigger.id);
-    if (!p) return;
-    startEdit(p);
-    // Scroll suave pro topo do form (depois do render)
-    setTimeout(() => { try { window.scrollTo({ top: 0, behavior: "smooth" }); } catch (e) {} }, 50);
-  }, [editTrigger?.id, editTrigger?.ts]); // eslint-disable-line react-hooks/exhaustive-deps
-
   function startEdit(p) {
     const td = p.teamData?.[restaurantId] || {};
-    // v8.20.0: carrega perms da pessoa pra edição inline
-    const ridPerms = p.permissions?.[restaurantId] || { operational: {}, admin: {}, special: {} };
     setEditingId(p.id);
     setEditForm({
       name: p.name ?? "",
@@ -24912,11 +24795,6 @@ Regras:
       roleId: td.roleId ?? "",
       admission: td.admission ?? "",
       isFreela: !!p.isFreela,
-      perms: {
-        operational: { ...(ridPerms.operational || {}) },
-        admin: { ...(ridPerms.admin || {}) },
-        special: { ...(ridPerms.special || {}), areas: [...(ridPerms.special?.areas || [])] },
-      },
     });
   }
   function saveEdit() {
@@ -24931,8 +24809,6 @@ Regras:
     let updatedPessoa = null;
     const next = (pessoas || []).map(p => {
       if (p.id !== editingId) return p;
-      // v8.20.0: salva perms editadas inline no cadastro
-      const newPerms = editForm.perms || { operational: {}, admin: {}, special: {} };
       updatedPessoa = {
         ...p,
         name: nm,
@@ -24952,10 +24828,6 @@ Regras:
             roleId: editForm.roleId || null,
             admission: editForm.admission || null,
           } : (p.teamData?.[restaurantId] || {}),
-        },
-        permissions: {
-          ...(p.permissions || {}),
-          [restaurantId]: newPerms,
         },
       };
       return updatedPessoa;
@@ -25244,18 +25116,6 @@ Regras:
                       <span style={{fontSize:13,color:editForm.isFreela?"#7c3aed":"var(--text)",fontWeight:600}}>🎒 É freela neste restaurante</span>
                       <span style={{fontSize:11,color:"var(--text3)",fontWeight:400}}>(pega shifts pontuais — PIX e WhatsApp obrigatórios)</span>
                     </label>
-                  </div>
-                  {/* v8.20.0: Permissões inline no cadastro */}
-                  <div style={{padding:"10px 12px",background:"var(--card-bg)",border:"1px solid var(--border)",borderRadius:8,marginBottom:10}}>
-                    <div style={{fontSize:13,color:"var(--text)",fontWeight:700,marginBottom:8}}>🔐 Permissões neste restaurante</div>
-                    <div style={{fontSize:11,color:"var(--text3)",marginBottom:10,lineHeight:1.5}}>
-                      Por padrão a pessoa não acessa nada — marque só o que precisar. Use "Tudo" pra liberar um grupo inteiro.
-                    </div>
-                    <PessoaPermsEditor
-                      perms={editForm.perms}
-                      onChange={(np)=>setEditForm(f=>({...f,perms:np}))}
-                      mobileOnly={mobileOnly}
-                    />
                   </div>
                   <div style={{display:"flex",gap:8,justifyContent:"flex-end"}}>
                     <button onClick={()=>setEditingId(null)} style={{...S.btnSecondary,fontSize:12,padding:"6px 14px"}}>Cancelar</button>
@@ -25719,167 +25579,6 @@ const PROFILE_COLORS = [
   { id: "gray",   label: "Cinza",   color: "var(--text3)" },
 ];
 
-// v8.20.0: nova view de permissões. Substitui PermissoesMatrix.
-// Mostra pessoas agrupadas por nível (Owner / Admin / Líder / Equipe) com chips coloridos das perms ativas.
-// "Editar permissões" → abre o cadastro da pessoa (via callback openPessoaForEdit).
-function PermissoesResumo({ restaurantId, pessoas, owners, onOpenPessoa, mobileOnly }) {
-  const [filter, setFilter] = useState("");
-  const [collapsed, setCollapsed] = useState({}); // { nivel: bool }
-
-  const ownerCpfSet = new Set((owners || []).map(o => (o.cpf || "").replace(/\D/g, "")).filter(Boolean));
-  const restPessoas = (pessoas || []).filter(p => {
-    if (!(p.restaurantIds || []).includes(restaurantId)) return false;
-    const cpfD = (p.cpf || "").replace(/\D/g, "");
-    if (cpfD && ownerCpfSet.has(cpfD)) return false;
-    return true;
-  });
-
-  // Classifica cada pessoa em um nível
-  function classify(p) {
-    const perms = p.permissions?.[restaurantId] || { operational: {}, admin: {}, special: {} };
-    const adminCount = Object.values(perms.admin || {}).filter(v => v === true).length;
-    const isLider = perms.special?.isLider === true;
-    const isTeam = !!p.isTeam?.[restaurantId];
-    if (adminCount > 0 || perms.special?.isDP) return "admin";
-    if (isLider) return "lider";
-    if (isTeam || p.isFreela) return "empregado";
-    return "empregado"; // default
-  }
-
-  // Filtro por nome
-  const q = filter.trim().toLowerCase();
-  const filtered = q ? restPessoas.filter(p => (p.name || "").toLowerCase().includes(q)) : restPessoas;
-
-  const buckets = { admin: [], lider: [], empregado: [] };
-  filtered.forEach(p => { buckets[classify(p)].push(p); });
-
-  // Owners do sistema (acesso implícito a tudo) — só aparecem como info
-  const ownersOfRest = (owners || []).filter(o => o.restaurantIds === undefined || (o.restaurantIds || []).includes(restaurantId) || o.isMaster);
-
-  const NIVEIS = [
-    { id: "owner",     label: "👑 Owners (acesso total implícito)", color: "#d4a017", bg: "#d4a01711", desc: "Acesso a tudo no sistema. Não editável aqui." },
-    { id: "admin",     label: "🛂 Administradores", color: "#a855f7", bg: "#a855f711", desc: "Têm uma ou mais permissões administrativas." },
-    { id: "lider",     label: "⭐ Líderes", color: "#f59e0b", bg: "#f59e0b11", desc: "Lideram uma ou mais áreas operacionais." },
-    { id: "empregado", label: "👥 Equipe / Empregados", color: "#0ea5e9", bg: "#0ea5e911", desc: "Operacional sem permissões administrativas." },
-  ];
-
-  function renderPerssoaCard(p) {
-    const perms = p.permissions?.[restaurantId] || { operational: {}, admin: {}, special: {} };
-    const sp = perms.special || {};
-    // Conta perms ativas por grupo (sem legacy)
-    const activeByGroup = PERM_GROUPS.filter(g => !g.legacy).map(group => {
-      const activeP = group.perms.filter(p2 => {
-        if (p2.legacy) return false;
-        const [g, n] = p2.key.split(".");
-        return perms[g]?.[n] === true;
-      });
-      return { group, activeP };
-    }).filter(x => x.activeP.length > 0);
-    const isTeam = !!p.isTeam?.[restaurantId];
-    return (
-      <div key={p.id} style={{padding:"12px 14px",background:"var(--card-bg)",border:"1px solid var(--border)",borderRadius:10,display:"flex",flexDirection:"column",gap:8}}>
-        <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
-          <span style={{color:"var(--text)",fontWeight:700,fontSize:14}}>{p.name}</span>
-          {isTeam && <span style={{fontSize:10,padding:"1px 8px",borderRadius:10,background:"#7c9e5e22",color:"#15803d",fontWeight:700,letterSpacing:0.4}}>EQUIPE</span>}
-          {p.isFreela && <span style={{fontSize:10,padding:"1px 8px",borderRadius:10,background:"#7c3aed22",color:"#7c3aed",fontWeight:700,letterSpacing:0.4}}>FREELA</span>}
-          {p.linkedManagerId && <span style={{fontSize:10,padding:"1px 8px",borderRadius:10,background:"var(--ac)22",color:"var(--ac)",fontWeight:700,letterSpacing:0.4}}>GESTOR</span>}
-          {sp.isLider && (sp.areas || []).length > 0 && (
-            <span style={{fontSize:10,padding:"1px 8px",borderRadius:10,background:"#f59e0b22",color:"#b45309",fontWeight:700,letterSpacing:0.4}}>
-              ⭐ Líder · {sp.areas.join(", ")}
-            </span>
-          )}
-          <span style={{flex:1}}/>
-          <button onClick={()=>onOpenPessoa(p.id)} style={{padding:"6px 12px",borderRadius:8,border:"1px solid var(--ac)44",background:"var(--ac)11",color:"var(--ac)",fontSize:12,fontWeight:700,cursor:"pointer"}}>
-            ✏️ Editar permissões
-          </button>
-        </div>
-        {activeByGroup.length === 0 ? (
-          <div style={{fontSize:11,color:"var(--text3)",fontStyle:"italic"}}>
-            Sem permissões ativas — só acessa o que é público (caixa de entrada, comunicados, etc.).
-          </div>
-        ) : (
-          <div style={{display:"flex",flexDirection:"column",gap:4}}>
-            {activeByGroup.map(({ group, activeP }) => (
-              <div key={group.id} style={{display:"flex",alignItems:"center",gap:6,flexWrap:"wrap"}}>
-                <span style={{fontSize:10,fontWeight:700,color:group.color,minWidth:120,letterSpacing:0.3}}>{group.label}</span>
-                <div style={{display:"flex",gap:4,flexWrap:"wrap"}}>
-                  {activeP.map(perm => (
-                    <span key={perm.key} style={{fontSize:10,padding:"2px 8px",borderRadius:10,background:group.bg,color:group.color,fontWeight:600,border:`1px solid ${group.color}33`}}>
-                      {perm.icon} {perm.label}
-                    </span>
-                  ))}
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-    );
-  }
-
-  return (
-    <div style={{display:"flex",flexDirection:"column",gap:12}}>
-      {/* Cabeçalho com filtro */}
-      <div style={{padding:"12px 14px",background:"var(--card-bg)",border:"1px solid var(--border)",borderRadius:10,display:"flex",gap:10,alignItems:"center",flexWrap:"wrap"}}>
-        <div style={{flex:"1 1 280px",display:"flex",flexDirection:"column",gap:2}}>
-          <span style={{fontSize:11,color:"var(--text3)",fontWeight:600}}>🔐 Permissões — visão por nível</span>
-          <span style={{fontSize:11,color:"var(--text3)"}}>Pessoas agrupadas pelo seu nível mais alto. Clique em "Editar permissões" pra mudar individualmente.</span>
-        </div>
-        <input value={filter} onChange={e=>setFilter(e.target.value)} placeholder="🔎 Filtrar por nome..." style={{...S.input,maxWidth:260,fontSize:13}}/>
-      </div>
-
-      {/* Owners (info) */}
-      {ownersOfRest.length > 0 && (
-        <div style={{padding:"12px 14px",background:"#d4a01711",border:"1px solid #d4a01744",borderRadius:10}}>
-          <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:6}}>
-            <span style={{fontSize:13,color:"#92400e",fontWeight:700}}>👑 Owners (acesso total implícito)</span>
-            <span style={{fontSize:11,color:"var(--text3)"}}>· {ownersOfRest.length} pessoa(s)</span>
-          </div>
-          <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
-            {ownersOfRest.map(o => (
-              <span key={o.id} style={{fontSize:12,padding:"4px 10px",borderRadius:14,background:"#fffbeb",border:"1px solid #d4a01744",color:"#92400e",fontWeight:600}}>
-                {o.name}{o.isMaster ? " (Master)" : ""}
-              </span>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {NIVEIS.filter(n => n.id !== "owner").map(nivel => {
-        const list = buckets[nivel.id] || [];
-        const isCollapsed = collapsed[nivel.id];
-        return (
-          <div key={nivel.id} style={{border:"1px solid var(--border)",borderRadius:12,background:nivel.bg,overflow:"hidden"}}>
-            <div onClick={()=>setCollapsed(s=>({...s,[nivel.id]:!isCollapsed}))}
-              style={{padding:"12px 14px",borderBottom:isCollapsed?"none":`1px solid ${nivel.color}22`,display:"flex",alignItems:"center",gap:10,cursor:"pointer"}}>
-              <span style={{fontSize:14,color:"var(--text)",fontWeight:700,flex:1}}>{nivel.label}</span>
-              <span style={{fontSize:12,fontWeight:700,color:nivel.color,background:"#fff",padding:"2px 10px",borderRadius:12,border:`1px solid ${nivel.color}44`}}>{list.length}</span>
-              <span style={{color:"var(--text3)",fontSize:13}}>{isCollapsed ? "▶" : "▼"}</span>
-            </div>
-            {!isCollapsed && (
-              <div style={{padding:"10px 12px"}}>
-                <div style={{fontSize:11,color:"var(--text3)",marginBottom:8,fontStyle:"italic"}}>{nivel.desc}</div>
-                {list.length === 0 ? (
-                  <div style={{padding:"20px",textAlign:"center",color:"var(--text3)",fontSize:13,background:"var(--card-bg)",borderRadius:10}}>
-                    Nenhuma pessoa neste nível.
-                  </div>
-                ) : (
-                  <div style={{display:"flex",flexDirection:"column",gap:8}}>
-                    {[...list].sort((a,b)=>(a.name||"").localeCompare(b.name||"")).map(renderPerssoaCard)}
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
-        );
-      })}
-    </div>
-  );
-}
-
-// v8.20.0: PermissoesMatrix mantida no código mas não mais referenciada — substituída por PermissoesResumo.
-// Será removida quando o resumo estabilizar em produção (Fase C+).
-// eslint-disable-next-line no-unused-vars
 function PermissoesMatrix({ restaurantId, pessoas, employees, managers, owners, permProfiles, onUpdate, mobileOnly }) {
   // permProfiles[restaurantId] aceita 2 formatos pra compat:
   //   LEGADO: Array<profile>            → custom apenas, sem hidden
