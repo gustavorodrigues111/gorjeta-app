@@ -3,7 +3,7 @@ import React, { useState, useEffect, useMemo, useRef, Component } from "react";
 import { db } from "./firebase";
 import { doc, getDoc, setDoc, onSnapshot } from "firebase/firestore";
 
-const APP_VERSION = "8.23.2";
+const APP_VERSION = "8.23.3";
 
 // v8.11.1: comparação de versão semver-like (8.11.1 > 8.10.7 > 8.9.4)
 function compareVersions(a, b) {
@@ -21237,31 +21237,35 @@ function buildShellSections({ pessoa, restaurantId, isOwner, employees, restaura
   if (op.reunioes || ad.employees || isOwner) {
     opItems.push({ id: "mod_ocorrencias", label: "Ocorrências", icon: "🚨", kind: "manager", tab: "ocorrencias" });
   }
+  // v8.23.3: aceita as perms novas exec/review além das antigas (configurar)
+  const canChecklistOp   = op.checklists || op.checklistsExec || op.checklistsReview;
+  const canContagensOp   = op.contagens || op.contagensExec;
+  const canTemperaturasOp = op.temperaturas || op.temperaturasExec;
   // Checklists, Contagens, Temperaturas — operacional executa, admin (ad.tips) configura templates
-  if (op.checklists || ad.tips) {
+  if (canChecklistOp || ad.tips) {
     opItems.push({
       id: "mod_mise_checklists", label: "Checklists", icon: "✅",
       subtabs: st(
-        op.checklists && { id: "executar",  label: "Executar",  kind: "operational", tab: "checklists" },
-        ad.tips       && { id: "templates", label: "Templates", kind: "manager",     tab: "mise_checklists" },
+        canChecklistOp && { id: "executar",  label: "Executar",  kind: "operational", tab: "checklists" },
+        ad.tips        && { id: "templates", label: "Templates", kind: "manager",     tab: "mise_checklists" },
       ),
     });
   }
-  if (op.contagens || ad.tips) {
+  if (canContagensOp || ad.tips) {
     opItems.push({
       id: "mod_mise_contagens", label: "Contagens", icon: "📦",
       subtabs: st(
-        op.contagens && { id: "contar", label: "Contar",    kind: "operational", tab: "contagens" },
-        ad.tips      && { id: "config", label: "Configurar", kind: "manager",    tab: "mise_contagens" },
+        canContagensOp && { id: "contar", label: "Contar",    kind: "operational", tab: "contagens" },
+        ad.tips        && { id: "config", label: "Configurar", kind: "manager",    tab: "mise_contagens" },
       ),
     });
   }
-  if (op.temperaturas || ad.tips) {
+  if (canTemperaturasOp || ad.tips) {
     opItems.push({
       id: "mod_mise_temperaturas", label: "Temperaturas", icon: "🌡️",
       subtabs: st(
-        op.temperaturas && { id: "monitor", label: "Monitorar",  kind: "operational", tab: "temperaturas" },
-        ad.tips         && { id: "config",  label: "Configurar", kind: "manager",     tab: "mise_temperaturas" },
+        canTemperaturasOp && { id: "monitor", label: "Monitorar",  kind: "operational", tab: "temperaturas" },
+        ad.tips           && { id: "config",  label: "Configurar", kind: "manager",     tab: "mise_temperaturas" },
       ),
     });
   }
