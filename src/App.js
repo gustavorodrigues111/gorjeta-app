@@ -3,7 +3,7 @@ import React, { useState, useEffect, useMemo, useRef, Component } from "react";
 import { db } from "./firebase";
 import { doc, getDoc, setDoc, onSnapshot } from "firebase/firestore";
 
-const APP_VERSION = "8.29.0";
+const APP_VERSION = "8.30.0";
 
 // v8.11.1: comparação de versão semver-like (8.11.1 > 8.10.7 > 8.9.4)
 function compareVersions(a, b) {
@@ -581,6 +581,7 @@ const K = {
   pessoas:             "v4:pessoas",              // [{id, restaurantIds:[], name, cpf, pin, mustChangePin, email?, whatsapp?, isTeam:{[rid]:bool}, teamData:{[rid]:{empCode,roleId,admission,...}}, linkedEmployeeId?, linkedManagerId?, permissions:{[rid]:{operational:{},admin:{},special:{}}}}]
   pessoasMigratedAt:   "v4:pessoasMigratedAt",    // ISO date da última migração (para idempotência)
   permsV2MigratedAt:   "v4:permsV2MigratedAt",    // v8.17.0 — flag idempotente da migração isDP → perms granulares
+  freelasFecharOpMigratedAt: "v4:freelasFecharOpMigratedAt", // v8.30.0 — flag da migração admin.freelasFechar → operational.freelasFechar
   // ═══ Operacional — Fichas Técnicas (portado do projeto fichastecnicas-c3829) ═══
   miseFtInsumos:       "v4:miseFtInsumos",        // [{id, restaurantId, name, unit, price}]
   miseFtEquipamentos:  "v4:miseFtEquipamentos",   // {[restaurantId]: [string]}
@@ -21320,9 +21321,11 @@ function buildShellSections({ pessoa, restaurantId, isOwner, employees, restaura
   // v8.10.5: aceita tanto sp.isLider (matriz nova) quanto sp.profile=="lider" (legacy migração)
   const _isLiderShell = sp.isLider === true || sp.profile === "lider";
   // v8.24.0: aba Freelas aparece se tem qualquer das perms novas (exec/fechar) OU legado (isOwner/isDP/Lider/admin.freelas)
+  // v8.30.0: freelasFechar agora vive em operational; ad.freelasFechar mantido como fallback de transição.
   const _canSeeFreelas = isOwner || sp.isDP || _isLiderShell
     || op.freelasExec === true
-    || ad.freelasFechar === true
+    || op.freelasFechar === true
+    || ad.freelasFechar === true // legacy v8.24-v8.29
     || ad.freelas === true;
   if (_canSeeFreelas) {
     planItems.push({ id: "mod_freelas", label: "Freelas", icon: "🎒", kind: "manager", tab: "freelas" });
@@ -23061,11 +23064,15 @@ function FreelasModule({ restaurantId, pessoas, freelaShifts, freelaPagamentos, 
   }
 
   // Quem pode ver cada sub-tab
-  // v8.29.0: agendar é alias de fechar — usa a permissão granular admin.freelasFechar.
+  // v8.30.0: agendar é alias de fechar — usa a permissão granular operational.freelasFechar.
   // Quem pode fechar lote (DP/Owner ou pessoa com a perm na matriz) também agenda.
-  const canFechamento = isDP || isOwner || perms?.admin?.freelasFechar === true;
-  const canAgendar    = canFechamento; // alias — quem fecha, agenda
-  const canHistorico  = isDP || isOwner || perms?.admin?.freelasFechar === true;
+  // ad.freelasFechar mantido como fallback de transição (pré-migração).
+  const _canFechar = isDP || isOwner
+    || perms?.operational?.freelasFechar === true
+    || perms?.admin?.freelasFechar === true; // legacy v8.24-v8.29
+  const canFechamento = _canFechar;
+  const canAgendar    = _canFechar; // alias — quem fecha, agenda
+  const canHistorico  = _canFechar;
 
   const SUB_TABS = [
     { id: "agendar",    label: "📅 Agendar",   visible: canAgendar },
@@ -26434,11 +26441,11 @@ const PERM_GROUPS = [
   {
     id: "g_escala", label: "📅 Escala e Freelas", color: "#3b82f6", bg: "#3b82f622",
     perms: [
-      { key: "admin.schedule",       label: "Editar escala",                icon: "📅" },
-      { key: "admin.fecharEscala",   label: "Fechar mês da escala",         icon: "🔒" },
-      { key: "admin.freelasFechar",  label: "Fechar/pagar lote de freelas", icon: "💵" },
-      { key: "operational.reunioes", label: "Gerir reuniões",               icon: "🗣️" },
-      { key: "operational.trilhas",  label: "Gerir trilhas",                icon: "🎯" },
+      { key: "admin.schedule",              label: "Editar escala",                icon: "📅" },
+      { key: "admin.fecharEscala",          label: "Fechar mês da escala",         icon: "🔒" },
+      { key: "operational.freelasFechar",   label: "Agendar e fechar lote de freelas", icon: "💵" }, // v8.30.0: movido de admin.X
+      { key: "operational.reunioes",        label: "Gerir reuniões",               icon: "🗣️" },
+      { key: "operational.trilhas",         label: "Gerir trilhas",                icon: "🎯" },
     ],
   },
   {
@@ -36236,6 +36243,7 @@ export default function App() {
   const [pessoas,             setPessoas]              = useState([]);
   const [pessoasMigratedAt,   setPessoasMigratedAt]    = useState(null);
   const [permsV2MigratedAt,   setPermsV2MigratedAt]    = useState(null); // v8.17.0
+  const [freelasFecharOpMigratedAt, setFreelasFecharOpMigratedAt] = useState(null); // v8.30.0
   // Operacional — Fichas Técnicas
   const [miseFtInsumos,      setMiseFtInsumos]      = useState([]);
   const [miseFtEquipamentos, setMiseFtEquipamentos] = useState({});
@@ -36276,7 +36284,7 @@ export default function App() {
       setLoadProgress("Preparando o sistema...");
 
       const keys = keyNames;
-      const map = { owners:setOwners, managers:setManagers, restaurants:setRestaurants, employees:setEmployees, roles:setRoles, tips:setTips, splits:setSplits, schedules:setSchedules, communications:setCommunications, commAcks:setCommAcks, faq:setFaq, dpMessages:setDpMessages, workSchedules:setWorkSchedules, notifications:setNotifications, noTipDays:setNoTipDays, trash:setTrash, schedTemplates:setSchedTemplates, schedDrafts:setSchedDrafts, scheduleVersions:setScheduleVersions, tipVersions:setTipVersions, vtConfig:setVtConfig, vtMonthly:setVtMonthly, vtPayments:setVtPayments, incidents:setIncidents, feedbacks:setFeedbacks, devChecklists:setDevChecklists, scheduleAdjustments:setScheduleAdjustments, scheduleStatus:setScheduleStatus, schedulePrevista:setSchedulePrevista, scheduleSwaps:setScheduleSwaps, recursoFolders:setRecursoFolders, recursos:setRecursos, recursosInitialized:setRecursosInitialized, employeeGoals:setEmployeeGoals, delays:setDelays, tipApprovals:setTipApprovals, meetingPlans:setMeetingPlans, meetingIdeas:setMeetingIdeas, meetingAgendas:setMeetingAgendas, meetingActions:setMeetingActions, meetingOccurrences:setMeetingOccurrences, meetingPendencias:setMeetingPendencias, inbox:setInbox, inboxFolders:setInboxFolders, miseCategories:setMiseCategories, miseStocks:setMiseStocks, miseAssignments:setMiseAssignments, miseItems:setMiseItems, miseCycles:setMiseCycles, miseCounts:setMiseCounts, miseSuppliers:setMiseSuppliers, miseProductSuppliers:setMiseProductSuppliers, miseSupplierOrders:setMiseSupplierOrders, miseChecklistTemplates:setMiseChecklistTemplates, miseChecklistRuns:setMiseChecklistRuns, miseFtInsumos:setMiseFtInsumos, miseFtEquipamentos:setMiseFtEquipamentos, miseFtDishes:setMiseFtDishes, pessoas:setPessoas, pessoasMigratedAt:setPessoasMigratedAt, permsV2MigratedAt:setPermsV2MigratedAt, tuyaLinks:setTuyaLinks, tempSensors:setTempSensors, tempReadings:setTempReadings, tempAlerts:setTempAlerts, tempBackfillState:setTempBackfillState, permProfiles:setPermProfiles, freelaShifts:setFreelaShifts, freelaPagamentos:setFreelaPagamentos };
+      const map = { owners:setOwners, managers:setManagers, restaurants:setRestaurants, employees:setEmployees, roles:setRoles, tips:setTips, splits:setSplits, schedules:setSchedules, communications:setCommunications, commAcks:setCommAcks, faq:setFaq, dpMessages:setDpMessages, workSchedules:setWorkSchedules, notifications:setNotifications, noTipDays:setNoTipDays, trash:setTrash, schedTemplates:setSchedTemplates, schedDrafts:setSchedDrafts, scheduleVersions:setScheduleVersions, tipVersions:setTipVersions, vtConfig:setVtConfig, vtMonthly:setVtMonthly, vtPayments:setVtPayments, incidents:setIncidents, feedbacks:setFeedbacks, devChecklists:setDevChecklists, scheduleAdjustments:setScheduleAdjustments, scheduleStatus:setScheduleStatus, schedulePrevista:setSchedulePrevista, scheduleSwaps:setScheduleSwaps, recursoFolders:setRecursoFolders, recursos:setRecursos, recursosInitialized:setRecursosInitialized, employeeGoals:setEmployeeGoals, delays:setDelays, tipApprovals:setTipApprovals, meetingPlans:setMeetingPlans, meetingIdeas:setMeetingIdeas, meetingAgendas:setMeetingAgendas, meetingActions:setMeetingActions, meetingOccurrences:setMeetingOccurrences, meetingPendencias:setMeetingPendencias, inbox:setInbox, inboxFolders:setInboxFolders, miseCategories:setMiseCategories, miseStocks:setMiseStocks, miseAssignments:setMiseAssignments, miseItems:setMiseItems, miseCycles:setMiseCycles, miseCounts:setMiseCounts, miseSuppliers:setMiseSuppliers, miseProductSuppliers:setMiseProductSuppliers, miseSupplierOrders:setMiseSupplierOrders, miseChecklistTemplates:setMiseChecklistTemplates, miseChecklistRuns:setMiseChecklistRuns, miseFtInsumos:setMiseFtInsumos, miseFtEquipamentos:setMiseFtEquipamentos, miseFtDishes:setMiseFtDishes, pessoas:setPessoas, pessoasMigratedAt:setPessoasMigratedAt, permsV2MigratedAt:setPermsV2MigratedAt, freelasFecharOpMigratedAt:setFreelasFecharOpMigratedAt, tuyaLinks:setTuyaLinks, tempSensors:setTempSensors, tempReadings:setTempReadings, tempAlerts:setTempAlerts, tempBackfillState:setTempBackfillState, permProfiles:setPermProfiles, freelaShifts:setFreelaShifts, freelaPagamentos:setFreelaPagamentos };
       const loaded_data = {};
       let successCount = 0;
       keys.forEach((k, i) => {
@@ -36575,8 +36583,9 @@ export default function App() {
   }, [loaded, pessoas?.length, permsV2MigratedAt]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // v8.24.0 — Migração silenciosa idempotente: admin.freelas (lançar+fechar tudo junto)
-  // → admin.freelasFechar (financeiro) + operational.freelasExec (operacional, registrar turno).
-  // Sem flag: só atualiza pessoa que tem admin.freelas=true E ainda não tem admin.freelasFechar
+  // → operational.freelasFechar + operational.freelasExec.
+  // v8.30.0: ambos vão pra operational agora — agendar/fechar é tarefa de líder, não admin.
+  // Sem flag: só atualiza pessoa que tem admin.freelas=true E ainda não tem operational.freelasFechar
   // OU operational.freelasExec — se já tem ambos, no-op.
   useEffect(() => {
     if (!loaded) return;
@@ -36595,7 +36604,7 @@ export default function App() {
         const adm = { ...(byGroup.admin || {}) };
         const op  = { ...(byGroup.operational || {}) };
         let localChange = false;
-        if (adm.freelasFechar !== true) { adm.freelasFechar = true; localChange = true; }
+        if (op.freelasFechar !== true) { op.freelasFechar = true; localChange = true; } // v8.30.0: era admin.freelasFechar
         if (op.freelasExec   !== true) { op.freelasExec   = true; localChange = true; }
         if (!localChange) {
           updatedPerms[rid] = byGroup;
@@ -36613,6 +36622,45 @@ export default function App() {
       handleUpdate("pessoas", next);
     }
   }, [loaded, pessoas?.length]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // v8.30.0 — Migra admin.freelasFechar → operational.freelasFechar.
+  // Conceitualmente agendar/fechar lote de freelas é tarefa do líder de área (operacional),
+  // não do admin. Estar em admin.X faz a pessoa virar "Gestor" em listas como
+  // eligibleResponsaveis (Reuniões/Ações). Move pro operational e idempotente via flag.
+  useEffect(() => {
+    if (!loaded) return;
+    if (freelasFecharOpMigratedAt) return;
+    if (!Array.isArray(pessoas)) {
+      handleUpdate("freelasFecharOpMigratedAt", new Date().toISOString());
+      return;
+    }
+    let touched = 0;
+    const next = pessoas.map(p => {
+      const allPerms = p.permissions || {};
+      let changed = false;
+      const updated = {};
+      Object.entries(allPerms).forEach(([rid, byGroup]) => {
+        if (byGroup?.admin?.freelasFechar !== true) {
+          updated[rid] = byGroup;
+          return;
+        }
+        const adm = { ...(byGroup.admin || {}) };
+        const op  = { ...(byGroup.operational || {}) };
+        delete adm.freelasFechar;
+        op.freelasFechar = true;
+        changed = true;
+        updated[rid] = { ...byGroup, admin: adm, operational: op };
+      });
+      if (!changed) return p;
+      touched++;
+      return { ...p, permissions: updated };
+    });
+    if (touched > 0) {
+      console.log(`[freelasFecharOp] ${touched} pessoa(s) migradas: admin.freelasFechar → operational.freelasFechar`);
+      handleUpdate("pessoas", next);
+    }
+    handleUpdate("freelasFecharOpMigratedAt", new Date().toISOString());
+  }, [loaded, pessoas?.length, freelasFecharOpMigratedAt]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // v7.3 — Migração auto-corretiva isTeam[rid]
   // Pessoas com linkedEmployeeId apontando pra employee ATIVO de um rid devem ter isTeam[rid]=true.
@@ -36758,8 +36806,8 @@ export default function App() {
       setToast("⚠️ Você está offline — conecte à internet para salvar alterações");
       return;
     }
-    const setters = { owners:setOwners, managers:setManagers, restaurants:setRestaurants, employees:setEmployees, roles:setRoles, tips:setTips, splits:setSplits, schedules:setSchedules, communications:setCommunications, commAcks:setCommAcks, faq:setFaq, dpMessages:setDpMessages, workSchedules:setWorkSchedules, notifications:setNotifications, noTipDays:setNoTipDays, trash:setTrash, schedTemplates:setSchedTemplates, schedDrafts:setSchedDrafts, scheduleVersions:setScheduleVersions, tipVersions:setTipVersions, vtConfig:setVtConfig, vtMonthly:setVtMonthly, vtPayments:setVtPayments, incidents:setIncidents, feedbacks:setFeedbacks, devChecklists:setDevChecklists, scheduleAdjustments:setScheduleAdjustments, scheduleStatus:setScheduleStatus, schedulePrevista:setSchedulePrevista, scheduleSwaps:setScheduleSwaps, recursoFolders:setRecursoFolders, recursos:setRecursos, recursosInitialized:setRecursosInitialized, employeeGoals:setEmployeeGoals, delays:setDelays, tipApprovals:setTipApprovals, meetingPlans:setMeetingPlans, meetingIdeas:setMeetingIdeas, meetingAgendas:setMeetingAgendas, meetingActions:setMeetingActions, meetingOccurrences:setMeetingOccurrences, meetingPendencias:setMeetingPendencias, inbox:setInbox, inboxFolders:setInboxFolders, miseCategories:setMiseCategories, miseStocks:setMiseStocks, miseAssignments:setMiseAssignments, miseItems:setMiseItems, miseCycles:setMiseCycles, miseCounts:setMiseCounts, miseSuppliers:setMiseSuppliers, miseProductSuppliers:setMiseProductSuppliers, miseSupplierOrders:setMiseSupplierOrders, miseChecklistTemplates:setMiseChecklistTemplates, miseChecklistRuns:setMiseChecklistRuns, miseFtInsumos:setMiseFtInsumos, miseFtEquipamentos:setMiseFtEquipamentos, miseFtDishes:setMiseFtDishes, pessoas:setPessoas, pessoasMigratedAt:setPessoasMigratedAt, permsV2MigratedAt:setPermsV2MigratedAt, tuyaLinks:setTuyaLinks, tempSensors:setTempSensors, tempReadings:setTempReadings, tempAlerts:setTempAlerts, tempBackfillState:setTempBackfillState, permProfiles:setPermProfiles, freelaShifts:setFreelaShifts, freelaPagamentos:setFreelaPagamentos };
-    const keys    = { owners:K.owners, managers:K.managers, restaurants:K.restaurants, employees:K.employees, roles:K.roles, tips:K.tips, splits:K.splits, schedules:K.schedules, communications:K.communications, commAcks:K.commAcks, faq:K.faq, dpMessages:K.dpMessages, workSchedules:K.workSchedules, notifications:K.notifications, noTipDays:K.noTipDays, trash:K.trash, schedTemplates:K.schedTemplates, schedDrafts:K.schedDrafts, scheduleVersions:K.scheduleVersions, tipVersions:K.tipVersions, vtConfig:K.vtConfig, vtMonthly:K.vtMonthly, vtPayments:K.vtPayments, incidents:K.incidents, feedbacks:K.feedbacks, devChecklists:K.devChecklists, scheduleAdjustments:K.scheduleAdjustments, scheduleStatus:K.scheduleStatus, schedulePrevista:K.schedulePrevista, scheduleSwaps:K.scheduleSwaps, recursoFolders:K.recursoFolders, recursos:K.recursos, recursosInitialized:K.recursosInitialized, employeeGoals:K.employeeGoals, delays:K.delays, tipApprovals:K.tipApprovals, meetingPlans:K.meetingPlans, meetingIdeas:K.meetingIdeas, meetingAgendas:K.meetingAgendas, meetingActions:K.meetingActions, inbox:K.inbox, inboxFolders:K.inboxFolders, miseCategories:K.miseCategories, miseStocks:K.miseStocks, miseAssignments:K.miseAssignments, miseItems:K.miseItems, miseCycles:K.miseCycles, miseCounts:K.miseCounts, miseSuppliers:K.miseSuppliers, miseProductSuppliers:K.miseProductSuppliers, miseSupplierOrders:K.miseSupplierOrders, miseChecklistTemplates:K.miseChecklistTemplates, miseChecklistRuns:K.miseChecklistRuns, miseFtInsumos:K.miseFtInsumos, miseFtEquipamentos:K.miseFtEquipamentos, miseFtDishes:K.miseFtDishes, pessoas:K.pessoas, pessoasMigratedAt:K.pessoasMigratedAt, permsV2MigratedAt:K.permsV2MigratedAt, tuyaLinks:K.tuyaLinks, tempSensors:K.tempSensors, tempReadings:K.tempReadings, tempAlerts:K.tempAlerts, tempBackfillState:K.tempBackfillState, permProfiles:K.permProfiles, freelaShifts:K.freelaShifts, freelaPagamentos:K.freelaPagamentos };
+    const setters = { owners:setOwners, managers:setManagers, restaurants:setRestaurants, employees:setEmployees, roles:setRoles, tips:setTips, splits:setSplits, schedules:setSchedules, communications:setCommunications, commAcks:setCommAcks, faq:setFaq, dpMessages:setDpMessages, workSchedules:setWorkSchedules, notifications:setNotifications, noTipDays:setNoTipDays, trash:setTrash, schedTemplates:setSchedTemplates, schedDrafts:setSchedDrafts, scheduleVersions:setScheduleVersions, tipVersions:setTipVersions, vtConfig:setVtConfig, vtMonthly:setVtMonthly, vtPayments:setVtPayments, incidents:setIncidents, feedbacks:setFeedbacks, devChecklists:setDevChecklists, scheduleAdjustments:setScheduleAdjustments, scheduleStatus:setScheduleStatus, schedulePrevista:setSchedulePrevista, scheduleSwaps:setScheduleSwaps, recursoFolders:setRecursoFolders, recursos:setRecursos, recursosInitialized:setRecursosInitialized, employeeGoals:setEmployeeGoals, delays:setDelays, tipApprovals:setTipApprovals, meetingPlans:setMeetingPlans, meetingIdeas:setMeetingIdeas, meetingAgendas:setMeetingAgendas, meetingActions:setMeetingActions, meetingOccurrences:setMeetingOccurrences, meetingPendencias:setMeetingPendencias, inbox:setInbox, inboxFolders:setInboxFolders, miseCategories:setMiseCategories, miseStocks:setMiseStocks, miseAssignments:setMiseAssignments, miseItems:setMiseItems, miseCycles:setMiseCycles, miseCounts:setMiseCounts, miseSuppliers:setMiseSuppliers, miseProductSuppliers:setMiseProductSuppliers, miseSupplierOrders:setMiseSupplierOrders, miseChecklistTemplates:setMiseChecklistTemplates, miseChecklistRuns:setMiseChecklistRuns, miseFtInsumos:setMiseFtInsumos, miseFtEquipamentos:setMiseFtEquipamentos, miseFtDishes:setMiseFtDishes, pessoas:setPessoas, pessoasMigratedAt:setPessoasMigratedAt, permsV2MigratedAt:setPermsV2MigratedAt, freelasFecharOpMigratedAt:setFreelasFecharOpMigratedAt, tuyaLinks:setTuyaLinks, tempSensors:setTempSensors, tempReadings:setTempReadings, tempAlerts:setTempAlerts, tempBackfillState:setTempBackfillState, permProfiles:setPermProfiles, freelaShifts:setFreelaShifts, freelaPagamentos:setFreelaPagamentos };
+    const keys    = { owners:K.owners, managers:K.managers, restaurants:K.restaurants, employees:K.employees, roles:K.roles, tips:K.tips, splits:K.splits, schedules:K.schedules, communications:K.communications, commAcks:K.commAcks, faq:K.faq, dpMessages:K.dpMessages, workSchedules:K.workSchedules, notifications:K.notifications, noTipDays:K.noTipDays, trash:K.trash, schedTemplates:K.schedTemplates, schedDrafts:K.schedDrafts, scheduleVersions:K.scheduleVersions, tipVersions:K.tipVersions, vtConfig:K.vtConfig, vtMonthly:K.vtMonthly, vtPayments:K.vtPayments, incidents:K.incidents, feedbacks:K.feedbacks, devChecklists:K.devChecklists, scheduleAdjustments:K.scheduleAdjustments, scheduleStatus:K.scheduleStatus, schedulePrevista:K.schedulePrevista, scheduleSwaps:K.scheduleSwaps, recursoFolders:K.recursoFolders, recursos:K.recursos, recursosInitialized:K.recursosInitialized, employeeGoals:K.employeeGoals, delays:K.delays, tipApprovals:K.tipApprovals, meetingPlans:K.meetingPlans, meetingIdeas:K.meetingIdeas, meetingAgendas:K.meetingAgendas, meetingActions:K.meetingActions, inbox:K.inbox, inboxFolders:K.inboxFolders, miseCategories:K.miseCategories, miseStocks:K.miseStocks, miseAssignments:K.miseAssignments, miseItems:K.miseItems, miseCycles:K.miseCycles, miseCounts:K.miseCounts, miseSuppliers:K.miseSuppliers, miseProductSuppliers:K.miseProductSuppliers, miseSupplierOrders:K.miseSupplierOrders, miseChecklistTemplates:K.miseChecklistTemplates, miseChecklistRuns:K.miseChecklistRuns, miseFtInsumos:K.miseFtInsumos, miseFtEquipamentos:K.miseFtEquipamentos, miseFtDishes:K.miseFtDishes, pessoas:K.pessoas, pessoasMigratedAt:K.pessoasMigratedAt, permsV2MigratedAt:K.permsV2MigratedAt, freelasFecharOpMigratedAt:K.freelasFecharOpMigratedAt, tuyaLinks:K.tuyaLinks, tempSensors:K.tempSensors, tempReadings:K.tempReadings, tempAlerts:K.tempAlerts, tempBackfillState:K.tempBackfillState, permProfiles:K.permProfiles, freelaShifts:K.freelaShifts, freelaPagamentos:K.freelaPagamentos };
     // Support functional updates to prevent stale-state race conditions:
     // When value is a function, it receives the latest state (like setState(prev => ...))
     // IMPORTANTE: o callback do setState pode rodar de forma assíncrona em React 18,
