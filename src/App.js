@@ -3,7 +3,7 @@ import React, { useState, useEffect, useMemo, useRef, Component } from "react";
 import { db } from "./firebase";
 import { doc, getDoc, setDoc, onSnapshot } from "firebase/firestore";
 
-const APP_VERSION = "8.26.0";
+const APP_VERSION = "8.26.1";
 
 // v8.11.1: comparação de versão semver-like (8.11.1 > 8.10.7 > 8.9.4)
 function compareVersions(a, b) {
@@ -23376,6 +23376,9 @@ function FreelaLancamentoTab({ restaurantId, allPessoas, restPessoas, restFreela
 
   // Filtros aplicados
   const filtered = shifts.filter(s => {
+    // v8.26.1: agendados não aparecem na tabela principal — ficam na aba Agendar (futuros)
+    // ou na seção amarela "Agendados pra hoje" (hoje/atrasados)
+    if (s.status === "agendado") return false;
     if (filterStatus === "pendentes") {
       if (s.status !== "aberto" || s.valorTipo) return false;
     } else if (filterStatus !== "todos" && s.status !== filterStatus) return false;
