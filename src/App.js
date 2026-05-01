@@ -10720,9 +10720,8 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
   const restEmps  = isLider
     ? allRestEmps.filter(e => { const role = restRoles.find(r => r.id === e.roleId); return role && managerAreas.includes(role.area); })
     : allRestEmps;
-  const schedEmps = isLider
-    ? allSchedEmps.filter(e => { const role = restRoles.find(r => r.id === e.roleId); return role && managerAreas.includes(role.area); })
-    : allSchedEmps;
+  // Líder na Escala: vê todos (apenas visualização), sem filtro por área.
+  const schedEmps = allSchedEmps;
 
   // forms
   const [tipRows, setTipRows]   = useState([{date:today(),total:"",note:""}]);
@@ -11090,12 +11089,14 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
   const ac = "var(--ac)";
   const canTips  = perms.tips     || isOwner;
   const canSched = perms.schedule || isOwner;
+  // Líder de área: pode ver a escala em Planejamento, mas não editar.
+  const canSchedEdit = canSched && !isLider;
   // v8.17.0: isDP é mantido como fonte legada; novos checks usam perms granulares com fallback no isDP.
   const isDP     = perms.isDP === true;
   const canDpCanal           = isDP || perms.dpCanal === true;
   const canAtravessarPrivado = isDP || perms.atravessarPrivado === true;
   const canReabrirEscala     = isDP || perms.reabrirEscala === true;
-  const canFecharEscala      = isDP || perms.fecharEscala === true || canSched;
+  const canFecharEscala      = isDP || perms.fecharEscala === true || canSchedEdit;
   // eslint-disable-next-line no-unused-vars
   const _permsV2 = { canDpCanal, canAtravessarPrivado, canReabrirEscala, canFecharEscala };
   const currentIsMasterDP = (currentUser?.masterRestaurantIds ?? []).includes(rid) || isOwner;
@@ -13018,7 +13019,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                   })}
                 </div>
                 {/* v8.11.0: Registrar inversão informal */}
-                {(canSched || isOwner) && !monthClosed && (
+                {(canSchedEdit || isOwner) && !monthClosed && (
                   <button onClick={()=>setSwapModalContext({ empAId: "", empBId: "", date1: "", date2: "" })} style={{...S.btnSecondary,fontSize:11,padding:"3px 10px"}} title="Registrar inversão recíproca de turno entre dois empregados (não muda a escala — só registra)">↔️ Registrar inversão</button>
                 )}
                 {/* v8.12.0: "Sugerir folgas de domingo" removido — escala deriva auto do horário+ciclo. */}
@@ -13407,25 +13408,29 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
 
                 {/* v8.12.0: "📅 Folgas do contrato" REMOVIDO — escala deriva auto. */}
                 {/* v8.12.0: Resetar escala — substitui dados salvos pela derivação (folgas do contrato + ciclo de domingos) */}
-                {(canSched || isOwner) && !monthClosed && (
+                {(canSchedEdit || isOwner) && !monthClosed && (
                   <button onClick={()=>setShowResetSchedConfirm(true)} style={{...S.btnSecondary,fontSize:mobileOnly?11:12,color:"var(--red)",borderColor:"var(--red)44",whiteSpace:"nowrap"}} title="Substitui a escala atual pela escala derivada do horário cadastrado + ciclo de domingos">
                     {mobileOnly?"🔄 Reset":"🔄 Resetar escala"}
                   </button>
                 )}
 
                 {/* Marcar férias */}
-                <button onClick={()=>{setShowVacForm(!showVacForm);setVacEmpId("");setVacFrom("");setVacTo("");}}
-                  style={{...S.btnSecondary,fontSize:mobileOnly?11:12,border:`1px solid ${showVacForm?"#8b5cf6":"#8b5cf644"}`,background:showVacForm?"#8b5cf622":"transparent",color:"#8b5cf6",whiteSpace:"nowrap"}}>
-                  {mobileOnly?"🏖️ Férias":"🏖️ Marcar férias"}
-                </button>
+                {(canSchedEdit || isOwner) && (
+                  <button onClick={()=>{setShowVacForm(!showVacForm);setVacEmpId("");setVacFrom("");setVacTo("");}}
+                    style={{...S.btnSecondary,fontSize:mobileOnly?11:12,border:`1px solid ${showVacForm?"#8b5cf6":"#8b5cf644"}`,background:showVacForm?"#8b5cf622":"transparent",color:"#8b5cf6",whiteSpace:"nowrap"}}>
+                    {mobileOnly?"🏖️ Férias":"🏖️ Marcar férias"}
+                  </button>
+                )}
 
                 {/* Botão "📄 Importar ponto" REMOVIDO em abril/2026 */}
 
                 {/* Registrar atrasos */}
-                <button onClick={()=>{setShowDelayForm(!showDelayForm);setDelayEmpId("");setDelayInputs({});}}
-                  style={{...S.btnSecondary,fontSize:mobileOnly?11:12,border:`1px solid ${showDelayForm?"#f59e0b":"#f59e0b44"}`,background:showDelayForm?"#f59e0b22":"transparent",color:"#f59e0b",whiteSpace:"nowrap"}}>
-                  {mobileOnly?"⏰ Atrasos":"⏰ Registrar atrasos"}
-                </button>
+                {(canSchedEdit || isOwner) && (
+                  <button onClick={()=>{setShowDelayForm(!showDelayForm);setDelayEmpId("");setDelayInputs({});}}
+                    style={{...S.btnSecondary,fontSize:mobileOnly?11:12,border:`1px solid ${showDelayForm?"#f59e0b":"#f59e0b44"}`,background:showDelayForm?"#f59e0b22":"transparent",color:"#f59e0b",whiteSpace:"nowrap"}}>
+                    {mobileOnly?"⏰ Atrasos":"⏰ Registrar atrasos"}
+                  </button>
+                )}
 
                 {/* "Histórico" movido pra "Mais ações" no rodapé */}
 
@@ -14090,6 +14095,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
               };
 
               function cycleStatus(empId, dateStr) {
+                if (!canSchedEdit) return; // Líder e quem não tem permissão: somente visualização
                 if (monthClosed) return; // Month is closed, no editing allowed
                 if (restaurant.serviceStartDate && dateStr < restaurant.serviceStartDate) return;
                 const empDayMap = effectiveMonth[empId] ?? {};
@@ -14195,7 +14201,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                               const status = isDem ? null : dayMap[slot.date];
                               const color = isDem ? "#6b7280" : (STATUS_COLORS[status] ?? "var(--green)");
                               const label = isDem ? "DEM" : (STATUS_SHORT[status] ?? "T");
-                              const locked = isDem || monthClosed || (restaurant.serviceStartDate && slot.date < restaurant.serviceStartDate);
+                              const locked = isDem || monthClosed || !canSchedEdit || (restaurant.serviceStartDate && slot.date < restaurant.serviceStartDate);
                               const dayNum = slot.date ? String(parseInt(slot.date.slice(-2))) : null;
                               const delayMin = dayNum ? (empDelays[dayNum] || 0) : 0;
                               const swapInfo = swapsByEmpDate[emp.id]?.[slot.date];
@@ -14313,7 +14319,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                               const label = isDem ? "D" : (STATUS_SHORT[status] ?? "•");
                               const wd = new Date(date+"T12:00:00").getDay();
                               const isWe = wd===0||wd===6;
-                              const locked = isDem || monthClosed || (restaurant.serviceStartDate && date < restaurant.serviceStartDate);
+                              const locked = isDem || monthClosed || !canSchedEdit || (restaurant.serviceStartDate && date < restaurant.serviceStartDate);
                               const dDelayMin = empDelaysD[String(d)] || 0;
                               const swapInfo = swapsByEmpDate[emp.id]?.[date];
                               const swapTip = swapInfo ? swapTooltip(emp.id, date) : null;
@@ -14452,7 +14458,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                               {sw.note && <span style={{color:"var(--text3)",marginLeft:6}}>· {sw.note}</span>}
                               <span style={{color:"var(--text3)",marginLeft:6,fontSize:10}}>· por {sw.registeredBy}</span>
                             </span>
-                            {!monthClosed && (canSched || isOwner) && (
+                            {!monthClosed && (canSchedEdit || isOwner) && (
                               <button onClick={async ()=>{
                                 if (!await appConfirm("Remover este registro de inversão?\n\nA escala/gorjeta/VT não são afetados — só apaga o registro.")) return;
                                 onUpdate("scheduleSwaps", (data?.scheduleSwaps ?? []).filter(s => s.id !== sw.id));
@@ -14475,7 +14481,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                     </button>
                   );
                 })()}
-                <button onClick={async ()=>{
+                {(canSchedEdit || isOwner) && <button onClick={async ()=>{
                   const mesNome = monthLabel(year, month);
                   const n = areaEmps.length;
                   if (!n) return;
@@ -14509,7 +14515,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                   onUpdate("_toast", `🔄 ${mesNome} limpo pra ${n} empregado(s) — salve para confirmar`);
                 }} style={{...S.btnSecondary,fontSize:12,color:"var(--red)",borderColor:"var(--red)44",alignSelf:"flex-start"}}>
                   🔄 Limpar este mês
-                </button>
+                </button>}
 
                 {/* Configurações avançadas — Apagar todas as escalas */}
                 {isOwner && (
