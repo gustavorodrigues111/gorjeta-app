@@ -3,7 +3,7 @@ import React, { useState, useEffect, useMemo, useRef, Component } from "react";
 import { db } from "./firebase";
 import { doc, getDoc, setDoc, onSnapshot } from "firebase/firestore";
 
-const APP_VERSION = "8.23.4";
+const APP_VERSION = "8.23.5";
 
 // v8.11.1: comparação de versão semver-like (8.11.1 > 8.10.7 > 8.9.4)
 function compareVersions(a, b) {
@@ -18371,6 +18371,11 @@ function OperationalPortal({ employee, data, onUpdate, onBack, toggleTheme, them
           <OperationalContagens
             employee={employee}
             pessoas={data?.pessoas ?? []}
+            isOwner={(() => {
+              const empCpf = (employee?.cpf || "").replace(/\D/g, "");
+              if (!empCpf) return false;
+              return ((data?.owners) || []).some(o => (o.cpf || "").replace(/\D/g, "") === empCpf);
+            })()}
             miseCategories={data?.miseCategories ?? []}
             miseStocks={data?.miseStocks ?? []}
             miseAssignments={data?.miseAssignments ?? []}
@@ -20630,7 +20635,7 @@ function MiseContagensAdmin({ restaurantId, restaurantName = "", employees, pess
 // ═══════════════════════════════════════════════════════════════
 // ──  MISE CONTAGENS — USER (Gestor Operacional)                ──
 // ═══════════════════════════════════════════════════════════════
-function OperationalContagens({ employee, pessoas = [], miseCategories, miseStocks, miseAssignments, miseItems, miseCounts, onUpdate }) {
+function OperationalContagens({ employee, pessoas = [], isOwner = false, miseCategories, miseStocks, miseAssignments, miseItems, miseCounts, onUpdate }) {
   // Modelo novo (Fase 1.9): contagem POR ESTOQUE.
   // 1. Pessoa vê estoques em que tem alguma atribuição
   // 2. Seleciona estoque → vê categorias daquele estoque com checkboxes pré-marcados nas atribuídas
@@ -20644,6 +20649,14 @@ function OperationalContagens({ employee, pessoas = [], miseCategories, miseStoc
   const restCategories = miseCategories.filter(c => c.restaurantId === restaurantId);
   const restStocks = miseStocks.filter(s => s.restaurantId === restaurantId);
 
+  // v8.23.5: Owner / quem configura contagens vê todos os estoques (igual ao checklists)
+  const _myPessoaC = (() => {
+    const pid = employee._pessoaId || (() => { const m = String(employee.id).match(/^pes_as_emp_(.+)$/); return m ? m[1] : null; })();
+    if (pid) return (pessoas || []).find(p => p.id === pid);
+    return (pessoas || []).find(p => p.linkedEmployeeId === employee.id);
+  })();
+  const seesAllStocks = isOwner || (_myPessoaC?.permissions?.[restaurantId]?.operational?.contagens === true);
+
   const [view, setView] = useState("list"); // list | categorias | contagem | fechamento
   const [selectedStockId, setSelectedStockId] = useState(null);
   const [selectedCategoryIds, setSelectedCategoryIds] = useState([]);
@@ -20651,7 +20664,10 @@ function OperationalContagens({ employee, pessoas = [], miseCategories, miseStoc
   const [feedback, setFeedback] = useState(null);
 
   // Estoques onde a pessoa tem atribuição (modelo novo a.stockId)
-  const myStockIds = [...new Set(myAssignments.filter(a => a.stockId).map(a => a.stockId))];
+  // v8.23.5: Owner / configurador vê todos os estoques do restaurante
+  const myStockIds = seesAllStocks
+    ? restStocks.map(s => s.id)
+    : [...new Set(myAssignments.filter(a => a.stockId).map(a => a.stockId))];
   const myStocks = restStocks.filter(s => myStockIds.includes(s.id)).sort((a,b)=>a.name.localeCompare(b.name));
 
   // Helper: categorias presentes em um estoque (via produtos)
@@ -20663,6 +20679,7 @@ function OperationalContagens({ employee, pessoas = [], miseCategories, miseStoc
     return restCategories.filter(c => catIds.has(c.id)).sort((a,b)=>a.name.localeCompare(b.name));
   }
   function isMyCategoryInStock(stockId, categoryId) {
+    if (seesAllStocks) return true; // v8.23.5: Owner/configurador conta tudo
     return myAssignments.some(a => a.stockId === stockId && a.categoryId === categoryId);
   }
   function othersInStockCategory(stockId, categoryId) {
@@ -21557,6 +21574,7 @@ function AppShell({ pessoa, data, activeRestaurantId, setActiveRestaurantId, use
         <OperationalContagens
           employee={buildVirtualEmpForPessoa(pessoa, activeRestaurantId)}
           pessoas={data?.pessoas ?? []}
+          isOwner={isOwner}
           miseCategories={data?.miseCategories ?? []}
           miseStocks={data?.miseStocks ?? []}
           miseAssignments={data?.miseAssignments ?? []}
