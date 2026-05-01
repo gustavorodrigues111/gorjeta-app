@@ -3,7 +3,7 @@ import React, { useState, useEffect, useMemo, useRef, Component } from "react";
 import { db } from "./firebase";
 import { doc, getDoc, setDoc, onSnapshot } from "firebase/firestore";
 
-const APP_VERSION = "8.27.0";
+const APP_VERSION = "8.28.0";
 
 // v8.11.1: comparação de versão semver-like (8.11.1 > 8.10.7 > 8.9.4)
 function compareVersions(a, b) {
@@ -14540,6 +14540,16 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                 )}
               </div>
             </details>
+
+            {/* v8.28.0 — Freelas do mês (planned/aberto/fechamento/pago/no_show) */}
+            <FreelasMesNaEscala
+              restaurantId={rid}
+              year={year}
+              month={month}
+              freelaShifts={data?.freelaShifts ?? []}
+              pessoas={data?.pessoas ?? []}
+              mobileOnly={mobileOnly}
+            />
           </div>
         )}
 
@@ -22675,6 +22685,29 @@ function FreelasModule({ restaurantId, pessoas, freelaShifts, freelaPagamentos, 
     onUpdate("_toast", `🗑️ Agendamento removido`);
   }
 
+  // v8.28.0: encerra turno de freela em andamento — preenche saída + intervalo
+  // (Geralmente outro líder no fim do turno; o que abriu marcou só entrada)
+  async function closeShift(shiftId, payload) {
+    const s = (freelaShifts || []).find(x => x.id === shiftId);
+    if (!s) return;
+    if (s.status !== "aberto") { onUpdate("_toast", "⚠️ Esse shift não está em andamento"); return; }
+    const saida = (payload?.saida || "").trim();
+    const intervalo = parseInt(payload?.intervalo) || 0;
+    if (!saida) { alert("Hora de saída é obrigatória."); return; }
+    const horas = calcHoras(s.entrada, saida, intervalo);
+    onUpdate("freelaShifts", (prev) => (prev || []).map(x => x.id === shiftId ? {
+      ...x,
+      saida,
+      intervalo,
+      horas,
+      observacao: (payload?.observacao || x.observacao || "").trim() || x.observacao,
+      encerradoEm: new Date().toISOString(),
+      encerradoPor: currentUser?.name || "—",
+      encerradoPorId: currentUser?.id || null,
+    } : x));
+    onUpdate("_toast", `■ Turno encerrado — ${fmtHoras(horas)} trabalhadas`);
+  }
+
   // v8.27.0: marca como "não compareceu" — fica no histórico, sem pagamento, conta na ficha do freela
   async function markNoShow(shiftId) {
     const s = (freelaShifts || []).find(x => x.id === shiftId);
@@ -23108,6 +23141,7 @@ function FreelasModule({ restaurantId, pessoas, freelaShifts, freelaPagamentos, 
           cancelPlannedShift={cancelPlannedShift}
           markNoShow={markNoShow}
           editPlannedShift={editPlannedShift}
+          closeShift={closeShift}
           isDP={isDP}
           isOwner={isOwner}
           isLider={isLider}
@@ -23162,6 +23196,138 @@ function FreelasModule({ restaurantId, pessoas, freelaShifts, freelaPagamentos, 
 // ═══════════════════════════════════════════════════════════════
 // ──  FREELAS — sub-componente Lançamento (tabela de shifts)     ──
 // ═══════════════════════════════════════════════════════════════
+// v8.28.0 — Seção "Freelas do mês" embaixo do grid da Escala
+// Lista todos os shifts do mês selecionado (planned + aberto + fechamento + pago + nao_compareceu)
+// agrupados por data, distinguindo freela vs empregado-turno-extra com badges.
+function FreelasMesNaEscala({ restaurantId, year, month, freelaShifts, pessoas, mobileOnly }) {
+  // Filtra shifts do mês: data formato YYYY-MM-DD, mês = month (0-indexed)
+  const monthStr = `${year}-${String(month + 1).padStart(2, "0")}`;
+  const monthShifts = (freelaShifts || []).filter(s => {
+    if (s.restaurantId !== restaurantId) return false;
+    const dt = s.scheduledDate || s.date || "";
+    return dt.startsWith(monthStr);
+  }).sort((a, b) => (a.scheduledDate || a.date || "").localeCompare(b.scheduledDate || b.date || ""));
+
+  // Estatísticas
+  const stats = {
+    total: monthShifts.length,
+    agendados: monthShifts.filter(s => s.status === "agendado").length,
+    realizados: monthShifts.filter(s => ["aberto","fechamento","pago"].includes(s.status)).length,
+    pagos: monthShifts.filter(s => s.status === "pago").length,
+    noshows: monthShifts.filter(s => s.status === "nao_compareceu").length,
+  };
+
+  // Cores e labels por status
+  function statusInfo(st) {
+    if (st === "agendado")        return { label: "AGENDADO",      color: "#7c3aed", bg: "#7c3aed22" };
+    if (st === "aberto")          return { label: "ABERTO",        color: "#15803d", bg: "#15803d22" };
+    if (st === "fechamento")      return { label: "EM FECHAMENTO", color: "#f59e0b", bg: "#f59e0b22" };
+    if (st === "pago")            return { label: "PAGO",          color: "#0ea5e9", bg: "#0ea5e922" };
+    if (st === "nao_compareceu")  return { label: "NÃO COMPARECEU",color: "#dc2626", bg: "#dc262622" };
+    return { label: st || "—", color: "var(--text3)", bg: "var(--bg2)" };
+  }
+
+  if (monthShifts.length === 0) {
+    return (
+      <details style={{marginTop:24,background:"var(--card-bg)",border:"1px solid var(--border)",borderRadius:10,padding:"10px 14px"}}>
+        <summary style={{cursor:"pointer",fontSize:13,fontWeight:700,color:"var(--text2)"}}>🎒 Freelas do mês <span style={{color:"var(--text3)",fontWeight:400,fontSize:11}}>· nenhum shift neste mês</span></summary>
+      </details>
+    );
+  }
+
+  return (
+    <details open style={{marginTop:24,background:"var(--card-bg)",border:"1px solid var(--border)",borderRadius:10}}>
+      <summary style={{cursor:"pointer",padding:"12px 14px",fontSize:14,fontWeight:700,color:"var(--text)",display:"flex",alignItems:"center",gap:10,flexWrap:"wrap"}}>
+        <span>🎒 Freelas do mês</span>
+        <span style={{fontSize:11,fontWeight:700,padding:"2px 8px",borderRadius:10,background:"#7c3aed22",color:"#7c3aed"}}>{stats.total} total</span>
+        {stats.agendados > 0  && <span style={{fontSize:11,padding:"2px 8px",borderRadius:10,background:"#7c3aed22",color:"#7c3aed"}}>{stats.agendados} agendado{stats.agendados>1?"s":""}</span>}
+        {stats.realizados > 0 && <span style={{fontSize:11,padding:"2px 8px",borderRadius:10,background:"#15803d22",color:"#15803d"}}>{stats.realizados} realizado{stats.realizados>1?"s":""}</span>}
+        {stats.pagos > 0      && <span style={{fontSize:11,padding:"2px 8px",borderRadius:10,background:"#0ea5e922",color:"#0ea5e9"}}>{stats.pagos} pago{stats.pagos>1?"s":""}</span>}
+        {stats.noshows > 0    && <span style={{fontSize:11,padding:"2px 8px",borderRadius:10,background:"#dc262622",color:"#dc2626"}}>🚫 {stats.noshows}</span>}
+      </summary>
+      <div style={{padding:"0 14px 14px"}}>
+        <div style={{display:"flex",flexDirection:"column",gap:6}}>
+          {monthShifts.map(s => {
+            const p = (pessoas || []).find(x => x.id === s.pessoaId);
+            const isEmployeePlus = p?.isTeam?.[restaurantId] === true && !p?.isFreela;
+            const dt = s.scheduledDate || s.date;
+            const info = statusInfo(s.status);
+            const horarios = (s.entrada || s.saida)
+              ? `${s.entrada || "—"}${s.saida ? ` → ${s.saida}` : ""}${s.intervalo ? ` (${s.intervalo}min int.)` : ""}`
+              : null;
+            return (
+              <div key={s.id} style={{padding:"8px 12px",background:"var(--bg2)",border:"1px solid var(--border)",borderRadius:8,display:"flex",alignItems:"center",gap:10,flexWrap:"wrap"}}>
+                <span style={{fontSize:11,fontFamily:"'DM Mono',monospace",color:"var(--text2)",minWidth:60}}>{fmtDate(dt)}</span>
+                <span style={{fontSize:13,color:"var(--text)",fontWeight:600,flex:"0 0 auto"}}>{shortName(p?.name) || "—"}</span>
+                {isEmployeePlus
+                  ? <span style={{fontSize:9,padding:"1px 6px",borderRadius:6,background:"#10b98122",color:"#15803d",fontWeight:700,whiteSpace:"nowrap"}}>EMPREGADO · EXTRA</span>
+                  : <span style={{fontSize:9,padding:"1px 6px",borderRadius:6,background:"#7c3aed22",color:"#7c3aed",fontWeight:700,whiteSpace:"nowrap"}}>FREELA</span>}
+                <span style={{fontSize:9,padding:"1px 6px",borderRadius:6,background:info.bg,color:info.color,fontWeight:700,whiteSpace:"nowrap"}}>{info.label}</span>
+                <div style={{flex:1,minWidth:120,display:"flex",gap:8,flexWrap:"wrap",fontSize:10,color:"var(--text3)"}}>
+                  {s.area && <span>📍 {s.area}</span>}
+                  {horarios && <span>🕐 {horarios}</span>}
+                  {s.totalCalc != null && <span style={{fontFamily:"'DM Mono',monospace"}}>R$ {Number(s.totalCalc).toFixed(2)}</span>}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+        <div style={{marginTop:10,fontSize:10,color:"var(--text3)",fontStyle:"italic"}}>
+          💡 Pra agendar/lançar/fechar shifts, use o módulo <b>🎒 Freelas</b> na sidebar.
+        </div>
+      </div>
+    </details>
+  );
+}
+
+// v8.28.0 — Modal pra encerrar turno em andamento (saída + intervalo)
+// Geralmente quem encerra é DIFERENTE de quem iniciou — esse modal é o fechamento operacional.
+function CloseShiftModal({ shift, pessoa, onSave, onClose, mobileOnly }) {
+  const [saida, setSaida] = useState("");
+  const [intervalo, setIntervalo] = useState("0");
+  const [observacao, setObservacao] = useState(shift?.observacao || "");
+
+  if (!shift) return null;
+
+  function handleSave() {
+    if (!saida) { alert("Hora de saída é obrigatória."); return; }
+    onSave({ saida, intervalo, observacao });
+  }
+
+  return (
+    <div onClick={onClose} style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.5)",zIndex:1000,display:"flex",alignItems:"center",justifyContent:"center",padding:16}}>
+      <div onClick={e=>e.stopPropagation()} style={{background:"var(--card-bg)",borderRadius:14,maxWidth:500,width:"100%",padding:24}}>
+        <h3 style={{margin:"0 0 6px",color:"var(--text)",fontSize:16,fontWeight:700}}>■ Encerrar turno</h3>
+        <p style={{margin:"0 0 14px",fontSize:12,color:"var(--text3)",lineHeight:1.5}}>
+          <b>{shortName(pessoa?.name) || "—"}</b> · {fmtDate(shift.date)} · entrada às <b>{shift.entrada}</b>
+          {shift.confirmadoPor && <> · iniciado por <i>{shortName(shift.confirmadoPor)}</i></>}
+        </p>
+        <div style={{display:"grid",gridTemplateColumns:mobileOnly?"1fr 1fr":"1fr 1fr 2fr",gap:10,marginBottom:14}}>
+          <div>
+            <label style={{...S.label,fontSize:11}}>Saída efetiva *</label>
+            <input type="time" value={saida} onChange={e=>setSaida(e.target.value)} style={S.input} autoFocus/>
+          </div>
+          <div>
+            <label style={{...S.label,fontSize:11}}>Intervalo (min)</label>
+            <input type="number" min="0" value={intervalo} onChange={e=>setIntervalo(e.target.value)} style={S.input}/>
+          </div>
+          <div>
+            <label style={{...S.label,fontSize:11}}>Observação ao encerrar</label>
+            <input value={observacao} onChange={e=>setObservacao(e.target.value)} placeholder="Ex: chegou atrasado, bom desempenho..." style={S.input}/>
+          </div>
+        </div>
+        <div style={{display:"flex",justifyContent:"flex-end",gap:8}}>
+          <button onClick={onClose} style={{...S.btnSecondary,padding:"8px 14px",fontSize:13}}>Cancelar</button>
+          <button onClick={handleSave}
+            style={{background:"#1e40af",color:"#fff",border:"none",borderRadius:8,padding:"8px 16px",fontSize:13,fontWeight:700,cursor:"pointer"}}>
+            ■ Encerrar turno
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // v8.27.0 — Modal pra editar dados dum shift agendado (pessoa, data, horários, área, observação)
 function PlannedShiftEditModal({ shift, restPessoas, restaurantId, onSave, onClose, mobileOnly }) {
   const [pessoaId, setPessoaId] = useState(shift.pessoaId || "");
@@ -23244,9 +23410,8 @@ function PlannedShiftEditModal({ shift, restPessoas, restaurantId, onSave, onClo
 // v8.26.0 — Card de confirmação dum shift agendado: inline com inputs de entrada/saída
 function PlannedShiftConfirmCard({ shift, pessoa, restaurantId, today_, onConfirm, onCancel, ac, mobileOnly, onNoShow, onEdit }) {
   const [expanded, setExpanded] = useState(false);
+  // v8.28.0: confirmação só pega ENTRADA. Saída/intervalo são marcados depois (CloseShiftModal).
   const [entrada, setEntrada] = useState(shift.entrada || "");
-  const [saida, setSaida] = useState(shift.saida || "");
-  const [intervalo, setIntervalo] = useState(String(shift.intervalo || 0));
   const [observacao, setObservacao] = useState(shift.observacao || "");
 
   const dt = shift.scheduledDate || shift.date;
@@ -23294,7 +23459,7 @@ function PlannedShiftConfirmCard({ shift, pessoa, restaurantId, today_, onConfir
             </button>
             <button onClick={()=>setExpanded(true)}
               style={{background:"#15803d",color:"#fff",border:"none",borderRadius:8,padding:"7px 14px",fontSize:12,fontWeight:700,cursor:"pointer",whiteSpace:"nowrap"}}>
-              ✓ Rolou
+              ▶ Iniciar turno
             </button>
           </>
         ) : (
@@ -23302,34 +23467,28 @@ function PlannedShiftConfirmCard({ shift, pessoa, restaurantId, today_, onConfir
         )}
       </div>
 
-      {/* Form inline expandido */}
+      {/* Form inline expandido — só registra ENTRADA. Saída + intervalo ficam pra outro líder no final. */}
       {expanded && (
         <div style={{marginTop:10,padding:"10px",background:"var(--bg2)",borderRadius:8,border:"1px solid var(--border)"}}>
-          <div style={{fontSize:11,color:"var(--text3)",marginBottom:8,fontStyle:"italic"}}>Preencha os horários reais:</div>
-          <div style={{display:"grid",gridTemplateColumns:mobileOnly?"1fr 1fr":"1fr 1fr 1fr 2fr",gap:8,marginBottom:10}}>
+          <div style={{fontSize:11,color:"var(--text3)",marginBottom:8,fontStyle:"italic"}}>
+            ▶ Marque só a hora de entrada. Saída e intervalo serão registrados ao final do turno (pode ser por outro líder).
+          </div>
+          <div style={{display:"grid",gridTemplateColumns:mobileOnly?"1fr":"1fr 2fr",gap:8,marginBottom:10}}>
             <div>
-              <label style={{...S.label,fontSize:10}}>Entrada *</label>
+              <label style={{...S.label,fontSize:10}}>Entrada efetiva *</label>
               <input type="time" value={entrada} onChange={e=>setEntrada(e.target.value)} style={S.input}/>
             </div>
             <div>
-              <label style={{...S.label,fontSize:10}}>Saída</label>
-              <input type="time" value={saida} onChange={e=>setSaida(e.target.value)} style={S.input}/>
-            </div>
-            <div>
-              <label style={{...S.label,fontSize:10}}>Intervalo (min)</label>
-              <input type="number" min="0" value={intervalo} onChange={e=>setIntervalo(e.target.value)} style={S.input}/>
-            </div>
-            <div>
-              <label style={{...S.label,fontSize:10}}>Observação (opcional)</label>
+              <label style={{...S.label,fontSize:10}}>Observação no início (opcional)</label>
               <input value={observacao} onChange={e=>setObservacao(e.target.value)} placeholder="Algo a registrar..." style={S.input}/>
             </div>
           </div>
           <div style={{display:"flex",justifyContent:"flex-end",gap:6}}>
             <button onClick={()=>setExpanded(false)} style={{...S.btnSecondary,fontSize:11,padding:"6px 12px"}}>Cancelar</button>
-            <button onClick={()=>onConfirm({ entrada, saida, intervalo, observacao })}
+            <button onClick={()=>onConfirm({ entrada, saida: "", intervalo: "", observacao })}
               disabled={!entrada}
               style={{background:entrada?"#15803d":"var(--border)",color:"#fff",border:"none",borderRadius:8,padding:"7px 16px",fontSize:12,fontWeight:700,cursor:entrada?"pointer":"not-allowed"}}>
-              ✓ Confirmar shift
+              ▶ Iniciar turno
             </button>
           </div>
         </div>
@@ -23518,7 +23677,7 @@ function FreelaAgendarTab({ restaurantId, restPessoas, shifts, addPlannedShift, 
   );
 }
 
-function FreelaLancamentoTab({ restaurantId, allPessoas, restPessoas, restFreelas, shifts, addShift, updateShift, deleteShift, addFreela, bulkFillValor, shiftPrntoPronto, calcHoras, fmtHoras, confirmPlannedShift, cancelPlannedShift, markNoShow, editPlannedShift, isDP, isOwner, isLider, currentUser, mobileOnly, ac }) {
+function FreelaLancamentoTab({ restaurantId, allPessoas, restPessoas, restFreelas, shifts, addShift, updateShift, deleteShift, addFreela, bulkFillValor, shiftPrntoPronto, calcHoras, fmtHoras, confirmPlannedShift, cancelPlannedShift, markNoShow, editPlannedShift, closeShift, isDP, isOwner, isLider, currentUser, mobileOnly, ac }) {
   const [showAddForm, setShowAddForm] = useState(false);
   const [newShift, setNewShift] = useState({ pessoaId: "", date: today(), entrada: "", saida: "", intervalo: 0, area: "", observacao: "" });
   const [showFreelaForm, setShowFreelaForm] = useState(false);
@@ -23583,6 +23742,16 @@ function FreelaLancamentoTab({ restaurantId, allPessoas, restPessoas, restFreela
     (s.scheduledDate || s.date) <= today_
   ).sort((a,b) => (a.scheduledDate || a.date).localeCompare(b.scheduledDate || b.date));
 
+  // v8.28.0: shifts EM ANDAMENTO — turno iniciado (entrada marcada) mas ainda sem saída
+  const inProgressShifts = shifts.filter(s =>
+    s.restaurantId === restaurantId &&
+    s.status === "aberto" &&
+    s.entrada && !s.saida
+  ).sort((a,b) => (b.confirmadoEm || "").localeCompare(a.confirmadoEm || ""));
+
+  // State pra encerrar turno
+  const [closingShiftId, setClosingShiftId] = useState(null);
+
   // v8.27.0: state pra modal de edição
   const [editingShiftId, setEditingShiftId] = useState(null);
   const editingShift = editingShiftId ? shifts.find(s => s.id === editingShiftId) : null;
@@ -23599,6 +23768,56 @@ function FreelaLancamentoTab({ restaurantId, allPessoas, restPessoas, restFreela
           onClose={()=>setEditingShiftId(null)}
           onSave={(patch) => { editPlannedShift(editingShiftId, patch); setEditingShiftId(null); }}
         />
+      )}
+
+      {/* v8.28.0: Modal de encerrar turno (saída + intervalo) */}
+      {closingShiftId && (
+        <CloseShiftModal
+          shift={shifts.find(s => s.id === closingShiftId)}
+          pessoa={restPessoas.find(p => p.id === shifts.find(s => s.id === closingShiftId)?.pessoaId)}
+          mobileOnly={mobileOnly}
+          onClose={()=>setClosingShiftId(null)}
+          onSave={(payload) => { closeShift(closingShiftId, payload); setClosingShiftId(null); }}
+        />
+      )}
+
+      {/* v8.28.0: Card de Em andamento (entrada marcada, sem saída) */}
+      {inProgressShifts.length > 0 && (
+        <div style={{padding:"12px 14px",background:"#dbeafe",border:"1px solid #1e40af66",borderRadius:12,marginBottom:14}}>
+          <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:10,flexWrap:"wrap"}}>
+            <span style={{fontSize:14,fontWeight:700,color:"#1e3a8a"}}>🔵 Em andamento</span>
+            <span style={{fontSize:11,color:"#1e3a8a",background:"#fff",padding:"2px 8px",borderRadius:10,fontWeight:700}}>{inProgressShifts.length}</span>
+            <span style={{fontSize:11,color:"#1e3a8a",fontStyle:"italic"}}>· encerre o turno marcando saída e intervalo (pode ser outro líder)</span>
+          </div>
+          <div style={{display:"flex",flexDirection:"column",gap:8}}>
+            {inProgressShifts.map(s => {
+              const p = restPessoas.find(x => x.id === s.pessoaId);
+              const isEmployeePlus = p?.isTeam?.[restaurantId] === true && !p?.isFreela;
+              return (
+                <div key={s.id} style={{padding:"10px 12px",background:"var(--card-bg)",border:"1px solid #1e40af33",borderRadius:10,display:"flex",alignItems:"center",gap:10,flexWrap:"wrap"}}>
+                  <div style={{flex:1,minWidth:200}}>
+                    <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
+                      <span style={{fontSize:13,color:"var(--text)",fontWeight:700}}>{shortName(p?.name) || "—"}</span>
+                      {isEmployeePlus
+                        ? <span style={{fontSize:10,padding:"1px 7px",borderRadius:8,background:"#10b98122",color:"#15803d",fontWeight:700}}>EMPREGADO · TURNO EXTRA</span>
+                        : <span style={{fontSize:10,padding:"1px 7px",borderRadius:8,background:ac+"22",color:ac,fontWeight:700}}>FREELA</span>}
+                    </div>
+                    <div style={{fontSize:11,color:"var(--text3)",marginTop:3,display:"flex",gap:10,flexWrap:"wrap"}}>
+                      <span>📅 {fmtDate(s.date)}</span>
+                      <span>▶ Entrada: <b>{s.entrada}</b></span>
+                      {s.area && <span>📍 {s.area}</span>}
+                      {s.confirmadoPor && <span style={{fontStyle:"italic"}}>· iniciado por {shortName(s.confirmadoPor)}</span>}
+                    </div>
+                  </div>
+                  <button onClick={()=>setClosingShiftId(s.id)}
+                    style={{background:"#1e40af",color:"#fff",border:"none",borderRadius:8,padding:"7px 14px",fontSize:12,fontWeight:700,cursor:"pointer",whiteSpace:"nowrap"}}>
+                    ■ Encerrar turno
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        </div>
       )}
 
       {/* v8.26.0: Card de Agendados pra hoje/atrasados — confirmação leva pro fluxo legado */}
