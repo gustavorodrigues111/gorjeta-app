@@ -3,7 +3,7 @@ import React, { useState, useEffect, useMemo, useRef, Component } from "react";
 import { db } from "./firebase";
 import { doc, getDoc, setDoc, onSnapshot } from "firebase/firestore";
 
-const APP_VERSION = "8.28.0";
+const APP_VERSION = "8.29.0";
 
 // v8.11.1: comparação de versão semver-like (8.11.1 > 8.10.7 > 8.9.4)
 function compareVersions(a, b) {
@@ -22863,25 +22863,7 @@ function FreelasModule({ restaurantId, pessoas, freelaShifts, freelaPagamentos, 
     return id;
   }
 
-  // ── Bulk-fill de valor (aplica a vários shifts de uma vez) ──
-  function bulkFillValor({ pessoaId, valorTipo, valorUnit, escopo }) {
-    // escopo: "abertos_pessoa" | "abertos_pessoa_sem_valor" | "todos_abertos_sem_valor"
-    const updated = (freelaShifts || []).map(s => {
-      if (s.restaurantId !== restaurantId) return s;
-      if (s.status !== "aberto") return s;
-      let match = false;
-      if (escopo === "abertos_pessoa" && s.pessoaId === pessoaId) match = true;
-      if (escopo === "abertos_pessoa_sem_valor" && s.pessoaId === pessoaId && !s.valorTipo) match = true;
-      if (escopo === "todos_abertos_sem_valor" && !s.valorTipo) match = true;
-      if (!match) return s;
-      const next = { ...s, valorTipo, valorUnit: parseFloat(valorUnit) || 0 };
-      if (valorTipo === "hora") next.totalCalc = next.valorUnit * (next.horas || 0);
-      else if (valorTipo === "diaria") next.totalCalc = next.valorUnit;
-      return next;
-    });
-    onUpdate("freelaShifts", updated);
-    onUpdate("_toast", `🪄 Valor aplicado em massa`);
-  }
+  // v8.29.0: bulk-fill removido — DP edita valor shift a shift no Fechamento.
 
   // ── Lotes de pagamento (Fase 5) ──
   const restLotes = (freelaPagamentos || []).filter(l => l.restaurantId === restaurantId);
@@ -23078,11 +23060,13 @@ function FreelasModule({ restaurantId, pessoas, freelaShifts, freelaPagamentos, 
   }
 
   // Quem pode ver cada sub-tab
+  // v8.29.0: agendar restrito a Líder/DP/Owner — operacional puro (sem nenhuma das 3 flags) não vê
+  const canAgendar = isLider || isDP || isOwner;
   const canFechamento = isDP || isOwner; // só DP/Owner faz fechamento e marca pago
   const canHistorico = isDP || isOwner;
 
   const SUB_TABS = [
-    { id: "agendar",    label: "📅 Agendar",   visible: true },
+    { id: "agendar",    label: "📅 Agendar",   visible: canAgendar },
     { id: "lancamento", label: "Lançamento",   visible: true },
     { id: "fechamento", label: "Fechamento",   visible: canFechamento },
     { id: "historico",  label: "Histórico",    visible: canHistorico },
@@ -23112,6 +23096,8 @@ function FreelasModule({ restaurantId, pessoas, freelaShifts, freelaPagamentos, 
         <FreelaAgendarTab
           restaurantId={restaurantId}
           restPessoas={restPessoas}
+          allPessoas={pessoas}
+          addFreela={addFreela}
           shifts={restShifts}
           addPlannedShift={addPlannedShift}
           cancelPlannedShift={cancelPlannedShift}
@@ -23133,7 +23119,6 @@ function FreelasModule({ restaurantId, pessoas, freelaShifts, freelaPagamentos, 
           updateShift={updateShift}
           deleteShift={deleteShift}
           addFreela={addFreela}
-          bulkFillValor={bulkFillValor}
           shiftPrntoPronto={shiftPrntoPronto}
           calcHoras={calcHoras}
           fmtHoras={fmtHoras}
@@ -23497,8 +23482,167 @@ function PlannedShiftConfirmCard({ shift, pessoa, restaurantId, today_, onConfir
   );
 }
 
+// v8.29.0 — Form de cadastro rápido de freela (CPF-first), reutilizado em Agendar e Lançamento
+function CadastrarFreelaForm({ ac, mobileOnly, allPessoas, restaurantId, addFreela, onCadastrado, onClose }) {
+  const [data, setData] = useState({ name: "", whatsapp: "", pix: "", cpf: "" });
+  const cpfRaw = (data.cpf || "").replace(/\D/g, "");
+  const cpfValido = cpfRaw.length === 11;
+  const existing = cpfValido ? (allPessoas || []).find(p => (p.cpf || "").replace(/\D/g, "") === cpfRaw) : null;
+  const jaNesteRest = existing ? (existing.restaurantIds || []).includes(restaurantId) : false;
+  const jaFreelaAqui = existing ? !!existing.isFreela : false;
+  const effName = data.name || existing?.name || "";
+  const effWA   = data.whatsapp || existing?.whatsapp || "";
+  const effPIX  = data.pix || existing?.pix || "";
+  const faltaWA   = !effWA.trim();
+  const faltaPIX  = !effPIX.trim();
+  const faltaNome = !effName.trim();
+
+  let statusBox = null;
+  if (cpfRaw.length > 0 && cpfRaw.length < 11) {
+    statusBox = { kind: "info", icon: "⌨️", text: `Continue digitando — faltam ${11 - cpfRaw.length} dígito(s)` };
+  } else if (cpfValido && existing) {
+    if (jaFreelaAqui && jaNesteRest) {
+      statusBox = { kind: "ok", icon: "✅", text: `${existing.name} já é freela aqui — usar este cadastro` };
+    } else if (jaNesteRest) {
+      statusBox = { kind: "warn", icon: "🔄", text: `${existing.name} já está aqui (equipe) — vamos marcar também como freela` };
+    } else {
+      statusBox = { kind: "info", icon: "🔗", text: `${existing.name} já cadastrado em outro restaurante — vamos vincular aqui como freela` };
+    }
+  } else if (cpfValido && !existing) {
+    statusBox = { kind: "info", icon: "🆕", text: `CPF novo — preencha os dados abaixo` };
+  }
+
+  const colorByKind = { ok: "#15803d", warn: "#92400e", info: ac };
+  const bgByKind    = { ok: "#10b98115", warn: "#fef3c7", info: `${ac}10` };
+
+  async function handleSubmit() {
+    if (jaFreelaAqui && jaNesteRest) {
+      onCadastrado?.(existing.id);
+      onClose?.();
+      return;
+    }
+    const newId = await addFreela({ name: effName, whatsapp: effWA, pix: effPIX, cpf: cpfRaw });
+    if (newId) {
+      setData({ name: "", whatsapp: "", pix: "", cpf: "" });
+      onCadastrado?.(newId);
+      onClose?.();
+    }
+  }
+
+  function handleCpfChange(e) {
+    const digits = e.target.value.replace(/\D/g, "").slice(0, 11);
+    let formatted = digits;
+    if (digits.length > 9)      formatted = digits.replace(/(\d{3})(\d{3})(\d{3})(\d{0,2}).*/, "$1.$2.$3-$4");
+    else if (digits.length > 6) formatted = digits.replace(/(\d{3})(\d{3})(\d{0,3}).*/, "$1.$2.$3");
+    else if (digits.length > 3) formatted = digits.replace(/(\d{3})(\d{0,3}).*/, "$1.$2");
+    setData({ ...data, cpf: formatted });
+  }
+
+  return (
+    <div style={{background:`${ac}06`,border:`1px dashed ${ac}66`,borderRadius:10,padding:14,marginBottom:14}}>
+      <div style={{fontSize:11,color:ac,fontWeight:700,textTransform:"uppercase",letterSpacing:0.4,marginBottom:4}}>🎒 Cadastrar freela</div>
+      <div style={{fontSize:11,color:"var(--text3)",marginBottom:10,lineHeight:1.4}}>
+        Comece pelo <strong>CPF</strong> — se a pessoa já tiver cadastro em outro restaurante, puxamos os dados automaticamente.
+      </div>
+
+      <div style={{marginBottom:10}}>
+        <label style={{...S.label,fontSize:11}}>CPF *</label>
+        <input
+          value={data.cpf}
+          onChange={handleCpfChange}
+          placeholder="000.000.000-00"
+          inputMode="numeric"
+          autoFocus
+          style={{...S.input,fontFamily:"'DM Mono',monospace",fontSize:14,letterSpacing:0.5}}
+        />
+      </div>
+
+      {statusBox && (
+        <div style={{
+          padding:"8px 12px",borderRadius:8,marginBottom:10,fontSize:12,
+          background:bgByKind[statusBox.kind],color:colorByKind[statusBox.kind],
+          border:`1px solid ${colorByKind[statusBox.kind]}33`,fontWeight:600,
+        }}>
+          {statusBox.icon} {statusBox.text}
+        </div>
+      )}
+
+      {cpfValido && !(jaFreelaAqui && jaNesteRest) && (
+        <>
+          <div style={{display:"grid",gridTemplateColumns:mobileOnly?"1fr":"2fr 1.3fr 1.5fr",gap:8,marginBottom:10}}>
+            <div>
+              <label style={{...S.label,fontSize:11}}>
+                Nome {faltaNome && <span style={{color:"var(--red)"}}>*</span>}
+                {existing?.name && data.name === "" && <span style={{color:colorByKind.ok,marginLeft:4,fontSize:10}}>(do cadastro)</span>}
+              </label>
+              <input
+                value={data.name || existing?.name || ""}
+                onChange={e=>setData({...data,name:e.target.value})}
+                placeholder="Nome completo"
+                disabled={!!existing?.name}
+                style={{...S.input,opacity:existing?.name?0.7:1,cursor:existing?.name?"not-allowed":"text"}}
+              />
+            </div>
+            <div>
+              <label style={{...S.label,fontSize:11}}>
+                WhatsApp {faltaWA && <span style={{color:"var(--red)"}}>*</span>}
+                {existing?.whatsapp && data.whatsapp === "" && <span style={{color:colorByKind.ok,marginLeft:4,fontSize:10}}>(do cadastro)</span>}
+              </label>
+              <input
+                value={data.whatsapp || existing?.whatsapp || ""}
+                onChange={e=>setData({...data,whatsapp:e.target.value})}
+                placeholder="(11) 9..."
+                style={{...S.input,...(faltaWA?{borderColor:"var(--red)"}:null)}}
+              />
+            </div>
+            <div>
+              <label style={{...S.label,fontSize:11}}>
+                PIX {faltaPIX && <span style={{color:"var(--red)"}}>*</span>}
+                {existing?.pix && data.pix === "" && <span style={{color:colorByKind.ok,marginLeft:4,fontSize:10}}>(do cadastro)</span>}
+              </label>
+              <input
+                value={data.pix || existing?.pix || ""}
+                onChange={e=>setData({...data,pix:e.target.value})}
+                placeholder="CPF, e-mail, tel ou aleatória"
+                style={{...S.input,...(faltaPIX?{borderColor:"var(--red)"}:null)}}
+              />
+            </div>
+          </div>
+
+          {existing && (faltaWA || faltaPIX) && (
+            <div style={{padding:"8px 12px",background:"#fef3c7",border:"1px solid #fbbf24",borderRadius:8,fontSize:12,color:"#92400e",marginBottom:10}}>
+              ⚠️ <strong>{existing.name}</strong> já está cadastrado, mas falta:
+              {faltaWA && " WhatsApp"}{faltaWA && faltaPIX && " e"}{faltaPIX && " PIX"}.
+              Preencha aí em cima — vamos completar o cadastro existente.
+            </div>
+          )}
+        </>
+      )}
+
+      <div style={{display:"flex",gap:8,justifyContent:"flex-end",marginTop:10}}>
+        <button onClick={()=>{ setData({name:"",whatsapp:"",pix:"",cpf:""}); onClose?.(); }}
+          style={{...S.btnSecondary,fontSize:12,padding:"7px 14px"}}>Cancelar</button>
+        <button
+          onClick={handleSubmit}
+          disabled={!cpfValido || (cpfValido && !(jaFreelaAqui && jaNesteRest) && (faltaNome || faltaWA || faltaPIX))}
+          style={{
+            background:ac,color:"#fff",border:"none",borderRadius:8,padding:"7px 18px",fontSize:13,fontWeight:700,
+            cursor:(!cpfValido || (faltaNome||faltaWA||faltaPIX)) && !(jaFreelaAqui&&jaNesteRest) ? "not-allowed":"pointer",
+            opacity:(!cpfValido || (cpfValido && !(jaFreelaAqui && jaNesteRest) && (faltaNome || faltaWA || faltaPIX))) ? 0.5 : 1,
+          }}>
+          {jaFreelaAqui && jaNesteRest ? "✓ Já cadastrado — usar" :
+           existing && jaNesteRest ? "🎒 Marcar como freela" :
+           existing ? "🔗 Vincular e usar" :
+           "🎒 Cadastrar e usar"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 // v8.25.0 — Sub-tab "Agendar": forma de criar shift futuro + lista dos próximos agendamentos
-function FreelaAgendarTab({ restaurantId, restPessoas, shifts, addPlannedShift, cancelPlannedShift, editPlannedShift, mobileOnly, ac }) {
+// v8.29.0 — Botão "Cadastrar freela" também aqui (antes só em Lançamento)
+function FreelaAgendarTab({ restaurantId, restPessoas, allPessoas, addFreela, shifts, addPlannedShift, cancelPlannedShift, editPlannedShift, mobileOnly, ac }) {
   const [editingShiftId, setEditingShiftId] = useState(null);
   const editingShift = editingShiftId ? shifts.find(s => s.id === editingShiftId) : null;
   const today_ = today();
@@ -23510,6 +23654,8 @@ function FreelaAgendarTab({ restaurantId, restPessoas, shifts, addPlannedShift, 
   const [saida, setSaida] = useState("");
   const [intervalo, setIntervalo] = useState("");
   const [observacao, setObservacao] = useState("");
+  // v8.29.0: cadastro rápido de freela inline
+  const [showFreelaForm, setShowFreelaForm] = useState(false);
 
   // Listas: freelas e empregados (separados pra select com optgroup)
   const freelasList = restPessoas.filter(p => p.isFreela === true && !p.inactive)
@@ -23558,10 +23704,30 @@ function FreelaAgendarTab({ restaurantId, restPessoas, shifts, addPlannedShift, 
         />
       )}
 
+      {/* v8.29.0: Form de cadastro rápido de freela — pra quem agenda também conseguir cadastrar */}
+      {showFreelaForm && (
+        <CadastrarFreelaForm
+          ac={ac}
+          mobileOnly={mobileOnly}
+          allPessoas={allPessoas}
+          restaurantId={restaurantId}
+          addFreela={addFreela}
+          onClose={()=>setShowFreelaForm(false)}
+          onCadastrado={(id)=>{ setPessoaId(id); }}
+        />
+      )}
+
       {/* Form de agendamento */}
       <div style={{padding:"14px 16px",background:"var(--card-bg)",border:`1px solid ${ac}44`,borderRadius:12}}>
-        <div style={{fontSize:14,fontWeight:700,color:"var(--text)",marginBottom:10,display:"flex",alignItems:"center",gap:6}}>
-          <span>📅</span><span>Agendar shift de freela</span>
+        <div style={{fontSize:14,fontWeight:700,color:"var(--text)",marginBottom:10,display:"flex",alignItems:"center",justifyContent:"space-between",gap:6,flexWrap:"wrap"}}>
+          <div style={{display:"flex",alignItems:"center",gap:6}}>
+            <span>📅</span><span>Agendar shift de freela</span>
+          </div>
+          <button onClick={()=>setShowFreelaForm(!showFreelaForm)}
+            title="Cadastrar um freela rapidinho — sem precisar ir na aba Pessoas"
+            style={{background:showFreelaForm?"var(--bg2)":"transparent",color:ac,border:`1px solid ${ac}`,borderRadius:8,padding:"5px 12px",fontSize:12,fontWeight:600,cursor:"pointer",fontFamily:"'DM Sans',sans-serif"}}>
+            {showFreelaForm ? "✕ Fechar cadastro" : "🎒+ Cadastrar freela"}
+          </button>
         </div>
         <div style={{display:"grid",gridTemplateColumns:mobileOnly?"1fr":"2fr 1fr 1fr",gap:10,marginBottom:10}}>
           <div>
@@ -23677,13 +23843,12 @@ function FreelaAgendarTab({ restaurantId, restPessoas, shifts, addPlannedShift, 
   );
 }
 
-function FreelaLancamentoTab({ restaurantId, allPessoas, restPessoas, restFreelas, shifts, addShift, updateShift, deleteShift, addFreela, bulkFillValor, shiftPrntoPronto, calcHoras, fmtHoras, confirmPlannedShift, cancelPlannedShift, markNoShow, editPlannedShift, closeShift, isDP, isOwner, isLider, currentUser, mobileOnly, ac }) {
+function FreelaLancamentoTab({ restaurantId, allPessoas, restPessoas, restFreelas, shifts, addShift, updateShift, deleteShift, addFreela, shiftPrntoPronto, calcHoras, fmtHoras, confirmPlannedShift, cancelPlannedShift, markNoShow, editPlannedShift, closeShift, isDP, isOwner, isLider, currentUser, mobileOnly, ac }) {
   const [showAddForm, setShowAddForm] = useState(false);
   const [newShift, setNewShift] = useState({ pessoaId: "", date: today(), entrada: "", saida: "", intervalo: 0, area: "", observacao: "" });
   const [showFreelaForm, setShowFreelaForm] = useState(false);
-  const [newFreela, setNewFreela] = useState({ name: "", whatsapp: "", pix: "", cpf: "" });
-  const [showBulkForm, setShowBulkForm] = useState(false);
-  const [bulkData, setBulkData] = useState({ pessoaId: "", valorTipo: "hora", valorUnit: "", escopo: "abertos_pessoa_sem_valor" });
+  // v8.29.0: form de cadastro extraído pra subcomponente CadastrarFreelaForm (state interno).
+  // v8.29.0: bulk fill removido — DP edita valor shift a shift no Fechamento
   const [filterStatus, setFilterStatus] = useState("todos"); // todos | aberto | pendentes | fechamento | pago
   const [filterPeriod, setFilterPeriod] = useState({ from: "", to: "" });
   const [filterPessoa, setFilterPessoa] = useState("");
@@ -23722,17 +23887,7 @@ function FreelaLancamentoTab({ restaurantId, allPessoas, restPessoas, restFreela
   // Importante: isTeam[restaurantId] (per-rest), não p.isTeam (objeto truthy mesmo vazio)
   const elegiveis = restPessoas.filter(p => p.isFreela || p.isTeam?.[restaurantId]).sort((a,b) => a.name.localeCompare(b.name));
 
-  async function handleAddFreelaSubmit(payload) {
-    // payload é opcional — se não vier, usa o state newFreela
-    const newId = await addFreela(payload || newFreela);
-    if (newId) {
-      setNewShift(s => ({ ...s, pessoaId: newId }));
-      setNewFreela({ name: "", whatsapp: "", pix: "", cpf: "" });
-      setShowFreelaForm(false);
-      // se o form de shift não estava aberto, abre — pra fluxo natural cadastro→lança
-      if (!showAddForm) setShowAddForm(true);
-    }
-  }
+  // v8.29.0: handleAddFreelaSubmit removido — lógica embutida no CadastrarFreelaForm + onCadastrado.
 
   // v8.26.0: shifts agendados pra hoje OU atrasados (já passou e ninguém confirmou)
   const today_ = today();
@@ -23867,13 +24022,7 @@ function FreelaLancamentoTab({ restaurantId, allPessoas, restPessoas, restFreela
           <option value="fechamento">🔒 Em fechamento</option>
           <option value="pago">💸 Pagos</option>
         </select>
-        {(isDP || isOwner) && (
-          <button onClick={()=>setShowBulkForm(!showBulkForm)}
-            title="Aplicar mesmo valor a vários shifts de uma vez"
-            style={{background:showBulkForm?"var(--bg2)":"transparent",color:ac,border:`1px solid ${ac}`,borderRadius:8,padding:"7px 12px",fontSize:12,fontWeight:600,cursor:"pointer"}}>
-            🪄 Bulk fill
-          </button>
-        )}
+        {/* v8.29.0: Bulk fill removido — DP edita valor shift a shift no Fechamento */}
         <select value={filterPessoa} onChange={e=>setFilterPessoa(e.target.value)}
           style={{...S.input,maxWidth:200,fontSize:12,padding:"7px 10px",cursor:"pointer"}}>
           <option value="">🎒 Todas as pessoas</option>
@@ -23885,211 +24034,24 @@ function FreelaLancamentoTab({ restaurantId, allPessoas, restPessoas, restFreela
           title="Até" style={{...S.input,maxWidth:140,fontSize:12,padding:"7px 10px"}}/>
       </div>
 
-      {/* Form de cadastro rápido de freela — fluxo CPF-first */}
-      {showFreelaForm && (() => {
-        // Lookup do CPF na base global de pessoas
-        const cpfRaw = (newFreela.cpf || "").replace(/\D/g, "");
-        const cpfValido = cpfRaw.length === 11;
-        const existing = cpfValido ? (allPessoas || []).find(p => (p.cpf || "").replace(/\D/g, "") === cpfRaw) : null;
-        const jaNesteRest = existing ? (existing.restaurantIds || []).includes(restaurantId) : false;
-        const jaFreelaAqui = existing ? !!existing.isFreela : false;
-        // Dados efetivos (preenchidos vs. existentes)
-        const effName = newFreela.name || existing?.name || "";
-        const effWA = newFreela.whatsapp || existing?.whatsapp || "";
-        const effPIX = newFreela.pix || existing?.pix || "";
-        const faltaWA = !effWA.trim();
-        const faltaPIX = !effPIX.trim();
-        const faltaNome = !effName.trim();
-        // Status pra UI
-        let statusBox = null;
-        if (cpfRaw.length > 0 && cpfRaw.length < 11) {
-          statusBox = { kind: "info", icon: "⌨️", text: `Continue digitando — faltam ${11 - cpfRaw.length} dígito(s)` };
-        } else if (cpfValido && existing) {
-          if (jaFreelaAqui && jaNesteRest) {
-            statusBox = { kind: "ok", icon: "✅", text: `${existing.name} já é freela aqui — selecione no campo Pessoa pra lançar shift` };
-          } else if (jaNesteRest) {
-            statusBox = { kind: "warn", icon: "🔄", text: `${existing.name} já está aqui (equipe) — vamos marcar também como freela` };
-          } else {
-            statusBox = { kind: "info", icon: "🔗", text: `${existing.name} já cadastrado em outro restaurante — vamos vincular aqui como freela` };
-          }
-        } else if (cpfValido && !existing) {
-          statusBox = { kind: "info", icon: "🆕", text: `CPF novo — preenche os dados abaixo` };
-        }
-
-        const colorByKind = { ok: "#15803d", warn: "#92400e", info: ac };
-        const bgByKind = { ok: "#10b98115", warn: "#fef3c7", info: `${ac}10` };
-
-        return (
-        <div style={{background:`${ac}06`,border:`1px dashed ${ac}66`,borderRadius:10,padding:14,marginBottom:14}}>
-          <div style={{fontSize:11,color:ac,fontWeight:700,textTransform:"uppercase",letterSpacing:0.4,marginBottom:4}}>🎒 Cadastrar freela</div>
-          <div style={{fontSize:11,color:"var(--text3)",marginBottom:10,lineHeight:1.4}}>
-            Comece pelo <strong>CPF</strong> — se a pessoa já tiver cadastro em outro restaurante, puxamos os dados automaticamente.
-          </div>
-
-          {/* CPF — destaque, primeiro */}
-          <div style={{marginBottom:10}}>
-            <label style={{...S.label,fontSize:11}}>CPF *</label>
-            <input
-              value={newFreela.cpf}
-              onChange={e=>{
-                // mantém só dígitos enquanto digita, mas formata na tela
-                const digits = e.target.value.replace(/\D/g, "").slice(0, 11);
-                let formatted = digits;
-                if (digits.length > 9) formatted = digits.replace(/(\d{3})(\d{3})(\d{3})(\d{0,2}).*/, "$1.$2.$3-$4");
-                else if (digits.length > 6) formatted = digits.replace(/(\d{3})(\d{3})(\d{0,3}).*/, "$1.$2.$3");
-                else if (digits.length > 3) formatted = digits.replace(/(\d{3})(\d{0,3}).*/, "$1.$2");
-                setNewFreela({...newFreela, cpf: formatted});
-              }}
-              placeholder="000.000.000-00"
-              inputMode="numeric"
-              autoFocus
-              style={{...S.input,fontFamily:"'DM Mono',monospace",fontSize:14,letterSpacing:0.5}}
-            />
-          </div>
-
-          {/* Box de status do lookup */}
-          {statusBox && (
-            <div style={{
-              padding:"8px 12px",borderRadius:8,marginBottom:10,fontSize:12,
-              background:bgByKind[statusBox.kind],color:colorByKind[statusBox.kind],
-              border:`1px solid ${colorByKind[statusBox.kind]}33`,fontWeight:600,
-            }}>
-              {statusBox.icon} {statusBox.text}
-            </div>
-          )}
-
-          {/* Campos restantes — só aparecem depois do CPF válido */}
-          {cpfValido && !(jaFreelaAqui && jaNesteRest) && (
-            <>
-              <div style={{display:"grid",gridTemplateColumns:mobileOnly?"1fr":"2fr 1.3fr 1.5fr",gap:8,marginBottom:10}}>
-                <div>
-                  <label style={{...S.label,fontSize:11}}>
-                    Nome {faltaNome && <span style={{color:"var(--red)"}}>*</span>}
-                    {existing?.name && newFreela.name === "" && <span style={{color:colorByKind.ok,marginLeft:4,fontSize:10}}>(do cadastro)</span>}
-                  </label>
-                  <input
-                    value={newFreela.name || existing?.name || ""}
-                    onChange={e=>setNewFreela({...newFreela,name:e.target.value})}
-                    placeholder="Nome completo"
-                    disabled={!!existing?.name}
-                    style={{...S.input,opacity:existing?.name?0.7:1,cursor:existing?.name?"not-allowed":"text"}}
-                  />
-                </div>
-                <div>
-                  <label style={{...S.label,fontSize:11}}>
-                    WhatsApp {faltaWA && <span style={{color:"var(--red)"}}>*</span>}
-                    {existing?.whatsapp && newFreela.whatsapp === "" && <span style={{color:colorByKind.ok,marginLeft:4,fontSize:10}}>(do cadastro)</span>}
-                  </label>
-                  <input
-                    value={newFreela.whatsapp || existing?.whatsapp || ""}
-                    onChange={e=>setNewFreela({...newFreela,whatsapp:e.target.value})}
-                    placeholder="(11) 9..."
-                    style={{...S.input,...(faltaWA?{borderColor:"var(--red)"}:null)}}
-                  />
-                </div>
-                <div>
-                  <label style={{...S.label,fontSize:11}}>
-                    PIX {faltaPIX && <span style={{color:"var(--red)"}}>*</span>}
-                    {existing?.pix && newFreela.pix === "" && <span style={{color:colorByKind.ok,marginLeft:4,fontSize:10}}>(do cadastro)</span>}
-                  </label>
-                  <input
-                    value={newFreela.pix || existing?.pix || ""}
-                    onChange={e=>setNewFreela({...newFreela,pix:e.target.value})}
-                    placeholder="CPF, e-mail, tel ou aleatória"
-                    style={{...S.input,...(faltaPIX?{borderColor:"var(--red)"}:null)}}
-                  />
-                </div>
-              </div>
-
-              {/* Aviso destacado se faltar dado essencial */}
-              {existing && (faltaWA || faltaPIX) && (
-                <div style={{padding:"8px 12px",background:"#fef3c7",border:"1px solid #fbbf24",borderRadius:8,fontSize:12,color:"#92400e",marginBottom:10}}>
-                  ⚠️ <strong>{existing.name}</strong> já está cadastrado, mas falta:
-                  {faltaWA && " WhatsApp"}{faltaWA && faltaPIX && " e"}{faltaPIX && " PIX"}.
-                  Preencha aí em cima — vamos completar o cadastro existente.
-                </div>
-              )}
-            </>
-          )}
-
-          <div style={{display:"flex",gap:8,justifyContent:"flex-end",marginTop:10}}>
-            <button onClick={()=>{setShowFreelaForm(false); setNewFreela({name:"",whatsapp:"",pix:"",cpf:""});}}
-              style={{...S.btnSecondary,fontSize:12,padding:"7px 14px"}}>Cancelar</button>
-            <button
-              onClick={async()=>{
-                // se já é freela aqui, só fecha (não precisa cadastrar de novo)
-                if (jaFreelaAqui && jaNesteRest) {
-                  setShowFreelaForm(false);
-                  setNewShift(s=>({...s,pessoaId:existing.id}));
-                  if (!showAddForm) setShowAddForm(true);
-                  return;
-                }
-                // Submit usando os dados efetivos (preenchidos OU vindos do existing)
-                await handleAddFreelaSubmit({ name: effName, whatsapp: effWA, pix: effPIX, cpf: cpfRaw });
-              }}
-              disabled={!cpfValido || (cpfValido && !(jaFreelaAqui && jaNesteRest) && (faltaNome || faltaWA || faltaPIX))}
-              style={{
-                background:ac,color:"#fff",border:"none",borderRadius:8,padding:"7px 18px",fontSize:13,fontWeight:700,
-                cursor:(!cpfValido || (faltaNome||faltaWA||faltaPIX)) && !(jaFreelaAqui&&jaNesteRest) ? "not-allowed":"pointer",
-                opacity:(!cpfValido || (cpfValido && !(jaFreelaAqui && jaNesteRest) && (faltaNome || faltaWA || faltaPIX))) ? 0.5 : 1,
-              }}>
-              {jaFreelaAqui && jaNesteRest ? "✓ Já cadastrado — usar" :
-               existing && jaNesteRest ? "🎒 Marcar como freela" :
-               existing ? "🔗 Vincular e usar" :
-               "🎒 Cadastrar e usar"}
-            </button>
-          </div>
-        </div>
-        );
-      })()}
-
-      {/* Form de bulk-fill (DP/Owner) */}
-      {showBulkForm && (isDP || isOwner) && (
-        <div style={{background:`${ac}06`,border:`1px dashed ${ac}66`,borderRadius:10,padding:14,marginBottom:14}}>
-          <div style={{fontSize:11,color:ac,fontWeight:700,textTransform:"uppercase",letterSpacing:0.4,marginBottom:4}}>🪄 Aplicar valor em massa</div>
-          <div style={{fontSize:11,color:"var(--text3)",marginBottom:10,lineHeight:1.4}}>
-            Atalho pra preencher rápido. Aplica o mesmo valor a vários shifts em status <strong>Aberto</strong> de uma vez.
-          </div>
-          <div style={{display:"grid",gridTemplateColumns:mobileOnly?"1fr":"1.6fr 1fr 1fr 1.6fr",gap:8,marginBottom:10}}>
-            <div>
-              <label style={{...S.label,fontSize:11}}>Pessoa</label>
-              <select value={bulkData.pessoaId} onChange={e=>setBulkData({...bulkData,pessoaId:e.target.value})} style={{...S.input,cursor:"pointer"}}>
-                <option value="">— Selecione —</option>
-                {restPessoas.filter(p=>p.isFreela||p.isTeam?.[restaurantId]).sort((a,b)=>a.name.localeCompare(b.name)).map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
-              </select>
-            </div>
-            <div>
-              <label style={{...S.label,fontSize:11}}>Tipo</label>
-              <select value={bulkData.valorTipo} onChange={e=>setBulkData({...bulkData,valorTipo:e.target.value})} style={{...S.input,cursor:"pointer"}}>
-                <option value="hora">Hora</option>
-                <option value="diaria">Diária</option>
-              </select>
-            </div>
-            <div>
-              <label style={{...S.label,fontSize:11}}>Valor R$</label>
-              <input type="number" step="0.01" min="0" value={bulkData.valorUnit} onChange={e=>setBulkData({...bulkData,valorUnit:e.target.value})} placeholder="0,00" style={S.input}/>
-            </div>
-            <div>
-              <label style={{...S.label,fontSize:11}}>Aplicar em</label>
-              <select value={bulkData.escopo} onChange={e=>setBulkData({...bulkData,escopo:e.target.value})} style={{...S.input,cursor:"pointer"}}>
-                <option value="abertos_pessoa_sem_valor">Só shifts sem valor (da pessoa)</option>
-                <option value="abertos_pessoa">Todos abertos (da pessoa, sobrescreve)</option>
-                <option value="todos_abertos_sem_valor">Todos sem valor (qualquer pessoa)</option>
-              </select>
-            </div>
-          </div>
-          <div style={{display:"flex",gap:8,justifyContent:"flex-end"}}>
-            <button onClick={()=>setShowBulkForm(false)} style={{...S.btnSecondary,fontSize:12,padding:"7px 14px"}}>Cancelar</button>
-            <button onClick={()=>{
-              if (bulkData.escopo !== "todos_abertos_sem_valor" && !bulkData.pessoaId) { alert("Selecione a pessoa."); return; }
-              if (!bulkData.valorUnit || parseFloat(bulkData.valorUnit) <= 0) { alert("Valor inválido."); return; }
-              bulkFillValor(bulkData);
-              setBulkData({ pessoaId: "", valorTipo: "hora", valorUnit: "", escopo: "abertos_pessoa_sem_valor" });
-              setShowBulkForm(false);
-            }} style={{background:ac,color:"#fff",border:"none",borderRadius:8,padding:"7px 18px",fontSize:13,fontWeight:700,cursor:"pointer"}}>🪄 Aplicar</button>
-          </div>
-        </div>
+      {/* v8.29.0: Form de cadastro rápido extraído pra subcomponente reutilizável */}
+      {showFreelaForm && (
+        <CadastrarFreelaForm
+          ac={ac}
+          mobileOnly={mobileOnly}
+          allPessoas={allPessoas}
+          restaurantId={restaurantId}
+          addFreela={addFreela}
+          onClose={()=>setShowFreelaForm(false)}
+          onCadastrado={(id)=>{
+            setNewShift(s => ({ ...s, pessoaId: id }));
+            // se o form de shift não estava aberto, abre — pra fluxo natural cadastro→lança
+            if (!showAddForm) setShowAddForm(true);
+          }}
+        />
       )}
+
+      {/* v8.29.0: Form de bulk-fill removido — DP edita valor shift a shift no Fechamento */}
 
       {/* Form de adicionar shift */}
       {showAddForm && (
