@@ -12875,6 +12875,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
             isDP={isDP}
             isLider={isLider}
             isOwner={isOwner}
+            perms={perms}
             onUpdate={onUpdate}
             mobileOnly={mobileOnly}
           />
@@ -22570,7 +22571,7 @@ function RecursosTab({ restaurantId, recursoFolders, recursos, recursosInitializ
   );
 }
 
-function FreelasModule({ restaurantId, pessoas, freelaShifts, freelaPagamentos, employees, roles, schedules, restaurants, currentUser, isDP, isLider, isOwner, onUpdate, mobileOnly }) {
+function FreelasModule({ restaurantId, pessoas, freelaShifts, freelaPagamentos, employees, roles, schedules, restaurants, currentUser, isDP, isLider, isOwner, perms, onUpdate, mobileOnly }) {
   const [subTab, setSubTab] = useState("lancamento");
   const ac = "#7c3aed"; // roxo Freelas — distingue dos outros módulos
   const restPessoas = (pessoas || []).filter(p => (p.restaurantIds || []).includes(restaurantId));
@@ -23060,10 +23061,11 @@ function FreelasModule({ restaurantId, pessoas, freelaShifts, freelaPagamentos, 
   }
 
   // Quem pode ver cada sub-tab
-  // v8.29.0: agendar restrito a Líder/DP/Owner — operacional puro (sem nenhuma das 3 flags) não vê
-  const canAgendar = isLider || isDP || isOwner;
-  const canFechamento = isDP || isOwner; // só DP/Owner faz fechamento e marca pago
-  const canHistorico = isDP || isOwner;
+  // v8.29.0: agendar é alias de fechar — usa a permissão granular admin.freelasFechar.
+  // Quem pode fechar lote (DP/Owner ou pessoa com a perm na matriz) também agenda.
+  const canFechamento = isDP || isOwner || perms?.admin?.freelasFechar === true;
+  const canAgendar    = canFechamento; // alias — quem fecha, agenda
+  const canHistorico  = isDP || isOwner || perms?.admin?.freelasFechar === true;
 
   const SUB_TABS = [
     { id: "agendar",    label: "📅 Agendar",   visible: canAgendar },
