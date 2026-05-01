@@ -3,7 +3,7 @@ import React, { useState, useEffect, useMemo, useRef, Component } from "react";
 import { db } from "./firebase";
 import { doc, getDoc, setDoc, onSnapshot } from "firebase/firestore";
 
-const APP_VERSION = "8.22.0";
+const APP_VERSION = "8.21.0";
 
 // v8.11.1: comparação de versão semver-like (8.11.1 > 8.10.7 > 8.9.4)
 function compareVersions(a, b) {
@@ -28581,8 +28581,7 @@ function OperationalChecklists({ employee, pessoas = [], miseChecklistTemplates,
   );
   const canReviewAny = myReviewableTpls.length > 0;
   const [view, setView] = useState("executar"); // executar | conferir
-  // v8.22.0: agrupa runs do mesmo template+data — chave é `${tplId}__${date}`
-  const [reviewingGroupKey, setReviewingGroupKey] = useState(null);
+  const [reviewingRunId, setReviewingRunId] = useState(null);
 
   if (templates.length === 0 && !canReviewAny) {
     return (
@@ -28608,8 +28607,8 @@ function OperationalChecklists({ employee, pessoas = [], miseChecklistTemplates,
         onUpdate={onUpdate}
         myReviewableTpls={myReviewableTpls}
         pendingReviews={pendingReviews}
-        reviewingGroupKey={reviewingGroupKey}
-        setReviewingGroupKey={setReviewingGroupKey}
+        reviewingRunId={reviewingRunId}
+        setReviewingRunId={setReviewingRunId}
         onSwitchToExecutar={() => setView("executar")}
         myPessoa={myPessoaForReview}
       />
@@ -28776,52 +28775,32 @@ function OperationalChecklists({ employee, pessoas = [], miseChecklistTemplates,
 // Lista de runs pendentes de conferência + tela de revisão + modal de criar ocorrência.
 // Critério de visibilidade: pessoa precisa passar em canReviewChecklist(pessoa, tpl, rid).
 // Ao aprovar, seta reviewedAt no run. Ocorrências criadas viram incidents (visibility:"internal").
-function ChecklistsConferenciaView({ restaurantId, employee, pessoas, miseChecklistTemplates, miseChecklistRuns, onUpdate, myReviewableTpls, pendingReviews, reviewingGroupKey, setReviewingGroupKey, onSwitchToExecutar, myPessoa }) {
+function ChecklistsConferenciaView({ restaurantId, employee, pessoas, miseChecklistTemplates, miseChecklistRuns, onUpdate, myReviewableTpls, pendingReviews, reviewingRunId, setReviewingRunId, onSwitchToExecutar, myPessoa }) {
   const miseAc = "#7c9e5e";
-  // v8.22.0: helper de agrupamento por template+data
-  function groupRunsByTplDate(runs) {
-    const map = {};
-    runs.forEach(r => {
-      const k = `${r.templateId}__${r.date}`;
-      if (!map[k]) map[k] = [];
-      map[k].push(r);
-    });
-    return map;
-  }
-  // Pendentes agrupadas
-  const pendingGroups = groupRunsByTplDate(pendingReviews);
   // Já conferidos por mim (histórico recente)
-  const myReviewedAll = (miseChecklistRuns || []).filter(r =>
+  const myReviewed = (miseChecklistRuns || []).filter(r =>
     r.restaurantId === restaurantId &&
     r.reviewedAt &&
     myReviewableTpls.some(t => t.id === r.templateId)
-  );
-  // Agrupa o histórico também
-  const reviewedGroups = groupRunsByTplDate(myReviewedAll);
-  // Lista as últimas 20 keys do histórico ordenadas pelo último reviewedAt
-  const reviewedGroupKeys = Object.keys(reviewedGroups).sort((a,b) => {
-    const lastA = Math.max(...reviewedGroups[a].map(r => new Date(r.reviewedAt || 0).getTime()));
-    const lastB = Math.max(...reviewedGroups[b].map(r => new Date(r.reviewedAt || 0).getTime()));
-    return lastB - lastA;
-  }).slice(0, 20);
+  ).sort((a,b) => (b.reviewedAt || "").localeCompare(a.reviewedAt || "")).slice(0, 20);
 
-  if (reviewingGroupKey) {
-    const groupRuns = (miseChecklistRuns || []).filter(r => `${r.templateId}__${r.date}` === reviewingGroupKey);
-    if (groupRuns.length === 0) {
-      setTimeout(() => setReviewingGroupKey(null), 0);
+  if (reviewingRunId) {
+    const run = (miseChecklistRuns || []).find(r => r.id === reviewingRunId);
+    if (!run) {
+      setTimeout(() => setReviewingRunId(null), 0);
       return null;
     }
-    const tpl = (miseChecklistTemplates || []).find(t => t.id === groupRuns[0].templateId);
+    const tpl = (miseChecklistTemplates || []).find(t => t.id === run.templateId);
     return (
-      <ChecklistReviewAggregatedScreen
-        runs={groupRuns}
+      <ChecklistReviewScreen
+        run={run}
         tpl={tpl}
         restaurantId={restaurantId}
         employee={employee}
         pessoas={pessoas}
         miseChecklistRuns={miseChecklistRuns}
         onUpdate={onUpdate}
-        onBack={() => setReviewingGroupKey(null)}
+        onBack={() => setReviewingRunId(null)}
         myPessoa={myPessoa}
       />
     );
@@ -28852,45 +28831,35 @@ function ChecklistsConferenciaView({ restaurantId, employee, pessoas, miseCheckl
         </div>
       </div>
 
-      {/* PENDENTES — agrupados por template+data */}
-      {Object.keys(pendingGroups).length > 0 && (
+      {/* PENDENTES */}
+      {pendingReviews.length > 0 && (
         <div style={{display:"flex",flexDirection:"column",gap:8}}>
           <div style={{fontSize:12,fontWeight:700,color:"var(--text2)",textTransform:"uppercase",letterSpacing:0.4}}>📋 Pendentes</div>
-          {Object.keys(pendingGroups).sort((a,b) => {
-            const maxA = Math.max(...pendingGroups[a].map(r => new Date(r.completedAt || 0).getTime()));
-            const maxB = Math.max(...pendingGroups[b].map(r => new Date(r.completedAt || 0).getTime()));
-            return maxB - maxA;
-          }).map(key => {
-            const groupRuns = pendingGroups[key];
-            const tpl = (miseChecklistTemplates || []).find(t => t.id === groupRuns[0].templateId);
-            const totalCount = (tpl?.items || []).length;
-            // Agrega quantos itens DISTINTOS foram marcados (qualquer pessoa marcando conta)
-            const itemsMarkedSet = new Set();
-            groupRuns.forEach(r => (r.items || []).forEach(it => { if (it.done) itemsMarkedSet.add(it.itemId); }));
-            const doneCount = itemsMarkedSet.size;
+          {pendingReviews.sort((a,b) => (b.completedAt||"").localeCompare(a.completedAt||"")).map(run => {
+            const tpl = (miseChecklistTemplates || []).find(t => t.id === run.templateId);
+            const items = run.items || [];
+            const doneCount = items.filter(i => i.done).length;
+            const totalCount = items.length;
             const pct = totalCount > 0 ? Math.round(doneCount/totalCount*100) : 0;
-            const hasNotes = groupRuns.some(r => (r.items || []).some(i => i.note && i.note.trim()));
+            const hasNotes = items.some(i => i.note && i.note.trim());
             const area = tpl?.area || "Geral";
-            const contributors = groupRuns.map(r => shortName(r.userName)).filter((v,i,a)=>a.indexOf(v)===i);
-            const lastTime = new Date(Math.max(...groupRuns.map(r => new Date(r.completedAt || 0).getTime()))).toLocaleTimeString("pt-BR",{hour:"2-digit",minute:"2-digit"});
             return (
-              <div key={key} onClick={() => setReviewingGroupKey(key)}
+              <div key={run.id} onClick={() => setReviewingRunId(run.id)}
                 style={{padding:"12px 14px",background:"var(--card-bg)",border:"1px solid #f59e0b66",borderRadius:10,cursor:"pointer",display:"flex",alignItems:"center",gap:10,flexWrap:"wrap"}}>
                 <div style={{flex:1,minWidth:180}}>
                   <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
                     <span style={{fontSize:14,color:"var(--text)",fontWeight:700}}>{tpl?.name || "Template removido"}</span>
                     <span style={{fontSize:10,padding:"2px 8px",borderRadius:10,background:area==="Geral"?"var(--bg2)":(AREA_COLORS[area]||"#888")+"22",color:area==="Geral"?"var(--text3)":(AREA_COLORS[area]||"#888"),fontWeight:700}}>{area}</span>
-                    {groupRuns.length > 1 && <span style={{fontSize:10,padding:"2px 6px",borderRadius:6,background:"#dbeafe",color:"#1e40af",fontWeight:700}}>👥 {groupRuns.length} pessoas</span>}
                     {hasNotes && <span style={{fontSize:10,padding:"2px 6px",borderRadius:6,background:"#fef3c7",color:"#b45309",fontWeight:700}}>📝 com observações</span>}
                   </div>
                   <div style={{fontSize:12,color:"var(--text3)",marginTop:3}}>
-                    👤 <b>{contributors.slice(0,3).join(", ")}</b>{contributors.length > 3 ? ` +${contributors.length-3}` : ""} · {fmtDate(groupRuns[0].date)} · último envio às {lastTime}
+                    👤 <b>{shortName(run.userName)}</b> · {fmtDate(run.date)} às {new Date(run.completedAt).toLocaleTimeString("pt-BR",{hour:"2-digit",minute:"2-digit"})}
                   </div>
                   <div style={{display:"flex",alignItems:"center",gap:8,marginTop:6}}>
                     <div style={{width:120,height:5,background:"var(--bg2)",borderRadius:3,overflow:"hidden"}}>
                       <div style={{width:`${pct}%`,height:"100%",background:pct===100?"#15803d":"#f59e0b"}}/>
                     </div>
-                    <span style={{fontSize:11,color:"var(--text3)",fontFamily:"'DM Mono',monospace"}}>{doneCount}/{totalCount} item(s) marcado(s)</span>
+                    <span style={{fontSize:11,color:"var(--text3)",fontFamily:"'DM Mono',monospace"}}>{doneCount}/{totalCount}</span>
                   </div>
                 </div>
                 <button style={{padding:"8px 16px",borderRadius:8,border:"none",background:"#f59e0b",color:"#fff",fontSize:13,fontWeight:700,cursor:"pointer"}}>
@@ -28902,32 +28871,25 @@ function ChecklistsConferenciaView({ restaurantId, employee, pessoas, miseCheckl
         </div>
       )}
 
-      {/* HISTÓRICO MEU — agrupado por template+data */}
-      {reviewedGroupKeys.length > 0 && (
+      {/* HISTÓRICO MEU */}
+      {myReviewed.length > 0 && (
         <div style={{display:"flex",flexDirection:"column",gap:8}}>
           <div style={{fontSize:12,fontWeight:700,color:"var(--text2)",textTransform:"uppercase",letterSpacing:0.4,marginTop:8}}>✅ Conferidos recentemente</div>
-          {reviewedGroupKeys.map(key => {
-            const groupRuns = reviewedGroups[key];
-            const tpl = (miseChecklistTemplates || []).find(t => t.id === groupRuns[0].templateId);
-            const totalCount = (tpl?.items || []).length;
-            const itemsMarkedSet = new Set();
-            groupRuns.forEach(r => (r.items || []).forEach(it => { if (it.done) itemsMarkedSet.add(it.itemId); }));
-            const doneCount = itemsMarkedSet.size;
-            const contributors = groupRuns.map(r => shortName(r.userName)).filter((v,i,a)=>a.indexOf(v)===i);
-            const reviewerNames = groupRuns.map(r => shortName(r.reviewerName)).filter(Boolean).filter((v,i,a)=>a.indexOf(v)===i);
-            const allBypass = groupRuns.every(r => r.autoBypass);
+          {myReviewed.map(run => {
+            const tpl = (miseChecklistTemplates || []).find(t => t.id === run.templateId);
+            const items = run.items || [];
+            const doneCount = items.filter(i => i.done).length;
+            const totalCount = items.length;
             return (
-              <div key={key} onClick={() => setReviewingGroupKey(key)}
+              <div key={run.id} onClick={() => setReviewingRunId(run.id)}
                 style={{padding:"10px 14px",background:"var(--card-bg)",border:"1px solid var(--border)",borderRadius:10,cursor:"pointer",display:"flex",alignItems:"center",gap:10,opacity:0.85}}>
                 <div style={{flex:1,minWidth:180}}>
-                  <div style={{fontSize:13,color:"var(--text)",fontWeight:600,display:"flex",alignItems:"center",gap:6,flexWrap:"wrap"}}>
+                  <div style={{fontSize:13,color:"var(--text)",fontWeight:600}}>
                     {tpl?.name || "Template removido"}
-                    {groupRuns.length > 1 && <span style={{fontSize:10,padding:"1px 6px",borderRadius:6,background:"#dbeafe",color:"#1e40af",fontWeight:700}}>{groupRuns.length}p</span>}
-                    {allBypass && <span style={{fontSize:10,color:"var(--text3)",fontStyle:"italic"}}>(auto-aprovado)</span>}
+                    {run.autoBypass && <span style={{marginLeft:8,fontSize:10,color:"var(--text3)",fontStyle:"italic"}}>(auto-aprovado)</span>}
                   </div>
                   <div style={{fontSize:11,color:"var(--text3)",marginTop:2}}>
-                    👤 {contributors.slice(0,3).join(", ")}{contributors.length > 3 ? ` +${contributors.length-3}` : ""} · {fmtDate(groupRuns[0].date)}
-                    {reviewerNames.length > 0 && <> · ✓ {reviewerNames.join(", ")}</>}
+                    👤 {shortName(run.userName)} · {fmtDate(run.date)} · ✓ por {shortName(run.reviewerName)} {run.reviewedAt ? new Date(run.reviewedAt).toLocaleTimeString("pt-BR",{hour:"2-digit",minute:"2-digit"}) : ""}
                   </div>
                 </div>
                 <div style={{fontSize:11,fontFamily:"'DM Mono',monospace",color:"var(--text3)"}}>{doneCount}/{totalCount}</div>
@@ -28941,62 +28903,33 @@ function ChecklistsConferenciaView({ restaurantId, employee, pessoas, miseCheckl
   );
 }
 
-// v8.22.0: Tela de revisão agregada — recebe lista de runs do mesmo template+data.
-// Itens mostram TODOS os carimbos de quem marcou + horário, somando os runs.
-// Approve aplica reviewedAt em TODOS os runs do grupo.
-// Observação geral é compartilhada (gravada em todos os runs do grupo).
-// Ocorrência criada vincula a todos os runs do grupo.
-function ChecklistReviewAggregatedScreen({ runs, tpl, restaurantId, employee, pessoas, miseChecklistRuns, onUpdate, onBack, myPessoa }) {
+// Tela de revisão individual de um run.
+// v8.21.0: read-only do que o empregado fez + observação geral do conferente + lista de ocorrências geradas + botão Aprovar.
+function ChecklistReviewScreen({ run, tpl, restaurantId, employee, pessoas, miseChecklistRuns, onUpdate, onBack, myPessoa }) {
   const items = (tpl?.items || []);
-  // Já existe alguma observação salva em algum dos runs? — pega a primeira não-vazia
-  const initialNotes = (runs.find(r => r.reviewerNotes && r.reviewerNotes.trim())?.reviewerNotes) || "";
-  const [reviewerNotes, setReviewerNotes] = useState(initialNotes);
+  const runItems = run.items || [];
+  const [reviewerNotes, setReviewerNotes] = useState(run.reviewerNotes || "");
   const [occurrenceModalOpen, setOccurrenceModalOpen] = useState(false);
-  // União das ocorrências vinculadas a qualquer run do grupo
-  const linkedOccs = [...new Set(runs.flatMap(r => r.linkedOccurrenceIds || []))];
-  const isAlreadyReviewed = runs.every(r => r.reviewedAt);
+  const linkedOccs = run.linkedOccurrenceIds || [];
 
-  // Pessoas atribuíveis na ocorrência: equipe do restaurante. Se o líder lidera áreas específicas, poderia restringir (TODO).
+  // Pessoas atribuíveis na ocorrência: equipe do restaurante. Se o líder lidera áreas específicas, restringe.
   const allTeamPessoas = (pessoas || []).filter(p => (p.restaurantIds || []).includes(restaurantId) && p.isTeam?.[restaurantId]);
   // v8.21.0 TODO: filtrar por área (liderAreas vs área do cargo da pessoa). Como roles não está em escopo, mostra todos por enquanto.
   // const liderAreas = myPessoa?.permissions?.[restaurantId]?.special?.areas || [];
   const candidatePessoas = allTeamPessoas;
 
-  // Pra cada item do template, agrega todos os carimbos {user, doneAt, note} dos runs que marcaram done
-  function getItemMarks(itemId) {
-    const marks = [];
-    runs.forEach(r => {
-      const ri = (r.items || []).find(x => x.itemId === itemId);
-      if (ri && ri.done) {
-        marks.push({
-          userId: r.userId,
-          userName: r.userName,
-          doneAt: ri.doneAt || r.completedAt,
-          note: ri.note,
-        });
-      }
-    });
-    // Ordena por horário
-    marks.sort((a,b) => (a.doneAt||"").localeCompare(b.doneAt||""));
-    return marks;
-  }
-
   function approve() {
     const now = new Date().toISOString();
-    const groupIds = new Set(runs.map(r => r.id));
-    const next = (miseChecklistRuns || []).map(r => {
-      if (!groupIds.has(r.id)) return r;
-      return {
-        ...r,
-        reviewedAt: now,
-        reviewerId: employee.id,
-        reviewerName: employee.name,
-        reviewerNotes: reviewerNotes.trim() || null,
-        updatedAt: now,
-      };
-    });
-    onUpdate("miseChecklistRuns", next);
-    onUpdate("_toast", runs.length > 1 ? `✅ ${runs.length} checklists conferidos` : `✅ Checklist conferido`);
+    const updated = {
+      ...run,
+      reviewedAt: now,
+      reviewerId: employee.id,
+      reviewerName: employee.name,
+      reviewerNotes: reviewerNotes.trim() || null,
+      updatedAt: now,
+    };
+    onUpdate("miseChecklistRuns", (miseChecklistRuns || []).map(r => r.id === run.id ? updated : r));
+    onUpdate("_toast", `✅ Checklist conferido`);
     onBack();
   }
 
@@ -29015,90 +28948,54 @@ function ChecklistReviewAggregatedScreen({ runs, tpl, restaurantId, employee, pe
       createdBy: employee.name,
       createdById: employee.id,
       visibility: "internal",
-      sourceChecklistRunIds: runs.map(r => r.id),
+      sourceChecklistRunId: run.id,
       sourceChecklistTemplateName: tpl?.name || "—",
     };
+    // Adiciona à coleção incidents (usa updater function pra evitar stale state)
     onUpdate("incidents", (prev) => [...(prev || []), newInc]);
-    // Vincula a TODOS os runs do grupo
-    const groupIds = new Set(runs.map(r => r.id));
-    onUpdate("miseChecklistRuns", (miseChecklistRuns || []).map(r => {
-      if (!groupIds.has(r.id)) return r;
-      return { ...r, linkedOccurrenceIds: [...(r.linkedOccurrenceIds || []), incId], updatedAt: now };
-    }));
+    // Refletir no run.linkedOccurrenceIds
+    const updated = {
+      ...run,
+      linkedOccurrenceIds: [...(run.linkedOccurrenceIds || []), incId],
+      updatedAt: now,
+    };
+    onUpdate("miseChecklistRuns", (miseChecklistRuns || []).map(r => r.id === run.id ? updated : r));
     onUpdate("_toast", `⚠️ Ocorrência registrada para ${shortName(empPessoa.name)}`);
     setOccurrenceModalOpen(false);
   }
-
-  // Lista de contribuidores únicos pra mostrar no header
-  const contributors = runs.map(r => ({ id: r.userId, name: r.userName }))
-    .filter((v,i,a) => a.findIndex(x => x.id === v.id) === i);
 
   return (
     <div style={{display:"flex",flexDirection:"column",gap:14}}>
       <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
         <button onClick={onBack} style={{...S.btnSecondary,fontSize:13,padding:"8px 14px"}}>← Voltar</button>
         <div style={{flex:1,minWidth:0}}>
-          <div style={{fontSize:11,color:"var(--text3)",fontWeight:700,textTransform:"uppercase",letterSpacing:0.4}}>{isAlreadyReviewed ? "Visualizando (já conferido)" : "Conferindo"}</div>
+          <div style={{fontSize:11,color:"var(--text3)",fontWeight:700,textTransform:"uppercase",letterSpacing:0.4}}>Conferindo</div>
           <div style={{fontSize:16,color:"var(--text)",fontWeight:700}}>{tpl?.name || "Template removido"}</div>
         </div>
-        {!isAlreadyReviewed && (
-          <button onClick={approve} style={{background:"#15803d",color:"#fff",border:"none",borderRadius:8,padding:"10px 20px",fontSize:13,fontWeight:700,cursor:"pointer",minHeight:44}}>
-            ✅ Aprovar{runs.length > 1 ? ` (${runs.length})` : ""}
-          </button>
-        )}
+        <button onClick={approve} style={{background:"#15803d",color:"#fff",border:"none",borderRadius:8,padding:"10px 20px",fontSize:13,fontWeight:700,cursor:"pointer",minHeight:44}}>
+          ✅ Aprovar e arquivar
+        </button>
       </div>
 
       <div style={{padding:"10px 14px",background:"var(--card-bg)",border:"1px solid var(--border)",borderRadius:10,fontSize:13,color:"var(--text2)"}}>
-        <div style={{marginBottom:contributors.length > 1 ? 6 : 0}}>
-          {fmtDate(runs[0].date)}
-          {runs.length > 1 && <span style={{marginLeft:6,fontSize:11,padding:"1px 6px",borderRadius:6,background:"#dbeafe",color:"#1e40af",fontWeight:700}}>👥 {runs.length} pessoas trabalharam neste checklist</span>}
-        </div>
-        {contributors.length === 1 ? (
-          <span>Preenchido por <b>{shortName(contributors[0].name)}</b> às {new Date(runs[0].completedAt).toLocaleTimeString("pt-BR",{hour:"2-digit",minute:"2-digit"})}.</span>
-        ) : (
-          <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
-            {contributors.map(c => {
-              const r = runs.find(rr => rr.userId === c.id);
-              return (
-                <span key={c.id} style={{fontSize:11,padding:"3px 10px",background:"#dbeafe",color:"#1e40af",borderRadius:12,fontWeight:600}}>
-                  👤 {shortName(c.name)} · {new Date(r.completedAt).toLocaleTimeString("pt-BR",{hour:"2-digit",minute:"2-digit"})}
-                </span>
-              );
-            })}
-          </div>
-        )}
+        Preenchido por <b>{shortName(run.userName)}</b> em {fmtDate(run.date)} às {new Date(run.completedAt).toLocaleTimeString("pt-BR",{hour:"2-digit",minute:"2-digit"})}.
       </div>
 
-      {/* Itens read-only com atribuição agregada */}
+      {/* Itens read-only */}
       <div style={{display:"flex",flexDirection:"column",gap:6}}>
         {items.map((it, idx) => {
-          const marks = getItemMarks(it.id);
-          const done = marks.length > 0;
-          // Coleta notas únicas (pode ter várias se várias pessoas comentaram)
-          const notes = marks.filter(m => m.note && m.note.trim()).map(m => ({ user: m.userName, note: m.note }));
+          const ri = runItems.find(x => x.itemId === it.id);
+          const done = !!ri?.done;
           return (
             <div key={it.id} style={{padding:"10px 14px",background:done?"#f0fdf4":"#fef9e7",border:`1px solid ${done?"#10b98144":"#f59e0b44"}`,borderRadius:8}}>
-              <div style={{display:"flex",alignItems:"center",gap:10,flexWrap:"wrap"}}>
+              <div style={{display:"flex",alignItems:"center",gap:10}}>
                 <span style={{fontSize:18}}>{done ? "✅" : "⬜"}</span>
                 <span style={{fontSize:11,color:"var(--text3)",fontFamily:"'DM Mono',monospace",minWidth:24}}>{idx+1}.</span>
                 <span style={{fontSize:14,color:"var(--text)",fontWeight:500,flex:1,textDecoration:done?"line-through":"none"}}>{it.text}</span>
               </div>
-              {marks.length > 0 && (
-                <div style={{display:"flex",gap:6,flexWrap:"wrap",marginTop:6,marginLeft:34}}>
-                  {marks.map((m, i) => (
-                    <span key={i} style={{fontSize:10,padding:"2px 8px",background:"#10b98122",color:"#15803d",borderRadius:10,fontWeight:600}}>
-                      {shortName(m.userName)} {m.doneAt ? `às ${new Date(m.doneAt).toLocaleTimeString("pt-BR",{hour:"2-digit",minute:"2-digit"})}` : ""}
-                    </span>
-                  ))}
-                </div>
-              )}
-              {notes.length > 0 && (
-                <div style={{marginTop:6,marginLeft:34,display:"flex",flexDirection:"column",gap:4}}>
-                  {notes.map((n, i) => (
-                    <div key={i} style={{padding:"6px 10px",background:"#fef3c7",borderRadius:6,fontSize:12,color:"#92400e",fontStyle:"italic"}}>
-                      📝 <b>{shortName(n.user)}:</b> {n.note}
-                    </div>
-                  ))}
+              {ri?.note && (
+                <div style={{marginTop:6,padding:"6px 10px",background:"#fef3c7",borderRadius:6,fontSize:12,color:"#92400e",fontStyle:"italic"}}>
+                  📝 {ri.note}
                 </div>
               )}
             </div>
