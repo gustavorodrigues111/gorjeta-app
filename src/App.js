@@ -3,7 +3,7 @@ import React, { useState, useEffect, useMemo, useRef, Component } from "react";
 import { db } from "./firebase";
 import { doc, getDoc, setDoc, onSnapshot } from "firebase/firestore";
 
-const APP_VERSION = "8.23.1";
+const APP_VERSION = "8.23.2";
 
 // v8.11.1: comparação de versão semver-like (8.11.1 > 8.10.7 > 8.9.4)
 function compareVersions(a, b) {
@@ -21964,12 +21964,28 @@ function AppShell({ pessoa, data, activeRestaurantId, setActiveRestaurantId, use
 function buildVirtualEmpForPessoa(pessoa, restaurantId) {
   if (!pessoa) return { id: "virt_empty", restaurantId, name: "—", operationalAreas: {} };
   const perms = pessoa?.permissions?.[restaurantId] || { operational: {} };
+  const op = perms.operational || {};
+  // v8.23.2: normaliza operationalAreas pra que perms novas (xxxExec / configurar / Review)
+  // acendam a aba correspondente no OperationalPortal.
+  // Antes: só `op.checklists` ligava a aba "checklists" — agora qualquer das 3 perms (config/exec/review) liga.
+  const normalizedAreas = {
+    ...op,
+    contagens:      op.contagens === true || op.contagensExec === true,
+    checklists:     op.checklists === true || op.checklistsExec === true || op.checklistsReview === true,
+    temperaturas:   op.temperaturas === true || op.temperaturasExec === true,
+    fichasTecnicas: op.fichasTecnicas === true,
+    compras:        op.compras === true,
+    escalas:        op.escalas === true,
+    gorjetas:       op.gorjetas === true,
+    trilhas:        op.trilhas === true,
+    reunioes:       op.reunioes === true,
+  };
   return {
     id: pessoa.linkedEmployeeId || `pes_as_emp_${pessoa.id}`,
     restaurantId,
     name: pessoa.name,
     cpf: pessoa.cpf || "",
-    operationalAreas: perms.operational || {},
+    operationalAreas: normalizedAreas,
     _pessoaId: pessoa.id,
   };
 }
