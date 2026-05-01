@@ -3,7 +3,7 @@ import React, { useState, useEffect, useMemo, useRef, Component } from "react";
 import { db } from "./firebase";
 import { doc, getDoc, setDoc, onSnapshot } from "firebase/firestore";
 
-const APP_VERSION = "8.23.5";
+const APP_VERSION = "8.23.6";
 
 // v8.11.1: comparação de versão semver-like (8.11.1 > 8.10.7 > 8.9.4)
 function compareVersions(a, b) {
@@ -32037,21 +32037,26 @@ function TemperaturasExportModal({ sensors, readings, alerts, restaurantId, onCl
           const head = [["Dia", ...slotLabels, "Méd."]];
           let lastKnownTemp = null; // valor mais recente conhecido (carry-forward através de dias/slots)
           const carryFlags = []; // mesma estrutura do body — true = carry-forward, false = leitura real
+          // v8.23.6: não preenche carry-forward em janelas FUTURAS do dia atual
+          const todayStr = new Date().toISOString().slice(0, 10);
+          const nowHour = new Date().getHours();
           const body = chunkDays.map(day => {
             const row = [fmtDate(day)];
             const flagRow = [false]; // primeira col (data) nunca é carry
             const dayTemps = [];
             for (let slot = 0; slot < SLOTS_PER_DAY; slot++) {
-              const startHH = String(slot * SLOT_HOURS).padStart(2, "0");
+              const slotStartHour = slot * SLOT_HOURS;
+              const startHH = String(slotStartHour).padStart(2, "0");
+              const isFutureSlot = day === todayStr && slotStartHour > nowHour;
               const temps = buckets[`${sensor.id}|${day} ${startHH}`];
               if (!temps || temps.length === 0) {
-                if (lastKnownTemp != null) {
-                  // Carry-forward: assume último valor conhecido
+                if (lastKnownTemp != null && !isFutureSlot) {
+                  // Carry-forward: assume último valor conhecido (só pra janelas passadas/em curso)
                   row.push(`${lastKnownTemp.toFixed(1)}*`);
                   flagRow.push(true);
                   dayTemps.push(lastKnownTemp);
                 } else {
-                  // Sem nenhuma leitura anterior — não há o que assumir
+                  // Sem leitura + (sem valor anterior OU janela futura) — vazio
                   row.push("—");
                   flagRow.push(false);
                 }
