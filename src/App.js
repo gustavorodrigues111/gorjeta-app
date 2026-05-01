@@ -3,7 +3,7 @@ import React, { useState, useEffect, useMemo, useRef, Component } from "react";
 import { db } from "./firebase";
 import { doc, getDoc, setDoc, onSnapshot } from "firebase/firestore";
 
-const APP_VERSION = "8.22.0";
+const APP_VERSION = "8.22.1";
 
 // v8.11.1: comparação de versão semver-like (8.11.1 > 8.10.7 > 8.9.4)
 function compareVersions(a, b) {
@@ -18394,6 +18394,11 @@ function OperationalPortal({ employee, data, onUpdate, onBack, toggleTheme, them
           <OperationalChecklists
             employee={employee}
             pessoas={data?.pessoas ?? []}
+            isOwner={(() => {
+              const empCpf = (employee?.cpf || "").replace(/\D/g, "");
+              if (!empCpf) return false;
+              return ((data?.owners) || []).some(o => (o.cpf || "").replace(/\D/g, "") === empCpf);
+            })()}
             miseChecklistTemplates={data?.miseChecklistTemplates ?? []}
             miseChecklistRuns={data?.miseChecklistRuns ?? []}
             onUpdate={onUpdate}
@@ -21571,6 +21576,7 @@ function AppShell({ pessoa, data, activeRestaurantId, setActiveRestaurantId, use
         <OperationalChecklists
           employee={buildVirtualEmpForPessoa(pessoa, activeRestaurantId)}
           pessoas={data?.pessoas ?? []}
+          isOwner={isOwner}
           miseChecklistTemplates={data?.miseChecklistTemplates ?? []}
           miseChecklistRuns={data?.miseChecklistRuns ?? []}
           onUpdate={onUpdate}
@@ -28399,15 +28405,30 @@ function MiseChecklistTemplateEditor({ tpl, updateTpl, onBack, mobileOnly, mkId,
 }
 
 // ── CHECKLISTS — USER (Gestor Operacional) ──
-function OperationalChecklists({ employee, pessoas = [], miseChecklistTemplates, miseChecklistRuns, onUpdate }) {
+function OperationalChecklists({ employee, pessoas = [], isOwner = false, miseChecklistTemplates, miseChecklistRuns, onUpdate }) {
   const restaurantId = employee.restaurantId;
   const today_ = today();
   // v8.21.0: filtra templates onde:
   //   - responsaveis vazio → visível pra todos com perm exec (comportamento antigo)
   //   - responsaveis preenchido → só pra quem está na lista (delegação)
+  // v8.22.1: Owner / quem configura (operational.checklists) / quem confere (operational.checklistsReview)
+  //          enxerga TUDO mesmo se não estiver na lista de responsáveis.
+  const _myPessoaForFilter = (() => {
+    const pid = employee._pessoaId || (() => {
+      const m = String(employee.id).match(/^pes_as_emp_(.+)$/);
+      return m ? m[1] : null;
+    })();
+    if (pid) return (pessoas || []).find(p => p.id === pid);
+    return (pessoas || []).find(p => p.linkedEmployeeId === employee.id);
+  })();
+  const _myPerms = _myPessoaForFilter?.permissions?.[restaurantId] || {};
+  const seesAllChecklists = isOwner
+    || _myPerms.operational?.checklists === true
+    || _myPerms.operational?.checklistsReview === true;
   const templates = (miseChecklistTemplates || []).filter(t => {
     if (t.restaurantId !== restaurantId) return false;
     if (t.active === false) return false;
+    if (seesAllChecklists) return true;
     const resp = t.responsaveis || [];
     if (resp.length === 0) return true;
     return resp.includes(employee.id);
