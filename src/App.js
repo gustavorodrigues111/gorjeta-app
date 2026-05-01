@@ -3,7 +3,7 @@ import React, { useState, useEffect, useMemo, useRef, Component } from "react";
 import { db } from "./firebase";
 import { doc, getDoc, setDoc, onSnapshot } from "firebase/firestore";
 
-const APP_VERSION = "8.23.6";
+const APP_VERSION = "8.23.7";
 
 // v8.11.1: comparação de versão semver-like (8.11.1 > 8.10.7 > 8.9.4)
 function compareVersions(a, b) {
@@ -32036,8 +32036,12 @@ function TemperaturasExportModal({ sensors, readings, alerts, restaurantId, onCl
           // Marcamos com asterisco (*) e cor cinza pra distinguir de leitura real.
           const head = [["Dia", ...slotLabels, "Méd."]];
           let lastKnownTemp = null; // valor mais recente conhecido (carry-forward através de dias/slots)
+          let lastKnownTimeMs = null; // timestamp do slot da última leitura real
           const carryFlags = []; // mesma estrutura do body — true = carry-forward, false = leitura real
           // v8.23.6: não preenche carry-forward em janelas FUTURAS do dia atual
+          // v8.23.7: limita carry-forward a MAX_CARRY_HOURS desde a última leitura real
+          // (sensor T&H Tuya reporta ~1h em estabilidade; sem reporte por 6h+ é suspeita de offline)
+          const MAX_CARRY_HOURS = 6;
           const todayStr = new Date().toISOString().slice(0, 10);
           const nowHour = new Date().getHours();
           const body = chunkDays.map(day => {
@@ -32048,15 +32052,18 @@ function TemperaturasExportModal({ sensors, readings, alerts, restaurantId, onCl
               const slotStartHour = slot * SLOT_HOURS;
               const startHH = String(slotStartHour).padStart(2, "0");
               const isFutureSlot = day === todayStr && slotStartHour > nowHour;
+              const slotTimeMs = new Date(`${day}T${startHH}:00:00`).getTime();
               const temps = buckets[`${sensor.id}|${day} ${startHH}`];
               if (!temps || temps.length === 0) {
-                if (lastKnownTemp != null && !isFutureSlot) {
-                  // Carry-forward: assume último valor conhecido (só pra janelas passadas/em curso)
+                const hoursSinceLast = lastKnownTimeMs != null ? (slotTimeMs - lastKnownTimeMs) / 3600000 : Infinity;
+                const carryStillValid = lastKnownTemp != null && hoursSinceLast <= MAX_CARRY_HOURS;
+                if (carryStillValid && !isFutureSlot) {
+                  // Carry-forward dentro do limite (6h) — assume estabilidade
                   row.push(`${lastKnownTemp.toFixed(1)}*`);
                   flagRow.push(true);
                   dayTemps.push(lastKnownTemp);
                 } else {
-                  // Sem leitura + (sem valor anterior OU janela futura) — vazio
+                  // Sem leitura + (carry expirou OU janela futura OU nunca houve leitura) — vazio
                   row.push("—");
                   flagRow.push(false);
                 }
@@ -32066,6 +32073,7 @@ function TemperaturasExportModal({ sensors, readings, alerts, restaurantId, onCl
                 flagRow.push(false);
                 dayTemps.push(avg);
                 lastKnownTemp = avg; // atualiza valor mais recente
+                lastKnownTimeMs = slotTimeMs;
               }
             }
             // Coluna "Méd." do dia (não marca como carry mesmo que componentes sejam)
