@@ -3,7 +3,7 @@ import React, { useState, useEffect, useMemo, useRef, Component } from "react";
 import { db } from "./firebase";
 import { doc, getDoc, setDoc, onSnapshot } from "firebase/firestore";
 
-const APP_VERSION = "8.23.7";
+const APP_VERSION = "8.25.0";
 
 // v8.11.1: comparação de versão semver-like (8.11.1 > 8.10.7 > 8.9.4)
 function compareVersions(a, b) {
@@ -21307,7 +21307,12 @@ function buildShellSections({ pessoa, restaurantId, isOwner, employees, restaura
   }
   // v8.10.5: aceita tanto sp.isLider (matriz nova) quanto sp.profile=="lider" (legacy migração)
   const _isLiderShell = sp.isLider === true || sp.profile === "lider";
-  if (isOwner || sp.isDP || _isLiderShell) {
+  // v8.24.0: aba Freelas aparece se tem qualquer das perms novas (exec/fechar) OU legado (isOwner/isDP/Lider/admin.freelas)
+  const _canSeeFreelas = isOwner || sp.isDP || _isLiderShell
+    || op.freelasExec === true
+    || ad.freelasFechar === true
+    || ad.freelas === true;
+  if (_canSeeFreelas) {
     planItems.push({ id: "mod_freelas", label: "Freelas", icon: "🎒", kind: "manager", tab: "freelas" });
   }
   if (op.reunioes) {
@@ -22629,6 +22634,46 @@ function FreelasModule({ restaurantId, pessoas, freelaShifts, freelaPagamentos, 
     onUpdate("_toast", `✅ Shift de ${pessoa.name} em ${fmtDate(shiftData.date)} lançado`);
   }
 
+  // v8.25.0: agendamento de shift futuro — sem horários reais, status "agendado"
+  async function addPlannedShift(shiftData) {
+    const pessoa = restPessoas.find(p => p.id === shiftData.pessoaId);
+    if (!pessoa) return;
+    if (!shiftData.scheduledDate) return;
+    const newShift = {
+      id: `shf_${Date.now().toString(36)}${Math.random().toString(36).slice(2,5)}`,
+      restaurantId,
+      pessoaId: shiftData.pessoaId,
+      personType: pessoa.isTeam?.[restaurantId] ? "employee" : "freela", // v8.25.0
+      date: shiftData.scheduledDate,            // mantém compat com schema antigo
+      scheduledDate: shiftData.scheduledDate,   // novo — explicita que é planejado
+      entrada: shiftData.entrada || "",
+      saida: shiftData.saida || "",
+      intervalo: 0,
+      horas: 0,
+      area: shiftData.area || null,
+      valorTipo: shiftData.valorTipo || null,
+      valorUnit: shiftData.valorUnit ?? null,
+      totalCalc: null,
+      observacao: shiftData.observacao || "",
+      status: "agendado",                       // v8.25.0 — novo status
+      lotePagamentoId: null,
+      lancadoPor: currentUser?.name || "—",
+      lancadoPorId: currentUser?.id || null,
+      lancadoEm: new Date().toISOString(),
+    };
+    onUpdate("freelaShifts", (prev) => [...(prev || []), newShift]);
+    onUpdate("_toast", `📅 Shift de ${pessoa.name} agendado pra ${fmtDate(shiftData.scheduledDate)}`);
+  }
+
+  // Cancela agendamento (só agendados podem ser cancelados; histórico fica vazio)
+  async function cancelPlannedShift(shiftId) {
+    const s = (freelaShifts || []).find(x => x.id === shiftId);
+    if (!s || s.status !== "agendado") return;
+    if (!await appConfirm(`Cancelar o shift agendado?`)) return;
+    onUpdate("freelaShifts", (prev) => (prev || []).filter(x => x.id !== shiftId));
+    onUpdate("_toast", `🗑️ Agendamento removido`);
+  }
+
   function updateShift(shiftId, patch) {
     const updated = (freelaShifts || []).map(s => {
       if (s.id !== shiftId) return s;
@@ -22936,9 +22981,10 @@ function FreelasModule({ restaurantId, pessoas, freelaShifts, freelaPagamentos, 
   const canHistorico = isDP || isOwner;
 
   const SUB_TABS = [
-    { id: "lancamento", label: "Lançamento", visible: true },
-    { id: "fechamento", label: "Fechamento", visible: canFechamento },
-    { id: "historico",  label: "Histórico",  visible: canHistorico },
+    { id: "agendar",    label: "📅 Agendar",   visible: true },
+    { id: "lancamento", label: "Lançamento",   visible: true },
+    { id: "fechamento", label: "Fechamento",   visible: canFechamento },
+    { id: "historico",  label: "Histórico",    visible: canHistorico },
   ].filter(t => t.visible);
 
   return (
@@ -22959,6 +23005,19 @@ function FreelasModule({ restaurantId, pessoas, freelaShifts, freelaPagamentos, 
           </button>
         ))}
       </div>
+
+      {/* v8.25.0: Sub-tab Agendar — shifts futuros */}
+      {subTab === "agendar" && (
+        <FreelaAgendarTab
+          restaurantId={restaurantId}
+          restPessoas={restPessoas}
+          shifts={restShifts}
+          addPlannedShift={addPlannedShift}
+          cancelPlannedShift={cancelPlannedShift}
+          mobileOnly={mobileOnly}
+          ac={ac}
+        />
+      )}
 
       {/* Sub-tab: Lançamento — tabela de shifts em status Aberto */}
       {subTab === "lancamento" && (
@@ -23030,6 +23089,157 @@ function FreelasModule({ restaurantId, pessoas, freelaShifts, freelaPagamentos, 
 // ═══════════════════════════════════════════════════════════════
 // ──  FREELAS — sub-componente Lançamento (tabela de shifts)     ──
 // ═══════════════════════════════════════════════════════════════
+// v8.25.0 — Sub-tab "Agendar": forma de criar shift futuro + lista dos próximos agendamentos
+function FreelaAgendarTab({ restaurantId, restPessoas, shifts, addPlannedShift, cancelPlannedShift, mobileOnly, ac }) {
+  const today_ = today();
+  const [pessoaId, setPessoaId] = useState("");
+  const [scheduledDate, setScheduledDate] = useState("");
+  const [area, setArea] = useState("");
+  const [valorTipo, setValorTipo] = useState("diaria");
+  const [valorUnit, setValorUnit] = useState("");
+  const [observacao, setObservacao] = useState("");
+
+  // Listas: freelas e empregados (separados pra select com optgroup)
+  const freelasList = restPessoas.filter(p => p.isFreela === true && !p.inactive)
+    .sort((a,b) => (a.name || "").localeCompare(b.name || ""));
+  const empsList = restPessoas.filter(p => p.isTeam?.[restaurantId] === true && !p.isFreela && !p.inactive)
+    .sort((a,b) => (a.name || "").localeCompare(b.name || ""));
+
+  // Próximos agendamentos (status="agendado") — futuros + hoje
+  const plannedShifts = shifts.filter(s =>
+    s.restaurantId === restaurantId &&
+    s.status === "agendado" &&
+    (s.scheduledDate || s.date) >= today_
+  ).sort((a,b) => (a.scheduledDate || a.date).localeCompare(b.scheduledDate || b.date));
+
+  function clearForm() {
+    setPessoaId(""); setScheduledDate(""); setArea(""); setValorTipo("diaria"); setValorUnit(""); setObservacao("");
+  }
+
+  async function handleSubmit() {
+    if (!pessoaId) { alert("Selecione uma pessoa."); return; }
+    if (!scheduledDate) { alert("Escolha a data."); return; }
+    if (scheduledDate < today_) { alert("Pra shift retroativo, use a aba Lançamento."); return; }
+    await addPlannedShift({
+      pessoaId,
+      scheduledDate,
+      area: area || null,
+      valorTipo,
+      valorUnit: valorUnit ? parseFloat(valorUnit) : null,
+      observacao,
+    });
+    clearForm();
+  }
+
+  return (
+    <div style={{display:"flex",flexDirection:"column",gap:16}}>
+      {/* Form de agendamento */}
+      <div style={{padding:"14px 16px",background:"var(--card-bg)",border:`1px solid ${ac}44`,borderRadius:12}}>
+        <div style={{fontSize:14,fontWeight:700,color:"var(--text)",marginBottom:10,display:"flex",alignItems:"center",gap:6}}>
+          <span>📅</span><span>Agendar shift de freela</span>
+        </div>
+        <div style={{display:"grid",gridTemplateColumns:mobileOnly?"1fr":"2fr 1fr 1fr",gap:10,marginBottom:10}}>
+          <div>
+            <label style={{...S.label,fontSize:11}}>Pessoa</label>
+            <select value={pessoaId} onChange={e=>setPessoaId(e.target.value)} style={S.input}>
+              <option value="">— Selecione —</option>
+              {freelasList.length > 0 && (
+                <optgroup label="🎒 Freelas cadastrados">
+                  {freelasList.map(p => <option key={p.id} value={p.id}>{shortName(p.name)}</option>)}
+                </optgroup>
+              )}
+              {empsList.length > 0 && (
+                <optgroup label="👥 Empregados (turno extra)">
+                  {empsList.map(p => <option key={p.id} value={p.id}>{shortName(p.name)}</option>)}
+                </optgroup>
+              )}
+            </select>
+          </div>
+          <div>
+            <label style={{...S.label,fontSize:11}}>Data</label>
+            <input type="date" value={scheduledDate} min={today_} onChange={e=>setScheduledDate(e.target.value)} style={S.input}/>
+          </div>
+          <div>
+            <label style={{...S.label,fontSize:11}}>Área (opcional)</label>
+            <select value={area} onChange={e=>setArea(e.target.value)} style={S.input}>
+              <option value="">—</option>
+              {AREAS.map(a => <option key={a} value={a}>{a}</option>)}
+            </select>
+          </div>
+        </div>
+        <div style={{display:"grid",gridTemplateColumns:mobileOnly?"1fr":"1fr 1fr 2fr",gap:10,marginBottom:10}}>
+          <div>
+            <label style={{...S.label,fontSize:11}}>Valor previsto (opcional)</label>
+            <select value={valorTipo} onChange={e=>setValorTipo(e.target.value)} style={S.input}>
+              <option value="diaria">Diária</option>
+              <option value="hora">Por hora</option>
+            </select>
+          </div>
+          <div>
+            <label style={{...S.label,fontSize:11}}>R$ {valorTipo === "hora" ? "/hora" : "/dia"}</label>
+            <input type="number" step="0.01" min="0" value={valorUnit} onChange={e=>setValorUnit(e.target.value)} placeholder="0.00" style={{...S.input,fontFamily:"'DM Mono',monospace"}}/>
+          </div>
+          <div>
+            <label style={{...S.label,fontSize:11}}>Observação (opcional)</label>
+            <input value={observacao} onChange={e=>setObservacao(e.target.value)} placeholder="Detalhes do shift..." style={S.input}/>
+          </div>
+        </div>
+        <div style={{display:"flex",justifyContent:"flex-end",gap:8}}>
+          <button onClick={clearForm} style={{...S.btnSecondary,fontSize:12,padding:"7px 14px"}}>Limpar</button>
+          <button onClick={handleSubmit}
+            style={{background:ac,color:"#fff",border:"none",borderRadius:8,padding:"8px 16px",fontSize:13,fontWeight:700,cursor:"pointer"}}>
+            📅 Agendar shift
+          </button>
+        </div>
+      </div>
+
+      {/* Lista de agendamentos futuros */}
+      <div>
+        <div style={{fontSize:12,fontWeight:700,color:"var(--text2)",textTransform:"uppercase",letterSpacing:0.4,marginBottom:8}}>
+          Próximos agendamentos ({plannedShifts.length})
+        </div>
+        {plannedShifts.length === 0 ? (
+          <div style={{padding:"30px 20px",textAlign:"center",color:"var(--text3)",fontSize:13,background:"var(--card-bg)",borderRadius:10,border:"1px dashed var(--border)"}}>
+            Sem shifts agendados. Use o formulário acima.
+          </div>
+        ) : (
+          <div style={{display:"flex",flexDirection:"column",gap:6}}>
+            {plannedShifts.map(s => {
+              const p = restPessoas.find(x => x.id === s.pessoaId);
+              const isEmployeePlus = p?.isTeam?.[restaurantId] === true;
+              const dt = s.scheduledDate || s.date;
+              const isToday = dt === today_;
+              return (
+                <div key={s.id} style={{padding:"10px 14px",background:"var(--card-bg)",border:`1px solid ${isToday?ac+"66":"var(--border)"}`,borderRadius:10,display:"flex",alignItems:"center",gap:10,flexWrap:"wrap"}}>
+                  <div style={{flex:1,minWidth:200}}>
+                    <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
+                      <span style={{fontSize:13,color:"var(--text)",fontWeight:700}}>{shortName(p?.name) || "—"}</span>
+                      {isEmployeePlus
+                        ? <span style={{fontSize:10,padding:"1px 7px",borderRadius:8,background:"#10b98122",color:"#15803d",fontWeight:700}}>EMPREGADO · TURNO EXTRA</span>
+                        : <span style={{fontSize:10,padding:"1px 7px",borderRadius:8,background:ac+"22",color:ac,fontWeight:700}}>FREELA</span>}
+                      {isToday && <span style={{fontSize:10,padding:"1px 7px",borderRadius:8,background:"#f59e0b22",color:"#b45309",fontWeight:700}}>HOJE</span>}
+                    </div>
+                    <div style={{fontSize:11,color:"var(--text3)",marginTop:3,display:"flex",gap:10,flexWrap:"wrap"}}>
+                      <span>📅 {fmtDate(dt)}</span>
+                      {s.area && <span>📍 {s.area}</span>}
+                      {s.valorUnit && <span>💵 R$ {Number(s.valorUnit).toFixed(2)} / {s.valorTipo}</span>}
+                      {s.observacao && <span style={{fontStyle:"italic"}}>· {s.observacao}</span>}
+                    </div>
+                  </div>
+                  <button onClick={()=>cancelPlannedShift(s.id)}
+                    style={{...S.btnSecondary,fontSize:11,padding:"5px 10px",color:"var(--red)",borderColor:"var(--red)44"}}>
+                    🗑️ Cancelar
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function FreelaLancamentoTab({ restaurantId, allPessoas, restPessoas, restFreelas, shifts, addShift, updateShift, deleteShift, addFreela, bulkFillValor, shiftPrntoPronto, calcHoras, fmtHoras, isDP, isOwner, isLider, currentUser, mobileOnly, ac }) {
   const [showAddForm, setShowAddForm] = useState(false);
   const [newShift, setNewShift] = useState({ pessoaId: "", date: today(), entrada: "", saida: "", intervalo: 0, area: "", observacao: "" });
@@ -25692,11 +25902,11 @@ const PERM_GROUPS = [
   {
     id: "g_escala", label: "📅 Escala e Freelas", color: "#3b82f6", bg: "#3b82f622",
     perms: [
-      { key: "admin.schedule",       label: "Editar escala",            icon: "📅" },
-      { key: "admin.fecharEscala",   label: "Fechar mês da escala",     icon: "🔒" },
-      { key: "admin.freelas",        label: "Lançar e fechar freelas",  icon: "🎒" },
-      { key: "operational.reunioes", label: "Gerir reuniões",           icon: "🗣️" },
-      { key: "operational.trilhas",  label: "Gerir trilhas",            icon: "🎯" },
+      { key: "admin.schedule",       label: "Editar escala",                icon: "📅" },
+      { key: "admin.fecharEscala",   label: "Fechar mês da escala",         icon: "🔒" },
+      { key: "admin.freelasFechar",  label: "Fechar/pagar lote de freelas", icon: "💵" },
+      { key: "operational.reunioes", label: "Gerir reuniões",               icon: "🗣️" },
+      { key: "operational.trilhas",  label: "Gerir trilhas",                icon: "🎯" },
     ],
   },
   {
@@ -25733,6 +25943,7 @@ const PERM_GROUPS = [
       { key: "operational.checklistsReview", label: "Conferir checklists",     icon: "🔎" },
       { key: "operational.contagensExec",    label: "Fazer contagens",         icon: "📦" },
       { key: "operational.temperaturasExec", label: "Registrar temperaturas",  icon: "🌡️" },
+      { key: "operational.freelasExec",      label: "Registrar turno de freela", icon: "🎒" },
       { key: "operational.fichasTecnicas",   label: "Consultar fichas técnicas", icon: "📖" },
     ],
   },
@@ -35830,6 +36041,46 @@ export default function App() {
     }
     handleUpdate("permsV2MigratedAt", new Date().toISOString());
   }, [loaded, pessoas?.length, permsV2MigratedAt]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // v8.24.0 — Migração silenciosa idempotente: admin.freelas (lançar+fechar tudo junto)
+  // → admin.freelasFechar (financeiro) + operational.freelasExec (operacional, registrar turno).
+  // Sem flag: só atualiza pessoa que tem admin.freelas=true E ainda não tem admin.freelasFechar
+  // OU operational.freelasExec — se já tem ambos, no-op.
+  useEffect(() => {
+    if (!loaded) return;
+    if (!Array.isArray(pessoas) || pessoas.length === 0) return;
+    let touched = 0;
+    const next = pessoas.map(p => {
+      const allPerms = p.permissions || {};
+      let changed = false;
+      const updatedPerms = {};
+      Object.entries(allPerms).forEach(([rid, byGroup]) => {
+        const hasLegacyFreelas = byGroup?.admin?.freelas === true;
+        if (!hasLegacyFreelas) {
+          updatedPerms[rid] = byGroup;
+          return;
+        }
+        const adm = { ...(byGroup.admin || {}) };
+        const op  = { ...(byGroup.operational || {}) };
+        let localChange = false;
+        if (adm.freelasFechar !== true) { adm.freelasFechar = true; localChange = true; }
+        if (op.freelasExec   !== true) { op.freelasExec   = true; localChange = true; }
+        if (!localChange) {
+          updatedPerms[rid] = byGroup;
+          return;
+        }
+        changed = true;
+        updatedPerms[rid] = { ...byGroup, admin: adm, operational: op };
+      });
+      if (!changed) return p;
+      touched++;
+      return { ...p, permissions: updatedPerms };
+    });
+    if (touched > 0) {
+      console.log(`[freelasSplit] ${touched} pessoa(s) com admin.freelas legado ganharam freelasFechar + freelasExec`);
+      handleUpdate("pessoas", next);
+    }
+  }, [loaded, pessoas?.length]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // v7.3 — Migração auto-corretiva isTeam[rid]
   // Pessoas com linkedEmployeeId apontando pra employee ATIVO de um rid devem ter isTeam[rid]=true.

@@ -6,7 +6,9 @@
 
 # misc
 .DS_Store
-.env*.local
+.env
+.env.*
+!.env.example
 .vercel
 
 # debug
