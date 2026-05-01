@@ -3,7 +3,7 @@ import React, { useState, useEffect, useMemo, useRef, Component } from "react";
 import { db } from "./firebase";
 import { doc, getDoc, setDoc, onSnapshot } from "firebase/firestore";
 
-const APP_VERSION = "8.23.3";
+const APP_VERSION = "8.23.4";
 
 // v8.11.1: comparação de versão semver-like (8.11.1 > 8.10.7 > 8.9.4)
 function compareVersions(a, b) {
@@ -28785,8 +28785,11 @@ function OperationalChecklists({ employee, pessoas = [], isOwner = false, miseCh
         const run = myRunsToday.find(r => r.templateId === tpl.id);
         const isCompleted = !!run?.completedAt;
         const isReviewed = !!run?.reviewedAt;
-        // v8.19.0: rascunho = run existe mas sem completedAt, OU draft local não vazio
-        const isDraft = !isCompleted && (!!run || !!drafts[tpl.id]);
+        // v8.19.0: rascunho = run existe mas sem completedAt, OU draft local com conteúdo de verdade
+        // v8.23.4: só conta como rascunho se tem item marcado ou nota com texto (showNote=true sozinho não conta)
+        const localDraft = drafts[tpl.id];
+        const localHasRealContent = localDraft && Object.values(localDraft).some(d => d?.done || (d?.note && d.note.trim()));
+        const isDraft = !isCompleted && (!!run || localHasRealContent);
         const items = tpl.items || [];
         const draftForTpl = drafts[tpl.id];
         const savedAt = savedTimestamps[tpl.id];
@@ -28833,6 +28836,14 @@ function OperationalChecklists({ employee, pessoas = [], isOwner = false, miseCh
                   {isDraft && <span style={{fontSize:10,padding:"1px 8px",borderRadius:10,background:"#f59e0b22",color:"#b45309",fontWeight:700}}>RASCUNHO</span>}
                 </div>
                 {tpl.description && <div style={{fontSize:12,color:"var(--text3)",marginTop:3}}>{tpl.description}</div>}
+                {/* v8.23.4: aviso explícito quando EU já enviei esse checklist hoje */}
+                {isCompleted && (
+                  <div style={{fontSize:12,color:"#15803d",marginTop:4,fontWeight:600,display:"flex",alignItems:"center",gap:4,flexWrap:"wrap"}}>
+                    <span>✅</span>
+                    <span>Você já enviou esse checklist hoje às {new Date(run.completedAt).toLocaleTimeString("pt-BR",{hour:"2-digit",minute:"2-digit"})}</span>
+                    {!isReviewed && <span style={{fontSize:10,color:"var(--text3)",fontWeight:500,fontStyle:"italic"}}>· libera amanhã</span>}
+                  </div>
+                )}
                 {/* v8.23.0: outros contribuintes hoje + progresso coletivo */}
                 {otherContributors.length > 0 && (
                   <div style={{fontSize:11,color:"#1e40af",marginTop:4,display:"flex",alignItems:"center",gap:4,flexWrap:"wrap"}}>
