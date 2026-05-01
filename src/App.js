@@ -3,7 +3,7 @@ import React, { useState, useEffect, useMemo, useRef, Component } from "react";
 import { db } from "./firebase";
 import { doc, getDoc, setDoc, onSnapshot } from "firebase/firestore";
 
-const APP_VERSION = "8.22.1";
+const APP_VERSION = "8.22.2";
 
 // v8.11.1: comparação de versão semver-like (8.11.1 > 8.10.7 > 8.9.4)
 function compareVersions(a, b) {
@@ -28540,13 +28540,28 @@ function OperationalChecklists({ employee, pessoas = [], isOwner = false, miseCh
     return { run, existing };
   }
 
+  // v8.22.2: helper — true se o draft tem ao menos 1 item marcado ou 1 nota não-vazia
+  function draftHasContent(draftData) {
+    return Object.values(draftData || {}).some(d => d?.done || (d?.note && d.note.trim()));
+  }
+
   function persistDraft(tpl, draftData) {
-    const { run, existing } = buildRun(tpl, draftData, false);
-    if (existing) {
-      onUpdate("miseChecklistRuns", (miseChecklistRuns || []).map(r => r.id === run.id ? run : r));
-    } else {
-      onUpdate("miseChecklistRuns", [...(miseChecklistRuns || []), run]);
+    const id = getOrCreateRunId(tpl);
+    // v8.22.2: se draft ficou vazio (ex: marcou e desmarcou tudo), descarta o rascunho
+    // pra não poluir histórico/lista de pendentes com run sem conteúdo.
+    if (!draftHasContent(draftData)) {
+      onUpdate("miseChecklistRuns", (prev) => (prev || []).filter(r => !(r.id === id && !r.completedAt)));
+      setDrafts(d => { const n = { ...d }; delete n[tpl.id]; return n; });
+      setSavedTimestamps(s => { const n = { ...s }; delete n[tpl.id]; return n; });
+      delete draftRunIds.current[tpl.id]; // próxima edição gera id novo
+      return;
     }
+    const { run } = buildRun(tpl, draftData, false);
+    onUpdate("miseChecklistRuns", (prev) => {
+      const arr = prev || [];
+      if (arr.some(r => r.id === run.id)) return arr.map(r => r.id === run.id ? run : r);
+      return [...arr, run];
+    });
     setSavedTimestamps(s => ({ ...s, [tpl.id]: run.updatedAt }));
   }
 
@@ -28563,18 +28578,19 @@ function OperationalChecklists({ employee, pessoas = [], isOwner = false, miseCh
 
   async function submitChecklist(tpl) {
     const draft = drafts[tpl.id] || ensureDraft(tpl);
-    const doneCount = Object.values(draft).filter(i => i?.done).length;
-    if (doneCount === 0) {
-      if (!await appConfirm("Nenhum item foi marcado. Enviar checklist vazio?")) return;
+    // v8.22.2: bloqueia envio sem nada preenchido (pelo menos 1 item ou 1 nota)
+    if (!draftHasContent(draft)) {
+      onUpdate("_toast", "⚠️ Marque pelo menos 1 item antes de enviar");
+      return;
     }
     // Cancela qualquer save em flight pra não sobrescrever depois do submit
     if (draftSaveTimers.current[tpl.id]) clearTimeout(draftSaveTimers.current[tpl.id]);
-    const { run, existing } = buildRun(tpl, draft, true);
-    if (existing) {
-      onUpdate("miseChecklistRuns", (miseChecklistRuns || []).map(r => r.id === run.id ? run : r));
-    } else {
-      onUpdate("miseChecklistRuns", [...(miseChecklistRuns || []), run]);
-    }
+    const { run } = buildRun(tpl, draft, true);
+    onUpdate("miseChecklistRuns", (prev) => {
+      const arr = prev || [];
+      if (arr.some(r => r.id === run.id)) return arr.map(r => r.id === run.id ? run : r);
+      return [...arr, run];
+    });
     // Limpa draft local — vai ler do run salvo agora (read-only)
     setDrafts(d => { const n = { ...d }; delete n[tpl.id]; return n; });
     setSavedTimestamps(s => { const n = { ...s }; delete n[tpl.id]; return n; });
