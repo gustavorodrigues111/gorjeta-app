@@ -3,7 +3,7 @@ import React, { useState, useEffect, useMemo, useRef, Component } from "react";
 import { db } from "./firebase";
 import { doc, getDoc, setDoc, onSnapshot } from "firebase/firestore";
 
-const APP_VERSION = "8.18.1";
+const APP_VERSION = "8.19.0";
 
 // v8.11.1: comparação de versão semver-like (8.11.1 > 8.10.7 > 8.9.4)
 function compareVersions(a, b) {
@@ -28039,11 +28039,26 @@ function OperationalChecklists({ employee, miseChecklistTemplates, miseChecklist
   const [expandedTpl, setExpandedTpl] = useState(null);
   const miseAc = "#7c9e5e";
 
-  // Estado local dos checklists abertos. Tudo fica local até clicar "Enviar".
-  // Estrutura: { [tplId]: { [itemId]: { done, note, showNote } } }
+  // v8.19.0: rascunho agora persiste no Firestore (mesma coleção miseChecklistRuns, sem completedAt).
+  // - drafts (state local) = espelho do que está sendo editado, pra UI responsiva
+  // - persistDraft = grava o run sem completedAt (debounced) — sobrevive a fechar a aba
+  // - submitChecklist = persistDraft com isSubmit=true → adiciona completedAt
+  // - draftRunIds = ID estável por template no ciclo de vida da tela, evita duplicar runs
+  // - savedTimestamps = mostra "💾 Salvo" depois de cada autosave
   const [drafts, setDrafts] = useState({});
+  const [savedTimestamps, setSavedTimestamps] = useState({}); // { [tplId]: ISO }
+  const draftRunIds = useRef({});
+  const draftSaveTimers = useRef({});
 
-  // Garante que um draft exista pra esse template, inicializado a partir do run salvo (se houver)
+  function getOrCreateRunId(tpl) {
+    if (draftRunIds.current[tpl.id]) return draftRunIds.current[tpl.id];
+    const existingRun = myRunsToday.find(r => r.templateId === tpl.id);
+    const id = existingRun?.id || `clrun_${Date.now().toString(36)}${Math.random().toString(36).slice(2,6)}`;
+    draftRunIds.current[tpl.id] = id;
+    return id;
+  }
+
+  // Garante que um draft exista pra esse template, inicializado a partir do run salvo (rascunho ou enviado)
   function ensureDraft(tpl) {
     if (drafts[tpl.id]) return drafts[tpl.id];
     const existingRun = myRunsToday.find(r => r.templateId === tpl.id);
@@ -28068,49 +28083,72 @@ function OperationalChecklists({ employee, miseChecklistTemplates, miseChecklist
     return { done: !!ri?.done, note: ri?.note || "", showNote: !!ri?.note };
   }
 
-  function updateItem(tpl, itemId, patch) {
-    setDrafts(d => {
-      const base = d[tpl.id] || ensureDraft(tpl);
-      return { ...d, [tpl.id]: { ...base, [itemId]: { ...getItemState(tpl, itemId), ...base?.[itemId], ...patch } } };
-    });
-  }
-
-  async function submitChecklist(tpl) {
-    const draft = drafts[tpl.id] || ensureDraft(tpl);
+  // Constrói o objeto run a partir do draft. Se isSubmit=true, marca completedAt.
+  function buildRun(tpl, draftData, isSubmit) {
+    const id = getOrCreateRunId(tpl);
     const now = new Date().toISOString();
-    const doneCount = Object.values(draft).filter(i => i?.done).length;
-    if (doneCount === 0) {
-      if (!await appConfirm("Nenhum item foi marcado. Enviar checklist vazio?")) return;
-    }
+    const existing = (miseChecklistRuns || []).find(r => r.id === id);
     const newItems = (tpl.items || []).map(it => {
-      const d = draft[it.id] || {};
-      // Firestore não aceita undefined — usa null ou omite o campo
-      const row = {
-        itemId: it.id,
-        done: !!d.done,
-      };
-      if (d.done) row.doneAt = now;
+      const d = draftData[it.id] || {};
+      const row = { itemId: it.id, done: !!d.done };
+      if (d.done) row.doneAt = (existing?.items?.find(x=>x.itemId===it.id)?.doneAt) || now;
       if (d.note && d.note.trim()) row.note = d.note.trim();
       return row;
     });
-    const existingRun = myRunsToday.find(r => r.templateId === tpl.id);
-    const newRun = {
-      id: existingRun?.id || `clrun_${Date.now().toString(36)}${Math.random().toString(36).slice(2,6)}`,
+    const run = {
+      id,
       restaurantId,
       templateId: tpl.id,
       userId: employee.id,
       userName: employee.name,
       date: today_,
       items: newItems,
-      completedAt: now,
+      updatedAt: now,
     };
-    if (existingRun) {
-      onUpdate("miseChecklistRuns", (miseChecklistRuns || []).map(r => r.id === existingRun.id ? newRun : r));
+    // Preserva completedAt se já existia, ou seta agora se for submit
+    if (isSubmit) run.completedAt = now;
+    else if (existing?.completedAt) run.completedAt = existing.completedAt;
+    return { run, existing };
+  }
+
+  function persistDraft(tpl, draftData) {
+    const { run, existing } = buildRun(tpl, draftData, false);
+    if (existing) {
+      onUpdate("miseChecklistRuns", (miseChecklistRuns || []).map(r => r.id === run.id ? run : r));
     } else {
-      onUpdate("miseChecklistRuns", [...(miseChecklistRuns || []), newRun]);
+      onUpdate("miseChecklistRuns", [...(miseChecklistRuns || []), run]);
     }
-    // Limpa draft
+    setSavedTimestamps(s => ({ ...s, [tpl.id]: run.updatedAt }));
+  }
+
+  function updateItem(tpl, itemId, patch) {
+    setDrafts(d => {
+      const base = d[tpl.id] || ensureDraft(tpl);
+      const newDraft = { ...base, [itemId]: { ...getItemState(tpl, itemId), ...base?.[itemId], ...patch } };
+      // Debounce 800ms — segura ondas de cliques antes de gravar
+      if (draftSaveTimers.current[tpl.id]) clearTimeout(draftSaveTimers.current[tpl.id]);
+      draftSaveTimers.current[tpl.id] = setTimeout(() => persistDraft(tpl, newDraft), 800);
+      return { ...d, [tpl.id]: newDraft };
+    });
+  }
+
+  async function submitChecklist(tpl) {
+    const draft = drafts[tpl.id] || ensureDraft(tpl);
+    const doneCount = Object.values(draft).filter(i => i?.done).length;
+    if (doneCount === 0) {
+      if (!await appConfirm("Nenhum item foi marcado. Enviar checklist vazio?")) return;
+    }
+    // Cancela qualquer save em flight pra não sobrescrever depois do submit
+    if (draftSaveTimers.current[tpl.id]) clearTimeout(draftSaveTimers.current[tpl.id]);
+    const { run, existing } = buildRun(tpl, draft, true);
+    if (existing) {
+      onUpdate("miseChecklistRuns", (miseChecklistRuns || []).map(r => r.id === run.id ? run : r));
+    } else {
+      onUpdate("miseChecklistRuns", [...(miseChecklistRuns || []), run]);
+    }
+    // Limpa draft local — vai ler do run salvo agora (read-only)
     setDrafts(d => { const n = { ...d }; delete n[tpl.id]; return n; });
+    setSavedTimestamps(s => { const n = { ...s }; delete n[tpl.id]; return n; });
     onUpdate("_toast", `✓ Checklist "${tpl.name}" enviado`);
   }
 
@@ -28136,8 +28174,11 @@ function OperationalChecklists({ employee, miseChecklistTemplates, miseChecklist
       {templates.map(tpl => {
         const run = myRunsToday.find(r => r.templateId === tpl.id);
         const isCompleted = !!run?.completedAt;
+        // v8.19.0: rascunho = run existe mas sem completedAt, OU draft local não vazio
+        const isDraft = !isCompleted && (!!run || !!drafts[tpl.id]);
         const items = tpl.items || [];
         const draftForTpl = drafts[tpl.id];
+        const savedAt = savedTimestamps[tpl.id];
         // Contagem "ao vivo" baseada no draft (se aberto) ou no run salvo
         const doneCount = items.reduce((acc, it) => {
           if (draftForTpl && draftForTpl[it.id]) return acc + (draftForTpl[it.id].done ? 1 : 0);
@@ -28158,7 +28199,7 @@ function OperationalChecklists({ employee, miseChecklistTemplates, miseChecklist
                 <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
                   <span style={{fontSize:15,color:"var(--text)",fontWeight:700}}>{tpl.name}</span>
                   {isCompleted && <span style={{fontSize:10,padding:"1px 8px",borderRadius:10,background:"#10b98122",color:"#15803d",fontWeight:700}}>✓ ENVIADO</span>}
-                  {!isCompleted && draftForTpl && <span style={{fontSize:10,padding:"1px 8px",borderRadius:10,background:"#f59e0b22",color:"#b45309",fontWeight:700}}>RASCUNHO</span>}
+                  {isDraft && <span style={{fontSize:10,padding:"1px 8px",borderRadius:10,background:"#f59e0b22",color:"#b45309",fontWeight:700}}>RASCUNHO</span>}
                 </div>
                 {tpl.description && <div style={{fontSize:12,color:"var(--text3)",marginTop:3}}>{tpl.description}</div>}
                 {/* Último envio de hoje — ajuda quem entrou no meio do turno a saber se já foi feito */}
@@ -28228,8 +28269,20 @@ function OperationalChecklists({ employee, miseChecklistTemplates, miseChecklist
                     </div>
                     {!isCompleted && (
                       <div style={{marginTop:14,display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:8}}>
-                        <div style={{fontSize:11,color:"var(--text3)"}}>
-                          {doneCount === 0 ? "Marque os itens conferidos e envie ao final." : `${doneCount} de ${items.length} marcado${doneCount>1?"s":""}`}
+                        <div style={{display:"flex",flexDirection:"column",gap:2}}>
+                          <div style={{fontSize:11,color:"var(--text3)"}}>
+                            {doneCount === 0 ? "Marque os itens conferidos e envie ao final." : `${doneCount} de ${items.length} marcado${doneCount>1?"s":""}`}
+                          </div>
+                          {savedAt ? (
+                            <div style={{fontSize:10,color:"#15803d",fontWeight:600,display:"flex",alignItems:"center",gap:4}}>
+                              <span>💾</span>
+                              <span>Salvo às {new Date(savedAt).toLocaleTimeString("pt-BR",{hour:"2-digit",minute:"2-digit",second:"2-digit"})}</span>
+                            </div>
+                          ) : run ? (
+                            <div style={{fontSize:10,color:"var(--text3)",fontStyle:"italic"}}>
+                              Rascunho preservado. Você pode fechar e voltar depois.
+                            </div>
+                          ) : null}
                         </div>
                         <button onClick={()=>submitChecklist(tpl)}
                           style={{background:"#15803d",color:"#fff",border:"none",borderRadius:8,padding:"10px 20px",fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:"'DM Sans',sans-serif",minHeight:44}}>
