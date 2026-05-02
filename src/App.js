@@ -389,6 +389,37 @@ function getActiveWorkSchedule(empSchedules, dateStr) {
     .sort((a, b) => (a.validFrom || "").localeCompare(b.validFrom || ""));
   return sorted[sorted.length - 1] || null;
 }
+
+// Deriva a escala de UM empregado pra um mês a partir do horário cadastrado + ciclo de domingos.
+// Mesma lógica de derivedScheduleByEmp do RestaurantPanel (v8.12.0). Usado quando não há dados
+// salvos pro mês — em particular meses futuros que ninguém ainda preencheu.
+function deriveScheduleForEmp(emp, year, month, workSchedules, restaurant) {
+  if (!emp) return {};
+  const empWS = workSchedules?.[emp.restaurantId]?.[emp.id] ?? [];
+  if (empWS.length === 0) return {};
+  const dim = new Date(year, month + 1, 0).getDate();
+  const out = {};
+  for (let d = 1; d <= dim; d++) {
+    const dateStr = `${year}-${String(month+1).padStart(2,"0")}-${String(d).padStart(2,"0")}`;
+    if (restaurant?.serviceStartDate && dateStr < restaurant.serviceStartDate) continue;
+    if (emp.demitidoEm && dateStr >= emp.demitidoEm) continue;
+    const ws = getActiveWorkSchedule(empWS, dateStr);
+    if (!ws) continue;
+    if (ws.validFrom && dateStr < ws.validFrom) continue;
+    const days = getEffectiveDays(ws, dateStr);
+    if (!days) continue;
+    const dow = new Date(dateStr+"T12:00:00").getDay();
+    const dayCfg = days[dow];
+    if (!dayCfg || dayCfg.active === false) { out[dateStr] = DAY_OFF; continue; }
+    if (dow === 0) {
+      const cycle = getSundayCycleFromSchedule(ws, dateStr);
+      if (cycle && cycle.refDate && isSundayOffByCycle(cycle, dateStr)) {
+        out[dateStr] = DAY_OFF;
+      }
+    }
+  }
+  return out;
+}
 // eslint-disable-next-line no-unused-expressions
 [getSundayCycleFromSchedule, isSundayOffByCycle, getActiveWorkSchedule];
 const getWeeksInMonth = (y, m) => { const daysInM = new Date(y, m + 1, 0).getDate(); const weeks = new Map(); for (let d = 1; d <= daysInM; d++) { const ds = `${y}-${String(m+1).padStart(2,"0")}-${String(d).padStart(2,"0")}`; const mon = getWeekMonday(ds); if (!weeks.has(mon)) { const sunD = new Date(mon + "T12:00:00"); sunD.setDate(sunD.getDate() + 6); weeks.set(mon, { monday: mon, sunday: sunD.toISOString().slice(0,10), daysInMonth: [] }); } weeks.get(mon).daysInMonth.push(d); } return [...weeks.values()]; };
@@ -4601,7 +4632,15 @@ function EmployeePortal({ employees, roles, tips, schedules, splits, restaurants
   const grossTotal = myTips.reduce((a, t) => a + (t.myShare ?? 0), 0);
   const taxTotal   = myTips.reduce((a, t) => a + (t.myTax   ?? 0), 0);
   const netTotal   = myTips.reduce((a, t) => a + (t.myNet   ?? 0), 0);
-  const dayMap = emp ? (schedules?.[emp.restaurantId]?.[mk]?.[empId] ?? {}) : {};
+  // Se o mês ainda não foi preenchido pelo gestor, deriva a escala do horário cadastrado + ciclo de domingos
+  // (mesmo comportamento do gestor no RestaurantPanel). Sem isso, meses futuros apareciam como "trabalha todo dia".
+  const dayMap = (() => {
+    if (!emp) return {};
+    const saved = schedules?.[emp.restaurantId]?.[mk]?.[empId];
+    if (saved && Object.keys(saved).length > 0) return saved;
+    const restObj = restaurants?.find(r => r.id === emp.restaurantId);
+    return deriveScheduleForEmp(emp, year, month, workSchedules, restObj);
+  })();
 
   // Pending communications
   const empRole = roles?.find(r => r.id === emp?.roleId);
@@ -4909,7 +4948,9 @@ function EmployeePortal({ employees, roles, tips, schedules, splits, restaurants
                       <tbody>
                         {areaEmpsList.map((e, ei) => {
                           const isMe = e.id === empId;
-                          const dm = schedules?.[emp?.restaurantId]?.[mk]?.[e.id] ?? {};
+                          const savedDm = schedules?.[emp?.restaurantId]?.[mk]?.[e.id];
+                          const restObj = restaurants?.find(r => r.id === emp?.restaurantId);
+                          const dm = (savedDm && Object.keys(savedDm).length > 0) ? savedDm : deriveScheduleForEmp(e, year, month, workSchedules, restObj);
                           const role = roles.find(r=>r.id===e.roleId);
                           return (
                             <tr key={e.id} style={{background:isMe?"var(--ac-bg)":ei%2===0?"var(--bg1)":"var(--bg2)"}}>
