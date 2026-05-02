@@ -248,6 +248,13 @@ const shortName = (name) => {
   return `${parts[0]} ${parts[parts.length - 1]}`;
 };
 const monthKey = (y, m) => `${y}-${String(m + 1).padStart(2, "0")}`;
+// Soma N dias (pode ser negativo) a uma data YYYY-MM-DD e retorna nova string YYYY-MM-DD
+const addDaysISO = (dateStr, n) => {
+  if (!dateStr) return dateStr;
+  const d = new Date(dateStr + "T12:00:00");
+  d.setDate(d.getDate() + n);
+  return d.toISOString().slice(0, 10);
+};
 
 // Converte URLs do Google Drive/Docs/Forms pra versões que permitem iframe.
 // Drive/Docs/Sheets/Slides bloqueiam X-Frame em /view e /edit, mas /preview e /embed funcionam.
@@ -5720,16 +5727,19 @@ function EmployeeSpreadsheet({ restEmps, restRoles, rid, employees, pessoas, onU
   }
 
   async function dismissEmp(emp) {
-    const dataStr = window.prompt(`Demitir "${emp.name}"?\n\nInforme a data da demissão (DD/MM/AAAA):`, new Date().toLocaleDateString("pt-BR"));
+    const dataStr = window.prompt(`Demitir "${emp.name}"?\n\nQual o último dia trabalhado? (DD/MM/AAAA)\n\n(Esse dia ainda conta na escala e na gorjeta. A partir do dia seguinte, ${emp.name} sai dos cálculos.)`, new Date().toLocaleDateString("pt-BR"));
     if (!dataStr) return;
     const parts = dataStr.split("/");
     if (parts.length !== 3) { window.alert("Data inválida. Use o formato DD/MM/AAAA."); return; }
     const [dd,mm,yyyy] = parts;
-    const demitidoEm = `${yyyy}-${mm.padStart(2,"0")}-${dd.padStart(2,"0")}`;
-    if (isNaN(new Date(demitidoEm+"T12:00:00").getTime())) { window.alert("Data inválida."); return; }
-    if (!await appConfirm(`Confirmar demissão de "${emp.name}" em ${dataStr}?\n\nA partir desta data:\n• Sai do cálculo de gorjeta\n• Consta como "DEM" na escala\n• No próximo mês será movido para inativo`)) return;
+    const lastWorkedDay = `${yyyy}-${mm.padStart(2,"0")}-${dd.padStart(2,"0")}`;
+    if (isNaN(new Date(lastWorkedDay+"T12:00:00").getTime())) { window.alert("Data inválida."); return; }
+    // demitidoEm = primeiro dia FORA = último dia + 1 (semântica interna histórica preservada)
+    const demitidoEm = addDaysISO(lastWorkedDay, 1);
+    const demitidoEmBR = new Date(demitidoEm+"T12:00:00").toLocaleDateString("pt-BR");
+    if (!await appConfirm(`Confirmar demissão de "${emp.name}"?\n\nÚltimo dia trabalhado: ${dataStr}\n\nA partir de ${demitidoEmBR}:\n• Sai do cálculo de gorjeta\n• Consta como "DEM" na escala\n• No próximo mês será movido para inativo`)) return;
     onUpdate("employees", employees.map(x => x.id===emp.id ? {...x, demitidoEm, demitidoPor: isOwner ? "Master" : "Gestor Adm.", inactive: true, inactiveFrom: demitidoEm} : x));
-    onUpdate("_toast", `📋 ${emp.name} demitido em ${dataStr}`);
+    onUpdate("_toast", `📋 ${emp.name} demitido — último dia ${dataStr}`);
   }
 
   async function undoDismiss(emp) {
@@ -5753,28 +5763,31 @@ function EmployeeSpreadsheet({ restEmps, restRoles, rid, employees, pessoas, onU
     const idx = parseInt(choice) - 1;
     if (isNaN(idx) || idx < 0 || idx >= available.length) { window.alert("Opção inválida."); return; }
     const newRole = available[idx];
-    const dataStr = window.prompt(`Data efetiva da mudança para "${newRole.name}" (DD/MM/AAAA):`, new Date().toLocaleDateString("pt-BR"));
+    const oldRole = restRoles.find(r => r.id === emp.roleId);
+    const dataStr = window.prompt(`Qual o último dia de "${emp.name}" como ${oldRole?.name ?? "cargo atual"}? (DD/MM/AAAA)\n\n(Esse dia ainda conta no cargo atual. A partir do dia seguinte, passa a ser ${newRole.name}.)`, new Date().toLocaleDateString("pt-BR"));
     if (!dataStr) return;
     const parts = dataStr.split("/");
     if (parts.length !== 3) { window.alert("Data inválida."); return; }
     const [dd,mm,yyyy] = parts;
-    const effectiveDate = `${yyyy}-${mm.padStart(2,"0")}-${dd.padStart(2,"0")}`;
-    if (isNaN(new Date(effectiveDate+"T12:00:00").getTime())) { window.alert("Data inválida."); return; }
+    const lastDayOldRole = `${yyyy}-${mm.padStart(2,"0")}-${dd.padStart(2,"0")}`;
+    if (isNaN(new Date(lastDayOldRole+"T12:00:00").getTime())) { window.alert("Data inválida."); return; }
+    // effectiveDate = primeiro dia no novo cargo = último dia no cargo atual + 1
+    const effectiveDate = addDaysISO(lastDayOldRole, 1);
+    const effectiveDateBR = new Date(effectiveDate+"T12:00:00").toLocaleDateString("pt-BR");
     const reason = window.prompt("Motivo (opcional):") || "";
     const changedBy = isOwner ? "Master" : "Gestor Adm.";
-    const oldRole = restRoles.find(r => r.id === emp.roleId);
 
     if (effectiveDate <= today()) {
       const historyEntry = { fromRoleId: emp.roleId, toRoleId: newRole.id, date: effectiveDate, reason, changedBy };
       const history = [...(emp.roleHistory ?? []), historyEntry];
-      if (!await appConfirm(`Confirmar mudança de cargo de "${emp.name}"?\n\n${oldRole?.name ?? "—"} → ${newRole.name}\nData: ${dataStr}\n${reason ? "Motivo: " + reason : ""}`)) return;
+      if (!await appConfirm(`Confirmar mudança de cargo de "${emp.name}"?\n\n${oldRole?.name ?? "—"} → ${newRole.name}\nÚltimo dia como ${oldRole?.name ?? "cargo atual"}: ${dataStr}\nNovo cargo a partir de ${effectiveDateBR}\n${reason ? "Motivo: " + reason : ""}`)) return;
       onUpdate("employees", employees.map(e => e.id === emp.id ? { ...e, roleId: newRole.id, roleHistory: history } : e));
       onUpdate("_toast", `⬆️ ${emp.name}: ${oldRole?.name ?? "—"} → ${newRole.name}`);
     } else {
-      if (!await appConfirm(`Agendar mudança de cargo de "${emp.name}"?\n\n${oldRole?.name ?? "—"} → ${newRole.name}\nData efetiva: ${dataStr}\n${reason ? "Motivo: " + reason : ""}\n\nA troca será aplicada automaticamente na data.`)) return;
+      if (!await appConfirm(`Agendar mudança de cargo de "${emp.name}"?\n\n${oldRole?.name ?? "—"} → ${newRole.name}\nÚltimo dia como ${oldRole?.name ?? "cargo atual"}: ${dataStr}\nNovo cargo a partir de ${effectiveDateBR}\n${reason ? "Motivo: " + reason : ""}\n\nA troca será aplicada automaticamente na data.`)) return;
       const pending = { newRoleId: newRole.id, effectiveDate, reason, changedBy };
       onUpdate("employees", employees.map(e => e.id === emp.id ? { ...e, pendingRoleChange: pending } : e));
-      onUpdate("_toast", `📅 Promoção de ${emp.name} agendada para ${dataStr}`);
+      onUpdate("_toast", `📅 Promoção de ${emp.name} agendada — último dia como ${oldRole?.name ?? "cargo atual"} ${dataStr}`);
     }
   }
 
@@ -5995,7 +6008,7 @@ function EmployeeSpreadsheet({ restEmps, restRoles, rid, employees, pessoas, onU
                   {isDemitido && (
                     <>
                       <div style={{padding:"10px 16px",borderRadius:10,background:"#e74c3c11",border:"1px solid #e74c3c33",fontSize:12,color:"var(--red)"}}>
-                        Demitido em {new Date(emp.demitidoEm+"T12:00:00").toLocaleDateString("pt-BR")} por {emp.demitidoPor ?? "—"}
+                        Último dia trabalhado: {new Date(addDaysISO(emp.demitidoEm,-1)+"T12:00:00").toLocaleDateString("pt-BR")} · registrado por {emp.demitidoPor ?? "—"}
                       </div>
                       <button onClick={()=>undoDismiss(emp)} style={{display:"flex",alignItems:"center",gap:8,padding:"12px 16px",borderRadius:10,border:"1px solid #10b98133",background:"#10b98109",color:"var(--text)",cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:13,textAlign:"left"}}>
                         <span style={{fontSize:18}}>↩️</span>
@@ -6261,7 +6274,7 @@ function EmployeeSpreadsheet({ restEmps, restRoles, rid, employees, pessoas, onU
                       doc.setFontSize(10); doc.setTextColor(100,100,100);
                       doc.text(`Período: ${dateFrom} a ${dateTo} — Gerado em ${new Date().toLocaleDateString("pt-BR")}`, W/2, y, {align:"center"}); y += 10;
                       doc.setFontSize(12); doc.setTextColor(30,30,30); doc.text("DADOS DO EMPREGADO", 14, y); y += 2;
-                      doc.autoTable({ startY:y, head:[], body:[["Nome",emp.name],["Cargo",role?.name??"—"],["Área",role?.area??"—"],["Código",emp.empCode??"—"],["Admissão",emp.admission?new Date(emp.admission+"T12:00:00").toLocaleDateString("pt-BR"):"—"],["Status",emp.demitidoEm?`Demitido em ${new Date(emp.demitidoEm+"T12:00:00").toLocaleDateString("pt-BR")}`:emp.inactive?"Inativo":"Ativo"]], theme:"grid", styles:{fontSize:10,cellPadding:3}, columnStyles:{0:{fontStyle:"bold",cellWidth:45}}, margin:{left:14,right:14} });
+                      doc.autoTable({ startY:y, head:[], body:[["Nome",emp.name],["Cargo",role?.name??"—"],["Área",role?.area??"—"],["Código",emp.empCode??"—"],["Admissão",emp.admission?new Date(emp.admission+"T12:00:00").toLocaleDateString("pt-BR"):"—"],["Status",emp.demitidoEm?`Demitido — último dia trabalhado em ${new Date(addDaysISO(emp.demitidoEm,-1)+"T12:00:00").toLocaleDateString("pt-BR")}`:emp.inactive?"Inativo":"Ativo"]], theme:"grid", styles:{fontSize:10,cellPadding:3}, columnStyles:{0:{fontStyle:"bold",cellWidth:45}}, margin:{left:14,right:14} });
                       y = doc.lastAutoTable.finalY + 8;
                       const empIncs = (incidents??[]).filter(i => i.restaurantId===rid && (i.employeeIds??[]).includes(emp.id) && !i.deletedAt && i.date>=fromISO && i.date<=toISO);
                       if (empIncs.length > 0) { if (y > 240) { doc.addPage(); y = 15; } doc.setFontSize(12); doc.text("OCORRÊNCIAS", 14, y); y += 2; doc.autoTable({ startY:y, head:[["Data","Tipo","Gravidade","Descrição"]], body:empIncs.sort((a,b)=>a.date.localeCompare(b.date)).map(inc => { const t = INCIDENT_TYPES.find(x=>x.id===inc.type); const sev = SEVERITY_OPTIONS.find(s=>s.id===inc.severity); return [new Date(inc.date+"T12:00:00").toLocaleDateString("pt-BR"),t?.label??inc.type,sev?.label??inc.severity??"—",(inc.description??"").slice(0,80)]; }), theme:"striped", styles:{fontSize:9,cellPadding:2}, headStyles:{fillColor:[59,130,246]}, columnStyles:{3:{cellWidth:70}}, margin:{left:14,right:14} }); y = doc.lastAutoTable.finalY + 8; }
@@ -6925,7 +6938,7 @@ function EmployeeSpreadsheet({ restEmps, restRoles, rid, employees, pessoas, onU
           <div style={{position:"fixed",top:0,left:0,right:0,bottom:0,background:"rgba(0,0,0,0.6)",zIndex:9999,display:"flex",alignItems:"center",justifyContent:"center",padding:16}} onClick={()=>setShowDismissalChecklist(false)}>
             <div onClick={e=>e.stopPropagation()} style={{background:"var(--bg2)",borderRadius:16,padding:24,maxWidth:480,width:"100%",maxHeight:"80vh",overflowY:"auto",border:"1px solid var(--border)"}}>
               <h3 style={{color:"var(--text)",margin:"0 0 16px",fontSize:16}}>Checklist de desligamento</h3>
-              <p style={{color:"var(--text2)",fontSize:13,margin:"0 0 12px"}}>{dce.name} — demissão em {dce.demitidoEm ? new Date(dce.demitidoEm+"T12:00:00").toLocaleDateString("pt-BR") : "—"}</p>
+              <p style={{color:"var(--text2)",fontSize:13,margin:"0 0 12px"}}>{dce.name} — último dia trabalhado em {dce.demitidoEm ? new Date(addDaysISO(dce.demitidoEm,-1)+"T12:00:00").toLocaleDateString("pt-BR") : "—"}</p>
               <div style={{display:"flex",flexDirection:"column",gap:8,marginBottom:16}}>
                 {checks.map((c,i) => (
                   <div key={i} style={{display:"flex",alignItems:"center",gap:10,padding:"10px 14px",borderRadius:10,background:c.ok?"#10b98109":"#f59e0b09",border:`1px solid ${c.ok?"#10b98133":"#f59e0b33"}`}}>
