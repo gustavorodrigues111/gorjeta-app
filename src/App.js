@@ -249,6 +249,38 @@ const shortName = (name) => {
 };
 const monthKey = (y, m) => `${y}-${String(m + 1).padStart(2, "0")}`;
 
+// Converte URLs do Google Drive/Docs/Forms pra versões que permitem iframe.
+// Drive/Docs/Sheets/Slides bloqueiam X-Frame em /view e /edit, mas /preview e /embed funcionam.
+const embeddableUrl = (url) => {
+  if (!url) return url;
+  try {
+    const u = new URL(url);
+    const host = u.hostname;
+    // Drive: /file/d/ID/view → /file/d/ID/preview
+    if (host === "drive.google.com") {
+      const m = u.pathname.match(/^\/file\/d\/([^/]+)/);
+      if (m) return `https://drive.google.com/file/d/${m[1]}/preview`;
+      // Pasta compartilhada: /drive/folders/ID → embed
+      const f = u.pathname.match(/^\/drive\/folders\/([^/?#]+)/);
+      if (f) return `https://drive.google.com/embeddedfolderview?id=${f[1]}#list`;
+    }
+    if (host === "docs.google.com") {
+      // /document /spreadsheets /presentation /forms /d/ID/(edit|view) → /preview
+      const m = u.pathname.match(/^\/(document|spreadsheets|presentation|forms)\/d\/([^/]+)/);
+      if (m) {
+        const kind = m[1];
+        const id = m[2];
+        if (kind === "forms") return `https://docs.google.com/forms/d/e/${id}/viewform?embedded=true`;
+        return `https://docs.google.com/${kind}/d/${id}/preview`;
+      }
+      // Forms já no formato /e/ID/viewform
+      const fe = u.pathname.match(/^\/forms\/d\/e\/([^/]+)\/viewform/);
+      if (fe) return `https://docs.google.com/forms/d/e/${fe[1]}/viewform?embedded=true`;
+    }
+    return url;
+  } catch { return url; }
+};
+
 // v8.9.1 — Sanitiza key pra Firestore (que rejeita campos com __ início+fim).
 // IDs do FAQ usam padrão __gorjeta__/__sistema__/etc. Convertemos pra "gorjeta", "sistema", etc.
 // Usado tanto em escrita quanto leitura no tabsGestor.faqAuto pra manter consistência.
@@ -22518,7 +22550,7 @@ function RecursosTab({ restaurantId, recursoFolders, recursos, recursosInitializ
               ) : (
                 <iframe
                   key={previewItem.url}
-                  src={previewItem.url}
+                  src={embeddableUrl(previewItem.url)}
                   title={previewItem.name}
                   onLoad={(e)=>{
                     try {
