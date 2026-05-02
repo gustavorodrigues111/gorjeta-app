@@ -10836,6 +10836,9 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
   const [swapModalContext, setSwapModalContext] = useState(null); // { empAId, date } | null
   // v8.12.0: confirmação do reset da escala
   const [showResetSchedConfirm, setShowResetSchedConfirm] = useState(false);
+  // Inversão de dia inteiro (feriados): troca o status de todos os empregados entre dois dias do mês.
+  // Empregados de férias num dos dois dias são preservados.
+  const [invertDayForm, setInvertDayForm] = useState(null); // null | { dateA, dateB, reason }
   // Month close / reopen confirmation
   const [showCloseConfirm, setShowCloseConfirm] = useState(false);
   const [showReopenConfirm, setShowReopenConfirm] = useState(false);
@@ -13674,6 +13677,103 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                 );
               })()}
 
+              {/* Modal: Inverter dia inteiro (feriados) */}
+              {invertDayForm && (() => {
+                const { dateA, dateB, reason } = invertDayForm;
+                const sameMonth = (d) => d && d.slice(0,7) === mk;
+                const valid = dateA && dateB && dateA !== dateB && sameMonth(dateA) && sameMonth(dateB);
+                // Preview: empregados afetados (preserva férias)
+                let affected = 0; let preserved = 0;
+                if (valid) {
+                  schedEmps.forEach(emp => {
+                    const cur = effectiveMonth[emp.id] ?? {};
+                    const sa = cur[dateA] ?? null;
+                    const sb = cur[dateB] ?? null;
+                    if (sa === DAY_VACATION || sb === DAY_VACATION) preserved++;
+                    else affected++;
+                  });
+                }
+                return (
+                  <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.6)",zIndex:9999,display:"flex",alignItems:"center",justifyContent:"center",padding:16}} onClick={()=>setInvertDayForm(null)}>
+                    <div onClick={e=>e.stopPropagation()} style={{background:"var(--card-bg)",border:"1px solid var(--border)",borderRadius:14,maxWidth:520,width:"100%",padding:24,boxShadow:"0 20px 50px rgba(0,0,0,0.3)"}}>
+                      <h3 style={{margin:"0 0 8px",color:"#7c3aed",fontSize:16,fontWeight:700}}>↔️ Inverter dia (feriados)</h3>
+                      <p style={{color:"var(--text2)",fontSize:12,margin:"0 0 14px",lineHeight:1.5}}>
+                        Troca o status (trabalho/folga/etc.) entre dois dias do mês para todos os empregados. Útil quando um feriado muda o dia de fechamento da casa.
+                        <br/><span style={{color:"var(--text3)"}}>Empregados de férias num dos dois dias são preservados.</span>
+                      </p>
+                      <div style={{display:"flex",gap:10,marginBottom:12}}>
+                        <div style={{flex:1}}>
+                          <label style={{...S.label,fontSize:11}}>Dia A</label>
+                          <input type="date" value={dateA} onChange={e=>setInvertDayForm({...invertDayForm, dateA:e.target.value})} style={S.input}/>
+                        </div>
+                        <div style={{flex:0,alignSelf:"flex-end",padding:"10px 4px",fontSize:18,color:"#7c3aed"}}>↔</div>
+                        <div style={{flex:1}}>
+                          <label style={{...S.label,fontSize:11}}>Dia B</label>
+                          <input type="date" value={dateB} onChange={e=>setInvertDayForm({...invertDayForm, dateB:e.target.value})} style={S.input}/>
+                        </div>
+                      </div>
+                      <div style={{marginBottom:12}}>
+                        <label style={{...S.label,fontSize:11}}>Motivo (opcional)</label>
+                        <input value={reason} onChange={e=>setInvertDayForm({...invertDayForm, reason:e.target.value})} placeholder="ex: Feriado 7 de Setembro — fechar 8/9, abrir 7" style={S.input}/>
+                      </div>
+                      {dateA && !sameMonth(dateA) && <div style={{padding:"8px 10px",background:"#ef444411",border:"1px solid #ef444433",borderRadius:8,fontSize:11,color:"#ef4444",marginBottom:8}}>Dia A precisa estar em {monthLabel(year,month)}.</div>}
+                      {dateB && !sameMonth(dateB) && <div style={{padding:"8px 10px",background:"#ef444411",border:"1px solid #ef444433",borderRadius:8,fontSize:11,color:"#ef4444",marginBottom:8}}>Dia B precisa estar em {monthLabel(year,month)}.</div>}
+                      {dateA && dateB && dateA === dateB && <div style={{padding:"8px 10px",background:"#ef444411",border:"1px solid #ef444433",borderRadius:8,fontSize:11,color:"#ef4444",marginBottom:8}}>Os dois dias precisam ser diferentes.</div>}
+                      {valid && (
+                        <div style={{padding:"10px 12px",background:"var(--bg2)",borderRadius:8,fontSize:12,color:"var(--text2)",lineHeight:1.6,marginBottom:14}}>
+                          <strong>{affected}</strong> empregado(s) terão o status invertido entre {new Date(dateA+"T12:00:00").toLocaleDateString("pt-BR")} e {new Date(dateB+"T12:00:00").toLocaleDateString("pt-BR")}.
+                          {preserved > 0 && <><br/><span style={{color:"var(--text3)"}}><strong>{preserved}</strong> de férias serão preservados.</span></>}
+                        </div>
+                      )}
+                      <div style={{display:"flex",justifyContent:"flex-end",gap:10}}>
+                        <button onClick={()=>setInvertDayForm(null)} style={{...S.btnSecondary,padding:"8px 14px",fontSize:13}}>Cancelar</button>
+                        <button onClick={()=>{
+                          if (!valid) return;
+                          // Snapshot pra histórico
+                          const preSnap = snapshotSchedulesMonth(schedules, rid, mk);
+                          saveSchedulesSnapshot(`Inversão ${new Date(dateA+"T12:00:00").toLocaleDateString("pt-BR")} ↔ ${new Date(dateB+"T12:00:00").toLocaleDateString("pt-BR")}${reason?` — ${reason}`:""}`, preSnap);
+                          // Aplica swap usando effectiveMonth como fonte (saved + derivado + edits locais)
+                          const newMonth = JSON.parse(JSON.stringify(schedules?.[rid]?.[mk] ?? {}));
+                          // Audit trail
+                          const adjAuthor = currentUser?.name || (isOwner?"Master":"Gestor Adm.");
+                          const adjTimestamp = new Date().toISOString();
+                          const newAdjs = [];
+                          schedEmps.forEach(emp => {
+                            const cur = effectiveMonth[emp.id] ?? {};
+                            const sa = cur[dateA] ?? null;
+                            const sb = cur[dateB] ?? null;
+                            if (sa === DAY_VACATION || sb === DAY_VACATION) return;
+                            if (!newMonth[emp.id]) newMonth[emp.id] = {};
+                            // dateA recebe o status que estava em dateB
+                            if (sb === null) delete newMonth[emp.id][dateA];
+                            else newMonth[emp.id][dateA] = sb;
+                            // dateB recebe o status que estava em dateA
+                            if (sa === null) delete newMonth[emp.id][dateB];
+                            else newMonth[emp.id][dateB] = sa;
+                            // Audit
+                            newAdjs.push({ id: `${Date.now()}-${Math.random().toString(36).slice(2,6)}-a`, empId: emp.id, date: dateA, from: sa ?? "", to: sb ?? "", author: adjAuthor, timestamp: adjTimestamp, reason: `Inversão${reason?`: ${reason}`:""}` });
+                            newAdjs.push({ id: `${Date.now()}-${Math.random().toString(36).slice(2,6)}-b`, empId: emp.id, date: dateB, from: sb ?? "", to: sa ?? "", author: adjAuthor, timestamp: adjTimestamp, reason: `Inversão${reason?`: ${reason}`:""}` });
+                          });
+                          if (newAdjs.length > 0) {
+                            const curAdjs = { ...(data?.scheduleAdjustments ?? {}) };
+                            if (!curAdjs[rid]) curAdjs[rid] = {};
+                            curAdjs[rid][mk] = [...(curAdjs[rid][mk] ?? []), ...newAdjs];
+                            onUpdate("scheduleAdjustments", curAdjs);
+                          }
+                          onUpdate("schedules", { ...schedules, [rid]: { ...(schedules?.[rid]??{}), [mk]: newMonth } });
+                          setSchedLocalEdits(null);
+                          setInvertDayForm(null);
+                          onUpdate("_toast", `↔️ ${affected} empregado(s) tiveram a escala invertida${preserved>0?` (${preserved} de férias preservados)`:""}`);
+                        }} disabled={!valid}
+                          style={{...S.btnPrimary,padding:"8px 14px",fontSize:13,fontWeight:700,background:"#7c3aed",borderColor:"#7c3aed",opacity:valid?1:0.5}}>
+                          Inverter
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })()}
+
               {/* Month close confirmation modal — Phase 4 */}
               {showCloseConfirm && (
                 <div style={{position:"fixed",top:0,left:0,right:0,bottom:0,background:"rgba(0,0,0,0.6)",zIndex:9999,display:"flex",alignItems:"center",justifyContent:"center",padding:16}} onClick={()=>setShowCloseConfirm(false)}>
@@ -14473,6 +14573,14 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
             <details style={{marginTop:18,padding:"12px 14px",background:"var(--bg2)",borderRadius:10,border:"1px solid var(--border)"}}>
               <summary style={{cursor:"pointer",fontSize:12,fontWeight:600,color:"var(--text2)",padding:"4px 0"}}>⋯ Mais ações</summary>
               <div style={{marginTop:12,display:"flex",flexDirection:"column",gap:10}}>
+                {/* Inverter dia inteiro (feriados) — Owner only, não fechado */}
+                {isOwner && !monthClosed && (
+                  <button onClick={()=>setInvertDayForm({ dateA: "", dateB: "", reason: "" })}
+                    style={{...S.btnSecondary,fontSize:12,padding:"8px 12px",alignSelf:"flex-start",color:"#7c3aed",borderColor:"#7c3aed44",background:"#7c3aed10"}}
+                    title="Inverter o status (trabalho ↔ folga ↔ etc.) entre dois dias do mês — útil pra feriados que mudam o dia de fechamento da casa">
+                    ↔️ Inverter dia (feriados)
+                  </button>
+                )}
                 {/* v8.12.1 (one-shot): Inferir refDate de abril/2026 a partir dos schedules existentes — Owner only */}
                 {isOwner && (() => {
                   const targetMk = "2026-04";
