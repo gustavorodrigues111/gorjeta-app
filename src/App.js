@@ -11112,6 +11112,21 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
   // Líder Operacional: acesso restrito a Dashboard + Escala + Horários + Equipe
   // ── Grouped tabs ──
   const liderInboxCount = isLider ? getInboxForUser({ inbox: data?.inbox, userId: currentUser?.id, userRole: "lider", restaurantId: rid, includeRead: false }).length : 0;
+  // Recursos: tab só aparece se o usuário tem ao menos um item visível (mesma regra de canSeeItem do RecursosTab).
+  // Owner sempre vê (precisa pra criar o primeiro item).
+  const hasVisibleRecurso = (() => {
+    if (isOwner) return true;
+    const items = (data?.recursos ?? []).filter(r => r.restaurantId === rid && !r.deletedAt);
+    if (items.length === 0) return false;
+    if (isDP) return true;
+    return items.some(r => {
+      const v = r.visibility || { mode: "default", sharedWith: [] };
+      const isCreator = r.createdById && r.createdById === currentUser?.id;
+      if (v.mode === "private") return isCreator;
+      if (v.mode === "shared") return isCreator || (Array.isArray(v.sharedWith) && v.sharedWith.includes(currentUser?.id));
+      return true; // default
+    });
+  })();
   // ──────────────────────────────────────────────────────────────────────
   // v7.0 IA — 5 seções: Início, Operação, Planejamento, Escritório, Ajustes
   // Líder Operacional: vê Início + Planejamento + Escritório (restrito)
@@ -11156,8 +11171,8 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
       canTips && ["tips","Gorjetas"],
       canTips && ["dashboard","Dashboard"],
       canTips && ["regra_divisao","Regra"],
-      // v8.15.0: Recursos — visível pra Owner/DP/Líder/admin (qualquer gestor)
-      (canTips || isOwner || isDP || isLider) && ["recursos","📚 Recursos"],
+      // v8.15.0: Recursos — Owner sempre; demais (DP/Líder/admin) só se tiverem ao menos 1 item visível.
+      (canTips || isOwner || isDP || isLider) && hasVisibleRecurso && ["recursos","📚 Recursos"],
       (isOwner || tabVisible("comunicados")) && ["comunicados","Comunicados"],
       (isOwner || tabVisible("faq")) && ["faq","FAQ"],
       (isOwner || tabVisible("dp")) && ["dp","Fale com DP"],
@@ -21195,7 +21210,7 @@ function hasAnyAdminRole(ad, sp, isOwner) {
 
 // Define estrutura da sidebar derivada de permissões da pessoa
 // v7.3: aceita employees pra check defensivo de isTeam
-function buildShellSections({ pessoa, restaurantId, isOwner, employees, restaurants }) {
+function buildShellSections({ pessoa, restaurantId, isOwner, employees, restaurants, recursos, currentUser }) {
   // Owner tem acesso implícito total — simula permissões completas
   let perms, isTeam;
   if (isOwner) {
@@ -21385,9 +21400,22 @@ function buildShellSections({ pessoa, restaurantId, isOwner, employees, restaura
       ),
     });
   }
-  // v8.15.0: Recursos — visível pra qualquer gestor (admin/líder/DP/owner)
+  // v8.15.0: Recursos — Owner sempre; demais (DP/Líder/admin) só se tiverem ao menos 1 item visível.
   const _isAnyMgr = isOwner || ad.tips || sp.isDP || sp.isLider || sp.profile === "lider" || ad.employees || ad.schedule;
-  if (_isAnyMgr) {
+  const _hasVisibleRecursoShell = (() => {
+    if (isOwner) return true;
+    const items = (recursos ?? []).filter(r => r.restaurantId === restaurantId && !r.deletedAt);
+    if (items.length === 0) return false;
+    if (sp.isDP === true) return true;
+    return items.some(r => {
+      const v = r.visibility || { mode: "default", sharedWith: [] };
+      const isCreator = r.createdById && r.createdById === currentUser?.id;
+      if (v.mode === "private") return isCreator;
+      if (v.mode === "shared") return isCreator || (Array.isArray(v.sharedWith) && v.sharedWith.includes(currentUser?.id));
+      return true; // default
+    });
+  })();
+  if (_isAnyMgr && _hasVisibleRecursoShell) {
     officeItems.push({ id: "mod_recursos", label: "Recursos", icon: "📚", kind: "manager", tab: "recursos" });
   }
   if (officeItems.length > 0) {
@@ -21447,7 +21475,7 @@ function AppShell({ pessoa, data, activeRestaurantId, setActiveRestaurantId, use
   const isOwner = isRealOwnerLocal && !impersonatedPessoa;
   const accessibleRestaurants = isRealOwnerLocal ? restaurants : (pessoa?.restaurantIds || []).map(rid => restaurants.find(r => r.id === rid)).filter(Boolean);
   const activeRest = restaurants.find(r => r.id === activeRestaurantId);
-  const sections = buildShellSections({ pessoa, restaurantId: activeRestaurantId, isOwner, employees: data?.employees ?? [], restaurants: data?.restaurants ?? [] });
+  const sections = buildShellSections({ pessoa, restaurantId: activeRestaurantId, isOwner, employees: data?.employees ?? [], restaurants: data?.restaurants ?? [], recursos: data?.recursos ?? [], currentUser });
   const allItems = sections.flatMap(s => s.items);
 
   // Seção ativa do shell (persistida em localStorage)
@@ -22179,11 +22207,15 @@ function RecursosTab({ restaurantId, recursoFolders, recursos, recursosInitializ
   const [itemForm, setItemForm] = useState(null); // null | {id?, folderId, name, type, url, content, tags, visibility:{mode,sharedWith}, editores:[]}
   // Modal pasta
   const [folderForm, setFolderForm] = useState(null);
-  // Pasta selecionada (default = primeira)
+  // Modal preview de link
+  const [previewItem, setPreviewItem] = useState(null); // null | { name, url }
+  const [previewBlocked, setPreviewBlocked] = useState(false);
+  // Pasta selecionada (default = primeira). Para não-Owner, default é a primeira pasta com itens visíveis.
   useEffect(() => {
-    if (!activeFolderId && restFolders.length > 0) setActiveFolderId(restFolders[0].id);
-    if (activeFolderId && !restFolders.find(f => f.id === activeFolderId)) setActiveFolderId(restFolders[0]?.id ?? null);
-  }, [restFolders, activeFolderId]); // eslint-disable-line react-hooks/exhaustive-deps
+    const pool = isOwner ? restFolders : restFolders.filter(f => restItems.some(r => r.folderId === f.id && canSeeItem(r)));
+    if (!activeFolderId && pool.length > 0) setActiveFolderId(pool[0].id);
+    if (activeFolderId && !pool.find(f => f.id === activeFolderId)) setActiveFolderId(pool[0]?.id ?? null);
+  }, [restFolders, restItems, activeFolderId, isOwner]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // v8.15.1: Lista de gestores/líderes elegíveis pra delegação de edição
   const eligibleResponsaveis = (() => {
@@ -22335,7 +22367,11 @@ function RecursosTab({ restaurantId, recursoFolders, recursos, recursosInitializ
   // Lista pra "compartilhar com" no item
   const shareableManagers = eligibleResponsaveis.filter(p => p.id !== currentUser?.id);
 
-  const activeFolder = restFolders.find(f => f.id === activeFolderId) || null;
+  // Pastas visíveis: Owner vê todas (precisa pra organizar). Demais só veem pastas com ao menos 1 item visível.
+  const visibleFolders = isOwner
+    ? restFolders
+    : restFolders.filter(f => restItems.some(r => r.folderId === f.id && canSeeItem(r)));
+  const activeFolder = visibleFolders.find(f => f.id === activeFolderId) || null;
 
   return (
     <div>
@@ -22347,17 +22383,17 @@ function RecursosTab({ restaurantId, recursoFolders, recursos, recursosInitializ
       </div>
 
       {/* Pastas */}
-      {restFolders.length === 0 ? (
+      {visibleFolders.length === 0 ? (
         <div style={{...S.card,padding:24,textAlign:"center"}}>
           <div style={{fontSize:36,marginBottom:8}}>📚</div>
-          <div style={{color:"var(--text)",fontWeight:700,fontSize:14,marginBottom:6}}>Sem pastas ainda</div>
-          <p style={{color:"var(--text3)",fontSize:12,marginBottom:14}}>Crie pastas pra organizar seus recursos (ex: Documentos, Contratos, Manuais).</p>
+          <div style={{color:"var(--text)",fontWeight:700,fontSize:14,marginBottom:6}}>{isOwner ? "Sem pastas ainda" : "Sem recursos disponíveis"}</div>
+          <p style={{color:"var(--text3)",fontSize:12,marginBottom:14}}>{isOwner ? "Crie pastas pra organizar seus recursos (ex: Documentos, Contratos, Manuais)." : "Você ainda não tem acesso a nenhum recurso. Peça pro Owner liberar."}</p>
           {isOwner && <button onClick={startNewFolder} style={{...S.btnPrimary,fontSize:13,padding:"8px 18px"}}>+ Criar primeira pasta</button>}
         </div>
       ) : (
         <>
           <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:14,padding:8,background:"var(--bg2)",borderRadius:10,border:"1px solid var(--border)"}}>
-            {restFolders.map(f => {
+            {visibleFolders.map(f => {
               const count = restItems.filter(r => r.folderId === f.id && canSeeItem(r)).length;
               const isActive = f.id === activeFolderId;
               return (
@@ -22409,7 +22445,27 @@ function RecursosTab({ restaurantId, recursoFolders, recursos, recursosInitializ
                         {editoresCount > 0 && <span title={`${editoresCount} editor(es) delegado(s)`} style={{fontSize:10,padding:"1px 6px",borderRadius:10,background:ac+"22",color:ac,fontWeight:700}}>✏️ {editoresCount}</span>}
                       </div>
                       {isLink ? (
-                        <a href={r.url} target="_blank" rel="noopener noreferrer" style={{color:ac,fontSize:11,textDecoration:"underline",fontFamily:"'DM Mono',monospace",wordBreak:"break-all",display:"block",marginTop:3}}>{r.url}</a>
+                        <div style={{display:"flex",flexDirection:"column",gap:6,marginTop:6}}>
+                          <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+                            <button onClick={()=>{setPreviewItem({name:r.name,url:r.url});setPreviewBlocked(false);}}
+                              style={{...S.btnSecondary,fontSize:11,padding:"5px 12px",color:ac,borderColor:ac+"55",background:ac+"10"}}>
+                              👁️ Visualizar
+                            </button>
+                            <button onClick={async ()=>{
+                              try {
+                                if (navigator.clipboard?.writeText) {
+                                  await navigator.clipboard.writeText(r.url);
+                                } else {
+                                  const ta = document.createElement("textarea"); ta.value = r.url; document.body.appendChild(ta); ta.select(); document.execCommand("copy"); document.body.removeChild(ta);
+                                }
+                                onUpdate("_toast", "📋 Link copiado");
+                              } catch { onUpdate("_toast", "⚠️ Não consegui copiar — copie manualmente"); }
+                            }} style={{...S.btnSecondary,fontSize:11,padding:"5px 12px"}}>
+                              📋 Copiar link
+                            </button>
+                          </div>
+                          {(() => { try { return <span style={{fontSize:10,color:"var(--text3)",fontFamily:"'DM Mono',monospace"}}>🌐 {new URL(r.url).hostname}</span>; } catch { return null; } })()}
+                        </div>
                       ) : (
                         r.content && <div style={{color:"var(--text2)",fontSize:12,marginTop:4,whiteSpace:"pre-wrap",lineHeight:1.5}}>{r.content}</div>
                       )}
@@ -22436,6 +22492,52 @@ function RecursosTab({ restaurantId, recursoFolders, recursos, recursosInitializ
             </div>
           )}
         </>
+      )}
+
+      {/* Modal: Preview de link */}
+      {previewItem && (
+        <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.55)",zIndex:1000,display:"flex",alignItems:"center",justifyContent:"center",padding:mobileOnly?8:24}} onClick={()=>setPreviewItem(null)}>
+          <div onClick={e=>e.stopPropagation()} style={{background:"var(--card-bg)",border:"1px solid var(--border)",borderRadius:14,width:"100%",maxWidth:1100,height:"90vh",display:"flex",flexDirection:"column",overflow:"hidden"}}>
+            <div style={{display:"flex",alignItems:"center",gap:10,padding:"12px 16px",borderBottom:"1px solid var(--border)",background:"var(--bg2)"}}>
+              <span style={{fontSize:16}}>👁️</span>
+              <div style={{flex:1,minWidth:0}}>
+                <div style={{color:"var(--text)",fontWeight:700,fontSize:14,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{previewItem.name}</div>
+                <div style={{color:"var(--text3)",fontSize:10,fontFamily:"'DM Mono',monospace",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{previewItem.url}</div>
+              </div>
+              <button onClick={()=>window.open(previewItem.url,"_blank","noopener,noreferrer")} style={{...S.btnSecondary,fontSize:11,padding:"5px 12px"}} title="Abrir em nova aba">↗ Nova aba</button>
+              <button onClick={()=>setPreviewItem(null)} style={{...S.btnSecondary,fontSize:11,padding:"5px 12px"}}>✕ Fechar</button>
+            </div>
+            <div style={{flex:1,position:"relative",background:"var(--bg1)"}}>
+              {previewBlocked ? (
+                <div style={{position:"absolute",inset:0,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:14,padding:24,textAlign:"center"}}>
+                  <div style={{fontSize:42}}>🚫</div>
+                  <div style={{color:"var(--text)",fontWeight:700,fontSize:15}}>Esse site não permite preview embutido</div>
+                  <p style={{color:"var(--text3)",fontSize:12,maxWidth:420,lineHeight:1.5,margin:0}}>Alguns sites (Google, bancos, sistemas internos) bloqueiam ser exibidos dentro de outras páginas por segurança. Abra em nova aba pra acessar.</p>
+                  <button onClick={()=>window.open(previewItem.url,"_blank","noopener,noreferrer")} style={{...S.btnPrimary,fontSize:13,padding:"10px 22px",background:ac,borderColor:ac}}>↗ Abrir em nova aba</button>
+                </div>
+              ) : (
+                <iframe
+                  key={previewItem.url}
+                  src={previewItem.url}
+                  title={previewItem.name}
+                  onLoad={(e)=>{
+                    try {
+                      // Se carregou mas foi bloqueado por X-Frame-Options, contentDocument lança
+                      // ou retorna um documento vazio. Heurística: se o iframe não tem URL definida ou está em about:blank após load, assume bloqueio.
+                      const fr = e.target;
+                      if (!fr.contentWindow || fr.contentWindow.location.href === "about:blank") setPreviewBlocked(true);
+                    } catch {
+                      // cross-origin: assume que carregou normalmente (é o caso comum)
+                    }
+                  }}
+                  onError={()=>setPreviewBlocked(true)}
+                  sandbox="allow-same-origin allow-scripts allow-popups allow-forms allow-popups-to-escape-sandbox"
+                  style={{width:"100%",height:"100%",border:"none",background:"#fff"}}
+                />
+              )}
+            </div>
+          </div>
+        </div>
       )}
 
       {/* Modal: Pasta */}
