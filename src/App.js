@@ -11174,6 +11174,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
     { id:"escritorio", label:"🏢 Escritório", icon:"🏢", tabs: [
       ["employees","Equipe"],
       ["freelas","🎒 Freelas"],
+      hasVisibleRecurso && ["recursos","📚 Recursos"],
     ].filter(Boolean) },
   ].filter(Boolean) : [
     { id:"inicio", label:"🏠 Início", icon:"🏠", tabs: [
@@ -22479,8 +22480,13 @@ function RecursosTab({ restaurantId, recursoFolders, recursos, recursosInitializ
                       {isLink ? (
                         <div style={{display:"flex",flexDirection:"column",gap:6,marginTop:6}}>
                           <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
-                            <button onClick={()=>{setPreviewItem({name:r.name,url:r.url});setPreviewBlocked(false);}}
-                              style={{...S.btnSecondary,fontSize:11,padding:"5px 12px",color:ac,borderColor:ac+"55",background:ac+"10"}}>
+                            <button onClick={()=>{
+                              // Drive/Docs/Forms: o iframe falha em pedir login da conta certa,
+                              // então abre direto em nova aba (usa o login do Google que o usuário já tem).
+                              const isGoogle = (() => { try { const h = new URL(r.url).hostname; return h === "drive.google.com" || h === "docs.google.com"; } catch { return false; } })();
+                              if (isGoogle) { window.open(r.url, "_blank", "noopener,noreferrer"); return; }
+                              setPreviewItem({name:r.name,url:r.url}); setPreviewBlocked(false);
+                            }} style={{...S.btnSecondary,fontSize:11,padding:"5px 12px",color:ac,borderColor:ac+"55",background:ac+"10"}}>
                               👁️ Visualizar
                             </button>
                             <button onClick={async ()=>{
