@@ -4845,6 +4845,10 @@ function EmployeePortal({ employees, roles, tips, schedules, splits, restaurants
         {tab === "escala" && (
           <div>
             <div style={{ marginBottom: 20 }}><MonthNav year={year} month={month} onChange={(y, m) => { setYear(y); setMonth(m); }} /></div>
+            <div style={{display:"flex",alignItems:"flex-start",gap:8,padding:"10px 12px",background:"#f59e0b14",border:"1px solid #f59e0b44",borderRadius:10,marginBottom:14,fontSize:12,color:"var(--text2)",lineHeight:1.5}}>
+              <span style={{fontSize:14,lineHeight:1}}>ℹ️</span>
+              <span>A escala apresentada é <strong>prevista</strong> e pode sofrer alterações. Mudanças serão comunicadas conforme o contrato de trabalho vigente.</span>
+            </div>
             <div style={{display:"flex",gap:8,marginBottom:14}}>
               <button onClick={()=>setEmpSchedView("mine")} style={{flex:1,padding:"8px",borderRadius:10,border:`1px solid ${empSchedView==="mine"?ac:"var(--border)"}`,background:empSchedView==="mine"?ac+"22":"transparent",color:empSchedView==="mine"?ac:"#555",cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:12}}>Minha Escala</button>
               <button onClick={()=>setEmpSchedView("area")} style={{flex:1,padding:"8px",borderRadius:10,border:`1px solid ${empSchedView==="area"?ac:"var(--border)"}`,background:empSchedView==="area"?ac+"22":"transparent",color:empSchedView==="area"?ac:"#555",cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:12}}>Escala da Área</button>
