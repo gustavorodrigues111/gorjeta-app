@@ -6016,10 +6016,12 @@ function EmployeeSpreadsheet({ restEmps, restRoles, rid, employees, pessoas, onU
                       )}
                       {/* VT balance card for dismissed employee (#70) */}
                       {(() => {
-                        const demMk2 = emp.demitidoEm?.slice(0,7);
+                        // Usa o mês/dia do ÚLTIMO DIA TRABALHADO (= demitidoEm - 1) como referência.
+                        const lastWorked2 = emp.demitidoEm ? addDaysISO(emp.demitidoEm, -1) : "";
+                        const demMk2 = lastWorked2.slice(0,7);
                         if (!demMk2) return null;
                         const [demY2, demM2] = demMk2.split("-").map(Number);
-                        const demDay2 = parseInt(emp.demitidoEm?.slice(8,10) ?? "0");
+                        const demDay2 = parseInt(lastWorked2.slice(8,10) ?? "0");
                         const daysInDemMonth2 = new Date(demY2, demM2, 0).getDate();
                         const vtPay2 = vtPayments?.[rid]?.[demMk2];
                         const vtSnap2 = vtPay2?.snapshot?.find(s => s.empId === emp.id);
@@ -6035,7 +6037,8 @@ function EmployeeSpreadsheet({ restEmps, restRoles, rid, employees, pessoas, onU
                             if (!schedMap2[ds] || schedMap2[ds] === "comptrab") planned2++;
                           }
                         }
-                        for (let dd = 1; dd < demDay2 && dd <= daysInDemMonth2; dd++) {
+                        // Conta dias trabalhados ATÉ E INCLUINDO o último dia trabalhado.
+                        for (let dd = 1; dd <= demDay2 && dd <= daysInDemMonth2; dd++) {
                           const ds = `${demY2}-${String(demM2).padStart(2,"0")}-${String(dd).padStart(2,"0")}`;
                           if (!schedMap2[ds] || schedMap2[ds] === "comptrab") worked2++;
                         }
@@ -6987,9 +6990,11 @@ function EmployeeSpreadsheet({ restEmps, restRoles, rid, employees, pessoas, onU
       {/* Pre-dismissal checklist modal (#71) */}
       {showDismissalChecklist && dismissalCheckEmp && (() => {
         const dce = dismissalCheckEmp;
-        const demMk3 = dce.demitidoEm?.slice(0,7) ?? "";
+        // Mês de referência = mês do ÚLTIMO DIA TRABALHADO (= demitidoEm - 1)
+        const lastWorked3 = dce.demitidoEm ? addDaysISO(dce.demitidoEm, -1) : "";
+        const demMk3 = lastWorked3.slice(0,7);
         const [demY3, demM3] = demMk3 ? demMk3.split("-").map(Number) : [0,0];
-        const demDay3 = parseInt(dce.demitidoEm?.slice(8,10) ?? "0");
+        const demDay3 = parseInt(lastWorked3.slice(8,10) ?? "0");
         const daysInDemMonth3 = demY3 ? new Date(demY3, demM3, 0).getDate() : 0;
         // VT status
         const vtPaid3 = !!vtPayments?.[rid]?.[demMk3];
@@ -6997,10 +7002,10 @@ function EmployeeSpreadsheet({ restEmps, restRoles, rid, employees, pessoas, onU
         const prevDem3 = demY3 ? new Date(demY3, demM3 - 2, 1) : null;
         const prevDemMk3 = prevDem3 ? `${prevDem3.getFullYear()}-${String(prevDem3.getMonth()+1).padStart(2,"0")}` : "";
         const prevSchedClosed3 = prevDemMk3 ? scheduleStatus?.[rid]?.[prevDemMk3]?.status === "closed" : false;
-        // Current month work days until dismissal
+        // Dias trabalhados ATÉ E INCLUINDO o último dia trabalhado
         const schedMap3 = schedules?.[rid]?.[demMk3]?.[dce.id] ?? {};
         let workDays3 = 0;
-        for (let dd = 1; dd < demDay3 && dd <= daysInDemMonth3; dd++) {
+        for (let dd = 1; dd <= demDay3 && dd <= daysInDemMonth3; dd++) {
           const ds = `${demY3}-${String(demM3).padStart(2,"0")}-${String(dd).padStart(2,"0")}`;
           if (!schedMap3[ds] || schedMap3[ds] === "comptrab") workDays3++;
         }
@@ -7071,8 +7076,10 @@ function ValeTransporteTab({ restaurantId, employees, roles, workSchedules, sche
   const restEmps = (employees ?? []).filter(e => {
     if (e.restaurantId !== restaurantId) return false;
     if (e.isFreela) return false;
-    const demMonth = e.demitidoEm ? e.demitidoEm.slice(0, 7) : null;
-    if (demMonth && demMonth < mk) return false; // demitido antes deste mês — fora sempre
+    // demitidoEm = primeiro dia FORA. O mês relevante pra filtro é o do ÚLTIMO DIA TRABALHADO (= demitidoEm - 1)
+    // assim demissão em 30/04 (demitidoEm=01/05) some já em maio, não aparece como "demitido neste mês" em maio.
+    const demMonth = e.demitidoEm ? addDaysISO(e.demitidoEm, -1).slice(0, 7) : null;
+    if (demMonth && demMonth < mk) return false; // último dia trabalhado num mês anterior — fora sempre
     const isInactiveNow = !!(e.inactive && e.inactiveFrom && e.inactiveFrom <= today());
     if (isInactiveNow && demMonth !== mk) return false; // inativo e não demitido neste mês — fora
     return true;
@@ -10913,8 +10920,9 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
   //   - Empregado ativo → APARECE
   const allSchedEmps = employees.filter(e => {
     if (e.restaurantId !== rid) return false;
-    const demMonth = e.demitidoEm ? e.demitidoEm.slice(0,7) : null;
-    if (demMonth && demMonth < mk) return false; // demitido antes deste mês — sempre fora
+    // demitidoEm = primeiro dia FORA → mês relevante é o do último dia trabalhado (= demitidoEm - 1).
+    const demMonth = e.demitidoEm ? addDaysISO(e.demitidoEm, -1).slice(0,7) : null;
+    if (demMonth && demMonth < mk) return false; // último dia trabalhado num mês anterior — sempre fora
     const isInactiveNow = !!(e.inactive && e.inactiveFrom && e.inactiveFrom <= today());
     if (isInactiveNow && demMonth !== mk) return false; // inativo e não demitido neste mês — fora
     return true;
