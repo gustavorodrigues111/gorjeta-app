@@ -1030,7 +1030,7 @@ function MonthNav({ year, month, onChange }) {
 
 
 //
-function CalendarGrid({ year, month, dayMap, onDayClick, readOnly, delayMap }) {
+function CalendarGrid({ year, month, dayMap, onDayClick, readOnly, delayMap, dayInversionsByDate }) {
   const firstDay = new Date(year, month, 1).getDay();
   const daysInMonth = new Date(year, month + 1, 0).getDate();
   const cells = [];
@@ -1094,9 +1094,11 @@ function CalendarGrid({ year, month, dayMap, onDayClick, readOnly, delayMap }) {
           const d = parseInt(dateStr.slice(-2));
           const st = styleOf(dateStr);
           const hasDelay = delayMap && (delayMap[String(d)] > 0);
+          const inv = dayInversionsByDate?.[dateStr];
+          const invTip = inv ? `↔️ Dia invertido com ${new Date(inv.otherDate+"T12:00:00").toLocaleDateString("pt-BR")}${inv.reason?` · Motivo: ${inv.reason}`:""}` : "";
           return (
             <button key={dateStr} onClick={() => !readOnly && onDayClick && onDayClick(dateStr)}
-              title={`${st.label}${hasDelay ? ` · Atraso ${delayMap[String(d)]} min` : ""}`}
+              title={`${st.label}${hasDelay ? ` · Atraso ${delayMap[String(d)]} min` : ""}${invTip ? `\n${invTip}` : ""}`}
               style={{
                 aspectRatio: "1", borderRadius: 8, border: "none",
                 background: st.bg, color: "#fff",
@@ -1115,6 +1117,9 @@ function CalendarGrid({ year, month, dayMap, onDayClick, readOnly, delayMap }) {
               <span style={{ fontSize: 16, fontWeight: 800, fontFamily: "'DM Mono',monospace", letterSpacing: 0.5, lineHeight: 1 }}>{st.code}</span>
               {hasDelay && (
                 <span style={{ position: "absolute", top: 3, right: 4, fontSize: 8, lineHeight: 1, background: "#fff", color: "#f59e0b", borderRadius: 3, padding: "1px 3px", fontWeight: 800 }}>⏰</span>
+              )}
+              {inv && (
+                <span style={{ position: "absolute", bottom: 3, right: 4, fontSize: 8, lineHeight: 1, background: "#fff", color: "#f59e0b", borderRadius: 3, padding: "1px 4px", fontWeight: 800 }}>↔</span>
               )}
             </button>
           );
@@ -4575,7 +4580,7 @@ function DpManagerTab({ restaurantId, dpMessages, onUpdate, isOwner }) {
   );
 }
 
-function EmployeePortal({ employees, roles, tips, schedules, splits, restaurants, communications, commAcks, faq, dpMessages, workSchedules, incidents, feedbacks, devChecklists, onBack, onUpdateEmployee, onUpdate, toggleTheme, theme, onSwitchToManager, onSwitchToOperational, employeeGoals, tipApprovals, delays, meetingPlans, inbox, inboxFolders, hideHeader, hideTabNav, forceTab, forceEmpId, pessoas, managers }) {
+function EmployeePortal({ employees, roles, tips, schedules, splits, restaurants, communications, commAcks, faq, dpMessages, workSchedules, incidents, feedbacks, devChecklists, onBack, onUpdateEmployee, onUpdate, toggleTheme, theme, onSwitchToManager, onSwitchToOperational, employeeGoals, tipApprovals, delays, meetingPlans, inbox, inboxFolders, hideHeader, hideTabNav, forceTab, forceEmpId, pessoas, managers, dayInversions }) {
   const [empId, setEmpId] = useState(() => forceEmpId || localStorage.getItem("apptip_empid") || null);
   // Sincroniza forceEmpId vindo do shell
   useEffect(() => {
@@ -4641,6 +4646,18 @@ function EmployeePortal({ employees, roles, tips, schedules, splits, restaurants
     if (saved && Object.keys(saved).length > 0) return saved;
     const restObj = restaurants?.find(r => r.id === emp.restaurantId);
     return deriveScheduleForEmp(emp, year, month, workSchedules, restObj);
+  })();
+
+  // Inversões de dia inteiro deste mês (pra exibir badge nas células)
+  const dayInversionsByDate = (() => {
+    const map = {};
+    if (!emp) return map;
+    (dayInversions ?? []).forEach(inv => {
+      if (inv.restaurantId !== emp.restaurantId) return;
+      if (inv.dateA?.slice(0,7) === mk) map[inv.dateA] = { otherDate: inv.dateB, reason: inv.reason, createdBy: inv.createdBy };
+      if (inv.dateB?.slice(0,7) === mk) map[inv.dateB] = { otherDate: inv.dateA, reason: inv.reason, createdBy: inv.createdBy };
+    });
+    return map;
   })();
 
   // Início de vigência da escala do empregado: validFrom mais antigo entre os horários cadastrados.
@@ -4875,7 +4892,7 @@ function EmployeePortal({ employees, roles, tips, schedules, splits, restaurants
             {empSchedView === "mine" && (
               <div>
                 <p style={{ color: "var(--text3)", fontSize: 13, marginBottom: 16, textTransform: "capitalize" }}>Sua escala em {monthLabel(year, month)}</p>
-                <CalendarGrid year={year} month={month} dayMap={dayMap} readOnly delayMap={delays?.[emp?.restaurantId]?.[mk]?.[empId] ?? {}} />
+                <CalendarGrid year={year} month={month} dayMap={dayMap} readOnly delayMap={delays?.[emp?.restaurantId]?.[mk]?.[empId] ?? {}} dayInversionsByDate={dayInversionsByDate} />
                 <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 8, marginTop: 20 }}>
                   {(() => {
                     const dim = new Date(year, month + 1, 0).getDate();
@@ -22039,6 +22056,7 @@ function AppShell({ pessoa, data, activeRestaurantId, setActiveRestaurantId, use
           inboxFolders={data?.inboxFolders || {}}
           pessoas={data?.pessoas || []}
           managers={data?.managers || []}
+          dayInversions={data?.dayInversions || []}
           onBack={()=>{}}
           onUpdateEmployee={(emp)=>{
             const next = (data?.employees || []).map(e => e.id === emp.id ? emp : e);
@@ -37364,7 +37382,7 @@ export default function App() {
             return () => { setCurrentUser(emp); setUserRole("employee"); localStorage.setItem("apptip_role","employee"); localStorage.setItem("apptip_userid",emp.id); localStorage.setItem("apptip_empid",emp.id); setView("employee"); };
           })()} />
       ))}
-      {view === "employee" && <EmployeePortal employees={employees} roles={roles} tips={tips} schedules={schedules} splits={splits} restaurants={restaurants} communications={communications} commAcks={commAcks} faq={faq} dpMessages={dpMessages} workSchedules={workSchedules} incidents={incidents} feedbacks={feedbacks} devChecklists={devChecklists} employeeGoals={employeeGoals} tipApprovals={tipApprovals} delays={delays} meetingPlans={meetingPlans} inbox={inbox} inboxFolders={inboxFolders} pessoas={pessoas} managers={managers} onBack={doLogout} onUpdateEmployee={emp=>{const next=employees.map(e=>e.id===emp.id?emp:e);handleUpdate("employees",next);}} onUpdate={handleUpdate} toggleTheme={toggleTheme} theme={theme}
+      {view === "employee" && <EmployeePortal employees={employees} roles={roles} tips={tips} schedules={schedules} splits={splits} restaurants={restaurants} communications={communications} commAcks={commAcks} faq={faq} dpMessages={dpMessages} workSchedules={workSchedules} incidents={incidents} feedbacks={feedbacks} devChecklists={devChecklists} employeeGoals={employeeGoals} tipApprovals={tipApprovals} delays={delays} meetingPlans={meetingPlans} inbox={inbox} inboxFolders={inboxFolders} pessoas={pessoas} managers={managers} dayInversions={dayInversions} onBack={doLogout} onUpdateEmployee={emp=>{const next=employees.map(e=>e.id===emp.id?emp:e);handleUpdate("employees",next);}} onUpdate={handleUpdate} toggleTheme={toggleTheme} theme={theme}
         onSwitchToManager={(() => {
           const cpf = currentUser?.cpf?.replace(/\D/g,"");
           let mgr = cpf ? managers.find(m => m.cpf?.replace(/\D/g,"") === cpf) : null;
