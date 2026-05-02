@@ -609,6 +609,7 @@ const K = {
   scheduleStatus:      "v4:scheduleStatus",      // {[rid]: {[mk]: {status:"open"|"review"|"closed", closedAt, closedBy, lastPontoImport, pontoSystem, missingFromPonto:[], importHistory:[], lastImportSummary}}}
   schedulePrevista:    "v4:schedulePrevista",     // {[rid]: {[mk]: frozen snapshot of schedules at first edit/VT payment}}
   scheduleSwaps:       "v4:scheduleSwaps",        // [{id, restaurantId, date, empAId, empBId, note?, registeredAt, registeredBy}] — inversões informais (v8.11.0)
+  dayInversions:       "v4:dayInversions",        // [{id, restaurantId, dateA, dateB, reason?, createdAt, createdBy}] — inversões de dia inteiro (feriados)
   recursoFolders:      "v4:recursoFolders",       // [{id, restaurantId, name, icon, order, createdAt, createdBy, deletedAt?}]  (v8.15.0)
   recursos:            "v4:recursos",             // [{id, restaurantId, folderId, name, type:"link"|"nota", url?, content?, tags:[], visibility:{mode,sharedWith}, editores:[pessoaId], createdById, createdBy, createdAt, updatedAt?, updatedBy?, deletedAt?}]  (v8.15.1: editores delegados pelo Owner; responsavelId removido)
   recursosInitialized: "v4:recursosInitialized",  // {[restaurantId]: true} — evita recriar pastas exemplo
@@ -13701,17 +13702,23 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                         Troca o status (trabalho/folga/etc.) entre dois dias do mês para todos os empregados. Útil quando um feriado muda o dia de fechamento da casa.
                         <br/><span style={{color:"var(--text3)"}}>Empregados de férias num dos dois dias são preservados.</span>
                       </p>
-                      <div style={{display:"flex",gap:10,marginBottom:12}}>
-                        <div style={{flex:1}}>
-                          <label style={{...S.label,fontSize:11}}>Dia A</label>
-                          <input type="date" value={dateA} onChange={e=>setInvertDayForm({...invertDayForm, dateA:e.target.value})} style={S.input}/>
-                        </div>
-                        <div style={{flex:0,alignSelf:"flex-end",padding:"10px 4px",fontSize:18,color:"#7c3aed"}}>↔</div>
-                        <div style={{flex:1}}>
-                          <label style={{...S.label,fontSize:11}}>Dia B</label>
-                          <input type="date" value={dateB} onChange={e=>setInvertDayForm({...invertDayForm, dateB:e.target.value})} style={S.input}/>
-                        </div>
-                      </div>
+                      {(() => {
+                        const monthMin = `${year}-${String(month+1).padStart(2,"0")}-01`;
+                        const monthMax = `${year}-${String(month+1).padStart(2,"0")}-${String(new Date(year, month+1, 0).getDate()).padStart(2,"0")}`;
+                        return (
+                          <div style={{display:"flex",gap:10,marginBottom:12}}>
+                            <div style={{flex:1}}>
+                              <label style={{...S.label,fontSize:11}}>Dia A</label>
+                              <input type="date" min={monthMin} max={monthMax} value={dateA} onChange={e=>setInvertDayForm({...invertDayForm, dateA:e.target.value})} style={S.input}/>
+                            </div>
+                            <div style={{flex:0,alignSelf:"flex-end",padding:"10px 4px",fontSize:18,color:"#7c3aed"}}>↔</div>
+                            <div style={{flex:1}}>
+                              <label style={{...S.label,fontSize:11}}>Dia B</label>
+                              <input type="date" min={monthMin} max={monthMax} value={dateB} onChange={e=>setInvertDayForm({...invertDayForm, dateB:e.target.value})} style={S.input}/>
+                            </div>
+                          </div>
+                        );
+                      })()}
                       <div style={{marginBottom:12}}>
                         <label style={{...S.label,fontSize:11}}>Motivo (opcional)</label>
                         <input value={reason} onChange={e=>setInvertDayForm({...invertDayForm, reason:e.target.value})} placeholder="ex: Feriado 7 de Setembro — fechar 8/9, abrir 7" style={S.input}/>
@@ -13764,6 +13771,16 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                             curAdjs[rid][mk] = [...(curAdjs[rid][mk] ?? []), ...newAdjs];
                             onUpdate("scheduleAdjustments", curAdjs);
                           }
+                          // Registra a inversão pra exibir badge nas células e tooltip do motivo
+                          const inversionRecord = {
+                            id: `inv-${Date.now()}-${Math.random().toString(36).slice(2,6)}`,
+                            restaurantId: rid,
+                            dateA, dateB,
+                            reason: reason || "",
+                            createdAt: adjTimestamp,
+                            createdBy: adjAuthor,
+                          };
+                          onUpdate("dayInversions", [...(data?.dayInversions ?? []), inversionRecord]);
                           onUpdate("schedules", { ...schedules, [rid]: { ...(schedules?.[rid]??{}), [mk]: newMonth } });
                           setSchedLocalEdits(null);
                           setInvertDayForm(null);
@@ -14302,6 +14319,20 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                   addEntry(sw.empBId, sw.date, sw, aName, null);
                 }
               });
+              // Inversões de dia inteiro (feriados): map por data → { otherDate, reason, createdBy, createdAt }
+              const dayInversionsByDate = {};
+              (data?.dayInversions ?? []).forEach(inv => {
+                if (inv.restaurantId !== rid) return;
+                if (inv.dateA?.slice(0,7) !== mk && inv.dateB?.slice(0,7) !== mk) return;
+                if (inv.dateA?.slice(0,7) === mk) dayInversionsByDate[inv.dateA] = { otherDate: inv.dateB, reason: inv.reason, createdBy: inv.createdBy, createdAt: inv.createdAt };
+                if (inv.dateB?.slice(0,7) === mk) dayInversionsByDate[inv.dateB] = { otherDate: inv.dateA, reason: inv.reason, createdBy: inv.createdBy, createdAt: inv.createdAt };
+              });
+              const dayInversionTooltip = (dateStr) => {
+                const inv = dayInversionsByDate[dateStr];
+                if (!inv) return null;
+                const otherBR = new Date(inv.otherDate+"T12:00:00").toLocaleDateString("pt-BR");
+                return `↔️ Dia invertido com ${otherBR}${inv.reason?` · Motivo: ${inv.reason}`:""}${inv.createdBy?` · por ${inv.createdBy}`:""}`;
+              };
               const swapTooltip = (empId, dateStr) => {
                 const sw = swapsByEmpDate[empId]?.[dateStr];
                 if (!sw) return null;
@@ -14421,9 +14452,11 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                               const delayMin = dayNum ? (empDelays[dayNum] || 0) : 0;
                               const swapInfo = swapsByEmpDate[emp.id]?.[slot.date];
                               const swapTip = swapInfo ? swapTooltip(emp.id, slot.date) : null;
+                              const dayInvInfo = dayInversionsByDate[slot.date];
+                              const dayInvTip = dayInvInfo ? dayInversionTooltip(slot.date) : null;
                               return (
                                 <div key={di} onClick={()=>!locked && cycleStatus(emp.id, slot.date)}
-                                  title={`${label === "T" ? "Trabalho" : (label === "DEM" ? "Demitido" : label)}${delayMin > 0 ? ` · Atraso ${delayMin} min` : ""}${swapTip ? `\n${swapTip}` : ""}`}
+                                  title={`${label === "T" ? "Trabalho" : (label === "DEM" ? "Demitido" : label)}${delayMin > 0 ? ` · Atraso ${delayMin} min` : ""}${swapTip ? `\n${swapTip}` : ""}${dayInvTip ? `\n${dayInvTip}` : ""}`}
                                   style={{
                                     display:"flex", alignItems:"center", justifyContent:"center",
                                     minHeight:36, borderRadius:6,
@@ -14442,6 +14475,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                                   }}>{restaurant.serviceStartDate && !isDem && slot.date < restaurant.serviceStartDate?"🔒":label}</span>
                                   {delayMin > 0 && <span style={{position:"absolute",top:0,right:1,fontSize:6,color:status||isDem?"#fff":"#f59e0b",fontWeight:800}}>⏰</span>}
                                   {swapInfo && <span style={{position:"absolute",top:-3,right:-3,fontSize:11,lineHeight:1,background:"#7c3aed",color:"#fff",borderRadius:"50%",width:16,height:16,display:"flex",alignItems:"center",justifyContent:"center",fontWeight:800,boxShadow:"0 2px 4px rgba(0,0,0,0.3)",border:"2px solid var(--card-bg)"}}>↔</span>}
+                                  {dayInvInfo && !swapInfo && <span style={{position:"absolute",top:-3,left:-3,fontSize:9,lineHeight:1,background:"#f59e0b",color:"#fff",borderRadius:"50%",width:14,height:14,display:"flex",alignItems:"center",justifyContent:"center",fontWeight:800,boxShadow:"0 2px 4px rgba(0,0,0,0.3)",border:"2px solid var(--card-bg)"}}>↔</span>}
                                 </div>
                               );
                             })}
@@ -14538,9 +14572,11 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                               const dDelayMin = empDelaysD[String(d)] || 0;
                               const swapInfo = swapsByEmpDate[emp.id]?.[date];
                               const swapTip = swapInfo ? swapTooltip(emp.id, date) : null;
+                              const dayInvInfo = dayInversionsByDate[date];
+                              const dayInvTip = dayInvInfo ? dayInversionTooltip(date) : null;
                               return (
                                 <td key={d} onClick={()=>!isDem && cycleStatus(emp.id, date)}
-                                  title={`${label === "•" ? "Trabalho" : (label === "D" ? "Demitido" : label)}${dDelayMin > 0 ? ` · Atraso: ${dDelayMin} min` : ""}${swapTip ? `\n${swapTip}` : ""}`}
+                                  title={`${label === "•" ? "Trabalho" : (label === "D" ? "Demitido" : label)}${dDelayMin > 0 ? ` · Atraso: ${dDelayMin} min` : ""}${swapTip ? `\n${swapTip}` : ""}${dayInvTip ? `\n${dayInvTip}` : ""}`}
                                   style={{
                                     textAlign:"center", padding:"2px 0",
                                     cursor: locked ? "not-allowed" : "pointer",
@@ -14558,6 +14594,7 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                                   }}>{!isDem&&restaurant.serviceStartDate&&date<restaurant.serviceStartDate?"🔒":label}</span>
                                   {dDelayMin > 0 && <span style={{position:"absolute",bottom:0,right:0,fontSize:5,color:status||isDem?"#fff":"#f59e0b",lineHeight:1}}>⏰</span>}
                                   {swapInfo && <span style={{position:"absolute",top:-2,right:-2,fontSize:9,lineHeight:1,background:"#7c3aed",color:"#fff",borderRadius:"50%",width:13,height:13,display:"flex",alignItems:"center",justifyContent:"center",fontWeight:800,boxShadow:"0 1px 3px rgba(0,0,0,0.4)",border:"1.5px solid var(--card-bg)",zIndex:2}}>↔</span>}
+                                  {dayInvInfo && !swapInfo && <span style={{position:"absolute",top:-2,left:-2,fontSize:8,lineHeight:1,background:"#f59e0b",color:"#fff",borderRadius:"50%",width:11,height:11,display:"flex",alignItems:"center",justifyContent:"center",fontWeight:800,boxShadow:"0 1px 3px rgba(0,0,0,0.4)",border:"1.5px solid var(--card-bg)",zIndex:2}}>↔</span>}
                                 </td>
                               );
                             })}
@@ -14579,7 +14616,11 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
               <div style={{marginTop:12,display:"flex",flexDirection:"column",gap:10}}>
                 {/* Inverter dia inteiro (feriados) — Owner only, não fechado */}
                 {isOwner && !monthClosed && (
-                  <button onClick={()=>setInvertDayForm({ dateA: "", dateB: "", reason: "" })}
+                  <button onClick={()=>{
+                    // Default: dia 1 do mês exibido (assim os pickers abrem no mês certo)
+                    const firstDay = `${year}-${String(month+1).padStart(2,"0")}-01`;
+                    setInvertDayForm({ dateA: firstDay, dateB: firstDay, reason: "" });
+                  }}
                     style={{...S.btnSecondary,fontSize:12,padding:"8px 12px",alignSelf:"flex-start",color:"#7c3aed",borderColor:"#7c3aed44",background:"#7c3aed10"}}
                     title="Inverter o status (trabalho ↔ folga ↔ etc.) entre dois dias do mês — útil pra feriados que mudam o dia de fechamento da casa">
                     ↔️ Inverter dia (feriados)
@@ -36536,6 +36577,7 @@ export default function App() {
   const [scheduleStatus,      setScheduleStatus]      = useState({});
   const [schedulePrevista,    setSchedulePrevista]    = useState({});
   const [scheduleSwaps,       setScheduleSwaps]       = useState([]); // v8.11.0 — inversões informais
+  const [dayInversions,       setDayInversions]       = useState([]); // inversões de dia inteiro (feriados)
   const [recursoFolders,      setRecursoFolders]      = useState([]); // v8.15.0 — pastas de Recursos
   const [recursos,            setRecursos]            = useState([]); // v8.15.0 — itens de Recursos
   const [recursosInitialized, setRecursosInitialized] = useState({}); // v8.15.0 — flag por restaurante
@@ -36606,7 +36648,7 @@ export default function App() {
       setLoadProgress("Preparando o sistema...");
 
       const keys = keyNames;
-      const map = { owners:setOwners, managers:setManagers, restaurants:setRestaurants, employees:setEmployees, roles:setRoles, tips:setTips, splits:setSplits, schedules:setSchedules, communications:setCommunications, commAcks:setCommAcks, faq:setFaq, dpMessages:setDpMessages, workSchedules:setWorkSchedules, notifications:setNotifications, noTipDays:setNoTipDays, trash:setTrash, schedTemplates:setSchedTemplates, schedDrafts:setSchedDrafts, scheduleVersions:setScheduleVersions, tipVersions:setTipVersions, vtConfig:setVtConfig, vtMonthly:setVtMonthly, vtPayments:setVtPayments, incidents:setIncidents, feedbacks:setFeedbacks, devChecklists:setDevChecklists, scheduleAdjustments:setScheduleAdjustments, scheduleStatus:setScheduleStatus, schedulePrevista:setSchedulePrevista, scheduleSwaps:setScheduleSwaps, recursoFolders:setRecursoFolders, recursos:setRecursos, recursosInitialized:setRecursosInitialized, employeeGoals:setEmployeeGoals, delays:setDelays, tipApprovals:setTipApprovals, meetingPlans:setMeetingPlans, meetingIdeas:setMeetingIdeas, meetingAgendas:setMeetingAgendas, meetingActions:setMeetingActions, meetingOccurrences:setMeetingOccurrences, meetingPendencias:setMeetingPendencias, inbox:setInbox, inboxFolders:setInboxFolders, miseCategories:setMiseCategories, miseStocks:setMiseStocks, miseAssignments:setMiseAssignments, miseItems:setMiseItems, miseCycles:setMiseCycles, miseCounts:setMiseCounts, miseSuppliers:setMiseSuppliers, miseProductSuppliers:setMiseProductSuppliers, miseSupplierOrders:setMiseSupplierOrders, miseChecklistTemplates:setMiseChecklistTemplates, miseChecklistRuns:setMiseChecklistRuns, miseFtInsumos:setMiseFtInsumos, miseFtEquipamentos:setMiseFtEquipamentos, miseFtDishes:setMiseFtDishes, pessoas:setPessoas, pessoasMigratedAt:setPessoasMigratedAt, permsV2MigratedAt:setPermsV2MigratedAt, freelasFecharOpMigratedAt:setFreelasFecharOpMigratedAt, tuyaLinks:setTuyaLinks, tempSensors:setTempSensors, tempReadings:setTempReadings, tempAlerts:setTempAlerts, tempBackfillState:setTempBackfillState, permProfiles:setPermProfiles, freelaShifts:setFreelaShifts, freelaPagamentos:setFreelaPagamentos };
+      const map = { owners:setOwners, managers:setManagers, restaurants:setRestaurants, employees:setEmployees, roles:setRoles, tips:setTips, splits:setSplits, schedules:setSchedules, communications:setCommunications, commAcks:setCommAcks, faq:setFaq, dpMessages:setDpMessages, workSchedules:setWorkSchedules, notifications:setNotifications, noTipDays:setNoTipDays, trash:setTrash, schedTemplates:setSchedTemplates, schedDrafts:setSchedDrafts, scheduleVersions:setScheduleVersions, tipVersions:setTipVersions, vtConfig:setVtConfig, vtMonthly:setVtMonthly, vtPayments:setVtPayments, incidents:setIncidents, feedbacks:setFeedbacks, devChecklists:setDevChecklists, scheduleAdjustments:setScheduleAdjustments, scheduleStatus:setScheduleStatus, schedulePrevista:setSchedulePrevista, scheduleSwaps:setScheduleSwaps, dayInversions:setDayInversions, recursoFolders:setRecursoFolders, recursos:setRecursos, recursosInitialized:setRecursosInitialized, employeeGoals:setEmployeeGoals, delays:setDelays, tipApprovals:setTipApprovals, meetingPlans:setMeetingPlans, meetingIdeas:setMeetingIdeas, meetingAgendas:setMeetingAgendas, meetingActions:setMeetingActions, meetingOccurrences:setMeetingOccurrences, meetingPendencias:setMeetingPendencias, inbox:setInbox, inboxFolders:setInboxFolders, miseCategories:setMiseCategories, miseStocks:setMiseStocks, miseAssignments:setMiseAssignments, miseItems:setMiseItems, miseCycles:setMiseCycles, miseCounts:setMiseCounts, miseSuppliers:setMiseSuppliers, miseProductSuppliers:setMiseProductSuppliers, miseSupplierOrders:setMiseSupplierOrders, miseChecklistTemplates:setMiseChecklistTemplates, miseChecklistRuns:setMiseChecklistRuns, miseFtInsumos:setMiseFtInsumos, miseFtEquipamentos:setMiseFtEquipamentos, miseFtDishes:setMiseFtDishes, pessoas:setPessoas, pessoasMigratedAt:setPessoasMigratedAt, permsV2MigratedAt:setPermsV2MigratedAt, freelasFecharOpMigratedAt:setFreelasFecharOpMigratedAt, tuyaLinks:setTuyaLinks, tempSensors:setTempSensors, tempReadings:setTempReadings, tempAlerts:setTempAlerts, tempBackfillState:setTempBackfillState, permProfiles:setPermProfiles, freelaShifts:setFreelaShifts, freelaPagamentos:setFreelaPagamentos };
       const loaded_data = {};
       let successCount = 0;
       keys.forEach((k, i) => {
@@ -37090,7 +37132,7 @@ export default function App() {
     setView("shell");
   }, [view, loaded, currentUser?.id, pessoas?.length]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const data = { owners, managers, restaurants, employees, roles, tips, splits, schedules, communications, commAcks, faq, dpMessages, workSchedules, notifications, noTipDays, trash, schedTemplates, schedDrafts, scheduleVersions, tipVersions, vtConfig, vtMonthly, vtPayments, incidents, feedbacks, devChecklists, scheduleAdjustments, scheduleStatus, schedulePrevista, scheduleSwaps, recursoFolders, recursos, recursosInitialized, employeeGoals, delays, tipApprovals, meetingPlans, meetingIdeas, meetingAgendas, meetingActions, meetingOccurrences, meetingPendencias, inbox, inboxFolders, miseCategories, miseStocks, miseAssignments, miseItems, miseCycles, miseCounts, miseSuppliers, miseProductSuppliers, miseSupplierOrders, miseChecklistTemplates, miseChecklistRuns, miseFtInsumos, miseFtEquipamentos, miseFtDishes, pessoas, pessoasMigratedAt, permsV2MigratedAt, tuyaLinks, tempSensors, tempReadings, tempAlerts, tempBackfillState, permProfiles, freelaShifts, freelaPagamentos };
+  const data = { owners, managers, restaurants, employees, roles, tips, splits, schedules, communications, commAcks, faq, dpMessages, workSchedules, notifications, noTipDays, trash, schedTemplates, schedDrafts, scheduleVersions, tipVersions, vtConfig, vtMonthly, vtPayments, incidents, feedbacks, devChecklists, scheduleAdjustments, scheduleStatus, schedulePrevista, scheduleSwaps, dayInversions, recursoFolders, recursos, recursosInitialized, employeeGoals, delays, tipApprovals, meetingPlans, meetingIdeas, meetingAgendas, meetingActions, meetingOccurrences, meetingPendencias, inbox, inboxFolders, miseCategories, miseStocks, miseAssignments, miseItems, miseCycles, miseCounts, miseSuppliers, miseProductSuppliers, miseSupplierOrders, miseChecklistTemplates, miseChecklistRuns, miseFtInsumos, miseFtEquipamentos, miseFtDishes, pessoas, pessoasMigratedAt, permsV2MigratedAt, tuyaLinks, tempSensors, tempReadings, tempAlerts, tempBackfillState, permProfiles, freelaShifts, freelaPagamentos };
 
   // v8.22.3: kick out automático — se o usuário logado for inativado durante a sessão,
   // a próxima rodada de data-refresh o desloga + mostra toast.
@@ -37128,8 +37170,8 @@ export default function App() {
       setToast("⚠️ Você está offline — conecte à internet para salvar alterações");
       return;
     }
-    const setters = { owners:setOwners, managers:setManagers, restaurants:setRestaurants, employees:setEmployees, roles:setRoles, tips:setTips, splits:setSplits, schedules:setSchedules, communications:setCommunications, commAcks:setCommAcks, faq:setFaq, dpMessages:setDpMessages, workSchedules:setWorkSchedules, notifications:setNotifications, noTipDays:setNoTipDays, trash:setTrash, schedTemplates:setSchedTemplates, schedDrafts:setSchedDrafts, scheduleVersions:setScheduleVersions, tipVersions:setTipVersions, vtConfig:setVtConfig, vtMonthly:setVtMonthly, vtPayments:setVtPayments, incidents:setIncidents, feedbacks:setFeedbacks, devChecklists:setDevChecklists, scheduleAdjustments:setScheduleAdjustments, scheduleStatus:setScheduleStatus, schedulePrevista:setSchedulePrevista, scheduleSwaps:setScheduleSwaps, recursoFolders:setRecursoFolders, recursos:setRecursos, recursosInitialized:setRecursosInitialized, employeeGoals:setEmployeeGoals, delays:setDelays, tipApprovals:setTipApprovals, meetingPlans:setMeetingPlans, meetingIdeas:setMeetingIdeas, meetingAgendas:setMeetingAgendas, meetingActions:setMeetingActions, meetingOccurrences:setMeetingOccurrences, meetingPendencias:setMeetingPendencias, inbox:setInbox, inboxFolders:setInboxFolders, miseCategories:setMiseCategories, miseStocks:setMiseStocks, miseAssignments:setMiseAssignments, miseItems:setMiseItems, miseCycles:setMiseCycles, miseCounts:setMiseCounts, miseSuppliers:setMiseSuppliers, miseProductSuppliers:setMiseProductSuppliers, miseSupplierOrders:setMiseSupplierOrders, miseChecklistTemplates:setMiseChecklistTemplates, miseChecklistRuns:setMiseChecklistRuns, miseFtInsumos:setMiseFtInsumos, miseFtEquipamentos:setMiseFtEquipamentos, miseFtDishes:setMiseFtDishes, pessoas:setPessoas, pessoasMigratedAt:setPessoasMigratedAt, permsV2MigratedAt:setPermsV2MigratedAt, freelasFecharOpMigratedAt:setFreelasFecharOpMigratedAt, tuyaLinks:setTuyaLinks, tempSensors:setTempSensors, tempReadings:setTempReadings, tempAlerts:setTempAlerts, tempBackfillState:setTempBackfillState, permProfiles:setPermProfiles, freelaShifts:setFreelaShifts, freelaPagamentos:setFreelaPagamentos };
-    const keys    = { owners:K.owners, managers:K.managers, restaurants:K.restaurants, employees:K.employees, roles:K.roles, tips:K.tips, splits:K.splits, schedules:K.schedules, communications:K.communications, commAcks:K.commAcks, faq:K.faq, dpMessages:K.dpMessages, workSchedules:K.workSchedules, notifications:K.notifications, noTipDays:K.noTipDays, trash:K.trash, schedTemplates:K.schedTemplates, schedDrafts:K.schedDrafts, scheduleVersions:K.scheduleVersions, tipVersions:K.tipVersions, vtConfig:K.vtConfig, vtMonthly:K.vtMonthly, vtPayments:K.vtPayments, incidents:K.incidents, feedbacks:K.feedbacks, devChecklists:K.devChecklists, scheduleAdjustments:K.scheduleAdjustments, scheduleStatus:K.scheduleStatus, schedulePrevista:K.schedulePrevista, scheduleSwaps:K.scheduleSwaps, recursoFolders:K.recursoFolders, recursos:K.recursos, recursosInitialized:K.recursosInitialized, employeeGoals:K.employeeGoals, delays:K.delays, tipApprovals:K.tipApprovals, meetingPlans:K.meetingPlans, meetingIdeas:K.meetingIdeas, meetingAgendas:K.meetingAgendas, meetingActions:K.meetingActions, inbox:K.inbox, inboxFolders:K.inboxFolders, miseCategories:K.miseCategories, miseStocks:K.miseStocks, miseAssignments:K.miseAssignments, miseItems:K.miseItems, miseCycles:K.miseCycles, miseCounts:K.miseCounts, miseSuppliers:K.miseSuppliers, miseProductSuppliers:K.miseProductSuppliers, miseSupplierOrders:K.miseSupplierOrders, miseChecklistTemplates:K.miseChecklistTemplates, miseChecklistRuns:K.miseChecklistRuns, miseFtInsumos:K.miseFtInsumos, miseFtEquipamentos:K.miseFtEquipamentos, miseFtDishes:K.miseFtDishes, pessoas:K.pessoas, pessoasMigratedAt:K.pessoasMigratedAt, permsV2MigratedAt:K.permsV2MigratedAt, freelasFecharOpMigratedAt:K.freelasFecharOpMigratedAt, tuyaLinks:K.tuyaLinks, tempSensors:K.tempSensors, tempReadings:K.tempReadings, tempAlerts:K.tempAlerts, tempBackfillState:K.tempBackfillState, permProfiles:K.permProfiles, freelaShifts:K.freelaShifts, freelaPagamentos:K.freelaPagamentos };
+    const setters = { owners:setOwners, managers:setManagers, restaurants:setRestaurants, employees:setEmployees, roles:setRoles, tips:setTips, splits:setSplits, schedules:setSchedules, communications:setCommunications, commAcks:setCommAcks, faq:setFaq, dpMessages:setDpMessages, workSchedules:setWorkSchedules, notifications:setNotifications, noTipDays:setNoTipDays, trash:setTrash, schedTemplates:setSchedTemplates, schedDrafts:setSchedDrafts, scheduleVersions:setScheduleVersions, tipVersions:setTipVersions, vtConfig:setVtConfig, vtMonthly:setVtMonthly, vtPayments:setVtPayments, incidents:setIncidents, feedbacks:setFeedbacks, devChecklists:setDevChecklists, scheduleAdjustments:setScheduleAdjustments, scheduleStatus:setScheduleStatus, schedulePrevista:setSchedulePrevista, scheduleSwaps:setScheduleSwaps, dayInversions:setDayInversions, recursoFolders:setRecursoFolders, recursos:setRecursos, recursosInitialized:setRecursosInitialized, employeeGoals:setEmployeeGoals, delays:setDelays, tipApprovals:setTipApprovals, meetingPlans:setMeetingPlans, meetingIdeas:setMeetingIdeas, meetingAgendas:setMeetingAgendas, meetingActions:setMeetingActions, meetingOccurrences:setMeetingOccurrences, meetingPendencias:setMeetingPendencias, inbox:setInbox, inboxFolders:setInboxFolders, miseCategories:setMiseCategories, miseStocks:setMiseStocks, miseAssignments:setMiseAssignments, miseItems:setMiseItems, miseCycles:setMiseCycles, miseCounts:setMiseCounts, miseSuppliers:setMiseSuppliers, miseProductSuppliers:setMiseProductSuppliers, miseSupplierOrders:setMiseSupplierOrders, miseChecklistTemplates:setMiseChecklistTemplates, miseChecklistRuns:setMiseChecklistRuns, miseFtInsumos:setMiseFtInsumos, miseFtEquipamentos:setMiseFtEquipamentos, miseFtDishes:setMiseFtDishes, pessoas:setPessoas, pessoasMigratedAt:setPessoasMigratedAt, permsV2MigratedAt:setPermsV2MigratedAt, freelasFecharOpMigratedAt:setFreelasFecharOpMigratedAt, tuyaLinks:setTuyaLinks, tempSensors:setTempSensors, tempReadings:setTempReadings, tempAlerts:setTempAlerts, tempBackfillState:setTempBackfillState, permProfiles:setPermProfiles, freelaShifts:setFreelaShifts, freelaPagamentos:setFreelaPagamentos };
+    const keys    = { owners:K.owners, managers:K.managers, restaurants:K.restaurants, employees:K.employees, roles:K.roles, tips:K.tips, splits:K.splits, schedules:K.schedules, communications:K.communications, commAcks:K.commAcks, faq:K.faq, dpMessages:K.dpMessages, workSchedules:K.workSchedules, notifications:K.notifications, noTipDays:K.noTipDays, trash:K.trash, schedTemplates:K.schedTemplates, schedDrafts:K.schedDrafts, scheduleVersions:K.scheduleVersions, tipVersions:K.tipVersions, vtConfig:K.vtConfig, vtMonthly:K.vtMonthly, vtPayments:K.vtPayments, incidents:K.incidents, feedbacks:K.feedbacks, devChecklists:K.devChecklists, scheduleAdjustments:K.scheduleAdjustments, scheduleStatus:K.scheduleStatus, schedulePrevista:K.schedulePrevista, scheduleSwaps:K.scheduleSwaps, dayInversions:K.dayInversions, recursoFolders:K.recursoFolders, recursos:K.recursos, recursosInitialized:K.recursosInitialized, employeeGoals:K.employeeGoals, delays:K.delays, tipApprovals:K.tipApprovals, meetingPlans:K.meetingPlans, meetingIdeas:K.meetingIdeas, meetingAgendas:K.meetingAgendas, meetingActions:K.meetingActions, inbox:K.inbox, inboxFolders:K.inboxFolders, miseCategories:K.miseCategories, miseStocks:K.miseStocks, miseAssignments:K.miseAssignments, miseItems:K.miseItems, miseCycles:K.miseCycles, miseCounts:K.miseCounts, miseSuppliers:K.miseSuppliers, miseProductSuppliers:K.miseProductSuppliers, miseSupplierOrders:K.miseSupplierOrders, miseChecklistTemplates:K.miseChecklistTemplates, miseChecklistRuns:K.miseChecklistRuns, miseFtInsumos:K.miseFtInsumos, miseFtEquipamentos:K.miseFtEquipamentos, miseFtDishes:K.miseFtDishes, pessoas:K.pessoas, pessoasMigratedAt:K.pessoasMigratedAt, permsV2MigratedAt:K.permsV2MigratedAt, freelasFecharOpMigratedAt:K.freelasFecharOpMigratedAt, tuyaLinks:K.tuyaLinks, tempSensors:K.tempSensors, tempReadings:K.tempReadings, tempAlerts:K.tempAlerts, tempBackfillState:K.tempBackfillState, permProfiles:K.permProfiles, freelaShifts:K.freelaShifts, freelaPagamentos:K.freelaPagamentos };
     // Support functional updates to prevent stale-state race conditions:
     // When value is a function, it receives the latest state (like setState(prev => ...))
     // IMPORTANTE: o callback do setState pode rodar de forma assíncrona em React 18,
