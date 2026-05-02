@@ -4642,6 +4642,17 @@ function EmployeePortal({ employees, roles, tips, schedules, splits, restaurants
     return deriveScheduleForEmp(emp, year, month, workSchedules, restObj);
   })();
 
+  // Início de vigência da escala do empregado: validFrom mais antigo entre os horários cadastrados.
+  // Se o mês exibido é totalmente anterior, escondemos o calendário (ele ainda não estava trabalhando).
+  const empValidFrom = (() => {
+    if (!emp) return null;
+    const empWS = workSchedules?.[emp.restaurantId]?.[emp.id] ?? [];
+    const dates = empWS.map(s => s.validFrom).filter(Boolean).sort();
+    return dates[0] || null; // null = sem horário cadastrado → não bloqueia
+  })();
+  const lastDayOfDisplayedMonth = `${year}-${String(month+1).padStart(2,"0")}-${String(new Date(year, month+1, 0).getDate()).padStart(2,"0")}`;
+  const monthBeforeVigencia = !!(empValidFrom && lastDayOfDisplayedMonth < empValidFrom);
+
   // Pending communications
   const empRole = roles?.find(r => r.id === emp?.roleId);
   const myComms = emp ? communications.filter(c => {
@@ -4845,6 +4856,13 @@ function EmployeePortal({ employees, roles, tips, schedules, splits, restaurants
         {tab === "escala" && (
           <div>
             <div style={{ marginBottom: 20 }}><MonthNav year={year} month={month} onChange={(y, m) => { setYear(y); setMonth(m); }} /></div>
+            {monthBeforeVigencia ? (
+              <div style={{...S.card,padding:24,textAlign:"center"}}>
+                <div style={{fontSize:36,marginBottom:8}}>📅</div>
+                <div style={{color:"var(--text)",fontWeight:700,fontSize:14,marginBottom:6}}>Você ainda não estava trabalhando neste mês</div>
+                <p style={{color:"var(--text3)",fontSize:12,margin:0}}>Sua escala começa em <strong>{new Date(empValidFrom+"T12:00:00").toLocaleDateString("pt-BR")}</strong>.</p>
+              </div>
+            ) : (<>
             <div style={{display:"flex",alignItems:"flex-start",gap:8,padding:"10px 12px",background:"#f59e0b14",border:"1px solid #f59e0b44",borderRadius:10,marginBottom:14,fontSize:12,color:"var(--text2)",lineHeight:1.5}}>
               <span style={{fontSize:14,lineHeight:1}}>ℹ️</span>
               <span>A escala apresentada é <strong>prevista</strong> e pode sofrer alterações. Mudanças serão comunicadas conforme o contrato de trabalho vigente.</span>
@@ -5001,6 +5019,7 @@ function EmployeePortal({ employees, roles, tips, schedules, splits, restaurants
                 </div>
               );
             })()}
+            </>)}
           </div>
         )}
 
