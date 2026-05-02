@@ -14752,6 +14752,58 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                     </div>
                   );
                 })()}
+                {/* Inversões de dia inteiro (feriados) — Owner only, lista + desfazer */}
+                {isOwner && (() => {
+                  const monthInvs = (data?.dayInversions ?? []).filter(inv => {
+                    if (inv.restaurantId !== rid) return false;
+                    return inv.dateA?.slice(0,7) === mk || inv.dateB?.slice(0,7) === mk;
+                  });
+                  if (monthInvs.length === 0) return null;
+                  return (
+                    <div style={{padding:"10px 12px",background:"var(--card-bg)",border:"1px solid #f59e0b44",borderRadius:8}}>
+                      <div style={{fontSize:12,fontWeight:700,color:"#f59e0b",marginBottom:8}}>↔️ Dias invertidos neste mês ({monthInvs.length})</div>
+                      <div style={{display:"flex",flexDirection:"column",gap:6}}>
+                        {monthInvs.sort((a,b) => (a.dateA||"").localeCompare(b.dateA||"")).map(inv => {
+                          const dA = new Date(inv.dateA+"T12:00:00").toLocaleDateString("pt-BR");
+                          const dB = new Date(inv.dateB+"T12:00:00").toLocaleDateString("pt-BR");
+                          return (
+                            <div key={inv.id} style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:8,padding:"6px 10px",background:"var(--bg2)",borderRadius:6,fontSize:11}}>
+                              <span style={{color:"var(--text2)",flex:1,minWidth:0}}>
+                                <strong>{dA} ↔ {dB}</strong>
+                                {inv.reason && <span style={{color:"var(--text3)",marginLeft:6}}>· {inv.reason}</span>}
+                                <span style={{color:"var(--text3)",marginLeft:6,fontSize:10}}>· por {inv.createdBy}</span>
+                              </span>
+                              {!monthClosed && (
+                                <button onClick={async ()=>{
+                                  if (!await appConfirm(`Desfazer a inversão entre ${dA} e ${dB}?\n\nA escala desses dois dias volta ao estado de antes da inversão (empregados de férias preservados, como na inversão original).`)) return;
+                                  // Re-aplica swap (A↔B↔A = identity), preservando férias.
+                                  const preSnap = snapshotSchedulesMonth(schedules, rid, mk);
+                                  saveSchedulesSnapshot(`Desfazer inversão ${dA} ↔ ${dB}`, preSnap);
+                                  const newMonth = JSON.parse(JSON.stringify(schedules?.[rid]?.[mk] ?? {}));
+                                  let undone = 0; let preserved = 0;
+                                  schedEmps.forEach(emp => {
+                                    const cur = effectiveMonth[emp.id] ?? {};
+                                    const sa = cur[inv.dateA] ?? null;
+                                    const sb = cur[inv.dateB] ?? null;
+                                    if (sa === DAY_VACATION || sb === DAY_VACATION) { preserved++; return; }
+                                    newMonth[emp.id] = { ...cur };
+                                    if (sb === null) delete newMonth[emp.id][inv.dateA]; else newMonth[emp.id][inv.dateA] = sb;
+                                    if (sa === null) delete newMonth[emp.id][inv.dateB]; else newMonth[emp.id][inv.dateB] = sa;
+                                    undone++;
+                                  });
+                                  onUpdate("schedules", { ...schedules, [rid]: { ...(schedules?.[rid]??{}), [mk]: newMonth } });
+                                  onUpdate("dayInversions", (data?.dayInversions ?? []).filter(x => x.id !== inv.id));
+                                  setSchedLocalEdits(null);
+                                  onUpdate("_toast", `↩️ Inversão desfeita — ${undone} empregado(s)${preserved>0?`, ${preserved} de férias preservados`:""}`);
+                                }} style={{...S.btnSecondary,fontSize:10,padding:"3px 8px",color:"#f59e0b",borderColor:"#f59e0b88",whiteSpace:"nowrap"}}>↩️ Desfazer</button>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  );
+                })()}
                 {(isOwner || isDP) && (() => {
                   const vCount = (data?.scheduleVersions?.[rid]?.[mk] ?? []).length;
                   return (
