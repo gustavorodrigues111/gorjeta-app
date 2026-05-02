@@ -5595,6 +5595,9 @@ function EmployeeSpreadsheet({ restEmps, restRoles, rid, employees, pessoas, onU
   const [previewFileName, setPreviewFileName] = useState("");
   const [showDismissalChecklist, setShowDismissalChecklist] = useState(false);
   const [dismissalCheckEmp, setDismissalCheckEmp] = useState(null);
+  // Modais com date picker (substitui window.prompt)
+  const [dismissForm, setDismissForm] = useState(null); // null | { emp, lastWorkedDay }
+  const [promoteForm, setPromoteForm] = useState(null); // null | { emp, newRoleId, lastDayOldRole, reason }
   const [detailEmp, setDetailEmp] = useState(null); // empId for detail view
   const [detailTab, setDetailTab] = useState("cadastro"); // cadastro | acoes | trilha
   // Reset detail view when parent signals (e.g. re-clicking "Equipe" tab)
@@ -5726,20 +5729,17 @@ function EmployeeSpreadsheet({ restEmps, restRoles, rid, employees, pessoas, onU
     onUpdate("employees", employees.map(x => x.id===emp.id ? {...emp, inactive:!emp.inactive, inactiveFrom:row.inactiveFrom||today()} : x));
   }
 
-  async function dismissEmp(emp) {
-    const dataStr = window.prompt(`Demitir "${emp.name}"?\n\nQual o último dia trabalhado? (DD/MM/AAAA)\n\n(Esse dia ainda conta na escala e na gorjeta. A partir do dia seguinte, ${emp.name} sai dos cálculos.)`, new Date().toLocaleDateString("pt-BR"));
-    if (!dataStr) return;
-    const parts = dataStr.split("/");
-    if (parts.length !== 3) { window.alert("Data inválida. Use o formato DD/MM/AAAA."); return; }
-    const [dd,mm,yyyy] = parts;
-    const lastWorkedDay = `${yyyy}-${mm.padStart(2,"0")}-${dd.padStart(2,"0")}`;
-    if (isNaN(new Date(lastWorkedDay+"T12:00:00").getTime())) { window.alert("Data inválida."); return; }
-    // demitidoEm = primeiro dia FORA = último dia + 1 (semântica interna histórica preservada)
+  function dismissEmp(emp) {
+    setDismissForm({ emp, lastWorkedDay: today() });
+  }
+  function confirmDismiss() {
+    const { emp, lastWorkedDay } = dismissForm || {};
+    if (!emp || !lastWorkedDay) return;
     const demitidoEm = addDaysISO(lastWorkedDay, 1);
-    const demitidoEmBR = new Date(demitidoEm+"T12:00:00").toLocaleDateString("pt-BR");
-    if (!await appConfirm(`Confirmar demissão de "${emp.name}"?\n\nÚltimo dia trabalhado: ${dataStr}\n\nA partir de ${demitidoEmBR}:\n• Sai do cálculo de gorjeta\n• Consta como "DEM" na escala\n• No próximo mês será movido para inativo`)) return;
+    const dataStr = new Date(lastWorkedDay+"T12:00:00").toLocaleDateString("pt-BR");
     onUpdate("employees", employees.map(x => x.id===emp.id ? {...x, demitidoEm, demitidoPor: isOwner ? "Master" : "Gestor Adm.", inactive: true, inactiveFrom: demitidoEm} : x));
     onUpdate("_toast", `📋 ${emp.name} demitido — último dia ${dataStr}`);
+    setDismissForm(null);
   }
 
   async function undoDismiss(emp) {
@@ -5754,41 +5754,31 @@ function EmployeeSpreadsheet({ restEmps, restRoles, rid, employees, pessoas, onU
     onUpdate("_toast", `↩️ Demissão de ${emp.name} revertida`);
   }
 
-  async function promoteEmp(emp) {
+  function promoteEmp(emp) {
     const available = restRoles.filter(r => !r.inactive && r.id !== emp.roleId);
     if (!available.length) { onUpdate("_toast", "Não há outros cargos ativos disponíveis."); return; }
-    const options = available.map((r, i) => `${i+1}. ${r.name} (${r.area}, ${r.points}pt)`).join("\n");
-    const choice = window.prompt(`Promover "${emp.name}"\n\nEscolha o novo cargo (digite o número):\n${options}`);
-    if (!choice) return;
-    const idx = parseInt(choice) - 1;
-    if (isNaN(idx) || idx < 0 || idx >= available.length) { window.alert("Opção inválida."); return; }
-    const newRole = available[idx];
+    setPromoteForm({ emp, newRoleId: "", lastDayOldRole: today(), reason: "" });
+  }
+  function confirmPromote() {
+    const { emp, newRoleId, lastDayOldRole, reason } = promoteForm || {};
+    if (!emp || !newRoleId || !lastDayOldRole) return;
+    const newRole = restRoles.find(r => r.id === newRoleId);
+    if (!newRole) return;
     const oldRole = restRoles.find(r => r.id === emp.roleId);
-    const dataStr = window.prompt(`Qual o último dia de "${emp.name}" como ${oldRole?.name ?? "cargo atual"}? (DD/MM/AAAA)\n\n(Esse dia ainda conta no cargo atual. A partir do dia seguinte, passa a ser ${newRole.name}.)`, new Date().toLocaleDateString("pt-BR"));
-    if (!dataStr) return;
-    const parts = dataStr.split("/");
-    if (parts.length !== 3) { window.alert("Data inválida."); return; }
-    const [dd,mm,yyyy] = parts;
-    const lastDayOldRole = `${yyyy}-${mm.padStart(2,"0")}-${dd.padStart(2,"0")}`;
-    if (isNaN(new Date(lastDayOldRole+"T12:00:00").getTime())) { window.alert("Data inválida."); return; }
-    // effectiveDate = primeiro dia no novo cargo = último dia no cargo atual + 1
     const effectiveDate = addDaysISO(lastDayOldRole, 1);
-    const effectiveDateBR = new Date(effectiveDate+"T12:00:00").toLocaleDateString("pt-BR");
-    const reason = window.prompt("Motivo (opcional):") || "";
     const changedBy = isOwner ? "Master" : "Gestor Adm.";
-
+    const dataStr = new Date(lastDayOldRole+"T12:00:00").toLocaleDateString("pt-BR");
     if (effectiveDate <= today()) {
       const historyEntry = { fromRoleId: emp.roleId, toRoleId: newRole.id, date: effectiveDate, reason, changedBy };
       const history = [...(emp.roleHistory ?? []), historyEntry];
-      if (!await appConfirm(`Confirmar mudança de cargo de "${emp.name}"?\n\n${oldRole?.name ?? "—"} → ${newRole.name}\nÚltimo dia como ${oldRole?.name ?? "cargo atual"}: ${dataStr}\nNovo cargo a partir de ${effectiveDateBR}\n${reason ? "Motivo: " + reason : ""}`)) return;
       onUpdate("employees", employees.map(e => e.id === emp.id ? { ...e, roleId: newRole.id, roleHistory: history } : e));
       onUpdate("_toast", `⬆️ ${emp.name}: ${oldRole?.name ?? "—"} → ${newRole.name}`);
     } else {
-      if (!await appConfirm(`Agendar mudança de cargo de "${emp.name}"?\n\n${oldRole?.name ?? "—"} → ${newRole.name}\nÚltimo dia como ${oldRole?.name ?? "cargo atual"}: ${dataStr}\nNovo cargo a partir de ${effectiveDateBR}\n${reason ? "Motivo: " + reason : ""}\n\nA troca será aplicada automaticamente na data.`)) return;
       const pending = { newRoleId: newRole.id, effectiveDate, reason, changedBy };
       onUpdate("employees", employees.map(e => e.id === emp.id ? { ...e, pendingRoleChange: pending } : e));
       onUpdate("_toast", `📅 Promoção de ${emp.name} agendada — último dia como ${oldRole?.name ?? "cargo atual"} ${dataStr}`);
     }
+    setPromoteForm(null);
   }
 
   async function deleteEmp(emp) {
@@ -6906,6 +6896,93 @@ function EmployeeSpreadsheet({ restEmps, restRoles, rid, employees, pessoas, onU
         ));
       })()}
       </>}
+
+      {/* Modal: Demissão com date picker */}
+      {dismissForm && (() => {
+        const { emp, lastWorkedDay } = dismissForm;
+        const valid = !!lastWorkedDay && !isNaN(new Date(lastWorkedDay+"T12:00:00").getTime());
+        const lwdBR = valid ? new Date(lastWorkedDay+"T12:00:00").toLocaleDateString("pt-BR") : "—";
+        const nextDayBR = valid ? new Date(addDaysISO(lastWorkedDay,1)+"T12:00:00").toLocaleDateString("pt-BR") : "—";
+        return (
+          <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.6)",zIndex:9999,display:"flex",alignItems:"center",justifyContent:"center",padding:16}} onClick={()=>setDismissForm(null)}>
+            <div onClick={e=>e.stopPropagation()} style={{background:"var(--card-bg)",border:"1px solid var(--border)",borderRadius:14,maxWidth:480,width:"100%",padding:24,boxShadow:"0 20px 50px rgba(0,0,0,0.3)"}}>
+              <h3 style={{margin:"0 0 8px",color:"var(--red)",fontSize:16,fontWeight:700}}>📋 Demitir {emp.name}</h3>
+              <p style={{color:"var(--text2)",fontSize:13,margin:"0 0 14px",lineHeight:1.5}}>
+                Selecione o <strong>último dia trabalhado</strong>. Esse dia ainda conta na escala e na gorjeta. A partir do dia seguinte, {emp.name} sai dos cálculos.
+              </p>
+              <div style={{marginBottom:14}}>
+                <label style={{...S.label,fontSize:11}}>Último dia trabalhado</label>
+                <input type="date" value={lastWorkedDay} onChange={e=>setDismissForm({...dismissForm, lastWorkedDay:e.target.value})} style={S.input}/>
+              </div>
+              {valid && (
+                <div style={{padding:"10px 12px",background:"var(--bg2)",borderRadius:8,fontSize:12,color:"var(--text2)",lineHeight:1.6,marginBottom:14}}>
+                  <div>Último dia: <strong>{lwdBR}</strong> (conta normal)</div>
+                  <div style={{color:"var(--red)",marginTop:4}}>A partir de <strong>{nextDayBR}</strong>: sai do cálculo de gorjeta, consta como "DEM" na escala.</div>
+                </div>
+              )}
+              <div style={{display:"flex",justifyContent:"flex-end",gap:10}}>
+                <button onClick={()=>setDismissForm(null)} style={{...S.btnSecondary,padding:"8px 14px",fontSize:13}}>Cancelar</button>
+                <button onClick={confirmDismiss} disabled={!valid}
+                  style={{...S.btnPrimary,padding:"8px 14px",fontSize:13,fontWeight:700,background:"var(--red)",borderColor:"var(--red)",opacity:valid?1:0.5}}>
+                  Confirmar demissão
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* Modal: Promoção / Mudança de cargo */}
+      {promoteForm && (() => {
+        const { emp, newRoleId, lastDayOldRole, reason } = promoteForm;
+        const oldRole = restRoles.find(r => r.id === emp.roleId);
+        const newRole = restRoles.find(r => r.id === newRoleId);
+        const available = restRoles.filter(r => !r.inactive && r.id !== emp.roleId).sort((a,b) => a.name.localeCompare(b.name));
+        const valid = !!newRoleId && !!lastDayOldRole && !isNaN(new Date(lastDayOldRole+"T12:00:00").getTime());
+        const lwdBR = valid ? new Date(lastDayOldRole+"T12:00:00").toLocaleDateString("pt-BR") : "—";
+        const nextDayBR = valid ? new Date(addDaysISO(lastDayOldRole,1)+"T12:00:00").toLocaleDateString("pt-BR") : "—";
+        const isFuture = valid && addDaysISO(lastDayOldRole, 1) > today();
+        return (
+          <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.6)",zIndex:9999,display:"flex",alignItems:"center",justifyContent:"center",padding:16}} onClick={()=>setPromoteForm(null)}>
+            <div onClick={e=>e.stopPropagation()} style={{background:"var(--card-bg)",border:"1px solid var(--border)",borderRadius:14,maxWidth:520,width:"100%",padding:24,boxShadow:"0 20px 50px rgba(0,0,0,0.3)"}}>
+              <h3 style={{margin:"0 0 8px",color:"#3b82f6",fontSize:16,fontWeight:700}}>⬆️ Mudar cargo de {emp.name}</h3>
+              <p style={{color:"var(--text2)",fontSize:13,margin:"0 0 14px",lineHeight:1.5}}>
+                Cargo atual: <strong>{oldRole?.name ?? "—"}</strong>
+              </p>
+              <div style={{marginBottom:12}}>
+                <label style={{...S.label,fontSize:11}}>Novo cargo</label>
+                <select value={newRoleId} onChange={e=>setPromoteForm({...promoteForm, newRoleId:e.target.value})} style={{...S.input,cursor:"pointer"}}>
+                  <option value="">Selecione...</option>
+                  {available.map(r => <option key={r.id} value={r.id}>{r.name} · {r.area} · {r.points}pt{r.noTip?" · sem gorjeta":""}</option>)}
+                </select>
+              </div>
+              <div style={{marginBottom:12}}>
+                <label style={{...S.label,fontSize:11}}>Último dia no cargo atual</label>
+                <input type="date" value={lastDayOldRole} onChange={e=>setPromoteForm({...promoteForm, lastDayOldRole:e.target.value})} style={S.input}/>
+                <div style={{fontSize:10,color:"var(--text3)",marginTop:4,lineHeight:1.4}}>Esse dia ainda conta como {oldRole?.name ?? "cargo atual"}. A partir do dia seguinte passa a ser {newRole?.name ?? "novo cargo"}.</div>
+              </div>
+              <div style={{marginBottom:14}}>
+                <label style={{...S.label,fontSize:11}}>Motivo (opcional)</label>
+                <input value={reason} onChange={e=>setPromoteForm({...promoteForm, reason:e.target.value})} placeholder="ex: promoção por tempo de casa" style={S.input}/>
+              </div>
+              {valid && newRole && (
+                <div style={{padding:"10px 12px",background:"var(--bg2)",borderRadius:8,fontSize:12,color:"var(--text2)",lineHeight:1.6,marginBottom:14}}>
+                  <div><strong>{oldRole?.name ?? "—"} → {newRole.name}</strong></div>
+                  <div style={{marginTop:4}}>Último dia como {oldRole?.name ?? "cargo atual"}: <strong>{lwdBR}</strong></div>
+                  <div style={{color:"#3b82f6",marginTop:4}}>{newRole.name} a partir de <strong>{nextDayBR}</strong>{isFuture?" (agendada — aplicada automaticamente)":""}</div>
+                </div>
+              )}
+              <div style={{display:"flex",justifyContent:"flex-end",gap:10}}>
+                <button onClick={()=>setPromoteForm(null)} style={{...S.btnSecondary,padding:"8px 14px",fontSize:13}}>Cancelar</button>
+                <button onClick={confirmPromote} disabled={!valid}
+                  style={{...S.btnPrimary,padding:"8px 14px",fontSize:13,fontWeight:700,background:"#3b82f6",borderColor:"#3b82f6",opacity:valid?1:0.5}}>
+                  {isFuture ? "Agendar promoção" : "Confirmar mudança"}
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* Pre-dismissal checklist modal (#71) */}
       {showDismissalChecklist && dismissalCheckEmp && (() => {
