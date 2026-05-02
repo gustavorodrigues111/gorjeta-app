@@ -4859,8 +4859,7 @@ function EmployeePortal({ employees, roles, tips, schedules, splits, restaurants
             {monthBeforeVigencia ? (
               <div style={{...S.card,padding:24,textAlign:"center"}}>
                 <div style={{fontSize:36,marginBottom:8}}>📅</div>
-                <div style={{color:"var(--text)",fontWeight:700,fontSize:14,marginBottom:6}}>Você ainda não estava trabalhando neste mês</div>
-                <p style={{color:"var(--text3)",fontSize:12,margin:0}}>Sua escala começa em <strong>{new Date(empValidFrom+"T12:00:00").toLocaleDateString("pt-BR")}</strong>.</p>
+                <div style={{color:"var(--text)",fontWeight:700,fontSize:14}}>Não há escalas cadastradas para você neste mês.</div>
               </div>
             ) : (<>
             <div style={{display:"flex",alignItems:"flex-start",gap:8,padding:"10px 12px",background:"#f59e0b14",border:"1px solid #f59e0b44",borderRadius:10,marginBottom:14,fontSize:12,color:"var(--text2)",lineHeight:1.5}}>
