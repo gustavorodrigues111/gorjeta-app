@@ -13732,7 +13732,10 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                           // Snapshot pra histórico
                           const preSnap = snapshotSchedulesMonth(schedules, rid, mk);
                           saveSchedulesSnapshot(`Inversão ${new Date(dateA+"T12:00:00").toLocaleDateString("pt-BR")} ↔ ${new Date(dateB+"T12:00:00").toLocaleDateString("pt-BR")}${reason?` — ${reason}`:""}`, preSnap);
-                          // Aplica swap usando effectiveMonth como fonte (saved + derivado + edits locais)
+                          // Aplica swap usando effectiveMonth como fonte (saved + derivado + edits locais).
+                          // IMPORTANTE: materializa o effectiveMonth INTEIRO de cada empregado afetado.
+                          // Sem isso, escala derivada (sem dados salvos) viraria saved só com 2 dias e
+                          // applyDerivationToEmp deixaria de derivar — perdendo folgas dos outros dias.
                           const newMonth = JSON.parse(JSON.stringify(schedules?.[rid]?.[mk] ?? {}));
                           // Audit trail
                           const adjAuthor = currentUser?.name || (isOwner?"Master":"Gestor Adm.");
@@ -13743,7 +13746,8 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
                             const sa = cur[dateA] ?? null;
                             const sb = cur[dateB] ?? null;
                             if (sa === DAY_VACATION || sb === DAY_VACATION) return;
-                            if (!newMonth[emp.id]) newMonth[emp.id] = {};
+                            // Materializa o effective do empregado (sem ainda aplicar swap)
+                            newMonth[emp.id] = { ...cur };
                             // dateA recebe o status que estava em dateB
                             if (sb === null) delete newMonth[emp.id][dateA];
                             else newMonth[emp.id][dateA] = sb;
