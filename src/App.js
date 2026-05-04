@@ -24913,11 +24913,11 @@ function FechaPessoaCard({ pessoa, shifts: pessoaShifts, allShifts, updateShift,
       {/* Lista de turnos compacta */}
       <div style={{ display: "flex", flexDirection: "column", gap: 4, marginBottom: 10, padding: "6px 8px", background: "rgba(255,255,255,0.5)", borderRadius: 8 }}>
         {pessoaShifts.sort((a,b) => (a.date || "").localeCompare(b.date || "")).map(s => (
-          <div key={s.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 11, padding: "3px 0", borderBottom: "1px dashed rgba(0,0,0,0.06)" }}>
-            <span style={{ color: "var(--text2)" }}>📅 {fmtDate(s.date)}{s.area ? ` · ${s.area}` : ""}</span>
-            <span style={{ color: "var(--text)", fontFamily: "'DM Mono',monospace", fontWeight: 600 }}>
+          <div key={s.id} style={{ display: "flex", flexDirection: "column", gap: 1, fontSize: 11, padding: "4px 0", borderBottom: "1px dashed rgba(0,0,0,0.06)" }}>
+            <div style={{ color: "var(--text2)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>📅 {fmtDate(s.date)}{s.area ? ` · ${s.area}` : ""}</div>
+            <div style={{ color: "var(--text3)", fontFamily: "'DM Mono',monospace", fontSize: 10, whiteSpace: "nowrap" }}>
               {s.entrada}→{s.saida}{s.intervalo > 0 ? ` (${s.intervalo}m)` : ""} = {fmtHoras ? fmtHoras(s.horas) : s.horas + "h"}
-            </span>
+            </div>
           </div>
         ))}
       </div>
@@ -25422,13 +25422,17 @@ function FreelaFechamentoTab({ restaurantId, restPessoas, shifts, lotes, shiftPr
                         return (
                           <div key={s.id}
                             onClick={(e) => { e.stopPropagation(); setSelected({ ...selected, [s.id]: !isSel }); }}
-                            style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, padding: "3px 0", borderBottom: "1px dashed rgba(0,0,0,0.06)", cursor: "pointer" }}>
-                            <input type="checkbox" checked={isSel} onChange={()=>setSelected({...selected,[s.id]:!isSel})} onClick={e=>e.stopPropagation()} style={{ cursor: "pointer", width: 13, height: 13, accentColor: "#16a34a" }}/>
-                            <span style={{ color: "var(--text2)", flex: 1, minWidth: 0 }}>📅 {fmtDate(s.date)}{s.area ? ` · ${s.area}` : ""}</span>
-                            <span style={{ color: "var(--text)", fontFamily: "'DM Mono',monospace", fontWeight: 600 }}>
-                              {s.entrada}→{s.saida}{s.intervalo > 0 ? ` (${s.intervalo}m)` : ""} · {fmtHoras(s.horas)}
-                            </span>
-                            <span style={{ color: "var(--text)", fontFamily: "'DM Mono',monospace", fontWeight: 700, minWidth: 70, textAlign: "right" }}>
+                            style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 11, padding: "4px 0", borderBottom: "1px dashed rgba(0,0,0,0.06)", cursor: "pointer" }}>
+                            <input type="checkbox" checked={isSel} onChange={()=>setSelected({...selected,[s.id]:!isSel})} onClick={e=>e.stopPropagation()} style={{ cursor: "pointer", width: 13, height: 13, accentColor: "#16a34a", flexShrink: 0 }}/>
+                            <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 1, overflow: "hidden" }}>
+                              <div style={{ color: "var(--text2)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                                📅 {fmtDate(s.date)}{s.area ? ` · ${s.area}` : ""}
+                              </div>
+                              <div style={{ color: "var(--text3)", fontFamily: "'DM Mono',monospace", fontSize: 10, whiteSpace: "nowrap" }}>
+                                {s.entrada}→{s.saida}{s.intervalo > 0 ? ` (${s.intervalo}m)` : ""} · {fmtHoras(s.horas)}
+                              </div>
+                            </div>
+                            <span style={{ color: "var(--text)", fontFamily: "'DM Mono',monospace", fontWeight: 700, minWidth: 70, textAlign: "right", flexShrink: 0 }}>
                               R$ {(s.totalCalc||0).toFixed(2)}
                             </span>
                           </div>
