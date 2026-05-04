@@ -15994,7 +15994,7 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme, 
   const setEditRestId = v => setEditIds(p=>({...p,rest:v}));
   const setEditMgrId = v => setEditIds(p=>({...p,mgr:v}));
   const setEditOwnerId = v => setEditIds(p=>({...p,owner:v}));
-  const [restForm, setRestForm]             = useState({ name:"",shortCode:"",cnpj:"",address:"",whatsappFin:"",whatsappOp:"",serviceStartDate:"" });
+  const [restForm, setRestForm]             = useState({ name:"",shortCode:"",cnpj:"",razaoSocial:"",codigoContabil:"",address:"",whatsappFin:"",whatsappOp:"",serviceStartDate:"" });
   const [mgrForm, setMgrForm]               = useState({ name:"",cpf:"",pin:"",restaurantIds:[],perms:{tips:true,schedule:true},isDP:false,profile:"custom",areas:[],masterRestaurantIds:[] });
   // Inbox state
   const [inboxFilter, setInboxFilter] = useState("all");
@@ -17504,7 +17504,7 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme, 
             <div>
               {/* ── Ações rápidas ── */}
               <div style={{display:"flex",gap:8,marginBottom:isMobile?12:16,flexWrap:"wrap"}}>
-                <button onClick={()=>{setEditRestId(null);setRestForm({name:"",cnpj:"",address:"",whatsappFin:"",whatsappOp:"",serviceStartDate:""});setShowRestModal(true);}} style={{...S.btnPrimary,fontSize:isMobile?12:14}}>+ Novo Restaurante</button>
+                <button onClick={()=>{setEditRestId(null);setRestForm({name:"",shortCode:"",cnpj:"",razaoSocial:"",codigoContabil:"",address:"",whatsappFin:"",whatsappOp:"",serviceStartDate:""});setShowRestModal(true);}} style={{...S.btnPrimary,fontSize:isMobile?12:14}}>+ Novo Restaurante</button>
                 {restaurants.length > 0 && (
                   <button onClick={()=>{
                     const exportData = {
@@ -17682,7 +17682,7 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme, 
                         <div style={{display:"flex",gap:6,borderTop:"1px solid var(--border)",paddingTop:8}}>
                           <button onClick={()=>onEnterOperational && onEnterOperational(r.id)} style={{background:"#7c9e5e",border:"none",borderRadius:8,color:"#fff",cursor:"pointer",fontSize:11,padding:"6px 10px",fontFamily:"'DM Sans',sans-serif",fontWeight:700,flex:1}}>▶ Entrar</button>
                           <button onClick={()=>{setSelRestaurant(r.id);setRestTab("financeiro");}} style={{...S.btnSecondary,fontSize:11,flex:"0 0 auto",textAlign:"center",color:"var(--green)",borderColor:"var(--green)",padding:"6px 10px"}} title="Financeiro">💳</button>
-                          <button onClick={()=>{setEditRestId(r.id);setRestForm({name:r.name,shortCode:r.shortCode??"",cnpj:r.cnpj??"",address:r.address??"",whatsappFin:r.whatsappFin??"",whatsappOp:r.whatsappOp??"",serviceStartDate:r.serviceStartDate??""});setShowRestModal(true);}} style={{...S.btnSecondary,fontSize:11,flex:"0 0 auto",textAlign:"center",padding:"6px 10px"}} title="Editar cadastro">✏️</button>
+                          <button onClick={()=>{setEditRestId(r.id);setRestForm({name:r.name,shortCode:r.shortCode??"",cnpj:r.cnpj??"",razaoSocial:r.razaoSocial??"",codigoContabil:r.codigoContabil??"",address:r.address??"",whatsappFin:r.whatsappFin??"",whatsappOp:r.whatsappOp??"",serviceStartDate:r.serviceStartDate??""});setShowRestModal(true);}} style={{...S.btnSecondary,fontSize:11,flex:"0 0 auto",textAlign:"center",padding:"6px 10px"}} title="Editar cadastro">✏️</button>
                         </div>
                       </div>
                     );
@@ -17754,7 +17754,7 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme, 
                         <div style={{display:"flex",gap:4,alignItems:"center"}} onClick={e=>e.stopPropagation()}>
                           <button onClick={()=>onEnterOperational && onEnterOperational(r.id)} title="Entrar no restaurante como master" style={{background:"#7c9e5e",border:"none",borderRadius:6,color:"#fff",cursor:"pointer",fontSize:11,padding:"4px 10px",fontFamily:"'DM Sans',sans-serif",fontWeight:700}}>▶ Entrar</button>
                           <button onClick={()=>setSelRestaurant(r.id)} title="Ver detalhes / financeiro" style={{background:"none",border:`1px solid ${ac}33`,borderRadius:6,color:ac,cursor:"pointer",fontSize:11,padding:"4px 8px",fontFamily:"'DM Sans',sans-serif"}}>Detalhes</button>
-                          <button onClick={()=>{setEditRestId(r.id);setRestForm({name:r.name,shortCode:r.shortCode??"",cnpj:r.cnpj??"",address:r.address??"",whatsappFin:r.whatsappFin??"",whatsappOp:r.whatsappOp??"",serviceStartDate:r.serviceStartDate??""});setShowRestModal(true);}} title="Editar cadastro" style={{background:"none",border:"1px solid var(--border)",borderRadius:6,color:"var(--text3)",cursor:"pointer",fontSize:11,padding:"4px 8px",fontFamily:"'DM Sans',sans-serif"}}>✏️</button>
+                          <button onClick={()=>{setEditRestId(r.id);setRestForm({name:r.name,shortCode:r.shortCode??"",cnpj:r.cnpj??"",razaoSocial:r.razaoSocial??"",codigoContabil:r.codigoContabil??"",address:r.address??"",whatsappFin:r.whatsappFin??"",whatsappOp:r.whatsappOp??"",serviceStartDate:r.serviceStartDate??""});setShowRestModal(true);}} title="Editar cadastro" style={{background:"none",border:"1px solid var(--border)",borderRadius:6,color:"var(--text3)",cursor:"pointer",fontSize:11,padding:"4px 8px",fontFamily:"'DM Sans',sans-serif"}}>✏️</button>
                         </div>
                       </div>
                     );
@@ -18343,6 +18343,8 @@ function OwnerPortal({ data, onUpdate, onBack, currentUser, toggleTheme, theme, 
               {editRestId && <p style={{color:"var(--text3)",fontSize:11,marginTop:4}}>O ID não pode ser alterado após criação.</p>}
             </div>
             <div><label style={S.label}>CNPJ (opcional)</label><input value={restForm.cnpj} onChange={e=>setRestForm({...restForm,cnpj:e.target.value})} placeholder="00.000.000/0000-00" style={S.input}/></div>
+            <div><label style={S.label}>Razão Social (opcional)</label><input value={restForm.razaoSocial??""} onChange={e=>setRestForm({...restForm,razaoSocial:e.target.value})} placeholder="ex: SOROROCA BAR LTDA" style={S.input}/><p style={{color:"var(--text3)",fontSize:11,marginTop:3}}>Aparece no cabeçalho da planilha exportada pra contabilidade.</p></div>
+            <div><label style={S.label}>Código contábil (opcional)</label><input value={restForm.codigoContabil??""} onChange={e=>setRestForm({...restForm,codigoContabil:e.target.value.replace(/\D/g,"")})} placeholder="ex: 2992" inputMode="numeric" style={S.input}/><p style={{color:"var(--text3)",fontSize:11,marginTop:3}}>Código da empresa junto à contabilidade. Aparece no cabeçalho da planilha como "{restForm.codigoContabil||"XXXX"} - {restForm.razaoSocial||restForm.name||"NOME"}".</p></div>
             <div><label style={S.label}>Endereço (opcional)</label><input value={restForm.address} onChange={e=>setRestForm({...restForm,address:e.target.value})} style={S.input}/></div>
             <div>
               <label style={S.label}>📅 Data de início da vigência do serviço</label>
