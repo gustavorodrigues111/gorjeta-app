@@ -786,7 +786,8 @@ function createActionNotifications({ actions, restaurantId, meetingDate, created
 }
 
 // ── Version retention ──
-const MAX_VERSIONS = 30;
+// Reduzido de 30 → 5 pra evitar estouro do limite de 1 MB do Firestore. Cada (rid, mk) tem até 5 snapshots.
+const MAX_VERSIONS = 5;
 const VERSION_DEBOUNCE_MS = 30000; // 30s
 // Pending debounced snapshots: key = `${kind}:${rid}:${mk}`, value = { timer, firstSnapshot, author, reason }
 const _pendingSnapshots = {};
@@ -835,6 +836,19 @@ function saveVersion(kind, rid, mk, currentVersions, snapshot, author, reason, o
     const list = [entry, ...(byMonth[mk] ?? [])].slice(0, MAX_VERSIONS);
     byMonth[mk] = list;
     byRest[rid] = byMonth;
+    // Poda TODAS as listas (de todos os restaurantes/meses) pra MAX_VERSIONS — protege contra
+    // crescimento histórico que pode estourar 1 MB no Firestore.
+    Object.keys(byRest).forEach(r => {
+      const months = byRest[r];
+      if (!months || typeof months !== "object") return;
+      const trimmedMonths = { ...months };
+      Object.keys(trimmedMonths).forEach(m => {
+        if (Array.isArray(trimmedMonths[m]) && trimmedMonths[m].length > MAX_VERSIONS) {
+          trimmedMonths[m] = trimmedMonths[m].slice(0, MAX_VERSIONS);
+        }
+      });
+      byRest[r] = trimmedMonths;
+    });
     onUpdate(versionKey, byRest);
   }
 
@@ -37033,6 +37047,46 @@ export default function App() {
           await save(K.employees, updated);
           setEmployees(updated);
           console.log(`Auto-inativados ${demitidosParaInativar.length} empregado(s) demitido(s)`);
+        }
+      }
+
+      // Auto-podar tipVersions / scheduleVersions que cresceram acima do MAX_VERSIONS (legacy:
+      // antes era 30, agora é 5). Sem isso o Firestore eventualmente recusa o save por exceder 1 MB.
+      const trimVersionsDoc = (versions) => {
+        if (!versions || typeof versions !== "object") return { trimmed: versions, changed: false };
+        let changed = false;
+        const out = {};
+        Object.keys(versions).forEach(r => {
+          const months = versions[r];
+          if (!months || typeof months !== "object") { out[r] = months; return; }
+          const trimmedMonths = {};
+          Object.keys(months).forEach(m => {
+            const list = months[m];
+            if (Array.isArray(list) && list.length > MAX_VERSIONS) {
+              trimmedMonths[m] = list.slice(0, MAX_VERSIONS);
+              changed = true;
+            } else {
+              trimmedMonths[m] = list;
+            }
+          });
+          out[r] = trimmedMonths;
+        });
+        return { trimmed: out, changed };
+      };
+      {
+        const tv = trimVersionsDoc(loaded_data.tipVersions);
+        if (tv.changed) {
+          await save(K.tipVersions, tv.trimmed);
+          setTipVersions(tv.trimmed);
+          loaded_data.tipVersions = tv.trimmed;
+          console.log("tipVersions podado pra MAX_VERSIONS=" + MAX_VERSIONS);
+        }
+        const sv = trimVersionsDoc(loaded_data.scheduleVersions);
+        if (sv.changed) {
+          await save(K.scheduleVersions, sv.trimmed);
+          setScheduleVersions(sv.trimmed);
+          loaded_data.scheduleVersions = sv.trimmed;
+          console.log("scheduleVersions podado pra MAX_VERSIONS=" + MAX_VERSIONS);
         }
       }
 
