@@ -29184,13 +29184,21 @@ function OperationalGorjetas({ employee, data }) {
     byEmp[t.employeeId].net += (t.myNet ?? 0);
     byEmp[t.employeeId].tax += (t.myTax ?? 0);
     byEmp[t.employeeId].daysCount.add(t.date);
-    byEmp[t.employeeId].tipsList.push({ date: t.date, myNet: t.myNet ?? 0, poolTotal: t.poolTotal ?? 0 });
+    byEmp[t.employeeId].tipsList.push({ date: t.date, myNet: t.myNet ?? 0, myShare: t.myShare ?? 0, myTax: t.myTax ?? 0, poolTotal: t.poolTotal ?? 0 });
+  });
+  // Pool real do dia (soma de myShare de todos do dia) — pra calcular % de cada um
+  const poolByDate = {};
+  tips.forEach(t => {
+    if (!poolByDate[t.date]) poolByDate[t.date] = 0;
+    poolByDate[t.date] += (t.myShare ?? 0);
   });
   const ranking = Object.values(byEmp)
     .map(r => {
       const emp = employees.find(e => e.id === r.employeeId);
       const role = emp ? roles.find(rl => rl.id === emp.roleId) : null;
-      const tipsList = r.tipsList.sort((a,b) => a.date.localeCompare(b.date));
+      const tipsList = r.tipsList
+        .map(t => ({ ...t, dayPool: poolByDate[t.date] || 0, sharePct: (poolByDate[t.date] > 0 ? (t.myShare / poolByDate[t.date]) * 100 : 0) }))
+        .sort((a,b) => a.date.localeCompare(b.date));
       return { ...r, emp, role, days: r.daysCount.size, tipsList };
     })
     .sort((a,b) => b.net - a.net);
@@ -29321,11 +29329,12 @@ function OperationalGorjetas({ employee, data }) {
                   </div>
                   {isExpanded && (
                     <div style={{padding:"4px 14px 14px",background:"var(--bg2)"}}>
-                      <div style={{fontSize:10,color:"var(--text3)",marginBottom:6,fontWeight:600,textTransform:"uppercase"}}>📅 {r.tipsList.length} dia(s)</div>
+                      <div style={{fontSize:10,color:"var(--text3)",marginBottom:6,fontWeight:600,textTransform:"uppercase"}}>📅 {r.tipsList.length} dia(s) — Pool · % · Líquido</div>
                       <div style={{display:"flex",flexDirection:"column",gap:4}}>
                         {r.tipsList.map((t,i) => (
-                          <div key={i} style={{padding:"6px 10px",background:"var(--card-bg)",border:"1px solid var(--border)",borderRadius:8,display:"flex",justifyContent:"space-between",fontSize:12}}>
-                            <span style={{color:"var(--text2)"}}>{fmtDate(t.date)} <span style={{color:"var(--text3)",fontSize:10}}>{WEEKDAYS[new Date(t.date+"T12:00:00").getDay()]}</span></span>
+                          <div key={i} style={{padding:"6px 10px",background:"var(--card-bg)",border:"1px solid var(--border)",borderRadius:8,display:"grid",gridTemplateColumns:"auto 1fr auto",gap:8,alignItems:"center",fontSize:11}}>
+                            <span style={{color:"var(--text2)"}}>{fmtDate(t.date)} <span style={{color:"var(--text3)",fontSize:9}}>{WEEKDAYS[new Date(t.date+"T12:00:00").getDay()]}</span></span>
+                            <span style={{color:"var(--text3)",fontFamily:"'DM Mono',monospace",textAlign:"right",fontSize:10}}>{fmt(t.dayPool)} · <strong style={{color:"var(--text2)"}}>{t.sharePct.toFixed(2)}%</strong></span>
                             <span style={{color:"#15803d",fontFamily:"'DM Mono',monospace",fontWeight:700}}>{fmt(t.myNet)}</span>
                           </div>
                         ))}
@@ -29378,14 +29387,28 @@ function OperationalGorjetas({ employee, data }) {
                           <td></td>
                           <td colSpan={4} style={{padding:"6px 14px 14px"}}>
                             <div style={{fontSize:11,color:"var(--text3)",marginBottom:6,fontWeight:600,textTransform:"uppercase",letterSpacing:0.4}}>📅 Detalhamento — {r.tipsList.length} dia(s)</div>
-                            <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(160px,1fr))",gap:6,fontSize:12}}>
-                              {r.tipsList.map((t,i) => (
-                                <div key={i} style={{padding:"6px 10px",background:"var(--card-bg)",border:"1px solid var(--border)",borderRadius:8,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-                                  <span style={{color:"var(--text2)"}}>{fmtDate(t.date)} <span style={{color:"var(--text3)",fontSize:10}}>{WEEKDAYS[new Date(t.date+"T12:00:00").getDay()]}</span></span>
-                                  <span style={{color:"#15803d",fontFamily:"'DM Mono',monospace",fontWeight:700}}>{fmt(t.myNet)}</span>
-                                </div>
-                              ))}
-                            </div>
+                            <table style={{width:"100%",borderCollapse:"collapse",fontSize:12,background:"var(--card-bg)",border:"1px solid var(--border)",borderRadius:8,overflow:"hidden"}}>
+                              <thead>
+                                <tr style={{background:"var(--bg2)"}}>
+                                  <th style={{padding:"6px 10px",textAlign:"left",fontSize:10,color:"var(--text3)",fontWeight:700,textTransform:"uppercase",letterSpacing:0.3}}>Data</th>
+                                  <th style={{padding:"6px 10px",textAlign:"right",fontSize:10,color:"var(--text3)",fontWeight:700,textTransform:"uppercase",letterSpacing:0.3}}>Pool (bruto)</th>
+                                  <th style={{padding:"6px 10px",textAlign:"right",fontSize:10,color:"var(--text3)",fontWeight:700,textTransform:"uppercase",letterSpacing:0.3}}>% dele</th>
+                                  <th style={{padding:"6px 10px",textAlign:"right",fontSize:10,color:"var(--text3)",fontWeight:700,textTransform:"uppercase",letterSpacing:0.3}}>Bruto</th>
+                                  <th style={{padding:"6px 10px",textAlign:"right",fontSize:10,color:"var(--text3)",fontWeight:700,textTransform:"uppercase",letterSpacing:0.3}}>Líquido</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {r.tipsList.map((t,i) => (
+                                  <tr key={i} style={{borderTop:"1px solid var(--border)"}}>
+                                    <td style={{padding:"5px 10px",color:"var(--text2)"}}>{fmtDate(t.date)} <span style={{color:"var(--text3)",fontSize:10}}>{WEEKDAYS[new Date(t.date+"T12:00:00").getDay()]}</span></td>
+                                    <td style={{padding:"5px 10px",textAlign:"right",color:"var(--text2)",fontFamily:"'DM Mono',monospace"}}>{fmt(t.dayPool)}</td>
+                                    <td style={{padding:"5px 10px",textAlign:"right",color:"var(--text3)",fontFamily:"'DM Mono',monospace"}}>{t.sharePct.toFixed(2)}%</td>
+                                    <td style={{padding:"5px 10px",textAlign:"right",color:"var(--text2)",fontFamily:"'DM Mono',monospace"}}>{fmt(t.myShare)}</td>
+                                    <td style={{padding:"5px 10px",textAlign:"right",color:"#15803d",fontFamily:"'DM Mono',monospace",fontWeight:700}}>{fmt(t.myNet)}</td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
                           </td>
                         </tr>
                       )}
