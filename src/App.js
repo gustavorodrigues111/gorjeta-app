@@ -29204,6 +29204,71 @@ function OperationalGorjetas({ employee, data }) {
     .sort((a,b) => b.net - a.net);
 
   const [expandedEmpId, setExpandedEmpId] = useState(null);
+  const [exportingSolides, setExportingSolides] = useState(false);
+
+  // Export Sólides (formato Planilha de Lançamentos)
+  async function exportSolides() {
+    setExportingSolides(true);
+    try {
+      await loadScript("https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js");
+      const XLSX = window.XLSX;
+      // Sólides company code: tenta restaurant.solidesCode primeiro, senão usa o restCode genérico
+      const solidesCode = restaurant?.solidesCode || restaurant?.code || "";
+      const layoutCode = restaurant?.solidesLayout || solidesCode || "0000";
+      const companyName = (restaurant?.razaoSocial || restaurant?.name || "").toUpperCase();
+      const monthLbl = `${String(month+1).padStart(2,"0")}/${year}`;
+
+      // Empregados que aparecem no ranking deste mês (têm pelo menos 1 lançamento)
+      // ou estavam ativos no fim do mês — pra cobrir até quem ficou sem gorjeta no mês.
+      const empRows = (employees || [])
+        .filter(e => {
+          // Demitido antes deste mês — fora
+          if (e.demitidoEm && e.demitidoEm <= `${year}-${String(month+1).padStart(2,"0")}-01`) return false;
+          // Inativo antes do mês — fora (a não ser que tenha gorjeta)
+          if (e.inactive && e.inactiveFrom && e.inactiveFrom < `${year}-${String(month+1).padStart(2,"0")}-01`) {
+            return tips.some(t => t.employeeId === e.id);
+          }
+          return true;
+        })
+        .map(e => {
+          const empTipNet = tips
+            .filter(t => t.employeeId === e.id)
+            .reduce((s, t) => s + (t.myNet ?? 0), 0);
+          // Código: prefere solidesCode (manual) → empCode (gerado pelo sistema) → vazio
+          const codigo = e.solidesCode || e.empCode || "";
+          const cpfFormatted = (() => {
+            const d = (e.cpf || "").replace(/\D/g, "");
+            if (d.length !== 11) return e.cpf || "";
+            return `${d.slice(0,3)}.${d.slice(3,6)}.${d.slice(6,9)}-${d.slice(9,11)}`;
+          })();
+          // Classe: padrão "1 - Assalariado", a não ser que esteja marcado como sócio
+          const classe = e.isProlaborista ? "3 - Prolaborista" : "1 - Assalariado";
+          return [codigo, (e.name || "").toUpperCase(), cpfFormatted, classe, empTipNet > 0 ? Number(empTipNet.toFixed(2)) : "", ""];
+        })
+        .sort((a, b) => (a[1] || "").localeCompare(b[1] || ""));
+
+      // Monta a planilha
+      const wsData = [
+        [`${solidesCode ? `${solidesCode} - ` : ""}${companyName}`, "", "", "", "", ""],
+        [`Planilha de Lançamentos - ${monthLbl}`, "", "", "", "", ""],
+        ["Código", "Nome", "CPF", "Classe", "Gorjeta SN - Lei 134", "Adic. noturno horas", "Qtd Colunas Auxiliares:#2", `Layout:#${layoutCode}`],
+        ...empRows.map(r => [...r, "CodContInterm:#0", "Qtd Colunas Auxiliares:#2", `Layout:#${layoutCode}`]),
+        [`TOTAL DE COLABORADORES: `, ` ${empRows.length}`],
+      ];
+      const ws = XLSX.utils.aoa_to_sheet(wsData);
+      ws["!cols"] = [{ wch: 10 }, { wch: 30 }, { wch: 14 }, { wch: 18 }, { wch: 18 }, { wch: 18 }, { wch: 25 }, { wch: 14 }, { wch: 14 }];
+      ws["!merges"] = [
+        { s: { r: 0, c: 0 }, e: { r: 0, c: 5 } },
+        { s: { r: 1, c: 0 }, e: { r: 1, c: 5 } },
+        { s: { r: wsData.length - 1, c: 0 }, e: { r: wsData.length - 1, c: 1 } },
+      ];
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, "Lançamentos");
+      const fileName = `Planilha_Lancamentos_${solidesCode || "export"}_${year}-${String(month+1).padStart(2,"0")}.xlsx`;
+      XLSX.writeFile(wb, fileName);
+    } catch (e) { console.error("export Sólides error:", e); window.alert("Erro ao exportar planilha. Tente novamente."); }
+    setExportingSolides(false);
+  }
 
   // Semana corrente (últimos 7 dias do mês ou do mês atual)
   const today_ = today();
@@ -29220,10 +29285,17 @@ function OperationalGorjetas({ employee, data }) {
           <div style={{fontSize:11,color:"var(--text3)",fontWeight:700,textTransform:"uppercase",letterSpacing:0.4}}>Gorjetas — visão operacional</div>
           <div style={{fontSize:17,color:"var(--text)",fontWeight:700,marginTop:2}}>{restaurant?.name ?? "Restaurante"}</div>
         </div>
-        <div style={{display:"flex",gap:4,alignItems:"center",background:"var(--card-bg)",border:"1px solid var(--border)",borderRadius:10,padding:4}}>
-          <button onClick={()=>navMonth(-1)} style={{background:"none",border:"none",padding:"4px 10px",cursor:"pointer",fontSize:14,color:"var(--text2)"}}>‹</button>
-          <span style={{fontSize:13,color:"var(--text)",fontWeight:700,minWidth:140,textAlign:"center",textTransform:"capitalize"}}>{monthLabel(year, month)}</span>
-          <button onClick={()=>navMonth(1)} style={{background:"none",border:"none",padding:"4px 10px",cursor:"pointer",fontSize:14,color:"var(--text2)"}}>›</button>
+        <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
+          <button onClick={exportSolides} disabled={exportingSolides || tips.length === 0}
+            title={tips.length === 0 ? "Nenhuma gorjeta lançada neste mês" : "Exportar XLSX no formato Sólides (Planilha de Lançamentos)"}
+            style={{padding:"8px 14px",borderRadius:10,border:"1px solid var(--green)44",background:tips.length===0?"transparent":"var(--green)11",color:"var(--green)",cursor:tips.length===0?"not-allowed":"pointer",fontSize:12,fontWeight:600,fontFamily:"'DM Sans',sans-serif",opacity:tips.length===0?0.5:1}}>
+            {exportingSolides ? "⏳ Exportando..." : "📊 Exportar Sólides"}
+          </button>
+          <div style={{display:"flex",gap:4,alignItems:"center",background:"var(--card-bg)",border:"1px solid var(--border)",borderRadius:10,padding:4}}>
+            <button onClick={()=>navMonth(-1)} style={{background:"none",border:"none",padding:"4px 10px",cursor:"pointer",fontSize:14,color:"var(--text2)"}}>‹</button>
+            <span style={{fontSize:13,color:"var(--text)",fontWeight:700,minWidth:140,textAlign:"center",textTransform:"capitalize"}}>{monthLabel(year, month)}</span>
+            <button onClick={()=>navMonth(1)} style={{background:"none",border:"none",padding:"4px 10px",cursor:"pointer",fontSize:14,color:"var(--text2)"}}>›</button>
+          </div>
         </div>
       </div>
 
