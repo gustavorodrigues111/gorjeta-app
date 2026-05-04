@@ -5718,7 +5718,7 @@ function EmployeeSpreadsheet({ restEmps, restRoles, rid, employees, pessoas, onU
   const list = showInactive ? inactiveEmps : activeEmps;
 
   function getRow(emp) {
-    return { name:emp.name||"", cpf:emp.cpf||"", admission:emp.admission||"", roleId:emp.roleId||"", inactiveFrom:emp.inactiveFrom||"", phone:emp.phone||"", email:emp.email||"", emergencyName:emp.emergencyName||"", emergencyPhone:emp.emergencyPhone||"", ...(editRows[emp.id]??{}) };
+    return { name:emp.name||"", cpf:emp.cpf||"", admission:emp.admission||"", roleId:emp.roleId||"", inactiveFrom:emp.inactiveFrom||"", phone:emp.phone||"", email:emp.email||"", emergencyName:emp.emergencyName||"", emergencyPhone:emp.emergencyPhone||"", codigoContabil:emp.codigoContabil||"", ...(editRows[emp.id]??{}) };
   }
 
   function setField(id, field, val) {
@@ -5727,9 +5727,9 @@ function EmployeeSpreadsheet({ restEmps, restRoles, rid, employees, pessoas, onU
 
   function saveEmp(emp) {
     setEditRows(prev => {
-      const row = { name:emp.name||"", cpf:emp.cpf||"", admission:emp.admission||"", roleId:emp.roleId||"", inactiveFrom:emp.inactiveFrom||"", phone:emp.phone||"", email:emp.email||"", emergencyName:emp.emergencyName||"", emergencyPhone:emp.emergencyPhone||"", ...(prev[emp.id]??{}) };
+      const row = { name:emp.name||"", cpf:emp.cpf||"", admission:emp.admission||"", roleId:emp.roleId||"", inactiveFrom:emp.inactiveFrom||"", phone:emp.phone||"", email:emp.email||"", emergencyName:emp.emergencyName||"", emergencyPhone:emp.emergencyPhone||"", codigoContabil:emp.codigoContabil||"", ...(prev[emp.id]??{}) };
       if (!row.name.trim()) return prev;
-      onUpdate("employees", employees.map(x => x.id===emp.id ? {...emp, name:row.name.trim(), cpf:row.cpf, admission:row.admission, roleId:row.roleId, inactiveFrom:row.inactiveFrom, phone:row.phone, email:row.email, emergencyName:row.emergencyName, emergencyPhone:row.emergencyPhone} : x));
+      onUpdate("employees", employees.map(x => x.id===emp.id ? {...emp, name:row.name.trim(), cpf:row.cpf, admission:row.admission, roleId:row.roleId, inactiveFrom:row.inactiveFrom, phone:row.phone, email:row.email, emergencyName:row.emergencyName, emergencyPhone:row.emergencyPhone, codigoContabil:(row.codigoContabil||"").trim()} : x));
       setSaved(p=>({...p,[emp.id]:true}));
       setTimeout(()=>setSaved(p=>({...p,[emp.id]:false})),1500);
       return prev;
@@ -5889,6 +5889,10 @@ function EmployeeSpreadsheet({ restEmps, restRoles, rid, employees, pessoas, onU
                   <div>
                     <label style={{fontSize:10,color:"var(--text3)",fontWeight:700,display:"block",marginBottom:4}}>Código</label>
                     <div style={{...S.input,fontSize:13,background:"var(--bg3)",color:"var(--accent)",fontWeight:700}}>{emp.empCode ?? "—"}</div>
+                  </div>
+                  <div>
+                    <label style={{fontSize:10,color:"var(--text3)",fontWeight:700,display:"block",marginBottom:4}} title="Usado na exportação Excel da contabilidade. Pode ficar vazio.">Código contábil</label>
+                    <input value={row.codigoContabil||""} onChange={ev=>setField(emp.id,"codigoContabil",ev.target.value.replace(/\D/g,""))} placeholder="ex: 000045" style={{...S.input,fontSize:13,fontFamily:"'DM Mono',monospace"}} inputMode="numeric"/>
                   </div>
                   <div>
                     <label style={{fontSize:10,color:"var(--text3)",fontWeight:700,display:"block",marginBottom:4}}>Telefone</label>
