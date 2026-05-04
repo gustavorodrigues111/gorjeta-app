@@ -18876,6 +18876,8 @@ function OperationalPortal({ employee, data, onUpdate, onBack, toggleTheme, them
           <OperationalGorjetas
             employee={employee}
             data={data}
+            onUpdate={onUpdate}
+            isOwner={false}
           />
         ) : activeArea?.module === "tip" ? (
           <div style={{textAlign:"center",padding:"50px 24px",color:"var(--text3)"}}>
@@ -22118,6 +22120,8 @@ function AppShell({ pessoa, data, activeRestaurantId, setActiveRestaurantId, use
         <OperationalGorjetas
           employee={buildVirtualEmpForPessoa(pessoa, activeRestaurantId)}
           data={data}
+          onUpdate={onUpdate}
+          isOwner={isRealOwnerLocal}
         />
       );
     }
@@ -29141,7 +29145,7 @@ function generateAtaPDF({ version, restaurant, pessoas, roles, finalPct, employe
   doc.save(`ata_divisao_gorjetas_${(restaurant?.name||"rest").replace(/\s+/g,"_").toLowerCase()}_${version.effectiveFrom}.pdf`);
 }
 
-function OperationalGorjetas({ employee, data }) {
+function OperationalGorjetas({ employee, data, onUpdate, isOwner }) {
   const restaurantId = employee.restaurantId;
   const now = new Date();
   const [year, setYear] = useState(now.getFullYear());
@@ -29180,7 +29184,8 @@ function OperationalGorjetas({ employee, data }) {
   // Ranking por colaborador
   const byEmp = {};
   tips.forEach(t => {
-    if (!byEmp[t.employeeId]) byEmp[t.employeeId] = { employeeId: t.employeeId, net: 0, tax: 0, daysCount: new Set(), tipsList: [] };
+    if (!byEmp[t.employeeId]) byEmp[t.employeeId] = { employeeId: t.employeeId, gross: 0, net: 0, tax: 0, daysCount: new Set(), tipsList: [] };
+    byEmp[t.employeeId].gross += (t.myShare ?? 0);
     byEmp[t.employeeId].net += (t.myNet ?? 0);
     byEmp[t.employeeId].tax += (t.myTax ?? 0);
     byEmp[t.employeeId].daysCount.add(t.date);
@@ -29204,52 +29209,103 @@ function OperationalGorjetas({ employee, data }) {
     .sort((a,b) => b.net - a.net);
 
   const [expandedEmpId, setExpandedEmpId] = useState(null);
-  const [exportingSolides, setExportingSolides] = useState(false);
+  const [exportingContabil, setExportingContabil] = useState(false);
+  const [importContabilForm, setImportContabilForm] = useState(null); // null | { rawText, parsed: [{empId, name, code}], unmatched: [...] }
 
-  // Export Sólides (formato Planilha de Lançamentos)
-  async function exportSolides() {
-    setExportingSolides(true);
+  // Parser flexível pra "lista CPF/nome → código contábil"
+  // Aceita CSV, TSV, "001 ALEZIO 062.720.413-90", "ALEZIO - 001", etc.
+  function parseImportContabilLines(rawText) {
+    if (!rawText || !employees) return { matched: [], unmatched: [], conflicts: [] };
+    const cleanCpf = s => (s || "").replace(/\D/g, "");
+    const norm = s => (s || "").trim().toUpperCase().replace(/\s+/g, " ");
+    const lines = rawText.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+    const matched = [];
+    const unmatched = [];
+    const conflicts = [];
+    lines.forEach(line => {
+      const parts = line.split(/[\t,;|]+| {2,}| - /).map(p => p.trim()).filter(Boolean);
+      if (parts.length < 2) { unmatched.push(line); return; }
+      let cpf = null, code = null, name = null;
+      parts.forEach(p => {
+        const digits = cleanCpf(p);
+        if (digits.length === 11 && !cpf) cpf = digits;
+        else if (digits.length >= 3 && digits.length <= 10 && /^\d+$/.test(digits) && !code) code = digits;
+        else if (/[a-zA-ZÀ-ú]/.test(p) && !name) name = p;
+      });
+      if (!code) { unmatched.push(line); return; }
+      let candidates = [];
+      if (cpf) candidates = employees.filter(e => cleanCpf(e.cpf) === cpf);
+      if (!candidates.length && name) {
+        const target = norm(name);
+        candidates = employees.filter(e => norm(e.name) === target);
+        if (!candidates.length) {
+          candidates = employees.filter(e => {
+            const en = norm(e.name);
+            return en.includes(target) || target.includes(en);
+          });
+        }
+      }
+      if (candidates.length === 0) { unmatched.push(line); return; }
+      if (candidates.length > 1) { conflicts.push({ line, candidates: candidates.map(c => c.name) }); return; }
+      matched.push({ empId: candidates[0].id, empName: candidates[0].name, code });
+    });
+    return { matched, unmatched, conflicts };
+  }
+
+  function applyImportContabil() {
+    if (!importContabilForm || !onUpdate) return;
+    const { matched } = importContabilForm.parsed || { matched: [] };
+    if (matched.length === 0) return;
+    const codeByEmp = {};
+    matched.forEach(m => { codeByEmp[m.empId] = m.code; });
+    const allEmps = data?.employees || [];
+    const updated = allEmps.map(e => codeByEmp[e.id] ? { ...e, codigoContabil: codeByEmp[e.id] } : e);
+    onUpdate("employees", updated);
+    onUpdate("_toast", `📥 ${matched.length} código(s) atualizado(s)`);
+    setImportContabilForm(null);
+  }
+
+  // Export Excel da Contabilidade (formato Planilha de Lançamentos)
+  async function exportContabil(targetYear = year, targetMonth = month) {
+    setExportingContabil(true);
     try {
       await loadScript("https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js");
       const XLSX = window.XLSX;
-      // Sólides company code: tenta restaurant.solidesCode primeiro, senão usa o restCode genérico
-      const solidesCode = restaurant?.solidesCode || restaurant?.code || "";
-      const layoutCode = restaurant?.solidesLayout || solidesCode || "0000";
+      const targetMk = monthKey(targetYear, targetMonth);
+      const monthTips = (data?.tips || []).filter(t => t.restaurantId === restaurantId && t.monthKey === targetMk);
+      const codigoContabil = restaurant?.codigoContabil || "";
+      const layoutCode = codigoContabil || "0000";
       const companyName = (restaurant?.razaoSocial || restaurant?.name || "").toUpperCase();
-      const monthLbl = `${String(month+1).padStart(2,"0")}/${year}`;
+      const monthLbl = `${String(targetMonth+1).padStart(2,"0")}/${targetYear}`;
 
-      // Empregados que aparecem no ranking deste mês (têm pelo menos 1 lançamento)
-      // ou estavam ativos no fim do mês — pra cobrir até quem ficou sem gorjeta no mês.
+      const monthStart = `${targetYear}-${String(targetMonth+1).padStart(2,"0")}-01`;
       const empRows = (employees || [])
         .filter(e => {
-          // Demitido antes deste mês — fora
-          if (e.demitidoEm && e.demitidoEm <= `${year}-${String(month+1).padStart(2,"0")}-01`) return false;
-          // Inativo antes do mês — fora (a não ser que tenha gorjeta)
-          if (e.inactive && e.inactiveFrom && e.inactiveFrom < `${year}-${String(month+1).padStart(2,"0")}-01`) {
-            return tips.some(t => t.employeeId === e.id);
+          if (e.demitidoEm && e.demitidoEm <= monthStart) return false;
+          if (e.inactive && e.inactiveFrom && e.inactiveFrom < monthStart) {
+            return monthTips.some(t => t.employeeId === e.id);
           }
           return true;
         })
         .map(e => {
-          const empTipNet = tips
+          // Valor exportado é o BRUTO (myShare) — a contabilidade aplica os impostos depois.
+          const empTipBruto = monthTips
             .filter(t => t.employeeId === e.id)
-            .reduce((s, t) => s + (t.myNet ?? 0), 0);
-          // Código: prefere solidesCode (manual) → empCode (gerado pelo sistema) → vazio
-          const codigo = e.solidesCode || e.empCode || "";
+            .reduce((s, t) => s + (t.myShare ?? 0), 0);
+          // Código da contabilidade: se não preenchido, fica vazio (não usa empCode interno)
+          const codigo = e.codigoContabil || "";
           const cpfFormatted = (() => {
             const d = (e.cpf || "").replace(/\D/g, "");
             if (d.length !== 11) return e.cpf || "";
             return `${d.slice(0,3)}.${d.slice(3,6)}.${d.slice(6,9)}-${d.slice(9,11)}`;
           })();
-          // Classe: padrão "1 - Assalariado", a não ser que esteja marcado como sócio
           const classe = e.isProlaborista ? "3 - Prolaborista" : "1 - Assalariado";
-          return [codigo, (e.name || "").toUpperCase(), cpfFormatted, classe, empTipNet > 0 ? Number(empTipNet.toFixed(2)) : "", ""];
+          return [codigo, (e.name || "").toUpperCase(), cpfFormatted, classe, empTipBruto > 0 ? Number(empTipBruto.toFixed(2)) : "", ""];
         })
         .sort((a, b) => (a[1] || "").localeCompare(b[1] || ""));
 
-      // Monta a planilha
       const wsData = [
-        [`${solidesCode ? `${solidesCode} - ` : ""}${companyName}`, "", "", "", "", ""],
+        [`${codigoContabil ? `${codigoContabil} - ` : ""}${companyName}`, "", "", "", "", ""],
         [`Planilha de Lançamentos - ${monthLbl}`, "", "", "", "", ""],
         ["Código", "Nome", "CPF", "Classe", "Gorjeta SN - Lei 134", "Adic. noturno horas", "Qtd Colunas Auxiliares:#2", `Layout:#${layoutCode}`],
         ...empRows.map(r => [...r, "CodContInterm:#0", "Qtd Colunas Auxiliares:#2", `Layout:#${layoutCode}`]),
@@ -29264,10 +29320,10 @@ function OperationalGorjetas({ employee, data }) {
       ];
       const wb = XLSX.utils.book_new();
       XLSX.utils.book_append_sheet(wb, ws, "Lançamentos");
-      const fileName = `Planilha_Lancamentos_${solidesCode || "export"}_${year}-${String(month+1).padStart(2,"0")}.xlsx`;
+      const fileName = `Gorjetas_${(restaurant?.name || "restaurante").replace(/\s+/g, "_")}_${targetYear}-${String(targetMonth+1).padStart(2,"0")}.xlsx`;
       XLSX.writeFile(wb, fileName);
-    } catch (e) { console.error("export Sólides error:", e); window.alert("Erro ao exportar planilha. Tente novamente."); }
-    setExportingSolides(false);
+    } catch (e) { console.error("export contabil error:", e); window.alert("Erro ao exportar planilha. Tente novamente."); }
+    setExportingContabil(false);
   }
 
   // Semana corrente (últimos 7 dias do mês ou do mês atual)
@@ -29286,10 +29342,17 @@ function OperationalGorjetas({ employee, data }) {
           <div style={{fontSize:17,color:"var(--text)",fontWeight:700,marginTop:2}}>{restaurant?.name ?? "Restaurante"}</div>
         </div>
         <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
-          <button onClick={exportSolides} disabled={exportingSolides || tips.length === 0}
-            title={tips.length === 0 ? "Nenhuma gorjeta lançada neste mês" : "Exportar XLSX no formato Sólides (Planilha de Lançamentos)"}
+          {onUpdate && (
+            <button onClick={()=>setImportContabilForm({ rawText: "", parsed: null })}
+              title="Colar lista de empregados + código contábil pra preencher os cadastros em massa"
+              style={{padding:"8px 14px",borderRadius:10,border:"1px solid #3b82f644",background:"#3b82f611",color:"#3b82f6",cursor:"pointer",fontSize:12,fontWeight:600,fontFamily:"'DM Sans',sans-serif"}}>
+              📥 Importar códigos contábeis
+            </button>
+          )}
+          <button onClick={()=>exportContabil()} disabled={exportingContabil || tips.length === 0}
+            title={tips.length === 0 ? "Nenhuma gorjeta lançada neste mês" : "Baixar planilha do mês pra enviar pra contabilidade"}
             style={{padding:"8px 14px",borderRadius:10,border:"1px solid var(--green)44",background:tips.length===0?"transparent":"var(--green)11",color:"var(--green)",cursor:tips.length===0?"not-allowed":"pointer",fontSize:12,fontWeight:600,fontFamily:"'DM Sans',sans-serif",opacity:tips.length===0?0.5:1}}>
-            {exportingSolides ? "⏳ Exportando..." : "📊 Exportar Sólides"}
+            {exportingContabil ? "⏳ Exportando..." : "📊 Exportar Excel da contabilidade"}
           </button>
           <div style={{display:"flex",gap:4,alignItems:"center",background:"var(--card-bg)",border:"1px solid var(--border)",borderRadius:10,padding:4}}>
             <button onClick={()=>navMonth(-1)} style={{background:"none",border:"none",padding:"4px 10px",cursor:"pointer",fontSize:14,color:"var(--text2)"}}>‹</button>
@@ -29426,6 +29489,8 @@ function OperationalGorjetas({ employee, data }) {
                   <th style={{padding:"8px 14px",textAlign:"left",fontSize:10,color:"var(--text3)",fontWeight:700,textTransform:"uppercase",letterSpacing:0.4}}>Colaborador</th>
                   <th style={{padding:"8px 12px",textAlign:"left",fontSize:10,color:"var(--text3)",fontWeight:700,textTransform:"uppercase",letterSpacing:0.4}}>Área</th>
                   <th style={{padding:"8px 12px",textAlign:"right",fontSize:10,color:"var(--text3)",fontWeight:700,textTransform:"uppercase",letterSpacing:0.4}}>Dias</th>
+                  <th style={{padding:"8px 12px",textAlign:"right",fontSize:10,color:"var(--text3)",fontWeight:700,textTransform:"uppercase",letterSpacing:0.4}}>Bruto</th>
+                  <th style={{padding:"8px 12px",textAlign:"right",fontSize:10,color:"var(--text3)",fontWeight:700,textTransform:"uppercase",letterSpacing:0.4}}>Imposto</th>
                   <th style={{padding:"8px 12px",textAlign:"right",fontSize:10,color:"var(--text3)",fontWeight:700,textTransform:"uppercase",letterSpacing:0.4}}>Líquido</th>
                 </tr>
               </thead>
@@ -29452,12 +29517,14 @@ function OperationalGorjetas({ employee, data }) {
                           ) : "—"}
                         </td>
                         <td style={{padding:"8px 12px",textAlign:"right",color:"var(--text3)"}}>{r.days}</td>
+                        <td style={{padding:"8px 12px",textAlign:"right",color:"var(--text2)",fontFamily:"'DM Mono',monospace"}}>{fmt(r.gross)}</td>
+                        <td style={{padding:"8px 12px",textAlign:"right",color:"#dc2626",fontFamily:"'DM Mono',monospace"}}>{fmt(r.tax)}</td>
                         <td style={{padding:"8px 12px",textAlign:"right",color:"#15803d",fontFamily:"'DM Mono',monospace",fontWeight:700}}>{fmt(r.net)}</td>
                       </tr>
                       {isExpanded && (
                         <tr style={{background:"var(--bg2)"}}>
                           <td></td>
-                          <td colSpan={4} style={{padding:"6px 14px 14px"}}>
+                          <td colSpan={6} style={{padding:"6px 14px 14px"}}>
                             <div style={{fontSize:11,color:"var(--text3)",marginBottom:6,fontWeight:600,textTransform:"uppercase",letterSpacing:0.4}}>📅 Detalhamento — {r.tipsList.length} dia(s)</div>
                             <table style={{width:"100%",borderCollapse:"collapse",fontSize:12,background:"var(--card-bg)",border:"1px solid var(--border)",borderRadius:8,overflow:"hidden"}}>
                               <thead>
@@ -29493,9 +29560,146 @@ function OperationalGorjetas({ employee, data }) {
         )}
       </div>
 
+      {/* HISTÓRICO — meses com escala fechada, com botão de exportar cada um */}
+      {(() => {
+        const allTipsRest = (data?.tips || []).filter(t => t.restaurantId === restaurantId);
+        const allMksWithTips = [...new Set(allTipsRest.map(t => t.monthKey))];
+        const closedMks = allMksWithTips
+          .filter(mkk => data?.scheduleStatus?.[restaurantId]?.[mkk]?.status === "closed")
+          .filter(mkk => mkk !== mk) // não mostra o mês atualmente exibido (já tem header e export)
+          .sort((a, b) => b.localeCompare(a)); // mais recente primeiro
+        if (closedMks.length === 0) return null;
+        return (
+          <div style={{marginTop:24,background:"var(--card-bg)",border:"1px solid var(--border)",borderRadius:12,overflow:"hidden"}}>
+            <div style={{padding:"10px 16px",borderBottom:"1px solid var(--border)",background:"var(--bg2)"}}>
+              <div style={{fontSize:13,color:"var(--text)",fontWeight:700}}>📚 Histórico — meses fechados ({closedMks.length})</div>
+              <div style={{fontSize:11,color:"var(--text3)",marginTop:2}}>Exporte a planilha de qualquer mês com escala fechada pra enviar pra contabilidade.</div>
+            </div>
+            <div>
+              {closedMks.map(mkk => {
+                const [yy, mm] = mkk.split("-").map(Number);
+                const mkkTips = allTipsRest.filter(t => t.monthKey === mkk);
+                const monthGross = mkkTips.reduce((s, t) => s + (t.myShare ?? 0), 0);
+                const monthNet = mkkTips.reduce((s, t) => s + (t.myNet ?? 0), 0);
+                const empCount = new Set(mkkTips.map(t => t.employeeId)).size;
+                const closedAt = data?.scheduleStatus?.[restaurantId]?.[mkk]?.closedAt;
+                return (
+                  <div key={mkk} style={{padding:"12px 16px",borderTop:"1px solid var(--border)",display:"flex",alignItems:"center",justifyContent:"space-between",flexWrap:"wrap",gap:12}}>
+                    <div style={{flex:1,minWidth:0}}>
+                      <div style={{fontSize:14,color:"var(--text)",fontWeight:700,textTransform:"capitalize"}}>{monthLabel(yy, mm-1)}</div>
+                      <div style={{fontSize:11,color:"var(--text3)",marginTop:2}}>
+                        {empCount} empregado(s) · Bruto {fmt(monthGross)} · Líquido {fmt(monthNet)}
+                        {closedAt && <span> · fechado em {new Date(closedAt).toLocaleDateString("pt-BR")}</span>}
+                      </div>
+                    </div>
+                    <div style={{display:"flex",gap:8}}>
+                      <button onClick={()=>{ setYear(yy); setMonth(mm-1); }}
+                        style={{...S.btnSecondary,fontSize:11,padding:"5px 10px"}}>
+                        Ver detalhes
+                      </button>
+                      <button onClick={()=>exportContabil(yy, mm-1)} disabled={exportingContabil}
+                        style={{padding:"5px 12px",borderRadius:8,border:"1px solid var(--green)44",background:"var(--green)11",color:"var(--green)",cursor:"pointer",fontSize:11,fontWeight:600,fontFamily:"'DM Sans',sans-serif"}}>
+                        📊 Exportar
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        );
+      })()}
+
       <div style={{marginTop:14,fontSize:11,color:"var(--text3)",lineHeight:1.5}}>
         💡 Visão read-only dos dados já processados pelo Gestor Administrativo. Para lançar novas gorjetas, fechar semana ou editar a divisão, use o Portal Adm (botão 📊 no topo).
       </div>
+
+      {/* Modal: Importar códigos contábeis em massa */}
+      {importContabilForm && (() => {
+        const parsed = importContabilForm.parsed;
+        return (
+          <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.6)",zIndex:9999,display:"flex",alignItems:"center",justifyContent:"center",padding:16}} onClick={()=>setImportContabilForm(null)}>
+            <div onClick={e=>e.stopPropagation()} style={{background:"var(--card-bg)",border:"1px solid var(--border)",borderRadius:14,maxWidth:680,width:"100%",maxHeight:"85vh",overflowY:"auto",padding:24}}>
+              <h3 style={{margin:"0 0 8px",color:"#3b82f6",fontSize:16,fontWeight:700}}>📥 Importar códigos contábeis</h3>
+              <p style={{color:"var(--text2)",fontSize:12,margin:"0 0 12px",lineHeight:1.5}}>
+                Cole uma lista no formato de sua escolha. O sistema identifica CPF, nome e código automaticamente. Tenta casar primeiro pelo CPF, depois pelo nome.
+              </p>
+              <details style={{marginBottom:12,fontSize:11,color:"var(--text3)"}}>
+                <summary style={{cursor:"pointer",color:"#3b82f6"}}>Ver exemplos de formato aceito</summary>
+                <div style={{marginTop:8,padding:"8px 10px",background:"var(--bg2)",borderRadius:6,fontFamily:"'DM Mono',monospace",fontSize:10,whiteSpace:"pre-wrap"}}>{`# Tab/CSV (cole de Excel/Sheets):
+000045	ALEZIO MATOS DA SILVA	062.720.413-90
+000025	ANTONIA NAYARA SOARES DE SOUSA	383.998.798-94
+
+# Lista simples:
+ALEZIO MATOS DA SILVA, 000045
+ANTONIA, 000025
+
+# Com hífen:
+DIEGO FERREIRA - 000004`}</div>
+              </details>
+              <textarea
+                value={importContabilForm.rawText}
+                onChange={e=>setImportContabilForm({...importContabilForm, rawText: e.target.value, parsed: null})}
+                placeholder="Cole aqui as linhas..."
+                rows={10}
+                style={{...S.input,fontFamily:"'DM Mono',monospace",fontSize:12,width:"100%",boxSizing:"border-box",resize:"vertical"}}
+              />
+              <div style={{display:"flex",gap:8,marginTop:10,marginBottom:14}}>
+                <button onClick={()=>{
+                  const result = parseImportContabilLines(importContabilForm.rawText);
+                  setImportContabilForm({...importContabilForm, parsed: result});
+                }} disabled={!importContabilForm.rawText.trim()}
+                  style={{...S.btnSecondary,fontSize:12,padding:"6px 12px",opacity:importContabilForm.rawText.trim()?1:0.5}}>
+                  🔍 Analisar
+                </button>
+              </div>
+              {parsed && (
+                <div style={{padding:"10px 12px",background:"var(--bg2)",borderRadius:8,marginBottom:14,fontSize:12,color:"var(--text2)",lineHeight:1.6}}>
+                  <div style={{color:"var(--green)"}}>✅ <strong>{parsed.matched.length}</strong> empregado(s) com código identificado</div>
+                  {parsed.unmatched.length > 0 && <div style={{color:"#f59e0b",marginTop:4}}>⚠️ <strong>{parsed.unmatched.length}</strong> linha(s) sem match (não bateu CPF nem nome)</div>}
+                  {parsed.conflicts.length > 0 && <div style={{color:"#ef4444",marginTop:4}}>❌ <strong>{parsed.conflicts.length}</strong> conflito(s) (mesmo nome bateu com vários empregados — adicione o CPF pra desambiguar)</div>}
+                  {parsed.matched.length > 0 && (
+                    <details style={{marginTop:8}}>
+                      <summary style={{cursor:"pointer",fontSize:11,color:"var(--text3)"}}>Ver matches ({parsed.matched.length})</summary>
+                      <div style={{marginTop:6,maxHeight:160,overflowY:"auto",fontSize:11,fontFamily:"'DM Mono',monospace"}}>
+                        {parsed.matched.map((m,i) => (
+                          <div key={i} style={{padding:"2px 0"}}>
+                            <strong style={{color:"#3b82f6"}}>{m.code}</strong> → {m.empName}
+                          </div>
+                        ))}
+                      </div>
+                    </details>
+                  )}
+                  {parsed.unmatched.length > 0 && (
+                    <details style={{marginTop:6}}>
+                      <summary style={{cursor:"pointer",fontSize:11,color:"#f59e0b"}}>Ver linhas sem match ({parsed.unmatched.length})</summary>
+                      <div style={{marginTop:6,maxHeight:120,overflowY:"auto",fontSize:11,fontFamily:"'DM Mono',monospace",color:"var(--text3)"}}>
+                        {parsed.unmatched.map((l,i) => <div key={i} style={{padding:"2px 0"}}>{l}</div>)}
+                      </div>
+                    </details>
+                  )}
+                  {parsed.conflicts.length > 0 && (
+                    <details style={{marginTop:6}}>
+                      <summary style={{cursor:"pointer",fontSize:11,color:"#ef4444"}}>Ver conflitos ({parsed.conflicts.length})</summary>
+                      <div style={{marginTop:6,maxHeight:120,overflowY:"auto",fontSize:11,fontFamily:"'DM Mono',monospace",color:"var(--text3)"}}>
+                        {parsed.conflicts.map((c,i) => <div key={i} style={{padding:"2px 0"}}>{c.line} → {c.candidates.join(" | ")}</div>)}
+                      </div>
+                    </details>
+                  )}
+                </div>
+              )}
+              <div style={{display:"flex",justifyContent:"flex-end",gap:10}}>
+                <button onClick={()=>setImportContabilForm(null)} style={{...S.btnSecondary,padding:"8px 14px",fontSize:13}}>Cancelar</button>
+                <button onClick={applyImportContabil}
+                  disabled={!parsed || parsed.matched.length === 0}
+                  style={{...S.btnPrimary,padding:"8px 14px",fontSize:13,fontWeight:700,background:"#3b82f6",borderColor:"#3b82f6",opacity:(parsed && parsed.matched.length > 0)?1:0.5}}>
+                  Aplicar {parsed?.matched?.length > 0 ? `(${parsed.matched.length})` : ""}
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 }
