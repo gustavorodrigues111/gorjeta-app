@@ -11102,6 +11102,8 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
   // Config local state — unified deferred save for ALL config settings
   const [localConfig, setLocalConfig] = useState(null); // null = clean, object = pending changes
   const configDirty = localConfig !== null;
+  // Modal pra escolher data retroativa quando muda taxRate
+  const [taxRetroModal, setTaxRetroModal] = useState(null); // null | { oldRate, newRate, fromDate, applyRetro }
 
   function getLocalRest() {
     if (!localConfig) return { ...restaurant };
@@ -11136,10 +11138,37 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
   }
   function saveConfig() {
     if (!localConfig) return;
+    // Detecta mudança de taxRate — se mudou, pergunta a partir de qual data aplicar
+    const oldTaxRate = restaurant.taxRate ?? TAX;
+    const newTaxRate = localConfig.taxRate ?? oldTaxRate;
+    const taxChanged = "taxRate" in localConfig && newTaxRate !== oldTaxRate;
+    if (taxChanged) {
+      setTaxRetroModal({ oldRate: oldTaxRate, newRate: newTaxRate, fromDate: today(), applyRetro: true });
+      return; // Espera escolha do usuário no modal
+    }
+    doSaveConfig(null, null);
+  }
+  function doSaveConfig(retroFromDate, newTaxRateForRetro) {
+    if (!localConfig) return;
     const updated = restaurants.map(r => r.id === rid ? { ...r, ...localConfig } : r);
     onUpdate("restaurants", updated);
+    // Recalcula tips se foi pedido retroativo
+    if (retroFromDate && newTaxRateForRetro != null) {
+      let affectedCount = 0;
+      const updatedTips = (tips || []).map(t => {
+        if (t.restaurantId !== rid) return t;
+        if (t.date < retroFromDate) return t;
+        const myShare = t.myShare || 0;
+        const newTax = round2(myShare * newTaxRateForRetro);
+        affectedCount++;
+        return { ...t, taxRate: newTaxRateForRetro, myTax: newTax, myNet: round2(myShare - newTax) };
+      });
+      onUpdate("tips", updatedTips);
+      onUpdate("_toast", `✅ Configurações salvas + ${affectedCount} lançamento(s) recalculado(s) com ${(newTaxRateForRetro*100).toFixed(0)}%`);
+    } else {
+      onUpdate("_toast", "✅ Configurações salvas!");
+    }
     setLocalConfig(null);
-    onUpdate("_toast", "✅ Configurações salvas!");
   }
   function discardConfig() { setLocalConfig(null); }
 
@@ -15844,6 +15873,61 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
               </div>
             )}
 
+            {/* Modal: Aplicar nova alíquota retroativamente */}
+            {taxRetroModal && (() => {
+              const { oldRate, newRate, fromDate, applyRetro } = taxRetroModal;
+              const monthStart = `${year}-${String(month+1).padStart(2,"0")}-01`;
+              const affected = (tips || []).filter(t => t.restaurantId === rid && t.date >= fromDate).length;
+              const empAffected = new Set((tips || []).filter(t => t.restaurantId === rid && t.date >= fromDate).map(t => t.employeeId)).size;
+              return (
+                <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.6)",zIndex:9999,display:"flex",alignItems:"center",justifyContent:"center",padding:16}} onClick={()=>setTaxRetroModal(null)}>
+                  <div onClick={e=>e.stopPropagation()} style={{background:"var(--card-bg)",border:"1px solid var(--border)",borderRadius:14,maxWidth:520,width:"100%",padding:24,boxShadow:"0 20px 50px rgba(0,0,0,0.3)"}}>
+                    <h3 style={{margin:"0 0 8px",color:ac,fontSize:16,fontWeight:700}}>💸 Mudança de alíquota: {(oldRate*100).toFixed(0)}% → {(newRate*100).toFixed(0)}%</h3>
+                    <p style={{color:"var(--text2)",fontSize:13,margin:"0 0 14px",lineHeight:1.5}}>
+                      A nova alíquota vale a partir de quando? Lançamentos antes da data ficam intactos.
+                    </p>
+                    <div style={{marginBottom:12}}>
+                      <label style={{display:"flex",alignItems:"flex-start",gap:8,padding:"10px 12px",borderRadius:8,border:`2px solid ${applyRetro?ac:"var(--border)"}`,background:applyRetro?ac+"08":"transparent",cursor:"pointer",marginBottom:6}}>
+                        <input type="radio" checked={applyRetro} onChange={()=>setTaxRetroModal({...taxRetroModal, applyRetro: true})} style={{accentColor:ac,marginTop:3}}/>
+                        <div style={{flex:1}}>
+                          <div style={{fontSize:13,fontWeight:600,color:"var(--text)"}}>Aplicar retroativamente a partir de:</div>
+                          <input type="date" value={fromDate} onChange={e=>setTaxRetroModal({...taxRetroModal, fromDate: e.target.value, applyRetro: true})} style={{...S.input,fontSize:12,marginTop:6,padding:"6px 8px"}}/>
+                        </div>
+                      </label>
+                      <label style={{display:"flex",alignItems:"flex-start",gap:8,padding:"10px 12px",borderRadius:8,border:`2px solid ${!applyRetro?ac:"var(--border)"}`,background:!applyRetro?ac+"08":"transparent",cursor:"pointer"}}>
+                        <input type="radio" checked={!applyRetro} onChange={()=>setTaxRetroModal({...taxRetroModal, applyRetro: false})} style={{accentColor:ac,marginTop:3}}/>
+                        <div>
+                          <div style={{fontSize:13,fontWeight:600,color:"var(--text)"}}>Só novos lançamentos</div>
+                          <div style={{fontSize:11,color:"var(--text3)",marginTop:2}}>Os existentes ficam com {(oldRate*100).toFixed(0)}%.</div>
+                        </div>
+                      </label>
+                    </div>
+                    {applyRetro && fromDate && (
+                      <div style={{padding:"10px 12px",background:"var(--bg2)",borderRadius:8,marginBottom:14,fontSize:12,color:"var(--text2)",lineHeight:1.6}}>
+                        <strong>{affected}</strong> lançamento(s) de <strong>{empAffected}</strong> empregado(s) terão imposto e líquido recalculados.
+                        <br/><span style={{color:"var(--text3)",fontSize:11}}>Bruto não muda. Só imposto e líquido são ajustados.</span>
+                        <div style={{marginTop:6,fontSize:11,color:"var(--text3)"}}>
+                          Atalhos: <button onClick={()=>setTaxRetroModal({...taxRetroModal, fromDate: monthStart, applyRetro: true})} style={{background:"none",border:"none",color:ac,cursor:"pointer",padding:0,fontSize:11,textDecoration:"underline"}}>início deste mês</button>
+                          {" · "}
+                          <button onClick={()=>setTaxRetroModal({...taxRetroModal, fromDate: `${year}-01-01`, applyRetro: true})} style={{background:"none",border:"none",color:ac,cursor:"pointer",padding:0,fontSize:11,textDecoration:"underline"}}>início deste ano</button>
+                        </div>
+                      </div>
+                    )}
+                    <div style={{display:"flex",justifyContent:"flex-end",gap:10}}>
+                      <button onClick={()=>setTaxRetroModal(null)} style={{...S.btnSecondary,padding:"8px 14px",fontSize:13}}>Cancelar</button>
+                      <button onClick={()=>{
+                        const retroDate = applyRetro ? fromDate : null;
+                        setTaxRetroModal(null);
+                        doSaveConfig(retroDate, newRate);
+                      }} disabled={applyRetro && !fromDate}
+                        style={{...S.btnPrimary,padding:"8px 14px",fontSize:13,fontWeight:700,opacity:(applyRetro&&!fromDate)?0.5:1}}>
+                        Salvar
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              );
+            })()}
           </div>
         )}
       </div>
