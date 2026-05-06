@@ -11390,8 +11390,9 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
   const ac = "var(--ac)";
   const canTips  = perms.tips     || isOwner;
   const canSched = perms.schedule || isOwner;
-  // Líder de área: pode ver a escala em Planejamento, mas não editar.
-  const canSchedEdit = canSched && !isLider;
+  // Líder de área: por padrão só visualiza. Mas se a perm `liderEditaEscala` estiver
+  // marcada (admin.liderEditaEscala em pessoas → manager.perms.liderEditaEscala), edita.
+  const canSchedEdit = canSched && (!isLider || perms.liderEditaEscala === true);
   // v8.17.0: isDP é mantido como fonte legada; novos checks usam perms granulares com fallback no isDP.
   const isDP     = perms.isDP === true;
   const canDpCanal           = isDP || perms.dpCanal === true;
@@ -27162,6 +27163,7 @@ const PERM_GROUPS = [
     id: "g_escala", label: "📅 Escala e Freelas", color: "#3b82f6", bg: "#3b82f622",
     perms: [
       { key: "admin.schedule",              label: "Editar escala",                icon: "📅" },
+      { key: "admin.liderEditaEscala",      label: "Líder pode editar escala (destrava bloqueio de líder)", icon: "✏️" },
       { key: "admin.fecharEscala",          label: "Fechar mês da escala",         icon: "🔒" },
       // v8.31.0: 'Agendar e fechar lote de freelas' deixou de ser checkbox — líder de área ganha automático.
       // Quem já tinha operational.freelasFechar marcado continua tendo (legacy fallback nas checagens).
