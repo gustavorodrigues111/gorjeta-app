@@ -668,6 +668,13 @@ const K = {
   // ═══ Freelas ═══
   freelaShifts:        "v4:freelaShifts",          // [{id, restaurantId, pessoaId, date, entrada, saida, intervalo, area, valorTipo:"hora"|"diaria", valorUnit, totalCalc, status:"aberto"|"fechamento"|"pago", lotePagamentoId?, lancadoPor, lancadoEm, observacao}]
   freelaPagamentos:    "v4:freelaPagamentos",      // [{id, restaurantId, criadoEm, criadoPor, shiftIds:[], totalGeral, status:"em_fechamento"|"pago", pagoEm?, pagoPor?}]
+
+  // ═══ Reservas (módulo de reservas de mesa) ═══
+  reservasConfig:      "v4:reservasConfig",         // {[rid]: { turnos:[{id,nome,diasSemana:[],horarios:[],capacidadePessoas,slotMinutes,ativo}], duracaoMediaMin, antecedenciaMinHoras, antecedenciaMaxDias, mensagemConfirmacao, mensagemLembrete, autoNoShowAposMin }}
+  reservasSalas:       "v4:reservasSalas",          // [{id, restaurantId, nome, ordem, ativa, descricao?}]
+  reservasTiposMesa:   "v4:reservasTiposMesa",      // [{id, restaurantId, salaId, label, capacidade, quantidade, descricao?, ativa, ordem}]
+  reservasClientes:    "v4:reservasClientes",       // [{id, restaurantId, nome, telefone, email?, aniversario?, observacoes?, tags:[], visitas:0, ultimaVisita?, noShows:0, blacklisted:false, createdAt, createdBy}]
+  reservas:            "v4:reservas",               // [{id, restaurantId, dateTime, party, turnoId, salaId?, tipoMesaId?, mesaIds:[], clienteId?, nomeCliente, telCliente, emailCliente?, status:"feita"|"confirmada"|"sentou"|"finalizada"|"no-show"|"cancelada", ocasiao?, observacoesCliente?, observacoesInternas?, fonte:"widget"|"backoffice", forcada:false, criadaPor, criadaPorId, confirmadaEm?, confirmadaPor?, sentouEm?, sentouPor?, finalizouEm?, noShowEm?, canceladaEm?, canceladaPor?, createdAt}]
 };
 
 // ── Inbox helpers ──
@@ -15259,6 +15266,25 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
           />
         )}
 
+        {/* RESERVAS — módulo de reservas de mesa */}
+        {(tab === "reservas_hoje" || tab === "reservas_calendario" || tab === "reservas_clientes" || tab === "reservas_config") && (
+          <ReservasTab
+            tab={tab}
+            restaurantId={rid}
+            restaurant={restaurant}
+            reservas={data?.reservas ?? []}
+            reservasConfig={data?.reservasConfig ?? {}}
+            reservasSalas={data?.reservasSalas ?? []}
+            reservasTiposMesa={data?.reservasTiposMesa ?? []}
+            reservasClientes={data?.reservasClientes ?? []}
+            currentUser={currentUser}
+            perms={perms}
+            isOwner={isOwner}
+            mobileOnly={mobileOnly}
+            onUpdate={onUpdate}
+          />
+        )}
+
         {/* TRILHA — integrada na aba Equipe */}
 
         {/* NOTIFICAÇÕES */}
@@ -21854,6 +21880,22 @@ function buildShellSections({ pessoa, restaurantId, isOwner, employees, restaura
       ),
     });
   }
+  // Reservas — visível pra qualquer perfil que tenha pelo menos a perm operar
+  const canReservasOp     = op.reservasOperar || op.reservasOperarForce;
+  const canReservasGer    = op.reservasGerenciar;
+  const canReservasClient = ad.reservasClientes;
+  const canReservasConfig = ad.reservasConfig;
+  if (canReservasOp || canReservasGer || canReservasClient || canReservasConfig || isOwner) {
+    opItems.push({
+      id: "mod_reservas", label: "Reservas", icon: "📅",
+      subtabs: st(
+        (canReservasOp || canReservasGer || isOwner) && { id: "hoje",      label: "Hoje",          kind: "manager", tab: "reservas_hoje" },
+        (canReservasOp || canReservasGer || isOwner) && { id: "calendario", label: "Calendário",   kind: "manager", tab: "reservas_calendario" },
+        (canReservasClient || isOwner)               && { id: "clientes",   label: "Clientes",     kind: "manager", tab: "reservas_clientes" },
+        (canReservasConfig || isOwner)               && { id: "config",     label: "Configurações", kind: "manager", tab: "reservas_config" },
+      ),
+    });
+  }
   if (opItems.length > 0) {
     sections.push({ group: "Operação", color: "#d4a017", items: opItems });
   }
@@ -27131,6 +27173,16 @@ const PERM_GROUPS = [
       { key: "operational.fichasTecnicas",   label: "Consultar fichas técnicas", icon: "📖" },
     ],
   },
+  {
+    id: "g_reservas", label: "📅 Reservas de Mesa", color: "#dc2626", bg: "#dc262622",
+    perms: [
+      { key: "operational.reservasOperar",      label: "Operar reservas (criar respeitando lotação, confirmar, sentou, no-show)", icon: "📅" },
+      { key: "operational.reservasOperarForce", label: "Forçar reserva mesmo lotado",      icon: "⚡" },
+      { key: "operational.reservasGerenciar",   label: "Editar/cancelar reservas + ver histórico", icon: "✏️" },
+      { key: "admin.reservasClientes",          label: "Gerir lista de clientes (CRM)",     icon: "👤" },
+      { key: "admin.reservasConfig",            label: "Configurar salões, mesas, turnos, mensagens", icon: "⚙️" },
+    ],
+  },
   // Mantidos como legacy pra compat — não aparecem na matriz nova
   {
     id: "g_legacy", label: "(legacy)", color: "#999", bg: "#99922", legacy: true,
@@ -27206,7 +27258,9 @@ const PERM_PROFILES = [
 const ALL_PERM_KEYS = [
   "operational.escalas","operational.gorjetas","operational.trilhas","operational.reunioes",
   "operational.contagens","operational.compras","operational.checklists","operational.fichasTecnicas","operational.temperaturas",
+  "operational.reservasOperar","operational.reservasOperarForce","operational.reservasGerenciar",
   "admin.tips","admin.schedule","admin.employees","admin.roles","admin.vt","admin.comunicados","admin.faq","admin.config","admin.pessoas",
+  "admin.reservasClientes","admin.reservasConfig",
   "special.isDP","special.isLider",
 ];
 
@@ -29796,6 +29850,1245 @@ DIEGO FERREIRA - 000004`}</div>
           </div>
         );
       })()}
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════
+// ──  RESERVAS — MÓDULO DE RESERVAS DE MESA                      ──
+// ═══════════════════════════════════════════════════════════════
+// 4 sub-tabs (gated por permissão): Hoje, Calendário, Clientes, Configurações
+// Permissões:
+//   operational.reservasOperar       — Hoje + Calendário (futuras) + criar respeitando lotação + ações
+//   operational.reservasOperarForce  — Permite forçar reserva mesmo lotado
+//   operational.reservasGerenciar    — Editar/cancelar + ver histórico passado
+//   admin.reservasClientes           — Ver/editar lista de clientes (CRM)
+//   admin.reservasConfig             — Configurações (salões, tipos mesa, turnos, mensagens)
+
+const RESERVA_STATUS_INFO = {
+  feita:       { label: "Feita",       icon: "📋", color: "#3b82f6", bg: "#3b82f622" },
+  confirmada:  { label: "Confirmada",  icon: "✅", color: "#10b981", bg: "#10b98122" },
+  sentou:      { label: "Sentou",      icon: "🪑", color: "#8b5cf6", bg: "#8b5cf622" },
+  finalizada:  { label: "Finalizada",  icon: "✔️", color: "#64748b", bg: "#64748b22" },
+  "no-show":   { label: "No-show",     icon: "⛔", color: "#ef4444", bg: "#ef444422" },
+  cancelada:   { label: "Cancelada",   icon: "❌", color: "#9ca3af", bg: "#9ca3af22" },
+};
+
+const DIAS_SEMANA = ["Dom","Seg","Ter","Qua","Qui","Sex","Sáb"];
+
+// Helpers
+function reservaPlaceholders(reserva, restaurant, cliente) {
+  const dt = new Date(reserva.dateTime);
+  const dataStr = dt.toLocaleDateString("pt-BR", { weekday: "long", day: "2-digit", month: "long", year: "numeric" });
+  const horaStr = dt.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
+  return {
+    "{nome}":         cliente?.nome || reserva.nomeCliente || "—",
+    "{data}":         dataStr,
+    "{hora}":         horaStr,
+    "{pessoas}":      String(reserva.party || 0),
+    "{restaurante}":  restaurant?.name || "—",
+  };
+}
+function aplicarPlaceholders(template, vals) {
+  let out = template || "";
+  Object.entries(vals).forEach(([k, v]) => { out = out.split(k).join(v); });
+  return out;
+}
+function whatsAppLink(telefone, mensagem) {
+  const limpo = (telefone || "").replace(/\D/g, "");
+  // Brasil: se 11 dígitos (DDD+9+8 numeros) ou 10 (sem 9), adiciona 55
+  let e164 = limpo;
+  if (limpo.length === 10 || limpo.length === 11) e164 = "55" + limpo;
+  return `https://wa.me/${e164}?text=${encodeURIComponent(mensagem || "")}`;
+}
+
+const MENSAGEM_CONFIRMACAO_DEFAULT =
+  "Olá {nome}! Confirmando sua reserva no {restaurante} para {data} às {hora} para {pessoas} pessoa(s). Confirma pra mim? Estamos te esperando!";
+
+function ReservasTab({ tab, restaurantId, restaurant, reservas, reservasConfig, reservasSalas, reservasTiposMesa, reservasClientes, currentUser, perms, isOwner, mobileOnly, onUpdate }) {
+  const op = perms?.operational || {};
+  const ad = perms?.admin || {};
+  const canOperar    = isOwner || op.reservasOperar || op.reservasOperarForce || op.reservasGerenciar;
+  const canForce     = isOwner || op.reservasOperarForce;
+  const canGerenciar = isOwner || op.reservasGerenciar;
+  const canClientes  = isOwner || ad.reservasClientes;
+  const canConfig    = isOwner || ad.reservasConfig;
+
+  const config = reservasConfig?.[restaurantId] || {};
+  const restReservas = (reservas || []).filter(r => r.restaurantId === restaurantId);
+  const restSalas    = (reservasSalas || []).filter(s => s.restaurantId === restaurantId).sort((a,b) => (a.ordem ?? 999) - (b.ordem ?? 999));
+  const restTipos    = (reservasTiposMesa || []).filter(t => t.restaurantId === restaurantId).sort((a,b) => (a.ordem ?? 999) - (b.ordem ?? 999));
+  const restClientes = (reservasClientes || []).filter(c => c.restaurantId === restaurantId);
+
+  // ─── HOJE ───
+  if (tab === "reservas_hoje" && canOperar) {
+    return <ReservasHoje
+      restaurantId={restaurantId} restaurant={restaurant}
+      reservas={restReservas} clientes={restClientes}
+      config={config} salas={restSalas} tipos={restTipos}
+      currentUser={currentUser} canForce={canForce} canGerenciar={canGerenciar}
+      onUpdate={onUpdate} mobileOnly={mobileOnly}
+      allReservas={reservas} allClientes={reservasClientes}
+    />;
+  }
+  if (tab === "reservas_calendario" && canOperar) {
+    return <ReservasCalendario
+      restaurantId={restaurantId} restaurant={restaurant}
+      reservas={restReservas} clientes={restClientes}
+      config={config} salas={restSalas} tipos={restTipos}
+      currentUser={currentUser} canForce={canForce} canGerenciar={canGerenciar}
+      onUpdate={onUpdate} mobileOnly={mobileOnly}
+      allReservas={reservas} allClientes={reservasClientes}
+    />;
+  }
+  if (tab === "reservas_clientes" && canClientes) {
+    return <ReservasClientes
+      restaurantId={restaurantId} restaurant={restaurant}
+      clientes={restClientes} reservas={restReservas}
+      currentUser={currentUser} mobileOnly={mobileOnly} onUpdate={onUpdate}
+      allClientes={reservasClientes}
+    />;
+  }
+  if (tab === "reservas_config" && canConfig) {
+    return <ReservasConfig
+      restaurantId={restaurantId} restaurant={restaurant}
+      config={config} salas={restSalas} tipos={restTipos}
+      reservasConfig={reservasConfig} reservasSalas={reservasSalas} reservasTiposMesa={reservasTiposMesa}
+      currentUser={currentUser} mobileOnly={mobileOnly} onUpdate={onUpdate}
+    />;
+  }
+
+  return (
+    <div style={{padding:24, textAlign:"center", color:"var(--text3)"}}>
+      <div style={{fontSize:36,marginBottom:8}}>🔒</div>
+      <div style={{color:"var(--text)",fontWeight:700,fontSize:14}}>Sem permissão</div>
+      <p style={{fontSize:12,marginTop:4}}>Você não tem acesso a esta sub-aba de Reservas.</p>
+    </div>
+  );
+}
+
+// ─── HOJE ───
+function ReservasHoje({ restaurantId, restaurant, reservas, clientes, config, salas, tipos, currentUser, canForce, canGerenciar, onUpdate, mobileOnly, allReservas, allClientes }) {
+  const today_ = today();
+  const [filterStatus, setFilterStatus] = useState("todos"); // todos | feita | confirmada | sentou | "no-show" | cancelada
+  const [showNew, setShowNew] = useState(false);
+  const reservasHoje = reservas
+    .filter(r => r.dateTime?.slice(0,10) === today_)
+    .sort((a,b) => (a.dateTime || "").localeCompare(b.dateTime || ""));
+  const filtered = filterStatus === "todos" ? reservasHoje : reservasHoje.filter(r => r.status === filterStatus);
+  const counts = {};
+  reservasHoje.forEach(r => { counts[r.status] = (counts[r.status] || 0) + 1; });
+
+  return (
+    <div>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:12,marginBottom:16}}>
+        <h3 style={{color:"var(--text)",margin:0,fontSize:mobileOnly?16:20}}>📅 Reservas — Hoje</h3>
+        <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+          <span style={{color:"var(--text3)",fontSize:12,alignSelf:"center"}}>{new Date(today_+"T12:00:00").toLocaleDateString("pt-BR",{weekday:"long",day:"2-digit",month:"long"})}</span>
+          <button onClick={()=>setShowNew(true)} style={{...S.btnPrimary,fontSize:13,padding:"8px 16px"}}>+ Nova reserva</button>
+        </div>
+      </div>
+
+      {/* Filtros por status */}
+      <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:14}}>
+        <button onClick={()=>setFilterStatus("todos")} style={{padding:"5px 12px",borderRadius:8,border:`1px solid ${filterStatus==="todos"?"var(--ac)":"var(--border)"}`,background:filterStatus==="todos"?"var(--ac)11":"transparent",color:filterStatus==="todos"?"var(--ac)":"var(--text2)",cursor:"pointer",fontSize:11,fontWeight:600}}>
+          Todos ({reservasHoje.length})
+        </button>
+        {Object.entries(RESERVA_STATUS_INFO).map(([key, info]) => (
+          <button key={key} onClick={()=>setFilterStatus(key)}
+            style={{padding:"5px 12px",borderRadius:8,border:`1px solid ${filterStatus===key?info.color:"var(--border)"}`,background:filterStatus===key?info.bg:"transparent",color:filterStatus===key?info.color:"var(--text2)",cursor:"pointer",fontSize:11,fontWeight:600}}>
+            {info.icon} {info.label} ({counts[key] || 0})
+          </button>
+        ))}
+      </div>
+
+      {filtered.length === 0 ? (
+        <div style={{...S.card,padding:30,textAlign:"center",color:"var(--text3)",fontSize:13}}>
+          <div style={{fontSize:36,marginBottom:8}}>📭</div>
+          {reservasHoje.length === 0 ? "Nenhuma reserva hoje." : `Nenhuma reserva com status "${RESERVA_STATUS_INFO[filterStatus]?.label || filterStatus}".`}
+        </div>
+      ) : (
+        <div style={{display:"flex",flexDirection:"column",gap:8}}>
+          {filtered.map(r => (
+            <ReservaCard key={r.id} r={r}
+              cliente={clientes.find(c => c.id === r.clienteId)}
+              salas={salas} tipos={tipos}
+              restaurant={restaurant}
+              config={config}
+              currentUser={currentUser}
+              canGerenciar={canGerenciar}
+              onUpdate={onUpdate}
+              allReservas={allReservas}
+              allClientes={allClientes}
+              restaurantId={restaurantId}
+              mobileOnly={mobileOnly}
+            />
+          ))}
+        </div>
+      )}
+
+      {showNew && (
+        <ReservaModal
+          restaurantId={restaurantId}
+          restaurant={restaurant}
+          config={config}
+          salas={salas} tipos={tipos}
+          clientes={clientes}
+          allReservas={allReservas}
+          allClientes={allClientes}
+          currentUser={currentUser}
+          canForce={canForce}
+          onUpdate={onUpdate}
+          onClose={()=>setShowNew(false)}
+        />
+      )}
+    </div>
+  );
+}
+
+// ─── CARD DE RESERVA (lista) ───
+function ReservaCard({ r, cliente, salas, tipos, restaurant, config, currentUser, canGerenciar, onUpdate, allReservas, allClientes, restaurantId, mobileOnly }) {
+  const status = RESERVA_STATUS_INFO[r.status] || RESERVA_STATUS_INFO.feita;
+  const sala = salas.find(s => s.id === r.salaId);
+  const tipo = tipos.find(t => t.id === r.tipoMesaId);
+  const dt = new Date(r.dateTime);
+  const horaStr = dt.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
+
+  function setStatusReserva(novoStatus, extra = {}) {
+    const now = new Date().toISOString();
+    const author = currentUser?.name || "Gestor";
+    const updates = { status: novoStatus, ...extra };
+    if (novoStatus === "confirmada") { updates.confirmadaEm = now; updates.confirmadaPor = author; }
+    if (novoStatus === "sentou")     { updates.sentouEm = now; updates.sentouPor = author; }
+    if (novoStatus === "finalizada") { updates.finalizouEm = now; }
+    if (novoStatus === "no-show")    { updates.noShowEm = now; }
+    if (novoStatus === "cancelada")  { updates.canceladaEm = now; updates.canceladaPor = author; }
+    const nextReservas = (allReservas || []).map(x => x.id === r.id ? { ...x, ...updates } : x);
+    onUpdate("reservas", nextReservas);
+    onUpdate("_toast", `${status.icon} ${status.label} → ${RESERVA_STATUS_INFO[novoStatus]?.label || novoStatus}`);
+  }
+
+  function abrirWhatsApp() {
+    if (!r.telCliente) { window.alert("Sem telefone cadastrado."); return; }
+    const tpl = config?.mensagemConfirmacao || MENSAGEM_CONFIRMACAO_DEFAULT;
+    const msg = aplicarPlaceholders(tpl, reservaPlaceholders(r, restaurant, cliente));
+    window.open(whatsAppLink(r.telCliente, msg), "_blank", "noopener,noreferrer");
+  }
+
+  return (
+    <div style={{...S.card,padding:"12px 14px",border:`1px solid ${status.color}33`,background:`${status.bg}33`}}>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:12,flexWrap:"wrap"}}>
+        <div style={{flex:1,minWidth:200}}>
+          <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:4}}>
+            <span style={{fontSize:18,fontWeight:700,color:"var(--text)",fontFamily:"'DM Mono',monospace"}}>{horaStr}</span>
+            <span style={{padding:"2px 8px",borderRadius:6,background:status.bg,color:status.color,fontSize:10,fontWeight:700}}>{status.icon} {status.label}</span>
+            {r.forcada && <span title="Reserva forçada (ultrapassou capacidade)" style={{padding:"2px 6px",borderRadius:6,background:"#f59e0b22",color:"#f59e0b",fontSize:10,fontWeight:700}}>⚡ Forçada</span>}
+            <span style={{color:"var(--text3)",fontSize:11}}>· {r.party} pessoa{r.party!==1?"s":""}</span>
+          </div>
+          <div style={{color:"var(--text)",fontWeight:600,fontSize:14}}>{r.nomeCliente}{r.telCliente ? <span style={{color:"var(--text3)",fontWeight:400,fontSize:12}}> · {r.telCliente}</span> : null}</div>
+          {(sala || tipo) && (
+            <div style={{color:"var(--text3)",fontSize:11,marginTop:2}}>
+              {sala?.nome}{sala && tipo ? " · " : ""}{tipo?.label}{tipo?.descricao ? ` (${tipo.descricao})` : ""}
+            </div>
+          )}
+          {r.ocasiao && <div style={{color:"#a855f7",fontSize:11,marginTop:2}}>🎉 {r.ocasiao}</div>}
+          {r.observacoesCliente && <div style={{color:"var(--text2)",fontSize:11,marginTop:2,fontStyle:"italic"}}>💬 {r.observacoesCliente}</div>}
+          {r.observacoesInternas && <div style={{color:"var(--text3)",fontSize:11,marginTop:2,fontStyle:"italic"}}>📝 {r.observacoesInternas}</div>}
+          <div style={{color:"var(--text3)",fontSize:10,marginTop:4}}>
+            {r.fonte === "widget" ? "🌐 Cliente" : `👤 ${r.criadaPor || "—"}`}
+            {r.confirmadaPor && ` · ✅ confirmada por ${r.confirmadaPor}`}
+            {r.sentouPor && ` · 🪑 sentou (${r.sentouPor})`}
+          </div>
+        </div>
+        <div style={{display:"flex",gap:6,flexDirection:mobileOnly?"row":"column",flexWrap:"wrap"}}>
+          {(r.status === "feita") && (
+            <button onClick={abrirWhatsApp} style={{padding:"6px 12px",borderRadius:8,border:"1px solid #25d36644",background:"#25d36611",color:"#15803d",cursor:"pointer",fontSize:11,fontWeight:600,whiteSpace:"nowrap"}}>
+              💬 Confirmar via WhatsApp
+            </button>
+          )}
+          {(r.status === "feita") && (
+            <button onClick={()=>setStatusReserva("confirmada")} style={{padding:"6px 12px",borderRadius:8,border:"1px solid #10b98144",background:"#10b98111",color:"#15803d",cursor:"pointer",fontSize:11,fontWeight:600,whiteSpace:"nowrap"}}>
+              ✅ Marcar confirmada
+            </button>
+          )}
+          {(r.status === "feita" || r.status === "confirmada") && (
+            <button onClick={()=>setStatusReserva("sentou")} style={{padding:"6px 12px",borderRadius:8,border:"1px solid #8b5cf644",background:"#8b5cf611",color:"#8b5cf6",cursor:"pointer",fontSize:11,fontWeight:600,whiteSpace:"nowrap"}}>
+              🪑 Sentou
+            </button>
+          )}
+          {(r.status === "sentou") && (
+            <button onClick={()=>setStatusReserva("finalizada")} style={{padding:"6px 12px",borderRadius:8,border:"1px solid #64748b44",background:"#64748b11",color:"#64748b",cursor:"pointer",fontSize:11,fontWeight:600,whiteSpace:"nowrap"}}>
+              ✔️ Finalizar
+            </button>
+          )}
+          {(r.status === "feita" || r.status === "confirmada") && (
+            <button onClick={async ()=>{
+              if (!await appConfirm(`Marcar como no-show? ${r.nomeCliente} será penalizado(a) na contagem.`)) return;
+              setStatusReserva("no-show");
+              // Atualiza cliente se existe
+              if (r.clienteId) {
+                const nextClientes = (allClientes || []).map(c => c.id === r.clienteId ? { ...c, noShows: (c.noShows || 0) + 1 } : c);
+                onUpdate("reservasClientes", nextClientes);
+              }
+            }} style={{padding:"6px 12px",borderRadius:8,border:"1px solid #ef444444",background:"#ef444411",color:"#ef4444",cursor:"pointer",fontSize:11,fontWeight:600,whiteSpace:"nowrap"}}>
+              ⛔ No-show
+            </button>
+          )}
+          {canGerenciar && r.status !== "cancelada" && r.status !== "finalizada" && (
+            <button onClick={async ()=>{
+              if (!await appConfirm("Cancelar esta reserva?")) return;
+              setStatusReserva("cancelada");
+            }} style={{padding:"6px 12px",borderRadius:8,border:"1px solid var(--border)",background:"transparent",color:"var(--text3)",cursor:"pointer",fontSize:11,whiteSpace:"nowrap"}}>
+              ❌ Cancelar
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── CALENDÁRIO ───
+function ReservasCalendario({ restaurantId, restaurant, reservas, clientes, config, salas, tipos, currentUser, canForce, canGerenciar, onUpdate, mobileOnly, allReservas, allClientes }) {
+  const now = new Date();
+  const [year, setYear] = useState(now.getFullYear());
+  const [month, setMonth] = useState(now.getMonth());
+  const [selectedDate, setSelectedDate] = useState(today());
+  const [showNew, setShowNew] = useState(null); // null | "YYYY-MM-DD"
+
+  const dim = new Date(year, month + 1, 0).getDate();
+  const firstDay = new Date(year, month, 1).getDay();
+  const cells = [];
+  for (let i = 0; i < firstDay; i++) cells.push(null);
+  for (let d = 1; d <= dim; d++) cells.push(`${year}-${String(month+1).padStart(2,"0")}-${String(d).padStart(2,"0")}`);
+
+  const reservasByDate = {};
+  reservas.forEach(r => {
+    const d = r.dateTime?.slice(0,10);
+    if (!d) return;
+    if (!reservasByDate[d]) reservasByDate[d] = [];
+    reservasByDate[d].push(r);
+  });
+
+  const reservasDoDia = (reservasByDate[selectedDate] || []).sort((a,b) => (a.dateTime || "").localeCompare(b.dateTime || ""));
+
+  function navMonth(delta) {
+    const d = new Date(year, month + delta, 1);
+    setYear(d.getFullYear()); setMonth(d.getMonth());
+  }
+
+  return (
+    <div>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:12,marginBottom:16}}>
+        <h3 style={{color:"var(--text)",margin:0,fontSize:mobileOnly?16:20}}>📅 Reservas — Calendário</h3>
+        <div style={{display:"flex",gap:8,alignItems:"center"}}>
+          <button onClick={()=>navMonth(-1)} style={{...S.btnSecondary,padding:"6px 12px"}}>‹</button>
+          <span style={{minWidth:140,textAlign:"center",fontSize:13,fontWeight:700,color:"var(--text)",textTransform:"capitalize"}}>{monthLabel(year, month)}</span>
+          <button onClick={()=>navMonth(1)} style={{...S.btnSecondary,padding:"6px 12px"}}>›</button>
+        </div>
+      </div>
+
+      <div style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",gap:4,marginBottom:4}}>
+        {DIAS_SEMANA.map(d => <div key={d} style={{textAlign:"center",fontSize:11,color:"var(--text3)",fontWeight:700,padding:"4px 0"}}>{d}</div>)}
+      </div>
+      <div style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",gap:4,marginBottom:18}}>
+        {cells.map((d, idx) => {
+          if (!d) return <div key={`e-${idx}`} />;
+          const list = reservasByDate[d] || [];
+          const total = list.length;
+          const pessoas = list.reduce((s,r) => s + (r.party || 0), 0);
+          const isSel = d === selectedDate;
+          const isToday = d === today();
+          return (
+            <button key={d} onClick={()=>setSelectedDate(d)}
+              style={{
+                aspectRatio: "1", borderRadius: 8,
+                border: `1px solid ${isSel?"var(--ac)":isToday?"var(--ac)44":"var(--border)"}`,
+                background: isSel ? "var(--ac)22" : isToday ? "var(--ac)08" : "var(--card-bg)",
+                cursor: "pointer", padding: "4px",
+                display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "space-between",
+              }}>
+              <span style={{fontSize:11,color:isSel?"var(--ac)":"var(--text2)",fontWeight:isToday?700:500}}>{parseInt(d.slice(-2))}</span>
+              {total > 0 && (
+                <div style={{fontSize:9,color:"var(--text3)",lineHeight:1.2,textAlign:"center"}}>
+                  <div style={{color:"var(--ac)",fontWeight:700}}>{total}r</div>
+                  <div>{pessoas}p</div>
+                </div>
+              )}
+            </button>
+          );
+        })}
+      </div>
+
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
+        <div style={{fontSize:13,fontWeight:700,color:"var(--text)"}}>
+          {new Date(selectedDate+"T12:00:00").toLocaleDateString("pt-BR",{weekday:"long",day:"2-digit",month:"long"})} — {reservasDoDia.length} reserva(s)
+        </div>
+        <button onClick={()=>setShowNew(selectedDate)} style={{...S.btnPrimary,fontSize:12,padding:"6px 14px"}}>+ Nova</button>
+      </div>
+
+      {reservasDoDia.length === 0 ? (
+        <div style={{...S.card,padding:20,textAlign:"center",color:"var(--text3)",fontSize:13}}>Nenhuma reserva neste dia.</div>
+      ) : (
+        <div style={{display:"flex",flexDirection:"column",gap:8}}>
+          {reservasDoDia.map(r => (
+            <ReservaCard key={r.id} r={r}
+              cliente={clientes.find(c => c.id === r.clienteId)}
+              salas={salas} tipos={tipos}
+              restaurant={restaurant}
+              config={config}
+              currentUser={currentUser}
+              canGerenciar={canGerenciar}
+              onUpdate={onUpdate}
+              allReservas={allReservas}
+              allClientes={allClientes}
+              restaurantId={restaurantId}
+              mobileOnly={mobileOnly}
+            />
+          ))}
+        </div>
+      )}
+
+      {showNew && (
+        <ReservaModal
+          restaurantId={restaurantId}
+          restaurant={restaurant}
+          config={config}
+          salas={salas} tipos={tipos}
+          clientes={clientes}
+          allReservas={allReservas}
+          allClientes={allClientes}
+          currentUser={currentUser}
+          canForce={canForce}
+          onUpdate={onUpdate}
+          dataInicial={showNew}
+          onClose={()=>setShowNew(null)}
+        />
+      )}
+    </div>
+  );
+}
+
+// ─── CLIENTES ───
+function ReservasClientes({ restaurantId, restaurant, clientes, reservas, currentUser, mobileOnly, onUpdate, allClientes }) {
+  const [search, setSearch] = useState("");
+  const [editing, setEditing] = useState(null); // null | {} | cliente
+  const filtered = clientes.filter(c => {
+    if (!search.trim()) return true;
+    const s = search.toLowerCase();
+    const tel = (c.telefone || "").replace(/\D/g, "");
+    const sLimpo = s.replace(/\D/g, "");
+    return (c.nome || "").toLowerCase().includes(s)
+        || (c.email || "").toLowerCase().includes(s)
+        || (sLimpo && tel.includes(sLimpo));
+  }).sort((a,b) => (a.nome || "").localeCompare(b.nome || ""));
+
+  function saveCliente(data) {
+    const isEdit = !!data.id;
+    const now = new Date().toISOString();
+    const author = currentUser?.name || "Gestor";
+    if (isEdit) {
+      const next = (allClientes || []).map(c => c.id === data.id ? { ...c, ...data } : c);
+      onUpdate("reservasClientes", next);
+    } else {
+      const novo = {
+        id: `cli-${Date.now()}-${Math.random().toString(36).slice(2,5)}`,
+        restaurantId, ...data,
+        visitas: 0, noShows: 0, blacklisted: false, tags: data.tags || [],
+        createdAt: now, createdBy: author,
+      };
+      onUpdate("reservasClientes", [...(allClientes || []), novo]);
+    }
+    setEditing(null);
+    onUpdate("_toast", isEdit ? "✏️ Cliente atualizado" : "+ Cliente cadastrado");
+  }
+
+  return (
+    <div>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:12,marginBottom:16}}>
+        <h3 style={{color:"var(--text)",margin:0,fontSize:mobileOnly?16:20}}>👤 Clientes ({filtered.length})</h3>
+        <button onClick={()=>setEditing({ nome: "", telefone: "", email: "" })} style={{...S.btnPrimary,fontSize:13,padding:"8px 16px"}}>+ Novo cliente</button>
+      </div>
+      <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="🔍 Buscar por nome, telefone ou email..." style={{...S.input,fontSize:13,marginBottom:14}}/>
+      {filtered.length === 0 ? (
+        <div style={{...S.card,padding:30,textAlign:"center",color:"var(--text3)",fontSize:13}}>
+          {search.trim() ? "Nenhum cliente encontrado." : "Nenhum cliente cadastrado ainda."}
+        </div>
+      ) : (
+        <div style={{display:"flex",flexDirection:"column",gap:8}}>
+          {filtered.map(c => {
+            const reservasCliente = reservas.filter(r => r.clienteId === c.id);
+            const ultimaVisita = reservasCliente.filter(r => r.status === "finalizada" || r.status === "sentou").sort((a,b) => (b.dateTime || "").localeCompare(a.dateTime || ""))[0];
+            return (
+              <div key={c.id} onClick={()=>setEditing(c)} style={{...S.card,padding:"10px 14px",cursor:"pointer",display:"flex",justifyContent:"space-between",alignItems:"center",gap:12}}>
+                <div style={{flex:1,minWidth:0}}>
+                  <div style={{color:"var(--text)",fontWeight:700,fontSize:14}}>
+                    {c.nome}
+                    {c.blacklisted && <span style={{marginLeft:8,padding:"2px 6px",borderRadius:6,background:"#ef444422",color:"#ef4444",fontSize:10,fontWeight:700}}>🚫 Bloqueado</span>}
+                    {c.tags?.includes("vip") && <span style={{marginLeft:8,padding:"2px 6px",borderRadius:6,background:"#f59e0b22",color:"#f59e0b",fontSize:10,fontWeight:700}}>⭐ VIP</span>}
+                  </div>
+                  <div style={{color:"var(--text3)",fontSize:11,marginTop:2}}>
+                    {c.telefone}{c.email ? ` · ${c.email}` : ""}
+                  </div>
+                  <div style={{color:"var(--text3)",fontSize:10,marginTop:2}}>
+                    {reservasCliente.length} reserva(s) total · {c.noShows || 0} no-show(s)
+                    {ultimaVisita && ` · última visita ${new Date(ultimaVisita.dateTime).toLocaleDateString("pt-BR")}`}
+                  </div>
+                </div>
+                <span style={{color:"var(--text3)",fontSize:11}}>›</span>
+              </div>
+            );
+          })}
+        </div>
+      )}
+      {editing && <ClienteModal cliente={editing} onSave={saveCliente} onClose={()=>setEditing(null)} mobileOnly={mobileOnly}/>}
+    </div>
+  );
+}
+
+function ClienteModal({ cliente, onSave, onClose, mobileOnly }) {
+  const [form, setForm] = useState({
+    id: cliente?.id,
+    nome: cliente?.nome || "",
+    telefone: cliente?.telefone || "",
+    email: cliente?.email || "",
+    aniversario: cliente?.aniversario || "",
+    observacoes: cliente?.observacoes || "",
+    tags: cliente?.tags || [],
+    blacklisted: cliente?.blacklisted || false,
+  });
+  const isEdit = !!cliente?.id;
+  const valid = form.nome.trim() && (form.telefone.replace(/\D/g,"").length >= 10);
+  return (
+    <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.6)",zIndex:9999,display:"flex",alignItems:"center",justifyContent:"center",padding:16}} onClick={onClose}>
+      <div onClick={e=>e.stopPropagation()} style={{background:"var(--card-bg)",border:"1px solid var(--border)",borderRadius:14,maxWidth:480,width:"100%",padding:24,maxHeight:"85vh",overflowY:"auto"}}>
+        <h3 style={{margin:"0 0 14px",color:"var(--text)",fontSize:16,fontWeight:700}}>{isEdit ? "Editar cliente" : "Novo cliente"}</h3>
+        <div style={{display:"flex",flexDirection:"column",gap:10}}>
+          <div><label style={{...S.label,fontSize:11}}>Nome *</label><input value={form.nome} onChange={e=>setForm({...form,nome:e.target.value})} style={S.input}/></div>
+          <div><label style={{...S.label,fontSize:11}}>Telefone *</label><input value={form.telefone} onChange={e=>setForm({...form,telefone:e.target.value})} placeholder="(11) 99999-9999" style={S.input} inputMode="tel"/></div>
+          <div><label style={{...S.label,fontSize:11}}>Email</label><input type="email" value={form.email} onChange={e=>setForm({...form,email:e.target.value})} style={S.input}/></div>
+          <div><label style={{...S.label,fontSize:11}}>Aniversário (opcional)</label><input type="date" value={form.aniversario} onChange={e=>setForm({...form,aniversario:e.target.value})} style={S.input}/></div>
+          <div><label style={{...S.label,fontSize:11}}>Observações</label><textarea value={form.observacoes} onChange={e=>setForm({...form,observacoes:e.target.value})} rows={3} style={{...S.input,resize:"vertical"}}/></div>
+          <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+            {["vip","alergico","vegetariano","fidelidade"].map(tag => {
+              const on = form.tags.includes(tag);
+              return (
+                <button key={tag} onClick={()=>setForm({...form,tags:on?form.tags.filter(t=>t!==tag):[...form.tags,tag]})}
+                  style={{padding:"4px 10px",borderRadius:6,border:`1px solid ${on?"#f59e0b":"var(--border)"}`,background:on?"#f59e0b22":"transparent",color:on?"#f59e0b":"var(--text3)",cursor:"pointer",fontSize:11}}>
+                  {on?"✓ ":""}{tag}
+                </button>
+              );
+            })}
+          </div>
+          <label style={{display:"flex",alignItems:"center",gap:8,padding:"8px 10px",border:"1px solid var(--border)",borderRadius:8,cursor:"pointer"}}>
+            <input type="checkbox" checked={form.blacklisted} onChange={e=>setForm({...form,blacklisted:e.target.checked})}/>
+            <span style={{fontSize:12,color:form.blacklisted?"#ef4444":"var(--text2)"}}>🚫 Bloquear este cliente (impede novas reservas)</span>
+          </label>
+        </div>
+        <div style={{display:"flex",justifyContent:"flex-end",gap:10,marginTop:18}}>
+          <button onClick={onClose} style={S.btnSecondary}>Cancelar</button>
+          <button onClick={()=>valid && onSave(form)} disabled={!valid} style={{...S.btnPrimary,opacity:valid?1:0.5}}>
+            {isEdit ? "Salvar" : "Cadastrar"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── CONFIGURAÇÕES ───
+function ReservasConfig({ restaurantId, restaurant, config, salas, tipos, reservasConfig, reservasSalas, reservasTiposMesa, currentUser, mobileOnly, onUpdate }) {
+  const [editingTurno, setEditingTurno] = useState(null);
+  const [editingSala, setEditingSala] = useState(null);
+  const [editingTipo, setEditingTipo] = useState(null);
+  const [mensagem, setMensagem] = useState(config.mensagemConfirmacao ?? MENSAGEM_CONFIRMACAO_DEFAULT);
+  const [duracaoMedia, setDuracaoMedia] = useState(config.duracaoMediaMin ?? 90);
+  const [antecedenciaMin, setAntecedenciaMin] = useState(config.antecedenciaMinHoras ?? 1);
+  const [antecedenciaMax, setAntecedenciaMax] = useState(config.antecedenciaMaxDias ?? 60);
+  const turnos = config.turnos || [];
+
+  function patchConfig(patch) {
+    const next = { ...(reservasConfig || {}) };
+    next[restaurantId] = { ...(next[restaurantId] || {}), ...patch };
+    onUpdate("reservasConfig", next);
+    onUpdate("_toast", "✅ Configuração salva");
+  }
+  function saveMensagem() {
+    patchConfig({ mensagemConfirmacao: mensagem });
+  }
+  function saveDuracao() {
+    patchConfig({
+      duracaoMediaMin: parseInt(duracaoMedia) || 90,
+      antecedenciaMinHoras: parseFloat(antecedenciaMin) || 1,
+      antecedenciaMaxDias: parseInt(antecedenciaMax) || 60,
+    });
+  }
+  function saveTurno(turno) {
+    const novosTurnos = turno.id
+      ? turnos.map(t => t.id === turno.id ? turno : t)
+      : [...turnos, { ...turno, id: `turno-${Date.now()}-${Math.random().toString(36).slice(2,5)}` }];
+    patchConfig({ turnos: novosTurnos });
+    setEditingTurno(null);
+  }
+  async function delTurno(id) {
+    if (!await appConfirm("Remover este turno?")) return;
+    patchConfig({ turnos: turnos.filter(t => t.id !== id) });
+  }
+  function saveSala(sala) {
+    const isEdit = !!sala.id;
+    if (isEdit) {
+      const next = (reservasSalas || []).map(s => s.id === sala.id ? sala : s);
+      onUpdate("reservasSalas", next);
+    } else {
+      const nova = { ...sala, id: `sala-${Date.now()}-${Math.random().toString(36).slice(2,5)}`, restaurantId, ordem: salas.length };
+      onUpdate("reservasSalas", [...(reservasSalas || []), nova]);
+    }
+    setEditingSala(null);
+    onUpdate("_toast", "✅ Salão salvo");
+  }
+  async function delSala(id) {
+    const tiposNaSala = tipos.filter(t => t.salaId === id);
+    if (tiposNaSala.length > 0) {
+      if (!await appConfirm(`Este salão tem ${tiposNaSala.length} tipo(s) de mesa cadastrados. Remover mesmo assim? Os tipos serão apagados.`)) return;
+      onUpdate("reservasTiposMesa", (reservasTiposMesa || []).filter(t => t.salaId !== id));
+    } else {
+      if (!await appConfirm("Remover este salão?")) return;
+    }
+    onUpdate("reservasSalas", (reservasSalas || []).filter(s => s.id !== id));
+  }
+  function saveTipo(tipo) {
+    const isEdit = !!tipo.id;
+    if (isEdit) {
+      const next = (reservasTiposMesa || []).map(t => t.id === tipo.id ? tipo : t);
+      onUpdate("reservasTiposMesa", next);
+    } else {
+      const novo = { ...tipo, id: `tipo-${Date.now()}-${Math.random().toString(36).slice(2,5)}`, restaurantId, ordem: tipos.length };
+      onUpdate("reservasTiposMesa", [...(reservasTiposMesa || []), novo]);
+    }
+    setEditingTipo(null);
+    onUpdate("_toast", "✅ Tipo de mesa salvo");
+  }
+  async function delTipo(id) {
+    if (!await appConfirm("Remover este tipo de mesa?")) return;
+    onUpdate("reservasTiposMesa", (reservasTiposMesa || []).filter(t => t.id !== id));
+  }
+
+  return (
+    <div>
+      <h3 style={{color:"var(--text)",margin:"0 0 16px",fontSize:mobileOnly?16:20}}>⚙️ Configurações de Reservas</h3>
+
+      {/* Turnos */}
+      <div style={{...S.card,padding:16,marginBottom:14}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
+          <div>
+            <p style={{color:"var(--text)",fontSize:14,fontWeight:700,margin:0}}>🕐 Turnos</p>
+            <p style={{color:"var(--text3)",fontSize:11,margin:"2px 0 0"}}>Períodos do dia em que aceitamos reservas (Almoço, Jantar...)</p>
+          </div>
+          <button onClick={()=>setEditingTurno({ nome: "", diasSemana: [1,2,3,4,5,6,0], horarios: [], capacidadePessoas: 50, slotMinutes: 30, ativo: true })} style={{...S.btnPrimary,fontSize:12,padding:"6px 14px"}}>+ Novo turno</button>
+        </div>
+        {turnos.length === 0 ? (
+          <div style={{padding:14,textAlign:"center",color:"var(--text3)",fontSize:12,background:"var(--bg2)",borderRadius:8}}>Nenhum turno cadastrado. Crie pelo menos um pra aceitar reservas.</div>
+        ) : (
+          <div style={{display:"flex",flexDirection:"column",gap:6}}>
+            {turnos.map(t => (
+              <div key={t.id} style={{padding:"10px 12px",borderRadius:8,border:"1px solid var(--border)",background:t.ativo?"var(--bg1)":"var(--bg2)",display:"flex",justifyContent:"space-between",alignItems:"center",gap:8,flexWrap:"wrap"}}>
+                <div style={{flex:1,minWidth:200}}>
+                  <div style={{fontSize:13,fontWeight:700,color:"var(--text)"}}>{t.nome}{!t.ativo && <span style={{marginLeft:8,fontSize:10,color:"var(--text3)"}}>(inativo)</span>}</div>
+                  <div style={{fontSize:11,color:"var(--text3)",marginTop:2}}>
+                    Dias: {(t.diasSemana || []).map(d => DIAS_SEMANA[d]).join(", ") || "—"} · {(t.horarios || []).length} horário(s) · até {t.capacidadePessoas} pessoas
+                  </div>
+                  {(t.horarios || []).length > 0 && (
+                    <div style={{fontSize:10,color:"var(--text3)",marginTop:2,fontFamily:"'DM Mono',monospace"}}>{(t.horarios || []).join(" · ")}</div>
+                  )}
+                </div>
+                <div style={{display:"flex",gap:6}}>
+                  <button onClick={()=>setEditingTurno(t)} style={{...S.btnSecondary,fontSize:11,padding:"4px 10px"}}>✏️ Editar</button>
+                  <button onClick={()=>delTurno(t.id)} style={{...S.btnSecondary,fontSize:11,padding:"4px 10px",color:"var(--red)",borderColor:"var(--red)44"}}>🗑️</button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Salões */}
+      <div style={{...S.card,padding:16,marginBottom:14}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
+          <div>
+            <p style={{color:"var(--text)",fontSize:14,fontWeight:700,margin:0}}>🏛️ Salões</p>
+            <p style={{color:"var(--text3)",fontSize:11,margin:"2px 0 0"}}>Áreas físicas do restaurante (Salão Principal, Varanda, Privativa...)</p>
+          </div>
+          <button onClick={()=>setEditingSala({ nome: "", descricao: "", ativa: true })} style={{...S.btnPrimary,fontSize:12,padding:"6px 14px"}}>+ Novo salão</button>
+        </div>
+        {salas.length === 0 ? (
+          <div style={{padding:14,textAlign:"center",color:"var(--text3)",fontSize:12,background:"var(--bg2)",borderRadius:8}}>Nenhum salão cadastrado.</div>
+        ) : (
+          <div style={{display:"flex",flexDirection:"column",gap:6}}>
+            {salas.map(s => (
+              <div key={s.id} style={{padding:"10px 12px",borderRadius:8,border:"1px solid var(--border)",display:"flex",justifyContent:"space-between",alignItems:"center",gap:8}}>
+                <div style={{flex:1}}>
+                  <div style={{fontSize:13,fontWeight:700,color:"var(--text)"}}>{s.nome}{!s.ativa && <span style={{marginLeft:8,fontSize:10,color:"var(--text3)"}}>(inativo)</span>}</div>
+                  {s.descricao && <div style={{fontSize:11,color:"var(--text3)",marginTop:2}}>{s.descricao}</div>}
+                </div>
+                <div style={{display:"flex",gap:6}}>
+                  <button onClick={()=>setEditingSala(s)} style={{...S.btnSecondary,fontSize:11,padding:"4px 10px"}}>✏️</button>
+                  <button onClick={()=>delSala(s.id)} style={{...S.btnSecondary,fontSize:11,padding:"4px 10px",color:"var(--red)",borderColor:"var(--red)44"}}>🗑️</button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Tipos de Mesa */}
+      <div style={{...S.card,padding:16,marginBottom:14}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
+          <div>
+            <p style={{color:"var(--text)",fontSize:14,fontWeight:700,margin:0}}>🪑 Tipos de Mesa</p>
+            <p style={{color:"var(--text3)",fontSize:11,margin:"2px 0 0"}}>Cada tipo pertence a um salão. A descrição é o que o cliente vai ver.</p>
+          </div>
+          <button onClick={()=>setEditingTipo({ salaId: salas[0]?.id || "", label: "", capacidade: 4, quantidade: 1, descricao: "", ativa: true })} disabled={salas.length === 0} style={{...S.btnPrimary,fontSize:12,padding:"6px 14px",opacity:salas.length===0?0.5:1}}>+ Novo tipo</button>
+        </div>
+        {salas.length === 0 ? (
+          <div style={{padding:14,textAlign:"center",color:"#f59e0b",fontSize:12,background:"#f59e0b11",border:"1px solid #f59e0b33",borderRadius:8}}>⚠️ Cadastre pelo menos um salão antes de cadastrar tipos de mesa.</div>
+        ) : tipos.length === 0 ? (
+          <div style={{padding:14,textAlign:"center",color:"var(--text3)",fontSize:12,background:"var(--bg2)",borderRadius:8}}>Nenhum tipo cadastrado.</div>
+        ) : (
+          <div style={{display:"flex",flexDirection:"column",gap:6}}>
+            {tipos.map(t => {
+              const sala = salas.find(s => s.id === t.salaId);
+              return (
+                <div key={t.id} style={{padding:"10px 12px",borderRadius:8,border:"1px solid var(--border)",display:"flex",justifyContent:"space-between",alignItems:"center",gap:8}}>
+                  <div style={{flex:1}}>
+                    <div style={{fontSize:13,fontWeight:700,color:"var(--text)"}}>{t.label}{!t.ativa && <span style={{marginLeft:8,fontSize:10,color:"var(--text3)"}}>(inativo)</span>}</div>
+                    <div style={{fontSize:11,color:"var(--text3)",marginTop:2}}>
+                      {sala?.nome || "(sala removida)"} · {t.capacidade} lugares · {t.quantidade} unidade(s)
+                    </div>
+                    {t.descricao && <div style={{fontSize:11,color:"var(--text2)",marginTop:2,fontStyle:"italic"}}>"{t.descricao}"</div>}
+                  </div>
+                  <div style={{display:"flex",gap:6}}>
+                    <button onClick={()=>setEditingTipo(t)} style={{...S.btnSecondary,fontSize:11,padding:"4px 10px"}}>✏️</button>
+                    <button onClick={()=>delTipo(t.id)} style={{...S.btnSecondary,fontSize:11,padding:"4px 10px",color:"var(--red)",borderColor:"var(--red)44"}}>🗑️</button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      {/* Política */}
+      <div style={{...S.card,padding:16,marginBottom:14}}>
+        <p style={{color:"var(--text)",fontSize:14,fontWeight:700,margin:"0 0 12px"}}>⏱️ Política de reserva</p>
+        <div style={{display:"grid",gridTemplateColumns:mobileOnly?"1fr":"1fr 1fr 1fr",gap:10,marginBottom:10}}>
+          <div>
+            <label style={{...S.label,fontSize:11}}>Duração média (min)</label>
+            <input type="number" min="30" step="15" value={duracaoMedia} onChange={e=>setDuracaoMedia(e.target.value)} style={S.input}/>
+          </div>
+          <div>
+            <label style={{...S.label,fontSize:11}}>Antecedência mín (horas)</label>
+            <input type="number" min="0" step="0.5" value={antecedenciaMin} onChange={e=>setAntecedenciaMin(e.target.value)} style={S.input}/>
+          </div>
+          <div>
+            <label style={{...S.label,fontSize:11}}>Antecedência máx (dias)</label>
+            <input type="number" min="1" max="365" value={antecedenciaMax} onChange={e=>setAntecedenciaMax(e.target.value)} style={S.input}/>
+          </div>
+        </div>
+        <button onClick={saveDuracao} style={{...S.btnPrimary,fontSize:12,padding:"6px 14px"}}>Salvar política</button>
+      </div>
+
+      {/* Mensagem de confirmação */}
+      <div style={{...S.card,padding:16,marginBottom:14}}>
+        <p style={{color:"var(--text)",fontSize:14,fontWeight:700,margin:"0 0 4px"}}>💬 Mensagem padrão de confirmação (WhatsApp)</p>
+        <p style={{color:"var(--text3)",fontSize:11,margin:"0 0 10px"}}>Use os placeholders abaixo. Eles serão substituídos automaticamente.</p>
+        <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:8}}>
+          {["{nome}","{data}","{hora}","{pessoas}","{restaurante}"].map(p => (
+            <span key={p} style={{padding:"3px 8px",borderRadius:6,background:"var(--bg2)",color:"var(--text3)",fontSize:10,fontFamily:"'DM Mono',monospace"}}>{p}</span>
+          ))}
+        </div>
+        <textarea value={mensagem} onChange={e=>setMensagem(e.target.value)} rows={4} style={{...S.input,resize:"vertical",fontSize:13}}/>
+        <div style={{display:"flex",gap:8,marginTop:8}}>
+          <button onClick={saveMensagem} style={{...S.btnPrimary,fontSize:12,padding:"6px 14px"}}>Salvar mensagem</button>
+          <button onClick={()=>setMensagem(MENSAGEM_CONFIRMACAO_DEFAULT)} style={{...S.btnSecondary,fontSize:12,padding:"6px 14px"}}>Restaurar padrão</button>
+        </div>
+      </div>
+
+      {editingTurno && <TurnoModal turno={editingTurno} onSave={saveTurno} onClose={()=>setEditingTurno(null)} mobileOnly={mobileOnly}/>}
+      {editingSala && <SalaModal sala={editingSala} onSave={saveSala} onClose={()=>setEditingSala(null)}/>}
+      {editingTipo && <TipoMesaModal tipo={editingTipo} salas={salas} onSave={saveTipo} onClose={()=>setEditingTipo(null)}/>}
+    </div>
+  );
+}
+
+function TurnoModal({ turno, onSave, onClose, mobileOnly }) {
+  const [form, setForm] = useState({
+    id: turno?.id,
+    nome: turno?.nome || "",
+    diasSemana: turno?.diasSemana || [1,2,3,4,5,6,0],
+    horarios: turno?.horarios || [],
+    capacidadePessoas: turno?.capacidadePessoas || 50,
+    slotMinutes: turno?.slotMinutes || 30,
+    ativo: turno?.ativo !== false,
+  });
+  const [novoHorario, setNovoHorario] = useState("");
+  function addHorario() {
+    if (!/^\d{2}:\d{2}$/.test(novoHorario)) return;
+    if (form.horarios.includes(novoHorario)) return;
+    setForm({...form, horarios: [...form.horarios, novoHorario].sort()});
+    setNovoHorario("");
+  }
+  function genHorarios(de, ate, step) {
+    const [h1, m1] = de.split(":").map(Number);
+    const [h2, m2] = ate.split(":").map(Number);
+    let cur = h1*60+m1, end = h2*60+m2;
+    const out = [];
+    while (cur <= end) {
+      out.push(`${String(Math.floor(cur/60)).padStart(2,"0")}:${String(cur%60).padStart(2,"0")}`);
+      cur += step;
+    }
+    setForm({...form, horarios: out});
+  }
+  const [genDe, setGenDe] = useState("19:00");
+  const [genAte, setGenAte] = useState("22:30");
+  const valid = form.nome.trim() && form.diasSemana.length > 0 && form.horarios.length > 0 && form.capacidadePessoas > 0;
+  return (
+    <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.6)",zIndex:9999,display:"flex",alignItems:"center",justifyContent:"center",padding:16}} onClick={onClose}>
+      <div onClick={e=>e.stopPropagation()} style={{background:"var(--card-bg)",border:"1px solid var(--border)",borderRadius:14,maxWidth:540,width:"100%",padding:24,maxHeight:"85vh",overflowY:"auto"}}>
+        <h3 style={{margin:"0 0 14px",color:"var(--text)",fontSize:16,fontWeight:700}}>{turno?.id ? "Editar turno" : "Novo turno"}</h3>
+        <div style={{display:"flex",flexDirection:"column",gap:10}}>
+          <div><label style={{...S.label,fontSize:11}}>Nome do turno</label><input value={form.nome} onChange={e=>setForm({...form,nome:e.target.value})} placeholder="ex: Almoço, Jantar, Brunch" style={S.input}/></div>
+          <div>
+            <label style={{...S.label,fontSize:11}}>Dias da semana</label>
+            <div style={{display:"flex",gap:4,flexWrap:"wrap"}}>
+              {DIAS_SEMANA.map((d, i) => {
+                const on = form.diasSemana.includes(i);
+                return (
+                  <button key={i} onClick={()=>setForm({...form,diasSemana:on?form.diasSemana.filter(x=>x!==i):[...form.diasSemana,i].sort()})}
+                    style={{padding:"6px 12px",borderRadius:6,border:`1px solid ${on?"var(--ac)":"var(--border)"}`,background:on?"var(--ac)22":"transparent",color:on?"var(--ac)":"var(--text3)",cursor:"pointer",fontSize:11,fontWeight:600}}>
+                    {d}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+          <div>
+            <label style={{...S.label,fontSize:11}}>Horários disponíveis ({form.horarios.length})</label>
+            <div style={{display:"grid",gridTemplateColumns:mobileOnly?"1fr 1fr":"1fr 1fr auto auto",gap:6,marginBottom:8}}>
+              <input type="time" value={genDe} onChange={e=>setGenDe(e.target.value)} style={{...S.input,fontSize:12}}/>
+              <input type="time" value={genAte} onChange={e=>setGenAte(e.target.value)} style={{...S.input,fontSize:12}}/>
+              <select value={form.slotMinutes} onChange={e=>setForm({...form,slotMinutes:parseInt(e.target.value)})} style={{...S.input,fontSize:12,cursor:"pointer"}}>
+                <option value={15}>15min</option>
+                <option value={30}>30min</option>
+                <option value={60}>60min</option>
+              </select>
+              <button onClick={()=>genHorarios(genDe, genAte, form.slotMinutes)} style={{...S.btnSecondary,fontSize:11,padding:"6px 10px"}}>Gerar</button>
+            </div>
+            <div style={{display:"flex",gap:6,marginBottom:8}}>
+              <input type="time" value={novoHorario} onChange={e=>setNovoHorario(e.target.value)} style={{...S.input,fontSize:12,flex:1}}/>
+              <button onClick={addHorario} style={{...S.btnSecondary,fontSize:11,padding:"6px 10px"}}>+ Adicionar</button>
+            </div>
+            <div style={{display:"flex",gap:4,flexWrap:"wrap",maxHeight:120,overflowY:"auto"}}>
+              {form.horarios.map(h => (
+                <button key={h} onClick={()=>setForm({...form,horarios:form.horarios.filter(x=>x!==h)})} style={{padding:"3px 8px",borderRadius:6,background:"var(--bg2)",border:"1px solid var(--border)",color:"var(--text2)",fontSize:11,fontFamily:"'DM Mono',monospace",cursor:"pointer"}}>
+                  {h} ✕
+                </button>
+              ))}
+            </div>
+          </div>
+          <div><label style={{...S.label,fontSize:11}}>Capacidade total (pessoas)</label><input type="number" min="1" value={form.capacidadePessoas} onChange={e=>setForm({...form,capacidadePessoas:parseInt(e.target.value)||0})} style={S.input}/></div>
+          <label style={{display:"flex",alignItems:"center",gap:8,cursor:"pointer"}}>
+            <input type="checkbox" checked={form.ativo} onChange={e=>setForm({...form,ativo:e.target.checked})}/>
+            <span style={{fontSize:12,color:"var(--text2)"}}>Turno ativo (aceita reservas)</span>
+          </label>
+        </div>
+        <div style={{display:"flex",justifyContent:"flex-end",gap:10,marginTop:18}}>
+          <button onClick={onClose} style={S.btnSecondary}>Cancelar</button>
+          <button onClick={()=>valid && onSave(form)} disabled={!valid} style={{...S.btnPrimary,opacity:valid?1:0.5}}>Salvar</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function SalaModal({ sala, onSave, onClose }) {
+  const [form, setForm] = useState({
+    id: sala?.id,
+    nome: sala?.nome || "",
+    descricao: sala?.descricao || "",
+    ativa: sala?.ativa !== false,
+  });
+  const valid = form.nome.trim();
+  return (
+    <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.6)",zIndex:9999,display:"flex",alignItems:"center",justifyContent:"center",padding:16}} onClick={onClose}>
+      <div onClick={e=>e.stopPropagation()} style={{background:"var(--card-bg)",border:"1px solid var(--border)",borderRadius:14,maxWidth:480,width:"100%",padding:24}}>
+        <h3 style={{margin:"0 0 14px",color:"var(--text)",fontSize:16,fontWeight:700}}>{sala?.id ? "Editar salão" : "Novo salão"}</h3>
+        <div style={{display:"flex",flexDirection:"column",gap:10}}>
+          <div><label style={{...S.label,fontSize:11}}>Nome</label><input value={form.nome} onChange={e=>setForm({...form,nome:e.target.value})} placeholder="ex: Salão Principal, Varanda, Privativa" style={S.input}/></div>
+          <div><label style={{...S.label,fontSize:11}}>Descrição (opcional)</label><textarea value={form.descricao} onChange={e=>setForm({...form,descricao:e.target.value})} rows={2} style={{...S.input,resize:"vertical"}}/></div>
+          <label style={{display:"flex",alignItems:"center",gap:8,cursor:"pointer"}}>
+            <input type="checkbox" checked={form.ativa} onChange={e=>setForm({...form,ativa:e.target.checked})}/>
+            <span style={{fontSize:12,color:"var(--text2)"}}>Salão ativo</span>
+          </label>
+        </div>
+        <div style={{display:"flex",justifyContent:"flex-end",gap:10,marginTop:18}}>
+          <button onClick={onClose} style={S.btnSecondary}>Cancelar</button>
+          <button onClick={()=>valid && onSave(form)} disabled={!valid} style={{...S.btnPrimary,opacity:valid?1:0.5}}>Salvar</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function TipoMesaModal({ tipo, salas, onSave, onClose }) {
+  const [form, setForm] = useState({
+    id: tipo?.id,
+    salaId: tipo?.salaId || salas[0]?.id || "",
+    label: tipo?.label || "",
+    capacidade: tipo?.capacidade || 4,
+    quantidade: tipo?.quantidade || 1,
+    descricao: tipo?.descricao || "",
+    ativa: tipo?.ativa !== false,
+  });
+  const valid = form.label.trim() && form.salaId && form.capacidade > 0 && form.quantidade > 0;
+  return (
+    <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.6)",zIndex:9999,display:"flex",alignItems:"center",justifyContent:"center",padding:16}} onClick={onClose}>
+      <div onClick={e=>e.stopPropagation()} style={{background:"var(--card-bg)",border:"1px solid var(--border)",borderRadius:14,maxWidth:520,width:"100%",padding:24,maxHeight:"85vh",overflowY:"auto"}}>
+        <h3 style={{margin:"0 0 14px",color:"var(--text)",fontSize:16,fontWeight:700}}>{tipo?.id ? "Editar tipo de mesa" : "Novo tipo de mesa"}</h3>
+        <div style={{display:"flex",flexDirection:"column",gap:10}}>
+          <div>
+            <label style={{...S.label,fontSize:11}}>Salão</label>
+            <select value={form.salaId} onChange={e=>setForm({...form,salaId:e.target.value})} style={{...S.input,cursor:"pointer"}}>
+              {salas.map(s => <option key={s.id} value={s.id}>{s.nome}</option>)}
+            </select>
+          </div>
+          <div><label style={{...S.label,fontSize:11}}>Nome do tipo</label><input value={form.label} onChange={e=>setForm({...form,label:e.target.value})} placeholder="ex: Mesa baixa 4p, Mesa do chef, Balcão" style={S.input}/></div>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+            <div><label style={{...S.label,fontSize:11}}>Capacidade (lugares)</label><input type="number" min="1" value={form.capacidade} onChange={e=>setForm({...form,capacidade:parseInt(e.target.value)||0})} style={S.input}/></div>
+            <div><label style={{...S.label,fontSize:11}}>Quantidade</label><input type="number" min="1" value={form.quantidade} onChange={e=>setForm({...form,quantidade:parseInt(e.target.value)||0})} style={S.input}/></div>
+          </div>
+          <div>
+            <label style={{...S.label,fontSize:11}}>Descrição (importante — vai aparecer pro cliente confirmar)</label>
+            <textarea value={form.descricao} onChange={e=>setForm({...form,descricao:e.target.value})} rows={3} placeholder="ex: Mesa convencional com cadeiras estofadas, perto da janela" style={{...S.input,resize:"vertical"}}/>
+          </div>
+          <label style={{display:"flex",alignItems:"center",gap:8,cursor:"pointer"}}>
+            <input type="checkbox" checked={form.ativa} onChange={e=>setForm({...form,ativa:e.target.checked})}/>
+            <span style={{fontSize:12,color:"var(--text2)"}}>Disponível pra reserva</span>
+          </label>
+        </div>
+        <div style={{display:"flex",justifyContent:"flex-end",gap:10,marginTop:18}}>
+          <button onClick={onClose} style={S.btnSecondary}>Cancelar</button>
+          <button onClick={()=>valid && onSave(form)} disabled={!valid} style={{...S.btnPrimary,opacity:valid?1:0.5}}>Salvar</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── MODAL: NOVA RESERVA (backoffice) ───
+function ReservaModal({ restaurantId, restaurant, config, salas, tipos, clientes, allReservas, allClientes, currentUser, canForce, onUpdate, dataInicial, onClose }) {
+  const [step, setStep] = useState(1); // 1: data/horário, 2: cliente, 3: confirmação
+  const [data, setData] = useState(dataInicial || today());
+  const [hora, setHora] = useState("");
+  const [turnoId, setTurnoId] = useState("");
+  const [party, setParty] = useState(2);
+  const [salaId, setSalaId] = useState("");
+  const [tipoMesaId, setTipoMesaId] = useState("");
+  const [ocasiao, setOcasiao] = useState("");
+  const [obsCliente, setObsCliente] = useState("");
+  const [obsInternas, setObsInternas] = useState("");
+
+  // Cliente: pode buscar existente ou criar novo
+  const [clienteId, setClienteId] = useState(null);
+  const [clienteSearch, setClienteSearch] = useState("");
+  const [novoNome, setNovoNome] = useState("");
+  const [novoTel, setNovoTel] = useState("");
+  const [novoEmail, setNovoEmail] = useState("");
+
+  const [confirmTipoMesa, setConfirmTipoMesa] = useState(false);
+
+  const turnos = (config.turnos || []).filter(t => t.ativo !== false);
+  const dataDow = data ? new Date(data + "T12:00:00").getDay() : null;
+  const turnosDoDia = dataDow !== null ? turnos.filter(t => (t.diasSemana || []).includes(dataDow)) : [];
+
+  // Calcula capacidade já usada nesse data + turno
+  function capacidadeUsada(d, turno) {
+    if (!turno) return 0;
+    return (allReservas || [])
+      .filter(r => r.restaurantId === restaurantId)
+      .filter(r => r.dateTime?.slice(0,10) === d)
+      .filter(r => r.turnoId === turno.id)
+      .filter(r => r.status !== "cancelada" && r.status !== "no-show")
+      .reduce((s, r) => s + (r.party || 0), 0);
+  }
+
+  const turnoSelecionado = turnos.find(t => t.id === turnoId);
+  const usadasNoTurno = turnoSelecionado ? capacidadeUsada(data, turnoSelecionado) : 0;
+  const overbookingMsg = turnoSelecionado && (usadasNoTurno + parseInt(party || 0)) > turnoSelecionado.capacidadePessoas;
+
+  function selectCliente(c) {
+    setClienteId(c.id);
+    setNovoNome(c.nome);
+    setNovoTel(c.telefone);
+    setNovoEmail(c.email || "");
+  }
+  function clearCliente() {
+    setClienteId(null);
+    setNovoNome("");
+    setNovoTel("");
+    setNovoEmail("");
+  }
+
+  const filteredClientes = clientes.filter(c => {
+    if (!clienteSearch.trim()) return false;
+    const s = clienteSearch.toLowerCase();
+    const tel = (c.telefone || "").replace(/\D/g, "");
+    const sLimpo = s.replace(/\D/g, "");
+    return (c.nome || "").toLowerCase().includes(s) || (sLimpo && tel.includes(sLimpo));
+  }).slice(0, 6);
+
+  function podeAvancar1() { return data && hora && turnoId && party > 0; }
+  function podeAvancar2() { return novoNome.trim() && novoTel.replace(/\D/g, "").length >= 10; }
+  function podeFinalizar() { return confirmTipoMesa; }
+
+  function finalizar() {
+    if (!podeFinalizar()) return;
+    if (overbookingMsg && !canForce) { window.alert("Capacidade do turno excedida. Sem permissão pra forçar."); return; }
+    const now = new Date().toISOString();
+    const author = currentUser?.name || "Gestor";
+    const authorId = currentUser?.id || null;
+    const dateTime = `${data}T${hora}:00`;
+
+    let finalClienteId = clienteId;
+    let nextClientes = allClientes || [];
+    if (!finalClienteId) {
+      finalClienteId = `cli-${Date.now()}-${Math.random().toString(36).slice(2,5)}`;
+      nextClientes = [...nextClientes, {
+        id: finalClienteId,
+        restaurantId,
+        nome: novoNome.trim(),
+        telefone: novoTel.trim(),
+        email: novoEmail.trim() || null,
+        tags: [], visitas: 0, noShows: 0, blacklisted: false,
+        createdAt: now, createdBy: author,
+      }];
+      onUpdate("reservasClientes", nextClientes);
+    }
+
+    const novaReserva = {
+      id: `res-${Date.now()}-${Math.random().toString(36).slice(2,5)}`,
+      restaurantId, dateTime, party: parseInt(party),
+      turnoId, salaId: salaId || null, tipoMesaId: tipoMesaId || null,
+      mesaIds: [],
+      clienteId: finalClienteId,
+      nomeCliente: novoNome.trim(),
+      telCliente: novoTel.trim(),
+      emailCliente: novoEmail.trim() || null,
+      status: "feita",
+      ocasiao: ocasiao || null,
+      observacoesCliente: obsCliente || null,
+      observacoesInternas: obsInternas || null,
+      fonte: "backoffice",
+      forcada: !!overbookingMsg,
+      criadaPor: author,
+      criadaPorId: authorId,
+      createdAt: now,
+    };
+    onUpdate("reservas", [...(allReservas || []), novaReserva]);
+    onUpdate("_toast", `📅 Reserva criada${overbookingMsg ? " (forçada)" : ""}`);
+    onClose();
+  }
+
+  const tiposNoSalaoAtivos = tipos.filter(t => t.ativa !== false && (!salaId || t.salaId === salaId));
+  const salaSel = salas.find(s => s.id === salaId);
+  const tipoSel = tipos.find(t => t.id === tipoMesaId);
+
+  return (
+    <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.6)",zIndex:9999,display:"flex",alignItems:"center",justifyContent:"center",padding:16}} onClick={onClose}>
+      <div onClick={e=>e.stopPropagation()} style={{background:"var(--card-bg)",border:"1px solid var(--border)",borderRadius:14,maxWidth:560,width:"100%",padding:24,maxHeight:"90vh",overflowY:"auto"}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
+          <h3 style={{margin:0,color:"var(--text)",fontSize:16,fontWeight:700}}>📅 Nova Reserva — Passo {step}/3</h3>
+          <button onClick={onClose} style={{background:"none",border:"none",fontSize:20,color:"var(--text3)",cursor:"pointer"}}>×</button>
+        </div>
+
+        {/* PASSO 1: data + horário + pessoas */}
+        {step === 1 && (
+          <div style={{display:"flex",flexDirection:"column",gap:12}}>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+              <div><label style={{...S.label,fontSize:11}}>Data</label><input type="date" value={data} onChange={e=>{setData(e.target.value);setHora("");setTurnoId("");}} style={S.input}/></div>
+              <div><label style={{...S.label,fontSize:11}}>Pessoas</label><input type="number" min="1" max="50" value={party} onChange={e=>setParty(parseInt(e.target.value)||0)} style={S.input}/></div>
+            </div>
+            {turnosDoDia.length === 0 ? (
+              <div style={{padding:14,textAlign:"center",color:"#f59e0b",fontSize:12,background:"#f59e0b11",border:"1px solid #f59e0b33",borderRadius:8}}>
+                ⚠️ Nenhum turno disponível neste dia. Verifique as configurações.
+              </div>
+            ) : (
+              <>
+                <div>
+                  <label style={{...S.label,fontSize:11}}>Turno</label>
+                  <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+                    {turnosDoDia.map(t => {
+                      const usadas = capacidadeUsada(data, t);
+                      const livre = t.capacidadePessoas - usadas;
+                      return (
+                        <button key={t.id} onClick={()=>{setTurnoId(t.id);setHora("");}}
+                          style={{padding:"8px 14px",borderRadius:8,border:`1px solid ${turnoId===t.id?"var(--ac)":"var(--border)"}`,background:turnoId===t.id?"var(--ac)11":"transparent",color:"var(--text)",cursor:"pointer",fontSize:12,textAlign:"left"}}>
+                          <div style={{fontWeight:700}}>{t.nome}</div>
+                          <div style={{fontSize:10,color:livre<=0?"#ef4444":livre<5?"#f59e0b":"var(--text3)"}}>{livre} de {t.capacidadePessoas} lugares livres</div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+                {turnoId && (
+                  <div>
+                    <label style={{...S.label,fontSize:11}}>Horário</label>
+                    <div style={{display:"flex",gap:4,flexWrap:"wrap"}}>
+                      {(turnos.find(t => t.id === turnoId)?.horarios || []).map(h => (
+                        <button key={h} onClick={()=>setHora(h)}
+                          style={{padding:"6px 12px",borderRadius:6,border:`1px solid ${hora===h?"var(--ac)":"var(--border)"}`,background:hora===h?"var(--ac)22":"transparent",color:hora===h?"var(--ac)":"var(--text2)",cursor:"pointer",fontSize:12,fontFamily:"'DM Mono',monospace"}}>
+                          {h}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                {salas.filter(s => s.ativa !== false).length > 0 && (
+                  <div>
+                    <label style={{...S.label,fontSize:11}}>Salão (opcional)</label>
+                    <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+                      <button onClick={()=>{setSalaId("");setTipoMesaId("");}} style={{padding:"5px 10px",borderRadius:6,border:`1px solid ${!salaId?"var(--ac)":"var(--border)"}`,background:!salaId?"var(--ac)22":"transparent",color:!salaId?"var(--ac)":"var(--text2)",cursor:"pointer",fontSize:11}}>Sem preferência</button>
+                      {salas.filter(s => s.ativa !== false).map(s => (
+                        <button key={s.id} onClick={()=>{setSalaId(s.id);setTipoMesaId("");}} style={{padding:"5px 10px",borderRadius:6,border:`1px solid ${salaId===s.id?"var(--ac)":"var(--border)"}`,background:salaId===s.id?"var(--ac)22":"transparent",color:salaId===s.id?"var(--ac)":"var(--text2)",cursor:"pointer",fontSize:11}}>
+                          {s.nome}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                {tiposNoSalaoAtivos.length > 0 && (
+                  <div>
+                    <label style={{...S.label,fontSize:11}}>Tipo de mesa (opcional)</label>
+                    <div style={{display:"flex",flexDirection:"column",gap:6}}>
+                      <button onClick={()=>setTipoMesaId("")} style={{padding:"8px 10px",borderRadius:6,border:`1px solid ${!tipoMesaId?"var(--ac)":"var(--border)"}`,background:!tipoMesaId?"var(--ac)11":"transparent",color:!tipoMesaId?"var(--ac)":"var(--text2)",cursor:"pointer",fontSize:11,textAlign:"left"}}>Sem preferência</button>
+                      {tiposNoSalaoAtivos.map(t => (
+                        <button key={t.id} onClick={()=>setTipoMesaId(t.id)} style={{padding:"8px 10px",borderRadius:6,border:`1px solid ${tipoMesaId===t.id?"var(--ac)":"var(--border)"}`,background:tipoMesaId===t.id?"var(--ac)11":"transparent",color:"var(--text)",cursor:"pointer",fontSize:11,textAlign:"left"}}>
+                          <div style={{fontWeight:700}}>{t.label}</div>
+                          {t.descricao && <div style={{fontSize:10,color:"var(--text3)",marginTop:2}}>{t.descricao}</div>}
+                          <div style={{fontSize:9,color:"var(--text3)",marginTop:2}}>{t.capacidade} lugar(es) · {t.quantidade} unidade(s)</div>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                {turnoSelecionado && overbookingMsg && (
+                  <div style={{padding:"10px 12px",background:"#ef444411",border:"1px solid #ef444466",borderRadius:8,fontSize:12,color:"#ef4444"}}>
+                    ⚠️ <strong>Capacidade ultrapassada.</strong> Turno tem {turnoSelecionado.capacidadePessoas} lugares, já reservados {usadasNoTurno}, esta reserva pediria +{party} = {usadasNoTurno + parseInt(party || 0)}.
+                    {canForce ? <div style={{marginTop:4}}>Você tem permissão pra forçar essa reserva.</div> : <div style={{marginTop:4}}>Você não tem permissão pra forçar.</div>}
+                  </div>
+                )}
+              </>
+            )}
+            <div style={{display:"flex",justifyContent:"flex-end",gap:10,marginTop:6}}>
+              <button onClick={onClose} style={S.btnSecondary}>Cancelar</button>
+              <button onClick={()=>setStep(2)} disabled={!podeAvancar1() || (overbookingMsg && !canForce)} style={{...S.btnPrimary,opacity:(!podeAvancar1() || (overbookingMsg && !canForce))?0.5:1}}>Próximo →</button>
+            </div>
+          </div>
+        )}
+
+        {/* PASSO 2: cliente */}
+        {step === 2 && (
+          <div style={{display:"flex",flexDirection:"column",gap:12}}>
+            <div>
+              <label style={{...S.label,fontSize:11}}>Buscar cliente existente</label>
+              <input value={clienteSearch} onChange={e=>setClienteSearch(e.target.value)} placeholder="Digite nome ou telefone..." style={S.input}/>
+              {filteredClientes.length > 0 && (
+                <div style={{maxHeight:140,overflowY:"auto",border:"1px solid var(--border)",borderRadius:6,marginTop:4}}>
+                  {filteredClientes.map(c => (
+                    <button key={c.id} onClick={()=>{selectCliente(c);setClienteSearch("");}} style={{width:"100%",padding:"8px 10px",border:"none",borderBottom:"1px solid var(--border)",background:"transparent",color:"var(--text)",cursor:"pointer",textAlign:"left",fontSize:12}}>
+                      <strong>{c.nome}</strong>
+                      <span style={{color:"var(--text3)",marginLeft:8}}>{c.telefone}</span>
+                      {c.blacklisted && <span style={{marginLeft:8,color:"#ef4444",fontSize:10}}>🚫 Bloqueado</span>}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+            <div style={{textAlign:"center",fontSize:11,color:"var(--text3)"}}>— ou cadastre um novo —</div>
+            {clienteId && (
+              <div style={{padding:"8px 10px",background:"var(--ac)11",border:"1px solid var(--ac)44",borderRadius:6,fontSize:11,color:"var(--text2)",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                <span>📋 Cliente vinculado</span>
+                <button onClick={clearCliente} style={{background:"none",border:"none",color:"var(--ac)",cursor:"pointer",fontSize:11}}>Trocar</button>
+              </div>
+            )}
+            <div><label style={{...S.label,fontSize:11}}>Nome *</label><input value={novoNome} onChange={e=>setNovoNome(e.target.value)} style={S.input}/></div>
+            <div><label style={{...S.label,fontSize:11}}>Telefone *</label><input value={novoTel} onChange={e=>setNovoTel(e.target.value)} placeholder="(11) 99999-9999" style={S.input} inputMode="tel"/></div>
+            <div><label style={{...S.label,fontSize:11}}>Email</label><input type="email" value={novoEmail} onChange={e=>setNovoEmail(e.target.value)} style={S.input}/></div>
+            <div><label style={{...S.label,fontSize:11}}>Ocasião (opcional)</label>
+              <select value={ocasiao} onChange={e=>setOcasiao(e.target.value)} style={{...S.input,cursor:"pointer"}}>
+                <option value="">Nenhuma</option>
+                <option value="Aniversário">Aniversário</option>
+                <option value="Negócio">Negócio</option>
+                <option value="Comemoração">Comemoração</option>
+                <option value="Encontro">Encontro</option>
+                <option value="Outro">Outro</option>
+              </select>
+            </div>
+            <div><label style={{...S.label,fontSize:11}}>Observação do cliente</label><textarea value={obsCliente} onChange={e=>setObsCliente(e.target.value)} rows={2} style={{...S.input,resize:"vertical"}} placeholder="ex: alergia a frutos do mar"/></div>
+            <div><label style={{...S.label,fontSize:11}}>Observação interna (não é compartilhada com o cliente)</label><textarea value={obsInternas} onChange={e=>setObsInternas(e.target.value)} rows={2} style={{...S.input,resize:"vertical"}}/></div>
+            <div style={{display:"flex",justifyContent:"space-between",gap:10,marginTop:6}}>
+              <button onClick={()=>setStep(1)} style={S.btnSecondary}>← Voltar</button>
+              <button onClick={()=>setStep(3)} disabled={!podeAvancar2()} style={{...S.btnPrimary,opacity:!podeAvancar2()?0.5:1}}>Próximo →</button>
+            </div>
+          </div>
+        )}
+
+        {/* PASSO 3: confirmação */}
+        {step === 3 && (
+          <div style={{display:"flex",flexDirection:"column",gap:12}}>
+            <div style={{padding:14,background:"var(--bg2)",borderRadius:10,fontSize:13,color:"var(--text2)",lineHeight:1.7}}>
+              <div style={{fontWeight:700,color:"var(--text)",marginBottom:8,fontSize:14}}>📋 Revise e confirme</div>
+              <div><strong>Cliente:</strong> {novoNome}</div>
+              <div><strong>Telefone:</strong> {novoTel}</div>
+              {novoEmail && <div><strong>Email:</strong> {novoEmail}</div>}
+              <div><strong>Data:</strong> {new Date(data+"T12:00:00").toLocaleDateString("pt-BR",{weekday:"long",day:"2-digit",month:"long",year:"numeric"})}</div>
+              <div><strong>Horário:</strong> {hora}</div>
+              <div><strong>Pessoas:</strong> {party}</div>
+              {ocasiao && <div><strong>Ocasião:</strong> {ocasiao}</div>}
+            </div>
+            {(salaSel || tipoSel) && (
+              <div style={{padding:14,border:"2px solid var(--ac)",borderRadius:10,background:"var(--ac)08"}}>
+                <div style={{fontSize:11,color:"var(--ac)",fontWeight:700,textTransform:"uppercase",letterSpacing:0.5,marginBottom:8}}>📍 Local da Mesa</div>
+                {salaSel && <div style={{fontSize:14,color:"var(--text)",fontWeight:700}}>{salaSel.nome}</div>}
+                {tipoSel && (
+                  <>
+                    <div style={{fontSize:13,color:"var(--text)",marginTop:4}}>→ {tipoSel.label}</div>
+                    {tipoSel.descricao && <div style={{fontSize:12,color:"var(--text2)",marginTop:6,fontStyle:"italic"}}>"{tipoSel.descricao}"</div>}
+                  </>
+                )}
+                <label style={{display:"flex",alignItems:"flex-start",gap:8,marginTop:12,cursor:"pointer"}}>
+                  <input type="checkbox" checked={confirmTipoMesa} onChange={e=>setConfirmTipoMesa(e.target.checked)} style={{accentColor:"var(--ac)",marginTop:3}}/>
+                  <span style={{fontSize:12,color:"var(--text2)"}}>Confirmo que esse é o local que o cliente quer.</span>
+                </label>
+              </div>
+            )}
+            {!salaSel && !tipoSel && (
+              <label style={{display:"flex",alignItems:"flex-start",gap:8,padding:"10px 12px",border:"1px solid var(--border)",borderRadius:8,cursor:"pointer"}}>
+                <input type="checkbox" checked={confirmTipoMesa} onChange={e=>setConfirmTipoMesa(e.target.checked)} style={{marginTop:3}}/>
+                <span style={{fontSize:12,color:"var(--text2)"}}>Sem preferência de salão/mesa — alocação pelo restaurante. Confirmo.</span>
+              </label>
+            )}
+            {overbookingMsg && (
+              <div style={{padding:"10px 12px",background:"#ef444411",border:"1px solid #ef444466",borderRadius:8,fontSize:12,color:"#ef4444"}}>
+                ⚡ <strong>Reserva forçada</strong> — capacidade do turno foi ultrapassada. Ficará marcada como forçada no histórico.
+              </div>
+            )}
+            <div style={{display:"flex",justifyContent:"space-between",gap:10,marginTop:6}}>
+              <button onClick={()=>setStep(2)} style={S.btnSecondary}>← Voltar</button>
+              <button onClick={finalizar} disabled={!podeFinalizar() || (overbookingMsg && !canForce)} style={{...S.btnPrimary,opacity:(!podeFinalizar() || (overbookingMsg && !canForce))?0.5:1}}>Finalizar Reserva</button>
+            </div>
+          </div>
+        )}
+      </div>
     </div>
   );
 }
@@ -37198,6 +38491,11 @@ export default function App() {
   const [permProfiles,       setPermProfiles]       = useState({});
   const [freelaShifts,       setFreelaShifts]       = useState([]);
   const [freelaPagamentos,   setFreelaPagamentos]   = useState([]);
+  const [reservasConfig,     setReservasConfig]     = useState({});
+  const [reservasSalas,      setReservasSalas]      = useState([]);
+  const [reservasTiposMesa,  setReservasTiposMesa]  = useState([]);
+  const [reservasClientes,   setReservasClientes]   = useState([]);
+  const [reservas,           setReservas]           = useState([]);
 
   useEffect(() => {
     const savedId = currentUserId;
@@ -37225,7 +38523,7 @@ export default function App() {
       setLoadProgress("Preparando o sistema...");
 
       const keys = keyNames;
-      const map = { owners:setOwners, managers:setManagers, restaurants:setRestaurants, employees:setEmployees, roles:setRoles, tips:setTips, splits:setSplits, schedules:setSchedules, communications:setCommunications, commAcks:setCommAcks, faq:setFaq, dpMessages:setDpMessages, workSchedules:setWorkSchedules, notifications:setNotifications, noTipDays:setNoTipDays, trash:setTrash, schedTemplates:setSchedTemplates, schedDrafts:setSchedDrafts, scheduleVersions:setScheduleVersions, tipVersions:setTipVersions, vtConfig:setVtConfig, vtMonthly:setVtMonthly, vtPayments:setVtPayments, incidents:setIncidents, feedbacks:setFeedbacks, devChecklists:setDevChecklists, scheduleAdjustments:setScheduleAdjustments, scheduleStatus:setScheduleStatus, schedulePrevista:setSchedulePrevista, scheduleSwaps:setScheduleSwaps, dayInversions:setDayInversions, recursoFolders:setRecursoFolders, recursos:setRecursos, recursosInitialized:setRecursosInitialized, employeeGoals:setEmployeeGoals, delays:setDelays, tipApprovals:setTipApprovals, meetingPlans:setMeetingPlans, meetingIdeas:setMeetingIdeas, meetingAgendas:setMeetingAgendas, meetingActions:setMeetingActions, meetingOccurrences:setMeetingOccurrences, meetingPendencias:setMeetingPendencias, inbox:setInbox, inboxFolders:setInboxFolders, miseCategories:setMiseCategories, miseStocks:setMiseStocks, miseAssignments:setMiseAssignments, miseItems:setMiseItems, miseCycles:setMiseCycles, miseCounts:setMiseCounts, miseSuppliers:setMiseSuppliers, miseProductSuppliers:setMiseProductSuppliers, miseSupplierOrders:setMiseSupplierOrders, miseChecklistTemplates:setMiseChecklistTemplates, miseChecklistRuns:setMiseChecklistRuns, miseFtInsumos:setMiseFtInsumos, miseFtEquipamentos:setMiseFtEquipamentos, miseFtDishes:setMiseFtDishes, pessoas:setPessoas, pessoasMigratedAt:setPessoasMigratedAt, permsV2MigratedAt:setPermsV2MigratedAt, freelasFecharOpMigratedAt:setFreelasFecharOpMigratedAt, tuyaLinks:setTuyaLinks, tempSensors:setTempSensors, tempReadings:setTempReadings, tempAlerts:setTempAlerts, tempBackfillState:setTempBackfillState, permProfiles:setPermProfiles, freelaShifts:setFreelaShifts, freelaPagamentos:setFreelaPagamentos };
+      const map = { owners:setOwners, managers:setManagers, restaurants:setRestaurants, employees:setEmployees, roles:setRoles, tips:setTips, splits:setSplits, schedules:setSchedules, communications:setCommunications, commAcks:setCommAcks, faq:setFaq, dpMessages:setDpMessages, workSchedules:setWorkSchedules, notifications:setNotifications, noTipDays:setNoTipDays, trash:setTrash, schedTemplates:setSchedTemplates, schedDrafts:setSchedDrafts, scheduleVersions:setScheduleVersions, tipVersions:setTipVersions, vtConfig:setVtConfig, vtMonthly:setVtMonthly, vtPayments:setVtPayments, incidents:setIncidents, feedbacks:setFeedbacks, devChecklists:setDevChecklists, scheduleAdjustments:setScheduleAdjustments, scheduleStatus:setScheduleStatus, schedulePrevista:setSchedulePrevista, scheduleSwaps:setScheduleSwaps, dayInversions:setDayInversions, recursoFolders:setRecursoFolders, recursos:setRecursos, recursosInitialized:setRecursosInitialized, employeeGoals:setEmployeeGoals, delays:setDelays, tipApprovals:setTipApprovals, meetingPlans:setMeetingPlans, meetingIdeas:setMeetingIdeas, meetingAgendas:setMeetingAgendas, meetingActions:setMeetingActions, meetingOccurrences:setMeetingOccurrences, meetingPendencias:setMeetingPendencias, inbox:setInbox, inboxFolders:setInboxFolders, miseCategories:setMiseCategories, miseStocks:setMiseStocks, miseAssignments:setMiseAssignments, miseItems:setMiseItems, miseCycles:setMiseCycles, miseCounts:setMiseCounts, miseSuppliers:setMiseSuppliers, miseProductSuppliers:setMiseProductSuppliers, miseSupplierOrders:setMiseSupplierOrders, miseChecklistTemplates:setMiseChecklistTemplates, miseChecklistRuns:setMiseChecklistRuns, miseFtInsumos:setMiseFtInsumos, miseFtEquipamentos:setMiseFtEquipamentos, miseFtDishes:setMiseFtDishes, pessoas:setPessoas, pessoasMigratedAt:setPessoasMigratedAt, permsV2MigratedAt:setPermsV2MigratedAt, freelasFecharOpMigratedAt:setFreelasFecharOpMigratedAt, tuyaLinks:setTuyaLinks, tempSensors:setTempSensors, tempReadings:setTempReadings, tempAlerts:setTempAlerts, tempBackfillState:setTempBackfillState, permProfiles:setPermProfiles, freelaShifts:setFreelaShifts, freelaPagamentos:setFreelaPagamentos, reservasConfig:setReservasConfig, reservasSalas:setReservasSalas, reservasTiposMesa:setReservasTiposMesa, reservasClientes:setReservasClientes, reservas:setReservas };
       const loaded_data = {};
       let successCount = 0;
       keys.forEach((k, i) => {
@@ -37749,7 +39047,7 @@ export default function App() {
     setView("shell");
   }, [view, loaded, currentUser?.id, pessoas?.length]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const data = { owners, managers, restaurants, employees, roles, tips, splits, schedules, communications, commAcks, faq, dpMessages, workSchedules, notifications, noTipDays, trash, schedTemplates, schedDrafts, scheduleVersions, tipVersions, vtConfig, vtMonthly, vtPayments, incidents, feedbacks, devChecklists, scheduleAdjustments, scheduleStatus, schedulePrevista, scheduleSwaps, dayInversions, recursoFolders, recursos, recursosInitialized, employeeGoals, delays, tipApprovals, meetingPlans, meetingIdeas, meetingAgendas, meetingActions, meetingOccurrences, meetingPendencias, inbox, inboxFolders, miseCategories, miseStocks, miseAssignments, miseItems, miseCycles, miseCounts, miseSuppliers, miseProductSuppliers, miseSupplierOrders, miseChecklistTemplates, miseChecklistRuns, miseFtInsumos, miseFtEquipamentos, miseFtDishes, pessoas, pessoasMigratedAt, permsV2MigratedAt, tuyaLinks, tempSensors, tempReadings, tempAlerts, tempBackfillState, permProfiles, freelaShifts, freelaPagamentos };
+  const data = { owners, managers, restaurants, employees, roles, tips, splits, schedules, communications, commAcks, faq, dpMessages, workSchedules, notifications, noTipDays, trash, schedTemplates, schedDrafts, scheduleVersions, tipVersions, vtConfig, vtMonthly, vtPayments, incidents, feedbacks, devChecklists, scheduleAdjustments, scheduleStatus, schedulePrevista, scheduleSwaps, dayInversions, recursoFolders, recursos, recursosInitialized, employeeGoals, delays, tipApprovals, meetingPlans, meetingIdeas, meetingAgendas, meetingActions, meetingOccurrences, meetingPendencias, inbox, inboxFolders, miseCategories, miseStocks, miseAssignments, miseItems, miseCycles, miseCounts, miseSuppliers, miseProductSuppliers, miseSupplierOrders, miseChecklistTemplates, miseChecklistRuns, miseFtInsumos, miseFtEquipamentos, miseFtDishes, pessoas, pessoasMigratedAt, permsV2MigratedAt, tuyaLinks, tempSensors, tempReadings, tempAlerts, tempBackfillState, permProfiles, freelaShifts, freelaPagamentos, reservasConfig, reservasSalas, reservasTiposMesa, reservasClientes, reservas };
 
   // v8.22.3: kick out automático — se o usuário logado for inativado durante a sessão,
   // a próxima rodada de data-refresh o desloga + mostra toast.
@@ -37787,8 +39085,8 @@ export default function App() {
       setToast("⚠️ Você está offline — conecte à internet para salvar alterações");
       return;
     }
-    const setters = { owners:setOwners, managers:setManagers, restaurants:setRestaurants, employees:setEmployees, roles:setRoles, tips:setTips, splits:setSplits, schedules:setSchedules, communications:setCommunications, commAcks:setCommAcks, faq:setFaq, dpMessages:setDpMessages, workSchedules:setWorkSchedules, notifications:setNotifications, noTipDays:setNoTipDays, trash:setTrash, schedTemplates:setSchedTemplates, schedDrafts:setSchedDrafts, scheduleVersions:setScheduleVersions, tipVersions:setTipVersions, vtConfig:setVtConfig, vtMonthly:setVtMonthly, vtPayments:setVtPayments, incidents:setIncidents, feedbacks:setFeedbacks, devChecklists:setDevChecklists, scheduleAdjustments:setScheduleAdjustments, scheduleStatus:setScheduleStatus, schedulePrevista:setSchedulePrevista, scheduleSwaps:setScheduleSwaps, dayInversions:setDayInversions, recursoFolders:setRecursoFolders, recursos:setRecursos, recursosInitialized:setRecursosInitialized, employeeGoals:setEmployeeGoals, delays:setDelays, tipApprovals:setTipApprovals, meetingPlans:setMeetingPlans, meetingIdeas:setMeetingIdeas, meetingAgendas:setMeetingAgendas, meetingActions:setMeetingActions, meetingOccurrences:setMeetingOccurrences, meetingPendencias:setMeetingPendencias, inbox:setInbox, inboxFolders:setInboxFolders, miseCategories:setMiseCategories, miseStocks:setMiseStocks, miseAssignments:setMiseAssignments, miseItems:setMiseItems, miseCycles:setMiseCycles, miseCounts:setMiseCounts, miseSuppliers:setMiseSuppliers, miseProductSuppliers:setMiseProductSuppliers, miseSupplierOrders:setMiseSupplierOrders, miseChecklistTemplates:setMiseChecklistTemplates, miseChecklistRuns:setMiseChecklistRuns, miseFtInsumos:setMiseFtInsumos, miseFtEquipamentos:setMiseFtEquipamentos, miseFtDishes:setMiseFtDishes, pessoas:setPessoas, pessoasMigratedAt:setPessoasMigratedAt, permsV2MigratedAt:setPermsV2MigratedAt, freelasFecharOpMigratedAt:setFreelasFecharOpMigratedAt, tuyaLinks:setTuyaLinks, tempSensors:setTempSensors, tempReadings:setTempReadings, tempAlerts:setTempAlerts, tempBackfillState:setTempBackfillState, permProfiles:setPermProfiles, freelaShifts:setFreelaShifts, freelaPagamentos:setFreelaPagamentos };
-    const keys    = { owners:K.owners, managers:K.managers, restaurants:K.restaurants, employees:K.employees, roles:K.roles, tips:K.tips, splits:K.splits, schedules:K.schedules, communications:K.communications, commAcks:K.commAcks, faq:K.faq, dpMessages:K.dpMessages, workSchedules:K.workSchedules, notifications:K.notifications, noTipDays:K.noTipDays, trash:K.trash, schedTemplates:K.schedTemplates, schedDrafts:K.schedDrafts, scheduleVersions:K.scheduleVersions, tipVersions:K.tipVersions, vtConfig:K.vtConfig, vtMonthly:K.vtMonthly, vtPayments:K.vtPayments, incidents:K.incidents, feedbacks:K.feedbacks, devChecklists:K.devChecklists, scheduleAdjustments:K.scheduleAdjustments, scheduleStatus:K.scheduleStatus, schedulePrevista:K.schedulePrevista, scheduleSwaps:K.scheduleSwaps, dayInversions:K.dayInversions, recursoFolders:K.recursoFolders, recursos:K.recursos, recursosInitialized:K.recursosInitialized, employeeGoals:K.employeeGoals, delays:K.delays, tipApprovals:K.tipApprovals, meetingPlans:K.meetingPlans, meetingIdeas:K.meetingIdeas, meetingAgendas:K.meetingAgendas, meetingActions:K.meetingActions, inbox:K.inbox, inboxFolders:K.inboxFolders, miseCategories:K.miseCategories, miseStocks:K.miseStocks, miseAssignments:K.miseAssignments, miseItems:K.miseItems, miseCycles:K.miseCycles, miseCounts:K.miseCounts, miseSuppliers:K.miseSuppliers, miseProductSuppliers:K.miseProductSuppliers, miseSupplierOrders:K.miseSupplierOrders, miseChecklistTemplates:K.miseChecklistTemplates, miseChecklistRuns:K.miseChecklistRuns, miseFtInsumos:K.miseFtInsumos, miseFtEquipamentos:K.miseFtEquipamentos, miseFtDishes:K.miseFtDishes, pessoas:K.pessoas, pessoasMigratedAt:K.pessoasMigratedAt, permsV2MigratedAt:K.permsV2MigratedAt, freelasFecharOpMigratedAt:K.freelasFecharOpMigratedAt, tuyaLinks:K.tuyaLinks, tempSensors:K.tempSensors, tempReadings:K.tempReadings, tempAlerts:K.tempAlerts, tempBackfillState:K.tempBackfillState, permProfiles:K.permProfiles, freelaShifts:K.freelaShifts, freelaPagamentos:K.freelaPagamentos };
+    const setters = { owners:setOwners, managers:setManagers, restaurants:setRestaurants, employees:setEmployees, roles:setRoles, tips:setTips, splits:setSplits, schedules:setSchedules, communications:setCommunications, commAcks:setCommAcks, faq:setFaq, dpMessages:setDpMessages, workSchedules:setWorkSchedules, notifications:setNotifications, noTipDays:setNoTipDays, trash:setTrash, schedTemplates:setSchedTemplates, schedDrafts:setSchedDrafts, scheduleVersions:setScheduleVersions, tipVersions:setTipVersions, vtConfig:setVtConfig, vtMonthly:setVtMonthly, vtPayments:setVtPayments, incidents:setIncidents, feedbacks:setFeedbacks, devChecklists:setDevChecklists, scheduleAdjustments:setScheduleAdjustments, scheduleStatus:setScheduleStatus, schedulePrevista:setSchedulePrevista, scheduleSwaps:setScheduleSwaps, dayInversions:setDayInversions, recursoFolders:setRecursoFolders, recursos:setRecursos, recursosInitialized:setRecursosInitialized, employeeGoals:setEmployeeGoals, delays:setDelays, tipApprovals:setTipApprovals, meetingPlans:setMeetingPlans, meetingIdeas:setMeetingIdeas, meetingAgendas:setMeetingAgendas, meetingActions:setMeetingActions, meetingOccurrences:setMeetingOccurrences, meetingPendencias:setMeetingPendencias, inbox:setInbox, inboxFolders:setInboxFolders, miseCategories:setMiseCategories, miseStocks:setMiseStocks, miseAssignments:setMiseAssignments, miseItems:setMiseItems, miseCycles:setMiseCycles, miseCounts:setMiseCounts, miseSuppliers:setMiseSuppliers, miseProductSuppliers:setMiseProductSuppliers, miseSupplierOrders:setMiseSupplierOrders, miseChecklistTemplates:setMiseChecklistTemplates, miseChecklistRuns:setMiseChecklistRuns, miseFtInsumos:setMiseFtInsumos, miseFtEquipamentos:setMiseFtEquipamentos, miseFtDishes:setMiseFtDishes, pessoas:setPessoas, pessoasMigratedAt:setPessoasMigratedAt, permsV2MigratedAt:setPermsV2MigratedAt, freelasFecharOpMigratedAt:setFreelasFecharOpMigratedAt, tuyaLinks:setTuyaLinks, tempSensors:setTempSensors, tempReadings:setTempReadings, tempAlerts:setTempAlerts, tempBackfillState:setTempBackfillState, permProfiles:setPermProfiles, freelaShifts:setFreelaShifts, freelaPagamentos:setFreelaPagamentos, reservasConfig:setReservasConfig, reservasSalas:setReservasSalas, reservasTiposMesa:setReservasTiposMesa, reservasClientes:setReservasClientes, reservas:setReservas };
+    const keys    = { owners:K.owners, managers:K.managers, restaurants:K.restaurants, employees:K.employees, roles:K.roles, tips:K.tips, splits:K.splits, schedules:K.schedules, communications:K.communications, commAcks:K.commAcks, faq:K.faq, dpMessages:K.dpMessages, workSchedules:K.workSchedules, notifications:K.notifications, noTipDays:K.noTipDays, trash:K.trash, schedTemplates:K.schedTemplates, schedDrafts:K.schedDrafts, scheduleVersions:K.scheduleVersions, tipVersions:K.tipVersions, vtConfig:K.vtConfig, vtMonthly:K.vtMonthly, vtPayments:K.vtPayments, incidents:K.incidents, feedbacks:K.feedbacks, devChecklists:K.devChecklists, scheduleAdjustments:K.scheduleAdjustments, scheduleStatus:K.scheduleStatus, schedulePrevista:K.schedulePrevista, scheduleSwaps:K.scheduleSwaps, dayInversions:K.dayInversions, recursoFolders:K.recursoFolders, recursos:K.recursos, recursosInitialized:K.recursosInitialized, employeeGoals:K.employeeGoals, delays:K.delays, tipApprovals:K.tipApprovals, meetingPlans:K.meetingPlans, meetingIdeas:K.meetingIdeas, meetingAgendas:K.meetingAgendas, meetingActions:K.meetingActions, inbox:K.inbox, inboxFolders:K.inboxFolders, miseCategories:K.miseCategories, miseStocks:K.miseStocks, miseAssignments:K.miseAssignments, miseItems:K.miseItems, miseCycles:K.miseCycles, miseCounts:K.miseCounts, miseSuppliers:K.miseSuppliers, miseProductSuppliers:K.miseProductSuppliers, miseSupplierOrders:K.miseSupplierOrders, miseChecklistTemplates:K.miseChecklistTemplates, miseChecklistRuns:K.miseChecklistRuns, miseFtInsumos:K.miseFtInsumos, miseFtEquipamentos:K.miseFtEquipamentos, miseFtDishes:K.miseFtDishes, pessoas:K.pessoas, pessoasMigratedAt:K.pessoasMigratedAt, permsV2MigratedAt:K.permsV2MigratedAt, freelasFecharOpMigratedAt:K.freelasFecharOpMigratedAt, tuyaLinks:K.tuyaLinks, tempSensors:K.tempSensors, tempReadings:K.tempReadings, tempAlerts:K.tempAlerts, tempBackfillState:K.tempBackfillState, permProfiles:K.permProfiles, freelaShifts:K.freelaShifts, freelaPagamentos:K.freelaPagamentos, reservasConfig:K.reservasConfig, reservasSalas:K.reservasSalas, reservasTiposMesa:K.reservasTiposMesa, reservasClientes:K.reservasClientes, reservas:K.reservas };
     // Support functional updates to prevent stale-state race conditions:
     // When value is a function, it receives the latest state (like setState(prev => ...))
     // IMPORTANTE: o callback do setState pode rodar de forma assíncrona em React 18,
