@@ -248,6 +248,47 @@ const shortName = (name) => {
   return `${parts[0]} ${parts[parts.length - 1]}`;
 };
 const monthKey = (y, m) => `${y}-${String(m + 1).padStart(2, "0")}`;
+
+// v8.32 — Defesa em profundidade: limita os arrays passados pra EmployeePortal ao restaurante
+// do empregado logado. Não impede ataque sério (a leitura no Firestore continua aberta sem
+// rules), mas reduz vazamento via React DevTools e bate olho casual.
+// Mantém estruturas {[rid]:{...}} intactas (já são indexadas e o componente acessa só pela rid certa).
+function filterDataForRestaurant(data, rid) {
+  if (!data || !rid) return data;
+  const inRest = (item) => !item || item.restaurantId === rid;
+  const restaurantHasRid = (p) => Array.isArray(p?.restaurantIds) ? p.restaurantIds.includes(rid) : false;
+  return {
+    ...data,
+    restaurants: (data.restaurants || []).filter(r => r.id === rid),
+    employees:   (data.employees || []).filter(inRest),
+    roles:       (data.roles || []).filter(inRest),
+    tips:        (data.tips || []).filter(inRest),
+    incidents:   (data.incidents || []).filter(inRest),
+    feedbacks:   (data.feedbacks || []).filter(inRest),
+    meetingPlans:       (data.meetingPlans || []).filter(inRest),
+    meetingIdeas:       (data.meetingIdeas || []).filter(inRest),
+    meetingAgendas:     (data.meetingAgendas || []).filter(inRest),
+    meetingActions:     (data.meetingActions || []).filter(inRest),
+    meetingOccurrences: (data.meetingOccurrences || []).filter(inRest),
+    meetingPendencias:  (data.meetingPendencias || []).filter(inRest),
+    communications:     (data.communications || []).filter(inRest),
+    dpMessages:         (data.dpMessages || []).filter(inRest),
+    notifications:      (data.notifications || []).filter(inRest),
+    inbox:              (data.inbox || []).filter(inRest),
+    scheduleSwaps:      (data.scheduleSwaps || []).filter(inRest),
+    dayInversions:      (data.dayInversions || []).filter(inRest),
+    recursoFolders:     (data.recursoFolders || []).filter(inRest),
+    recursos:           (data.recursos || []).filter(inRest),
+    reservas:           (data.reservas || []).filter(inRest),
+    reservasSalas:      (data.reservasSalas || []).filter(inRest),
+    reservasTiposMesa:  (data.reservasTiposMesa || []).filter(inRest),
+    reservasClientes:   (data.reservasClientes || []).filter(inRest),
+    freelaShifts:       (data.freelaShifts || []).filter(inRest),
+    freelaPagamentos:   (data.freelaPagamentos || []).filter(inRest),
+    pessoas:    (data.pessoas || []).filter(restaurantHasRid),
+    managers:   (data.managers || []).filter(m => !m.restaurantIds || restaurantHasRid(m)),
+  };
+}
 // Soma N dias (pode ser negativo) a uma data YYYY-MM-DD e retorna nova string YYYY-MM-DD
 const addDaysISO = (dateStr, n) => {
   if (!dateStr) return dateStr;
@@ -1934,60 +1975,38 @@ function ComunicadosManagerTab({ restaurantId, communications, commAcks, employe
 }
 
 //
-// ── AI helper (Groq — Llama 3) ────────────────────────────────────────────────
-const GROQ_KEY = process.env.REACT_APP_GROQ_KEY ?? "";
-
+// ── AI helper (Groq — Llama 3 via Vercel function) ───────────────────────────
+// Antes (antes de v8.32) chamava direto a API do Groq com REACT_APP_GROQ_KEY no
+// bundle público, expondo a chave. Agora vai por /api/ai/generate (server-side).
 async function groqGenerate(systemPrompt, userInput) {
-  if (!GROQ_KEY || GROQ_KEY.length < 20) {
-    throw new Error("Chave da IA não configurada (REACT_APP_GROQ_KEY ausente no build). Contate o admin.");
-  }
   let res;
   try {
-    res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+    res = await fetch("/api/ai/generate", {
       method: "POST",
-      headers: { "Content-Type": "application/json", "Authorization": `Bearer ${GROQ_KEY}` },
-      body: JSON.stringify({
-        model: "llama-3.3-70b-versatile",
-        messages: [
-          { role: "system", content: systemPrompt },
-          { role: "user", content: userInput },
-        ],
-        temperature: 0.15,
-        response_format: { type: "json_object" },
-        max_tokens: 4096,
-      }),
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ systemPrompt, userInput }),
     });
   } catch (netErr) {
-    console.error("[Groq] Erro de rede:", netErr);
+    console.error("[AI] Erro de rede:", netErr);
     throw new Error("Erro de conexão com a IA. Verifique sua internet e tente novamente.");
   }
 
-  let data;
+  let payload;
   try {
-    data = await res.json();
+    payload = await res.json();
   } catch (parseErr) {
-    console.error("[Groq] Resposta inválida (não-JSON):", res.status, await res.text().catch(()=>"(sem corpo)"));
-    throw new Error(`Resposta inválida da IA (HTTP ${res.status}).`);
+    console.error("[AI] Resposta inválida do servidor:", res.status);
+    throw new Error(`Resposta inválida do servidor (HTTP ${res.status}).`);
   }
 
-  if (!res.ok || data.error) {
-    const msg = data.error?.message || `HTTP ${res.status}`;
-    const code = data.error?.code || data.error?.type;
-    console.error("[Groq] Erro da API:", { status: res.status, code, msg, data });
-    if (res.status === 401) throw new Error("Chave da IA inválida ou expirada. Contate o admin.");
+  if (!res.ok || !payload.success) {
+    const msg = payload?.error || `HTTP ${res.status}`;
+    console.error("[AI] Erro:", { status: res.status, msg });
     if (res.status === 429) throw new Error("Limite de requisições da IA excedido. Aguarde alguns instantes.");
-    if (res.status === 404 || /model.*not.*found|decommission/i.test(msg)) throw new Error("Modelo da IA indisponível. Atualização necessária.");
     throw new Error(`IA retornou erro: ${msg}`);
   }
 
-  const raw = data.choices?.[0]?.message?.content ?? "";
-  if (!raw.trim()) throw new Error("IA retornou resposta vazia. Tente reformular o pedido.");
-  try {
-    return JSON.parse(raw.replace(/```json|```/g, "").trim());
-  } catch (parseErr) {
-    console.error("[Groq] Não foi possível parsear JSON:", raw);
-    throw new Error("IA retornou texto fora do formato esperado. Tente novamente.");
-  }
+  return payload.data;
 }
 
 // ── useMobile hook — unified mobile detection ──
@@ -22333,32 +22352,33 @@ function AppShell({ pessoa, data, activeRestaurantId, setActiveRestaurantId, use
           </div>
         );
       }
+      const _empData = filterDataForRestaurant(data, activeRestaurantId);
       return (
         <EmployeePortal
           key={`ep-${activeRestaurantId}-${effectiveTab}-${resetCounter}`}
-          employees={data?.employees || []}
-          roles={data?.roles || []}
-          tips={data?.tips || []}
+          employees={_empData?.employees || []}
+          roles={_empData?.roles || []}
+          tips={_empData?.tips || []}
           schedules={data?.schedules || {}}
           splits={data?.splits || {}}
-          restaurants={data?.restaurants || []}
-          communications={data?.communications || []}
+          restaurants={_empData?.restaurants || []}
+          communications={_empData?.communications || []}
           commAcks={data?.commAcks || {}}
           faq={data?.faq || {}}
-          dpMessages={data?.dpMessages || []}
+          dpMessages={_empData?.dpMessages || []}
           workSchedules={data?.workSchedules || {}}
-          incidents={data?.incidents || []}
-          feedbacks={data?.feedbacks || []}
+          incidents={_empData?.incidents || []}
+          feedbacks={_empData?.feedbacks || []}
           devChecklists={data?.devChecklists || {}}
           employeeGoals={data?.employeeGoals || {}}
           tipApprovals={data?.tipApprovals || {}}
           delays={data?.delays || {}}
-          meetingPlans={data?.meetingPlans || []}
-          inbox={data?.inbox || []}
+          meetingPlans={_empData?.meetingPlans || []}
+          inbox={_empData?.inbox || []}
           inboxFolders={data?.inboxFolders || {}}
-          pessoas={data?.pessoas || []}
-          managers={data?.managers || []}
-          dayInversions={data?.dayInversions || []}
+          pessoas={_empData?.pessoas || []}
+          managers={_empData?.managers || []}
+          dayInversions={_empData?.dayInversions || []}
           onBack={()=>{}}
           onUpdateEmployee={(emp)=>{
             const next = (data?.employees || []).map(e => e.id === emp.id ? emp : e);
@@ -39279,7 +39299,18 @@ export default function App() {
             return () => { setCurrentUser(emp); setUserRole("employee"); localStorage.setItem("apptip_role","employee"); localStorage.setItem("apptip_userid",emp.id); localStorage.setItem("apptip_empid",emp.id); setView("employee"); };
           })()} />
       ))}
-      {view === "employee" && <EmployeePortal employees={employees} roles={roles} tips={tips} schedules={schedules} splits={splits} restaurants={restaurants} communications={communications} commAcks={commAcks} faq={faq} dpMessages={dpMessages} workSchedules={workSchedules} incidents={incidents} feedbacks={feedbacks} devChecklists={devChecklists} employeeGoals={employeeGoals} tipApprovals={tipApprovals} delays={delays} meetingPlans={meetingPlans} inbox={inbox} inboxFolders={inboxFolders} pessoas={pessoas} managers={managers} dayInversions={dayInversions} onBack={doLogout} onUpdateEmployee={emp=>{const next=employees.map(e=>e.id===emp.id?emp:e);handleUpdate("employees",next);}} onUpdate={handleUpdate} toggleTheme={toggleTheme} theme={theme}
+      {view === "employee" && (() => {
+        // v8.32 — filtra dados por restaurante do empregado antes de passar (defesa em profundidade)
+        const _empRid = currentUser?.restaurantId;
+        const _f = filterDataForRestaurant({
+          employees, roles, tips, restaurants, communications, dpMessages, incidents, feedbacks,
+          meetingPlans, meetingIdeas: [], meetingAgendas: [], meetingActions: [], meetingOccurrences: [], meetingPendencias: [],
+          notifications: [], inbox, scheduleSwaps: [], dayInversions,
+          recursoFolders: [], recursos: [], reservas: [], reservasSalas: [], reservasTiposMesa: [], reservasClientes: [],
+          freelaShifts: [], freelaPagamentos: [],
+          pessoas, managers,
+        }, _empRid);
+        return <EmployeePortal employees={_f.employees} roles={_f.roles} tips={_f.tips} schedules={schedules} splits={splits} restaurants={_f.restaurants} communications={_f.communications} commAcks={commAcks} faq={faq} dpMessages={_f.dpMessages} workSchedules={workSchedules} incidents={_f.incidents} feedbacks={_f.feedbacks} devChecklists={devChecklists} employeeGoals={employeeGoals} tipApprovals={tipApprovals} delays={delays} meetingPlans={_f.meetingPlans} inbox={_f.inbox} inboxFolders={inboxFolders} pessoas={_f.pessoas} managers={_f.managers} dayInversions={_f.dayInversions} onBack={doLogout} onUpdateEmployee={emp=>{const next=employees.map(e=>e.id===emp.id?emp:e);handleUpdate("employees",next);}} onUpdate={handleUpdate} toggleTheme={toggleTheme} theme={theme}
         onSwitchToManager={(() => {
           const cpf = currentUser?.cpf?.replace(/\D/g,"");
           let mgr = cpf ? managers.find(m => m.cpf?.replace(/\D/g,"") === cpf) : null;
@@ -39297,7 +39328,8 @@ export default function App() {
           const emp = employees.find(e => e.id === empIdLs);
           if (!emp || !hasAnyOperationalArea(emp)) return null;
           return () => { setCurrentUser(emp); setUserRole("operational"); localStorage.setItem("apptip_role","operational"); localStorage.setItem("apptip_userid",emp.id); localStorage.setItem("apptip_empid",emp.id); setView("operational"); };
-        })()} />}
+        })()} />;
+      })()}
       {view === "shell" && !loaded && (
         <div style={{minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",flexDirection:"column",gap:12,fontFamily:"'DM Sans',sans-serif"}}>
           <div style={{fontSize:40}}>🍽️</div>
