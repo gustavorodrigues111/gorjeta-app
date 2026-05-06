@@ -218,17 +218,31 @@ async function save(key, value, retries = 3) {
   const undefPath = findUndefinedPath(value);
   if (undefPath) console.warn(`[save] removendo undefined em ${key}${undefPath}`);
   const cleanValue = sanitizeForFirestore(value);
+  // v8.32 — métricas de tamanho ajudam a diagnosticar erro de limite (1 MiB)
+  let approxBytes = 0;
+  try { approxBytes = JSON.stringify(cleanValue).length; } catch (_) {}
+  let lastErr = null;
   for (let i = 0; i < retries; i++) {
     try {
       await setDoc(doc(db, "appdata", key), { value: cleanValue });
       cacheSet(key, cleanValue);
       return true;
     } catch (e) {
-      console.error(`save error (tentativa ${i+1}/${retries}):`, key, e);
+      lastErr = e;
+      console.error(`save error (tentativa ${i+1}/${retries}):`, key, `${approxBytes}B`, e?.code, e?.message, e);
       if (i < retries - 1) await new Promise(r => setTimeout(r, 1000 * (i + 1)));
     }
   }
-  console.error(`save FAILED after ${retries} retries:`, key);
+  console.error(`save FAILED after ${retries} retries:`, key, `${approxBytes}B`, lastErr);
+  // Expõe erro detalhado pro caller via window pra alert mostrar
+  if (typeof window !== "undefined" && lastErr) {
+    window.__lastSaveError = {
+      key,
+      bytes: approxBytes,
+      code: lastErr?.code || "(sem code)",
+      message: lastErr?.message || String(lastErr),
+    };
+  }
   return false;
 }
 // Flag global para detectar se o load principal conseguiu conectar
@@ -39142,13 +39156,23 @@ export default function App() {
         if (prevValue !== undefined) {
           setters[field]?.(prevValue);
         }
+        const detail = (typeof window !== "undefined" && window.__lastSaveError) || null;
+        let causa = "";
+        if (detail) {
+          const sizeKB = (detail.bytes / 1024).toFixed(0);
+          causa = `\n— Erro Firebase ——\n`
+            + `Code: ${detail.code}\n`
+            + `Tamanho: ${sizeKB} KB (limite 1024 KB)\n`
+            + `Mensagem: ${detail.message}\n\n`;
+        }
         const msg = `❌ Falha ao salvar no servidor (${field}).\n\n`
-          + `Sua alteração foi REVERTIDA — a tela voltou pro estado anterior.\n\n`
+          + `Sua alteração foi REVERTIDA — a tela voltou pro estado anterior.\n`
+          + causa
           + `Possíveis causas:\n`
           + `• Bloqueio de segurança (App Check / reCAPTCHA / Firestore rules)\n`
           + `• Internet instável\n`
-          + `• Documento excedeu 1 MB\n\n`
-          + `Abra o Console do navegador (⌘⌥I) e procure por "save error" pra ver a causa real.`;
+          + `• Documento excedeu 1 MB (resource-exhausted)\n\n`
+          + `Console (⌘⌥I) → procure "save error" pra mais detalhes.`;
         setToast(`❌ Falha ao salvar ${field} — alteração revertida`);
         if (typeof window !== "undefined") {
           try { window.alert(msg); } catch (_) {}
