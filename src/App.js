@@ -12976,10 +12976,47 @@ function RestaurantPanel({ restaurant, restaurants, employees, roles, tips, spli
           <div>
             <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:12,marginBottom:16}}>
               <h3 style={{color:"var(--text)",margin:0,fontSize:mobileOnly?16:20}}>🏷️ Cargos</h3>
-              {isOwner && <button onClick={()=>{
-                const ok = resetTab("roles","Cargos",()=>({roles:roles.filter(r=>r.restaurantId===rid)}));
-                if(ok){ onUpdate("roles",roles.filter(r=>r.restaurantId!==rid)); onUpdate("_toast","🗑️ Cargos enviados para a lixeira"); }
-              }} style={{...S.btnSecondary,fontSize:12,color:"var(--red)",borderColor:"var(--red)44"}}>🗑️ Resetar</button>}
+              <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+                <button
+                  onClick={()=>{
+                    // Export pro Planejamento.app — CSV compatível com importador do gestaocentral
+                    const escapeCsv = (v) => {
+                      if (v == null) return "";
+                      const s = String(v);
+                      return (s.includes(",") || s.includes('"') || s.includes("\n"))
+                        ? '"' + s.replace(/"/g, '""') + '"'
+                        : s;
+                    };
+                    const header = "nome,area,tipo_vinculo,pontos,sem_gorjeta,recebe_producao,ativo";
+                    const lines = restRoles.map(r => [
+                      escapeCsv(r.name),
+                      escapeCsv(r.area || "Salão"),
+                      "registrado",
+                      String(r.points ?? 0),
+                      String(!!r.noTip),
+                      "false",                       // edite a planilha pra marcar produção (ex: Cozinha)
+                      String(!r.inactive),
+                    ].join(","));
+                    const csv = [header, ...lines].join("\n");
+                    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement("a");
+                    a.href = url;
+                    a.download = `cargos_${(restaurant?.shortCode || "rest").toLowerCase()}_${new Date().toISOString().slice(0,10)}.csv`;
+                    document.body.appendChild(a);
+                    a.click();
+                    document.body.removeChild(a);
+                    URL.revokeObjectURL(url);
+                    onUpdate("_toast", `📤 ${restRoles.length} cargo(s) exportado(s)`);
+                  }}
+                  style={{...S.btnSecondary, fontSize:12}}
+                  title="Baixa um CSV pra importar no planejamento.app"
+                >📤 Exportar CSV</button>
+                {isOwner && <button onClick={()=>{
+                  const ok = resetTab("roles","Cargos",()=>({roles:roles.filter(r=>r.restaurantId===rid)}));
+                  if(ok){ onUpdate("roles",roles.filter(r=>r.restaurantId!==rid)); onUpdate("_toast","🗑️ Cargos enviados para a lixeira"); }
+                }} style={{...S.btnSecondary,fontSize:12,color:"var(--red)",borderColor:"var(--red)44"}}>🗑️ Resetar</button>}
+              </div>
             </div>
             <RoleSpreadsheet
               restRoles={restRoles} rid={rid}
