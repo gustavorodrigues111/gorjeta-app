@@ -32735,6 +32735,36 @@ function ftDishCost(dish, insumos, dishes) {
   return { sfCosts, total, portions, costPerPortion, suggestedPrice, cmv, markup };
 }
 
+// Calcula o fator efetivo de produção de cada sub-ficha quando o usuário escala a ficha final.
+// A sub-ficha final recebe `finalScaleFactor`. Sub-fichas intermediárias recebem
+// (qty_consumida_convertida / rendimento) * fator_da_pai, somado entre todas as pais que a consomem.
+// Retorna { [sfId]: fator }.
+function ftComputeSfScaleFactors(dish, finalScaleFactor) {
+  const factors = {};
+  const sfs = (dish && dish.sub_fichas) || [];
+  if (sfs.length === 0) return factors;
+  sfs.forEach(sf => { factors[sf.id] = 0; });
+  const finalSf = sfs[sfs.length - 1];
+  factors[finalSf.id] = finalScaleFactor || 1;
+  for (let i = sfs.length - 1; i >= 0; i--) {
+    const sf = sfs[i];
+    const myFactor = factors[sf.id] || 0;
+    if (myFactor <= 0) continue;
+    (sf.ingredientes || []).forEach(ing => {
+      let subSf = null;
+      if (ing.subref_id) subSf = sfs.find(s => s.id === ing.subref_id);
+      if (!subSf && i > 0) subSf = ftDetectSubref(dish, i, ing.insumo_name);
+      if (!subSf) return;
+      const subRend = ftGetSfRendimento(subSf);
+      if (!subRend || subRend.qty <= 0 || ing.qty == null) return;
+      const [qConverted] = ftNormalizeSubrefQty(ing.qty, ing.unit, subRend.unit);
+      const subFactor = (qConverted / subRend.qty) * myFactor;
+      factors[subSf.id] = (factors[subSf.id] || 0) + subFactor;
+    });
+  }
+  return factors;
+}
+
 // Export PDF de uma ficha (usa jsPDF + autoTable, carregados via CDN no index.html)
 function ftExportDishPDF(dish, insumos, dishes, restaurantName) {
   const jsPDF = window.jspdf?.jsPDF;
@@ -36052,10 +36082,13 @@ function OperationalFichasTecnicas({ employee, miseFtInsumos, miseFtDishes }) {
   const [scaleFactor, setScaleFactor] = useState(1);
 
   const openDish = openDishId ? restDishes.find(d => d.id === openDishId) : null;
+  const sfFactors = useMemo(() => openDish ? ftComputeSfScaleFactors(openDish, scaleFactor) : {}, [openDish, scaleFactor]);
 
   if (openDish) {
     const costInfo = ftDishCost(openDish, restInsumos, restDishes);
     const lastSf = (openDish.sub_fichas || [])[(openDish.sub_fichas || []).length - 1];
+    const finalPortions = costInfo.portions || 1;
+    const targetPortions = Math.round(scaleFactor * finalPortions * 100) / 100;
     return (
       <div>
         {/* Toolbar */}
@@ -36065,14 +36098,32 @@ function OperationalFichasTecnicas({ employee, miseFtInsumos, miseFtDishes }) {
             <div style={{fontSize:11,color:"var(--text3)",fontWeight:700,textTransform:"uppercase",letterSpacing:0.4}}>Ficha técnica</div>
             <div style={{fontSize:17,color:"var(--text)",fontWeight:700,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{openDish.name}</div>
           </div>
-          <div style={{display:"flex",alignItems:"center",gap:6,background:"var(--card-bg)",border:"1px solid var(--border)",borderRadius:8,padding:"4px 8px"}}>
-            <span style={{fontSize:11,color:"var(--text3)",fontWeight:600}}>Escala:</span>
-            {[0.5, 1, 2, 4].map(f => (
-              <button key={f} onClick={()=>setScaleFactor(f)}
-                style={{background:scaleFactor===f?"#7c9e5e":"transparent",color:scaleFactor===f?"#fff":"var(--text2)",border:"none",borderRadius:6,padding:"4px 10px",fontSize:12,cursor:"pointer",fontWeight:scaleFactor===f?700:500}}>
-                {f}×
-              </button>
-            ))}
+          <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
+            <div style={{display:"flex",alignItems:"center",gap:6,background:"var(--card-bg)",border:"1px solid var(--border)",borderRadius:8,padding:"4px 8px"}}>
+              <span style={{fontSize:11,color:"var(--text3)",fontWeight:600}}>Escala:</span>
+              {[0.5, 1, 2, 4].map(f => (
+                <button key={f} onClick={()=>setScaleFactor(f)}
+                  style={{background:Math.abs(scaleFactor-f)<0.0001?"#7c9e5e":"transparent",color:Math.abs(scaleFactor-f)<0.0001?"#fff":"var(--text2)",border:"none",borderRadius:6,padding:"4px 10px",fontSize:12,cursor:"pointer",fontWeight:Math.abs(scaleFactor-f)<0.0001?700:500}}>
+                  {f}×
+                </button>
+              ))}
+            </div>
+            <div style={{display:"flex",alignItems:"center",gap:6,background:"var(--card-bg)",border:"1px solid var(--border)",borderRadius:8,padding:"4px 10px"}}>
+              <span style={{fontSize:11,color:"var(--text3)",fontWeight:600}}>Fazer:</span>
+              <input
+                type="number"
+                min="0"
+                step="any"
+                value={targetPortions || ""}
+                onChange={e=>{
+                  const n = parseFloat(e.target.value);
+                  if (!isNaN(n) && n > 0 && finalPortions > 0) setScaleFactor(n / finalPortions);
+                  else if (e.target.value === "") setScaleFactor(1);
+                }}
+                style={{width:70,border:"1px solid var(--border)",borderRadius:6,padding:"3px 6px",fontSize:12,fontFamily:"'DM Mono',monospace",background:"var(--bg2)",color:"var(--text)"}}
+              />
+              <span style={{fontSize:11,color:"var(--text3)",fontWeight:600}}>porções</span>
+            </div>
           </div>
         </div>
 
@@ -36125,6 +36176,7 @@ function OperationalFichasTecnicas({ employee, miseFtInsumos, miseFtDishes }) {
           {(openDish.sub_fichas || []).map((sf, sfIdx) => {
             const isFinal = sfIdx === openDish.sub_fichas.length - 1;
             const sfCost = costInfo.sfCosts.find(x => x.sf.id === sf.id);
+            const sfFactor = sfFactors[sf.id] > 0 ? sfFactors[sf.id] : scaleFactor;
             return (
               <div key={sf.id} style={{background:"var(--card-bg)",border:`1px solid ${isFinal?"#7c9e5e66":"var(--border)"}`,borderRadius:12,overflow:"hidden"}}>
                 <div style={{padding:"12px 16px",background: isFinal ? "#7c9e5e11" : "var(--bg2)",borderBottom:"1px solid var(--border)",display:"flex",alignItems:"center",justifyContent:"space-between",flexWrap:"wrap",gap:8}}>
@@ -36132,10 +36184,11 @@ function OperationalFichasTecnicas({ employee, miseFtInsumos, miseFtDishes }) {
                     <div style={{display:"flex",alignItems:"center",gap:8}}>
                       <span style={{fontSize:15,color:"var(--text)",fontWeight:700}}>{sfIdx+1}. {sf.name}</span>
                       {isFinal && <span style={{fontSize:10,padding:"2px 8px",borderRadius:10,background:"#7c9e5e22",color:"#15803d",fontWeight:700,letterSpacing:0.4}}>FINAL</span>}
+                      {!isFinal && Math.abs(sfFactor - scaleFactor) > 0.0001 && <span title="Esta sub-ficha escala de forma diferente da ficha final por conta da proporção entre rendimento e consumo" style={{fontSize:10,padding:"2px 8px",borderRadius:10,background:"#f59e0b22",color:"#a16207",fontWeight:700,letterSpacing:0.4,fontFamily:"'DM Mono',monospace"}}>×{Math.round(sfFactor*100)/100}</span>}
                     </div>
-                    {sf.rendimento && <div style={{fontSize:12,color:"var(--text3)",marginTop:2,fontFamily:"'DM Mono',monospace"}}>Rend.: {ftFormatRendimento(sf.rendimento, scaleFactor)}</div>}
+                    {sf.rendimento && <div style={{fontSize:12,color:"var(--text3)",marginTop:2,fontFamily:"'DM Mono',monospace"}}>Rend.: {ftFormatRendimento(sf.rendimento, sfFactor)}</div>}
                   </div>
-                  <div style={{fontSize:12,color:"var(--text3)",fontFamily:"'DM Mono',monospace"}}>{sfCost ? fmt(sfCost.total * scaleFactor) : "—"}</div>
+                  <div style={{fontSize:12,color:"var(--text3)",fontFamily:"'DM Mono',monospace"}}>{sfCost ? fmt(sfCost.total * sfFactor) : "—"}</div>
                 </div>
                 <div style={{padding:"14px 16px"}}>
                   {/* Ingredientes */}
@@ -36155,7 +36208,7 @@ function OperationalFichasTecnicas({ employee, miseFtInsumos, miseFtDishes }) {
                             {(sf.ingredientes || []).map((ing, idx) => {
                               const costRow = sfCost?.rows?.[idx];
                               const isSubref = !!ing.subref_id;
-                              const fmtQ = ftFormatIngQty(ing, scaleFactor);
+                              const fmtQ = ftFormatIngQty(ing, sfFactor);
                               return (
                                 <tr key={idx} style={{borderTop:"1px solid var(--border)"}}>
                                   <td style={{padding:"8px 10px",color:"var(--text)"}}>
@@ -36166,7 +36219,7 @@ function OperationalFichasTecnicas({ employee, miseFtInsumos, miseFtDishes }) {
                                     {fmtQ.text} {fmtQ.unit}
                                   </td>
                                   <td style={{padding:"8px 10px",textAlign:"right",color:costRow?.isReutilizavel?"#a855f7":(costRow?.isSubproduto?"var(--text3)":"var(--text2)"),fontFamily:"'DM Mono',monospace",fontSize:11}}>
-                                    {ing.is_qb ? "Q.B" : (costRow?.isReutilizavel ? "♻" : (costRow?.isSubproduto ? "—" : (costRow ? fmt(costRow.cost * scaleFactor) : "—")))}
+                                    {ing.is_qb ? "Q.B" : (costRow?.isReutilizavel ? "♻" : (costRow?.isSubproduto ? "—" : (costRow ? fmt(costRow.cost * sfFactor) : "—")))}
                                   </td>
                                 </tr>
                               );
