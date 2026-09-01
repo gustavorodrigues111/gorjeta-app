@@ -23827,16 +23827,12 @@ function FreelasModule({ restaurantId, pessoas, freelaShifts, freelaPagamentos, 
   const canFechamento = _canFechar;
   const canAgendar    = _canFechar; // alias — quem fecha, agenda
   const canHistorico  = _canFechar;
-  // v8.32.0: lançar turno RETROATIVO (data passada) é permissão exclusiva — o master
-  // escolhe quem pode. Owner sempre pode (é quem concede). DP/líder NÃO pega automático.
-  const canRetroativo = isOwner || perms?.operational?.freelasRetroativo === true;
 
   const SUB_TABS = [
-    { id: "agendar",    label: "📅 Agendar",       visible: canAgendar },
-    { id: "lancamento", label: "Lançamento",       visible: true },
-    { id: "retroativo", label: "⏪ Turnos passados", visible: canRetroativo },
-    { id: "fechamento", label: "Fechamento",       visible: canFechamento },
-    { id: "historico",  label: "Histórico",        visible: canHistorico },
+    { id: "agendar",    label: "📅 Agendar",   visible: canAgendar },
+    { id: "lancamento", label: "Lançamento",   visible: true },
+    { id: "fechamento", label: "Fechamento",   visible: canFechamento },
+    { id: "historico",  label: "Histórico",    visible: canHistorico },
   ].filter(t => t.visible);
 
   return (
@@ -23898,20 +23894,6 @@ function FreelasModule({ restaurantId, pessoas, freelaShifts, freelaPagamentos, 
           isOwner={isOwner}
           isLider={isLider}
           currentUser={currentUser}
-          mobileOnly={mobileOnly}
-          ac={ac}
-        />
-      )}
-
-      {subTab === "retroativo" && canRetroativo && (
-        <FreelaRetroativoTab
-          restaurantId={restaurantId}
-          restPessoas={restPessoas}
-          restFreelas={restFreelas}
-          shifts={restShifts}
-          addShift={addShift}
-          fmtHoras={fmtHoras}
-          calcHoras={calcHoras}
           mobileOnly={mobileOnly}
           ac={ac}
         />
@@ -24624,124 +24606,6 @@ function FreelaAgendarTab({ restaurantId, restPessoas, allPessoas, addFreela, sh
   );
 }
 
-// v8.32.0: aba EXCLUSIVA (permissão operational.freelasRetroativo) pra lançar turno
-// de freela numa DATA PASSADA já com entrada/saída/intervalo completos. Reusa addShift
-// (status "aberto"), então o turno cai direto na tabela/fechamento como qualquer outro.
-function FreelaRetroativoTab({ restaurantId, restPessoas, restFreelas, shifts, addShift, fmtHoras, calcHoras, mobileOnly, ac }) {
-  const today_ = today();
-  const ontem = (() => { const d = new Date(today_ + "T12:00:00"); d.setDate(d.getDate() - 1); return d.toISOString().slice(0,10); })();
-  const [f, setF] = useState({ pessoaId: "", date: ontem, entrada: "", saida: "", intervalo: 0, area: "", observacao: "" });
-  const set = (patch) => setF(s => ({ ...s, ...patch }));
-
-  const horasPrev = calcHoras(f.entrada, f.saida, f.intervalo);
-
-  // Últimos retroativos lançados (data < hoje), pra dar retorno visual.
-  const recentes = shifts.filter(s => s.restaurantId === restaurantId && s.status !== "agendado" && (s.date || "") < today_)
-    .sort((a,b) => (b.lancadoEm || "").localeCompare(a.lancadoEm || "")).slice(0, 8);
-
-  async function handleSubmit() {
-    if (!f.pessoaId) { alert("Selecione a pessoa."); return; }
-    if (!f.date) { alert("Escolha a data."); return; }
-    if (f.date >= today_) { alert("Essa aba é só pra datas passadas. Pra hoje/futuro use Lançamento ou Agendar."); return; }
-    if (!f.entrada) { alert("Preencha a hora de entrada."); return; }
-    await addShift({
-      pessoaId: f.pessoaId, date: f.date, entrada: f.entrada, saida: f.saida || "",
-      intervalo: f.intervalo ? parseInt(f.intervalo) : 0, area: f.area || "", observacao: f.observacao || "",
-    });
-    setF({ pessoaId: "", date: ontem, entrada: "", saida: "", intervalo: 0, area: "", observacao: "" });
-  }
-
-  return (
-    <div style={{display:"flex",flexDirection:"column",gap:16}}>
-      <div style={{padding:"10px 14px",background:"#f59e0b11",border:"1px solid #f59e0b44",borderRadius:10,fontSize:12,color:"var(--text2)"}}>
-        ⏪ <b>Turnos passados</b> — lance um turno de freela numa data anterior já com entrada, saída e intervalo. Acesso exclusivo (permissão concedida pelo master).
-      </div>
-
-      <div style={{padding:"14px 16px",background:"var(--card-bg)",border:`1px solid ${ac}44`,borderRadius:12}}>
-        <div style={{display:"grid",gridTemplateColumns:mobileOnly?"1fr":"2fr 1fr 1fr",gap:10,marginBottom:10}}>
-          <div>
-            <label style={{...S.label,fontSize:11}}>Pessoa</label>
-            <select value={f.pessoaId} onChange={e=>set({pessoaId:e.target.value})} style={{...S.input,cursor:"pointer"}}>
-              <option value="">— Selecione —</option>
-              {restFreelas.length > 0 && (
-                <optgroup label="🎒 Freelas">
-                  {restFreelas.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
-                </optgroup>
-              )}
-              {restPessoas.filter(p => p.isTeam?.[restaurantId] && !p.isFreela).length > 0 && (
-                <optgroup label="👥 Equipe (CLT pegando freela)">
-                  {restPessoas.filter(p => p.isTeam?.[restaurantId] && !p.isFreela).map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
-                </optgroup>
-              )}
-            </select>
-          </div>
-          <div>
-            <label style={{...S.label,fontSize:11}}>Data (passada)</label>
-            <input type="date" value={f.date} max={ontem} onChange={e=>set({date:e.target.value})} style={S.input}/>
-          </div>
-          <div>
-            <label style={{...S.label,fontSize:11}}>Área (opcional)</label>
-            <select value={f.area} onChange={e=>set({area:e.target.value})} style={{...S.input,cursor:"pointer"}}>
-              <option value="">— Sem área —</option>
-              {AREAS.map(a => <option key={a} value={a}>{a}</option>)}
-            </select>
-          </div>
-        </div>
-        <div style={{display:"grid",gridTemplateColumns:mobileOnly?"1fr 1fr":"1fr 1fr 1fr 1fr",gap:10,marginBottom:10}}>
-          <div>
-            <label style={{...S.label,fontSize:11}}>Entrada</label>
-            <input type="time" value={f.entrada} onChange={e=>set({entrada:e.target.value})} style={S.input}/>
-          </div>
-          <div>
-            <label style={{...S.label,fontSize:11}}>Saída</label>
-            <input type="time" value={f.saida} onChange={e=>set({saida:e.target.value})} style={S.input}/>
-          </div>
-          <div>
-            <label style={{...S.label,fontSize:11}}>Intervalo (min)</label>
-            <input type="number" min="0" value={f.intervalo} onChange={e=>set({intervalo:e.target.value})} placeholder="0" style={{...S.input,fontFamily:"'DM Mono',monospace"}}/>
-          </div>
-          <div>
-            <label style={{...S.label,fontSize:11}}>Horas (prévia)</label>
-            <div style={{...S.input,display:"flex",alignItems:"center",fontFamily:"'DM Mono',monospace",fontWeight:700,color:horasPrev>0?"#15803d":"var(--text3)"}}>{horasPrev>0?fmtHoras(horasPrev):"—"}</div>
-          </div>
-        </div>
-        <div style={{marginBottom:10}}>
-          <label style={{...S.label,fontSize:11}}>Observação (opcional)</label>
-          <input value={f.observacao} onChange={e=>set({observacao:e.target.value})} placeholder="ex: cobriu evento, lançamento atrasado, etc" style={S.input}/>
-        </div>
-        <div style={{fontSize:10,color:"var(--text3)",marginBottom:10,fontStyle:"italic"}}>
-          💡 O valor (R$) é definido pelo DP no Fechamento. Se a pessoa for CLT, o dia é marcado como folga-freela na escala.
-        </div>
-        <div style={{display:"flex",justifyContent:"flex-end"}}>
-          <button onClick={handleSubmit} style={{background:ac,color:"#fff",border:"none",borderRadius:8,padding:"8px 18px",fontSize:13,fontWeight:700,cursor:"pointer"}}>⏪ Lançar turno passado</button>
-        </div>
-      </div>
-
-      {recentes.length > 0 && (
-        <div>
-          <div style={{fontSize:12,fontWeight:700,color:"var(--text2)",textTransform:"uppercase",letterSpacing:0.4,marginBottom:8}}>Retroativos recentes</div>
-          <div style={{display:"flex",flexDirection:"column",gap:6}}>
-            {recentes.map(s => {
-              const p = restPessoas.find(x => x.id === s.pessoaId);
-              return (
-                <div key={s.id} style={{padding:"8px 12px",background:"var(--card-bg)",border:"1px solid var(--border)",borderRadius:10,display:"flex",alignItems:"center",gap:10,flexWrap:"wrap",fontSize:12}}>
-                  <span style={{fontWeight:700,color:"var(--text)"}}>{shortName(p?.name) || "—"}</span>
-                  <span style={{color:"var(--text3)"}}>📅 {fmtDate(s.date)}</span>
-                  <span style={{color:"var(--text3)"}}>▶ {s.entrada || "—"}{s.saida ? ` → ${s.saida}` : ""}</span>
-                  {s.horas > 0 && <span style={{fontFamily:"'DM Mono',monospace",color:"#15803d",fontWeight:700}}>{fmtHoras(s.horas)}</span>}
-                  {s.area && <span style={{color:"var(--text3)"}}>📍 {s.area}</span>}
-                  <span style={{flex:1}}/>
-                  <span style={{fontSize:10,color:"var(--text3)",fontStyle:"italic"}}>{s.status}</span>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
 function FreelaLancamentoTab({ restaurantId, allPessoas, restPessoas, restFreelas, shifts, addShift, updateShift, deleteShift, addFreela, shiftPrntoPronto, calcHoras, fmtHoras, confirmPlannedShift, cancelPlannedShift, markNoShow, editPlannedShift, closeShift, isDP, isOwner, isLider, currentUser, mobileOnly, ac }) {
   const [showAddForm, setShowAddForm] = useState(false);
   const [newShift, setNewShift] = useState({ pessoaId: "", date: today(), entrada: "", saida: "", intervalo: 0, area: "", observacao: "" });
@@ -24774,7 +24638,6 @@ function FreelaLancamentoTab({ restaurantId, allPessoas, restPessoas, restFreela
   function handleAddSubmit() {
     if (!newShift.pessoaId) { alert("Selecione a pessoa."); return; }
     if (!newShift.date) { alert("Selecione a data."); return; }
-    if (newShift.date < today()) { alert("Data no passado: use a aba \"⏪ Turnos passados\" (permissão exclusiva)."); return; }
     // v8.5: só entrada é obrigatória na ABERTURA. Saída/intervalo/valor são preenchidos
     // pelo DP no Fechamento. Se o operador já souber o resto, pode preencher tudo de uma vez.
     if (!newShift.entrada) { alert("Preencha a hora de entrada."); return; }
@@ -24978,7 +24841,7 @@ function FreelaLancamentoTab({ restaurantId, allPessoas, restPessoas, restFreela
             </div>
             <div>
               <label style={{...S.label,fontSize:11}}>Data</label>
-              <input type="date" value={newShift.date} min={today()} onChange={e=>setNewShift({...newShift,date:e.target.value})} style={S.input}/>
+              <input type="date" value={newShift.date} onChange={e=>setNewShift({...newShift,date:e.target.value})} style={S.input}/>
             </div>
             <div>
               <label style={{...S.label,fontSize:11}}>Hora de entrada</label>
@@ -27341,7 +27204,6 @@ const PERM_GROUPS = [
       { key: "admin.fecharEscala",          label: "Fechar mês da escala",         icon: "🔒" },
       // v8.31.0: 'Agendar e fechar lote de freelas' deixou de ser checkbox — líder de área ganha automático.
       // Quem já tinha operational.freelasFechar marcado continua tendo (legacy fallback nas checagens).
-      { key: "operational.freelasRetroativo", label: "Lançar turno de freela retroativo (data passada)", icon: "⏪" },
       { key: "operational.reunioes",        label: "Gerir reuniões",               icon: "🗣️" },
       { key: "operational.trilhas",         label: "Gerir trilhas",                icon: "🎯" },
     ],
