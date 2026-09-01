@@ -19,3 +19,4 @@ yarn-error.log*
 # backups e arquivos temporários
 *.bak
 *.tmp
+.claude/
